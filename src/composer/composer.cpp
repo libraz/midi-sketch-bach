@@ -303,6 +303,12 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
       prov.shadow_winning_pitch = cand.shadow_winning_pitch;
       prov.shadow_winning_pitch_without_markov = cand.shadow_winning_pitch_without_markov;
       prov.source = isCarrierIntent(span.intent) ? NoteSource::Material : NoteSource::Compose;
+      if (prov.source == NoteSource::Material) {
+        prov.has_authored_note = true;
+        prov.authored_start_tick = note.start_tick;
+        prov.authored_duration = note.duration;
+        prov.authored_pitch = note.pitch;
+      }
       prov.satisfied_rules = cand.satisfied_rules;
       prov.rejected_alternatives = 0;  // commit policy does not rank alternatives
       result.provenance.push_back(prov);
@@ -378,7 +384,8 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   }
 
   Validator validator;
-  result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material);
+  result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material,
+                                         ValidationScope::Generation);
 
   // Visibility surface for the no-fallback principle. A Compose position that
   // exhausted all candidates emitted no note (a rest) instead of a default

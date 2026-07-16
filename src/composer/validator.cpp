@@ -15,9 +15,8 @@ namespace bach::composer {
 namespace {
 
 using rule_helpers::isCrossRelationPc;
-using rule_helpers::isLeadingTone;
 using rule_helpers::isPerfectInterval;
-using rule_helpers::isStrongBeat;
+using rule_helpers::isStructuralAccent;
 using rule_helpers::pitchClass;
 using rule_helpers::voicePitchAt;
 
@@ -119,6 +118,82 @@ std::size_t noteIndexSoundingAt(const std::vector<NoteEvent>& notes, VoiceId voi
   return best;
 }
 
+std::uint8_t lowestSoundingPitch(const std::vector<NoteEvent>& notes,
+                                 const std::vector<VoiceId>& voices, Tick tick) {
+  std::uint8_t lowest = 0;
+  for (VoiceId voice : voices) {
+    const std::uint8_t pitch = voicePitchAt(notes, voice, tick);
+    if (pitch != 0 && (lowest == 0 || pitch < lowest))
+      lowest = pitch;
+  }
+  return lowest;
+}
+
+bool isDeclaredFourThree(const std::vector<NoteEvent>& notes, const std::vector<VoiceId>& voices,
+                         const Material& material, VoiceId upper_voice, Tick tick) {
+  for (const auto& sp : material.suspension_patterns) {
+    if (sp.type != SuspensionType::Sus4_3 || sp.voice != upper_voice ||
+        sp.suspension_tick != tick || sp.preparation_tick >= sp.suspension_tick ||
+        sp.resolution_tick <= sp.suspension_tick) {
+      continue;
+    }
+    const std::uint8_t prep = voicePitchAt(notes, sp.voice, sp.preparation_tick);
+    const std::uint8_t sus = voicePitchAt(notes, sp.voice, sp.suspension_tick);
+    const std::uint8_t res = voicePitchAt(notes, sp.voice, sp.resolution_tick);
+    if (prep != sp.preparation_pitch || sus != sp.suspension_pitch || res != sp.resolution_pitch ||
+        prep != sus)
+      continue;
+    const int resolution_motion = static_cast<int>(res) - static_cast<int>(sus);
+    if (resolution_motion != -1 && resolution_motion != -2)
+      continue;
+    const std::uint8_t prep_bass = lowestSoundingPitch(notes, voices, sp.preparation_tick);
+    const std::uint8_t sus_bass = lowestSoundingPitch(notes, voices, sp.suspension_tick);
+    const std::uint8_t res_bass = lowestSoundingPitch(notes, voices, sp.resolution_tick);
+    if (prep_bass == 0 || sus_bass == 0 || res_bass == 0 || prep <= prep_bass || sus <= sus_bass ||
+        res <= res_bass)
+      continue;
+    if (!rule_helpers::isConsonantAboveBass(prep, prep_bass) ||
+        (static_cast<int>(sus) - static_cast<int>(sus_bass)) % 12 != 5)
+      continue;
+    const int resolution_class = (static_cast<int>(res) - static_cast<int>(res_bass)) % 12;
+    if (resolution_class == 3 || resolution_class == 4)
+      return true;
+  }
+  return false;
+}
+
+bool isDeclaredCadentialSixFour(const std::vector<NoteEvent>& notes,
+                                const std::vector<VoiceId>& voices, const HarmonicPlan& plan,
+                                VoiceId upper_voice, Tick tick) {
+  if (plan.chords.empty())
+    return false;
+  for (const auto& six_four : plan.cadential_six_fours) {
+    if (six_four.type != SixFourType::Cadential || six_four.tick != tick ||
+        six_four.resolution_tick <= six_four.tick)
+      continue;
+    const std::uint8_t bass = lowestSoundingPitch(notes, voices, tick);
+    const std::uint8_t resolution_bass =
+        lowestSoundingPitch(notes, voices, six_four.resolution_tick);
+    const std::uint8_t upper = voicePitchAt(notes, upper_voice, tick);
+    const std::uint8_t resolution = voicePitchAt(notes, upper_voice, six_four.resolution_tick);
+    if (bass == 0 || resolution_bass == 0 || upper == 0 || resolution == 0)
+      continue;
+    const std::uint8_t dominant = static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12);
+    if (pitchClass(bass) != dominant || pitchClass(resolution_bass) != dominant ||
+        pitchClass(upper) != plan.tonic_pc % 12 ||
+        activeChord(plan, six_four.resolution_tick).root_pc % 12 != dominant)
+      continue;
+    const int motion = static_cast<int>(resolution) - static_cast<int>(upper);
+    const int resolution_class =
+        (static_cast<int>(resolution) - static_cast<int>(resolution_bass)) % 12;
+    const std::uint8_t leading_tone = static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12);
+    if (motion == -1 && resolution_class == 4 && pitchClass(resolution) == leading_tone) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool isTonicTriadPc(std::uint8_t pc, const HarmonicPlan& plan) {
   const std::uint8_t tonic = static_cast<std::uint8_t>(plan.tonic_pc % 12);
   const std::uint8_t third = static_cast<std::uint8_t>((tonic + (plan.is_minor ? 3 : 4)) % 12);
@@ -130,6 +205,30 @@ bool hasRuleBit(const std::vector<NoteProvenance>& provenance, std::size_t index
   if (index >= provenance.size())
     return false;
   return (provenance[index].satisfied_rules & (ruleBitMask(bit))) != 0;
+}
+
+// Final-score contextual exemptions are never inferred from NoteSource alone.
+// A fixed carrier must still equal the independent declaration stamped before
+// ornamentation; an ornament must remain inside that declared note, stay in
+// its close diatonic-neighbour range, and carry the OrnamentRealized bit.
+// A mutated note therefore loses the exemption even though its source/intent
+// fields are unchanged.
+bool matchesAuthoredContext(const NoteEvent& note, const NoteProvenance& provenance) {
+  if (!provenance.has_authored_note)
+    return false;
+  if (provenance.source == NoteSource::Material) {
+    return note.start_tick == provenance.authored_start_tick &&
+           note.duration == provenance.authored_duration && note.pitch == provenance.authored_pitch;
+  }
+  if (provenance.source != NoteSource::Ornament ||
+      !(provenance.satisfied_rules & ruleBitMask(RuleBit::OrnamentRealized))) {
+    return false;
+  }
+  const Tick authored_end = provenance.authored_start_tick + provenance.authored_duration;
+  const Tick note_end = note.start_tick + note.duration;
+  return provenance.authored_duration > 0 && note.duration > 0 &&
+         note.start_tick >= provenance.authored_start_tick && note_end <= authored_end &&
+         std::abs(static_cast<int>(note.pitch) - static_cast<int>(provenance.authored_pitch)) <= 4;
 }
 
 SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject) {
@@ -296,9 +395,85 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
 
 ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const std::vector<NoteProvenance>& provenance,
-                                     const HarmonicPlan& harmonic_plan,
-                                     const Material& material) const {
+                                     const HarmonicPlan& harmonic_plan, const Material& material,
+                                     ValidationScope scope) const {
   ValidationReport report;
+  const bool audit_final_score = scope == ValidationScope::FinalScore;
+  if (audit_final_score && notes.size() != provenance.size()) {
+    ValidationFailure failure;
+    failure.rule_id = "note_provenance_alignment";
+    failure.kind = FailKind::StructuralFail;
+    report.failures.push_back(failure);
+    report.status = ValidationStatus::FailedSpan;
+    return report;
+  }
+  std::vector<bool> authored_context(notes.size(), false);
+  if (audit_final_score) {
+    for (std::size_t i = 0; i < notes.size() && i < provenance.size(); ++i) {
+      authored_context[i] = matchesAuthoredContext(notes[i], provenance[i]);
+      if (provenance[i].has_authored_note && !authored_context[i]) {
+        ValidationFailure failure;
+        failure.span_id = provenance[i].span_id;
+        failure.rule_id = provenance[i].source == NoteSource::Ornament
+                              ? "ornament_declaration_integrity"
+                              : "carrier_declaration_integrity";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+    // Validate each ornament expansion as a complete temporal replacement of
+    // one authored carrier.  Per-note bounds alone would miss a deleted middle
+    // subdivision or a gap, so group by the immutable authored-note identity
+    // and require exact, contiguous coverage ending on the main tone.
+    for (std::size_t i = 0; i < notes.size() && i < provenance.size(); ++i) {
+      const auto& p = provenance[i];
+      if (p.source != NoteSource::Ornament || !p.has_authored_note)
+        continue;
+      const auto same_group = [&](std::size_t j) {
+        return j < provenance.size() && provenance[j].source == NoteSource::Ornament &&
+               provenance[j].has_authored_note && notes[j].voice == notes[i].voice &&
+               provenance[j].span_id == p.span_id && provenance[j].voice_intent == p.voice_intent &&
+               provenance[j].authored_start_tick == p.authored_start_tick &&
+               provenance[j].authored_duration == p.authored_duration &&
+               provenance[j].authored_pitch == p.authored_pitch;
+      };
+      bool already_checked = false;
+      for (std::size_t j = 0; j < i; ++j) {
+        if (same_group(j)) {
+          already_checked = true;
+          break;
+        }
+      }
+      if (already_checked)
+        continue;
+      std::vector<std::size_t> group;
+      for (std::size_t j = i; j < notes.size(); ++j) {
+        if (same_group(j))
+          group.push_back(j);
+      }
+      std::sort(group.begin(), group.end(), [&](std::size_t a, std::size_t b) {
+        return notes[a].start_tick < notes[b].start_tick;
+      });
+      Tick cursor = p.authored_start_tick;
+      bool group_ok = group.size() >= 2;
+      for (std::size_t index : group) {
+        if (!authored_context[index] || notes[index].start_tick != cursor) {
+          group_ok = false;
+          break;
+        }
+        cursor = notes[index].start_tick + notes[index].duration;
+      }
+      group_ok = group_ok && cursor == p.authored_start_tick + p.authored_duration &&
+                 notes[group.back()].pitch == p.authored_pitch;
+      if (!group_ok) {
+        ValidationFailure failure;
+        failure.span_id = p.span_id;
+        failure.rule_id = "ornament_group_integrity";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
   if (!notes.empty()) {
     report.texture_metrics.push_back(computeTextureMetrics(notes));
   }
@@ -324,15 +499,17 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // so existing 4/4 fixtures validate byte-identically; a 3/4 plan yields 1440.
   const Tick ticks_per_bar = harmonic_plan.ticksPerBar();
 
-  // 1. Strong-beat dissonance — only check Compose-source notes. Material
-  //    notes are inputs and not subject to candidate-search rules.
+  // 1. Strong-beat dissonance. Generation validation checks only search-owned
+  //    notes; final-score validation checks every sounding source.
   for (std::size_t i = 0; i < notes.size(); ++i) {
     const auto& note = notes[i];
     if (i >= provenance.size())
       continue;
-    if (provenance[i].source != NoteSource::Compose)
+    if (!audit_final_score && provenance[i].source != NoteSource::Compose)
       continue;
-    if (!isStrongBeat(note.start_tick, ticks_per_bar))
+    if (audit_final_score && authored_context[i])
+      continue;
+    if (!isStructuralAccent(harmonic_plan, note.start_tick))
       continue;
 
     const auto& chord = activeChord(harmonic_plan, note.start_tick);
@@ -384,6 +561,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     const VoiceId upper_voice = voices.front();
     const Tick approach_tick = cadence.tick - kTicksPerBeat;
+    // The upper cadential approach may be a diminuted run inside the final
+    // beat.  Sample the pitch sounding immediately before the cadence rather
+    // than the beat's first subdivision; the bass formula remains anchored to
+    // the preceding beat so V -> I root motion is still measured structurally.
+    const Tick upper_approach_tick = cadence.tick - 1;
     VoiceId bass_voice = upper_voice;
     for (auto it = voices.rbegin(); it != voices.rend(); ++it) {
       if (*it == upper_voice)
@@ -400,7 +582,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       report.failures.push_back(failure);
       continue;
     }
-    const std::uint8_t upper_prev = voicePitchAt(notes, upper_voice, approach_tick);
+    const std::uint8_t upper_prev = voicePitchAt(notes, upper_voice, upper_approach_tick);
     const std::uint8_t upper_now = voicePitchAt(notes, upper_voice, cadence.tick);
     const std::uint8_t bass_prev = voicePitchAt(notes, bass_voice, approach_tick);
     const std::uint8_t bass_now = voicePitchAt(notes, bass_voice, cadence.tick);
@@ -468,11 +650,13 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       int prev_interval = INT32_MIN;
       std::uint8_t prev_pa = 0;
       std::uint8_t prev_pb = 0;
+      bool prev_pair_has_authored_context = false;
       for (Tick t : ticks) {
         std::uint8_t pa = voicePitchAt(notes, voices[va], t);
         std::uint8_t pb = voicePitchAt(notes, voices[vb], t);
         if (pa == 0 || pb == 0) {
           prev_interval = INT32_MIN;
+          prev_pair_has_authored_context = false;
           continue;
         }
         int interval = static_cast<int>(pa) - static_cast<int>(pb);
@@ -499,8 +683,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         // are allowed even on perfect intervals) AND the interval stays
         // identical AND non-zero.
         const bool both_moved = prev_pa != 0 && prev_pb != 0 && pa != prev_pa && pb != prev_pb;
-        const std::size_t current_lower_index = noteIndexStartingAt(notes, voices[vb], t);
-        const std::size_t current_upper_index = noteIndexStartingAt(notes, voices[va], t);
+        const std::size_t current_lower_index = noteIndexSoundingAt(notes, voices[vb], t);
+        const std::size_t current_upper_index = noteIndexSoundingAt(notes, voices[va], t);
         const bool current_is_cadence =
             hasRuleBit(provenance, current_lower_index, RuleBit::CadenceCellCommitted);
         // Material and Ornament sources are both fixed inputs from the
@@ -521,9 +705,16 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         // voice runs parallels against a Material lower voice (or vice
         // versa) the violation is real and composer-fixable, so it fires.
         const bool both_material = upper_is_material && current_is_material;
+        const bool pair_has_authored_context = current_lower_index < authored_context.size() &&
+                                               current_upper_index < authored_context.size() &&
+                                               authored_context[current_lower_index] &&
+                                               authored_context[current_upper_index];
+        const bool parallel_context_exempt =
+            audit_final_score ? (pair_has_authored_context && prev_pair_has_authored_context)
+                              : both_material;
         if (prev_interval != INT32_MIN && both_moved && isPerfectInterval(interval) &&
             isPerfectInterval(prev_interval) && interval == prev_interval && interval != 0 &&
-            !current_is_cadence && !both_material) {
+            !current_is_cadence && !parallel_context_exempt) {
           // Find the span id of voices[vb]'s note starting at t (failing
           // span is the lower voice by convention).
           SpanId fail_span = kInvalidSpanId;
@@ -544,7 +735,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const bool similar_motion = prev_pa != 0 && prev_pb != 0 && motion_a != 0 &&
                                     motion_b != 0 && ((motion_a > 0) == (motion_b > 0));
         if (prev_interval != INT32_MIN && similar_motion && isPerfectInterval(interval) &&
-            !isPerfectInterval(prev_interval) && !current_is_cadence && !both_material) {
+            !isPerfectInterval(prev_interval) && !current_is_cadence && !parallel_context_exempt) {
           SpanId fail_span = kInvalidSpanId;
           for (std::size_t k = 0; k < notes.size(); ++k) {
             if (notes[k].voice == voices[vb] && notes[k].start_tick == t) {
@@ -562,6 +753,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         prev_interval = interval;
         prev_pa = pa;
         prev_pb = pb;
+        prev_pair_has_authored_context = pair_has_authored_context;
       }
     }
   }
@@ -590,9 +782,14 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       // notes and provenance are index-aligned, so i,j index provenance.
       // A Compose-vs-Material or Compose-vs-Compose cross relation still
       // fires; only the uncontrollable fixed-vs-fixed pair is skipped.
-      if (i < provenance.size() && j < provenance.size() &&
-          provenance[i].source == NoteSource::Material &&
-          provenance[j].source == NoteSource::Material) {
+      const bool generation_fixed_pair = !audit_final_score && i < provenance.size() &&
+                                         j < provenance.size() &&
+                                         provenance[i].source == NoteSource::Material &&
+                                         provenance[j].source == NoteSource::Material;
+      const bool declared_final_pair = audit_final_score && i < authored_context.size() &&
+                                       j < authored_context.size() && authored_context[i] &&
+                                       authored_context[j];
+      if (generation_fixed_pair || declared_final_pair) {
         continue;
       }
       SpanId fail_span = kInvalidSpanId;
@@ -606,38 +803,48 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // 5. Vertical dissonance on strong beats. Every voice pair that
-  //    sounds together at a strong-beat tick must form a consonant
-  //    interval. Consonant set (semitones mod 12): {0, 3, 4, 5, 7,
-  //    8, 9}. The blame falls on the Compose-source side of the
-  //    pair; if both notes are Material, the pair is skipped (the
-  //    composer cannot fix fixed inputs).
-  static constexpr auto isConsonantSemis = [](int semis) {
-    const int pc = std::abs(semis) % 12;
-    return pc == 0 || pc == 3 || pc == 4 || pc == 5 || pc == 7 || pc == 8 || pc == 9;
-  };
+  // 5. Vertical dissonance on structural accents. Perfect fourths are
+  //    classified against the actual lowest sounding pitch: a fourth above
+  //    the bass is dissonant unless a fully realized 4-3 suspension or
+  //    cadential 6/4 declaration supplies its preparation and resolution.
+  //    A fourth between upper voices remains valid when both notes are
+  //    consonant above the bass.
   for (std::size_t va = 0; va < voices.size(); ++va) {
     for (std::size_t vb = va + 1; vb < voices.size(); ++vb) {
       for (Tick t : ticks) {
-        if (!isStrongBeat(t, ticks_per_bar))
+        if (!isStructuralAccent(harmonic_plan, t))
           continue;
         const std::uint8_t pa = voicePitchAt(notes, voices[va], t);
         const std::uint8_t pb = voicePitchAt(notes, voices[vb], t);
         if (pa == 0 || pb == 0)
           continue;
-        const int interval = static_cast<int>(pa) - static_cast<int>(pb);
-        if (isConsonantSemis(interval))
+        const std::size_t authored_a = noteIndexSoundingAt(notes, voices[va], t);
+        const std::size_t authored_b = noteIndexSoundingAt(notes, voices[vb], t);
+        if (audit_final_score && authored_a < authored_context.size() &&
+            authored_b < authored_context.size() && authored_context[authored_a] &&
+            authored_context[authored_b]) {
+          continue;
+        }
+        const std::uint8_t bass_pitch = lowestSoundingPitch(notes, voices, t);
+        bool consonant = rule_helpers::isBassSensitiveConsonance(pa, pb, bass_pitch);
+        if (!consonant && std::abs(static_cast<int>(pa) - static_cast<int>(pb)) % 12 == 5 &&
+            std::min(pa, pb) == bass_pitch) {
+          const VoiceId upper_voice = pa > pb ? voices[va] : voices[vb];
+          consonant = isDeclaredFourThree(notes, voices, material, upper_voice, t) ||
+                      isDeclaredCadentialSixFour(notes, voices, harmonic_plan, upper_voice, t);
+        }
+        if (consonant)
           continue;
 
         // Find span_id: prefer the Compose-source side of the pair.
         SpanId compose_span = kInvalidSpanId;
         SpanId fallback_span = kInvalidSpanId;
         for (std::size_t k = 0; k < notes.size(); ++k) {
-          if (notes[k].start_tick != t)
-            continue;
           if (notes[k].voice != voices[va] && notes[k].voice != voices[vb]) {
             continue;
           }
+          if (t < notes[k].start_tick || t >= notes[k].start_tick + notes[k].duration)
+            continue;
           if (k >= provenance.size())
             continue;
           if (provenance[k].source == NoteSource::Compose) {
@@ -648,11 +855,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
             fallback_span = provenance[k].span_id;
           }
         }
-        if (compose_span == kInvalidSpanId) {
+        if (compose_span == kInvalidSpanId && !audit_final_score) {
           continue;  // both Material; nothing the composer can do.
         }
         ValidationFailure failure;
-        failure.span_id = compose_span;
+        failure.span_id = compose_span != kInvalidSpanId ? compose_span : fallback_span;
         failure.rule_id = "vertical_dissonance";
         report.failures.push_back(failure);
       }
@@ -669,9 +876,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //     pair are forbidden because under octave inversion they collapse
   //     to parallel unisons (still parallel perfect). Parallel fifths
   //     are tolerated (they invert to fourths).
-  // (b) fourth_only_on_weak_beat: a perfect 4th in the upper pair on a
-  //     strong beat is forbidden (it inverts to a 5th); weak-beat 4ths
-  //     are allowed.
+  // Upper-voice fourths are handled by the bass-sensitive rule above; they
+  // are not intrinsically dissonant merely because they invert to fifths.
   for (std::size_t va = 0; va < voices.size(); ++va) {
     const std::size_t vb = va + 1;
     if (vb >= voices.size())
@@ -703,8 +909,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const bool lower_material =
           idx_lower < provenance.size() && provenance[idx_lower].source == NoteSource::Material;
       const bool both_material = upper_material && lower_material;
+      const bool both_declared = idx_upper < authored_context.size() &&
+                                 idx_lower < authored_context.size() &&
+                                 authored_context[idx_upper] && authored_context[idx_lower];
 
-      if (!both_material && isStrongBeat(t, ticks_per_bar)) {
+      if ((audit_final_score ? !both_declared : !both_material) &&
+          isStructuralAccent(harmonic_plan, t)) {
         // (a) Parallel perfect octaves into the same perfect-octave
         //     interval, both voices moving (oblique/static allowed).
         const bool both_moved = prev_pa != 0 && prev_pb != 0 && pa != prev_pa && pb != prev_pb;
@@ -718,19 +928,6 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           ValidationFailure failure;
           failure.span_id = fail_span;
           failure.rule_id = "invertible_at_octave";
-          report.failures.push_back(failure);
-        }
-
-        // (b) Perfect fourth in the upper pair on a strong beat.
-        if (abs_class == 5) {
-          SpanId fail_span = kInvalidSpanId;
-          if (idx_lower < provenance.size())
-            fail_span = provenance[idx_lower].span_id;
-          else if (idx_upper < provenance.size())
-            fail_span = provenance[idx_upper].span_id;
-          ValidationFailure failure;
-          failure.span_id = fail_span;
-          failure.rule_id = "fourth_only_on_weak_beat";
           report.failures.push_back(failure);
         }
       }
@@ -753,14 +950,16 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       return notes[a].start_tick < notes[b].start_tick;
     });
 
-    // Rule P1: forbidden melodic augmented/diminished intervals and
-    // direct tritone leaps. Scope is Compose-source notes; Material is
-    // fixed input and is handled by material markers / catalog curation.
+    // Rule P1: forbidden melodic augmented/diminished intervals and direct
+    // tritone leaps. Generation validation limits repair responsibility to
+    // Compose notes; final-score validation audits every source.
     for (std::size_t i = 1; i < indices.size(); ++i) {
       const std::size_t current = indices[i];
       if (current >= provenance.size())
         continue;
-      if (provenance[current].source != NoteSource::Compose)
+      if (!audit_final_score && provenance[current].source != NoteSource::Compose)
+        continue;
+      if (audit_final_score && authored_context[current] && authored_context[indices[i - 1]])
         continue;
       if (hasRuleBit(provenance, current, RuleBit::CadenceCellCommitted))
         continue;
@@ -781,8 +980,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const ChordEvent& chord_at_curr = activeChord(harmonic_plan, notes[current].start_tick);
       const bool secondary_active =
           chord_at_prev.has_secondary_of || chord_at_curr.has_secondary_of;
-      if (!secondary_active &&
-          rule_helpers::isAugmentedMelodicInterval(prev_pitch, current_pitch, harmonic_plan)) {
+      if (!secondary_active && rule_helpers::isContextualAugmentedMelodicInterval(
+                                   prev_pitch, current_pitch, harmonic_plan,
+                                   notes[indices[i - 1]].start_tick, notes[current].start_tick)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "augmented_melodic";
@@ -808,12 +1008,16 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const std::size_t current = indices[i];
       if (current >= provenance.size())
         continue;
-      if (provenance[current].source != NoteSource::Compose)
+      if (!audit_final_score && provenance[current].source != NoteSource::Compose)
         continue;
-      if (!isLeadingTone(notes[current].pitch, harmonic_plan))
+      if (audit_final_score && authored_context[current])
         continue;
-      if (i + 1 >= indices.size() ||
-          !resolvesLeadingTone(notes[current].pitch, notes[indices[i + 1]].pitch, harmonic_plan)) {
+      if (!rule_helpers::isContextualLeadingTone(notes[current].pitch, harmonic_plan,
+                                                 notes[current].start_tick))
+        continue;
+      if (i + 1 >= indices.size() || !rule_helpers::isContextualLeadingToneResolution(
+                                         notes[current].pitch, notes[indices[i + 1]].pitch,
+                                         harmonic_plan, notes[current].start_tick)) {
         ValidationFailure failure;
         failure.span_id = provenance[current].span_id;
         failure.rule_id = "leading_tone_resolution";
@@ -823,7 +1027,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
     // Rule 3: consecutive_leaps.
     for (std::size_t i = 2; i < indices.size(); ++i) {
-      if (indices[i] >= provenance.size() || provenance[indices[i]].source != NoteSource::Compose)
+      if (indices[i] >= provenance.size() ||
+          (!audit_final_score && provenance[indices[i]].source != NoteSource::Compose))
+        continue;
+      if (audit_final_score && authored_context[indices[i]] && authored_context[indices[i - 1]] &&
+          authored_context[indices[i - 2]])
         continue;
       if (hasRuleBit(provenance, indices[i], RuleBit::CadenceCellCommitted))
         continue;
@@ -843,21 +1051,23 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
 
-    // Rule 4: weak-beat non-chord-tone must be approached AND left by
-    // step (<= 2 semis). Only Compose-source notes are subject to the
-    // rule. Voice-boundary notes (no prev or no next) are exempt.
+    // Rule 4: weak-beat non-chord-tone must be approached AND left by step
+    // (<= 2 semis). Final-score validation includes fixed and ornamented
+    // sources. Voice-boundary notes (no prev or no next) are exempt.
     for (std::size_t i = 1; i + 1 < indices.size(); ++i) {
       const std::size_t k = indices[i];
       if (k >= provenance.size())
         continue;
-      if (provenance[k].source != NoteSource::Compose)
+      if (!audit_final_score && provenance[k].source != NoteSource::Compose)
+        continue;
+      if (audit_final_score && authored_context[k])
         continue;
       if (hasRuleBit(provenance, k, RuleBit::CadenceCellCommitted))
         continue;
       if (i + 1 < indices.size() &&
           hasRuleBit(provenance, indices[i + 1], RuleBit::CadenceCellCommitted))
         continue;
-      if (isStrongBeat(notes[k].start_tick, ticks_per_bar))
+      if (isStructuralAccent(harmonic_plan, notes[k].start_tick))
         continue;  // covered by rule 1
 
       const auto& chord = activeChord(harmonic_plan, notes[k].start_tick);
@@ -903,7 +1113,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     // Preparation: must be consonant against the lowest sounding voice at
     // the preparation tick and tie (pitch identity) into the suspension.
     // If no other voice sounds, the preparation rule is vacuously OK.
-    bool prep_ok = prep_actual != 0 && prep_actual == sus_actual;
+    bool prep_ok = prep_actual != 0 && prep_actual == sp.preparation_pitch &&
+                   sus_actual == sp.suspension_pitch && res_actual == sp.resolution_pitch &&
+                   prep_actual == sus_actual;
     if (prep_ok) {
       std::uint8_t bass_pitch = 0;
       for (auto it = voices.rbegin(); it != voices.rend(); ++it) {
@@ -1171,9 +1383,6 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (n.voice > max_voice)
         max_voice = n.voice;
     }
-    const std::uint8_t tonic_pc = static_cast<std::uint8_t>(harmonic_plan.tonic_pc % 12);
-    const std::uint8_t leading_tone_pc = static_cast<std::uint8_t>((tonic_pc + 11) % 12);
-
     for (const auto& chord : harmonic_plan.chords) {
       if (!chord.has_degree)
         continue;
@@ -1201,9 +1410,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       // covers V and vii in any key and skips harmless cases like I
       // or IV where the leading tone is non-chord.
       const auto triad = triadFor(chord);
-      const bool chord_owns_leading_tone = (triad[0] == leading_tone_pc) ||
-                                           (triad[1] == leading_tone_pc) ||
-                                           (triad[2] == leading_tone_pc);
+      const auto tonal_context = rule_helpers::tonalContextAt(harmonic_plan, chord.start_tick);
+      const std::uint8_t leading_tone_pc = tonal_context.leading_tone_pc;
+      const bool chord_owns_leading_tone =
+          tonal_context.has_active_leading_tone &&
+          ((triad[0] == leading_tone_pc) || (triad[1] == leading_tone_pc) ||
+           (triad[2] == leading_tone_pc));
       if (chord_owns_leading_tone) {
         std::size_t lt_count = 0;
         for (std::uint8_t p : voiced_pitches) {
@@ -1435,12 +1647,19 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const Tick expected_tick = beat_cursor;
         const Tick expected_dur = tmpl.seed_durations[i];
         bool found = false;
-        for (const auto& n : notes) {
+        for (std::size_t note_index = 0; note_index < notes.size(); ++note_index) {
+          const auto& n = notes[note_index];
           if (n.voice != tmpl.voice)
             continue;
-          if (n.start_tick != expected_tick)
+          const bool declared_match =
+              note_index < provenance.size() && provenance[note_index].has_authored_note &&
+              provenance[note_index].authored_start_tick == expected_tick &&
+              provenance[note_index].authored_pitch == static_cast<std::uint8_t>(expected_pitch) &&
+              provenance[note_index].authored_duration == expected_dur;
+          if (n.start_tick != expected_tick && !declared_match)
             continue;
-          if (n.pitch == static_cast<std::uint8_t>(expected_pitch) && n.duration == expected_dur) {
+          if (declared_match || (n.pitch == static_cast<std::uint8_t>(expected_pitch) &&
+                                 n.duration == expected_dur)) {
             found = true;
           }
           break;
@@ -1476,20 +1695,106 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   for (const auto& entry : material.imitation_entries) {
     const std::vector<MaterialNote>* leader = fragmentNotes(entry.leader_fragment);
     const std::vector<MaterialNote>* follower = fragmentNotes(entry.follower_fragment);
-    if (leader->empty() || follower->empty())
+    if (entry.leader_start_index >= leader->size() ||
+        entry.follower_start_index >= follower->size())
       continue;
-    const Tick expected_follower_tick = leader->front().start_tick + entry.distance_ticks;
-    const int expected_follower_pitch =
-        static_cast<int>(leader->front().pitch) + entry.interval_semis;
-    const bool tick_ok = follower->front().start_tick == expected_follower_tick;
-    const bool pitch_ok =
-        expected_follower_pitch >= 0 && expected_follower_pitch <= 127 &&
-        follower->front().pitch == static_cast<std::uint8_t>(expected_follower_pitch);
-    if (!tick_ok || !pitch_ok) {
+    const std::size_t available = std::min(leader->size() - entry.leader_start_index,
+                                           follower->size() - entry.follower_start_index);
+    const std::size_t count = entry.note_count == 0 ? available : entry.note_count;
+    if (count == 0 || count > available)
+      continue;
+    const MaterialNote& leader_head = (*leader)[entry.leader_start_index];
+    const MaterialNote& follower_head = (*follower)[entry.follower_start_index];
+    const Tick expected_follower_tick = leader_head.start_tick + entry.distance_ticks;
+    const int expected_follower_pitch = static_cast<int>(leader_head.pitch) + entry.interval_semis;
+    bool declaration_ok = follower_head.start_tick == expected_follower_tick;
+    const bool pitch_ok = expected_follower_pitch >= 0 && expected_follower_pitch <= 127 &&
+                          follower_head.pitch == static_cast<std::uint8_t>(expected_follower_pitch);
+    declaration_ok = declaration_ok && pitch_ok;
+
+    // Validate the declared entry's complete rhythm/contour window, not only
+    // its head. Real answers retain a constant transposition. Tonal answers
+    // may remap tonic/dominant degrees in the four-note head, then must rejoin
+    // the stored real-answer contour exactly.
+    const std::uint8_t tonic_pc = static_cast<std::uint8_t>(harmonic_plan.tonic_pc % 12);
+    const std::uint8_t dominant_pc = static_cast<std::uint8_t>((tonic_pc + 7) % 12);
+    const int tonal_tail_interval =
+        entry.has_tonal_base_interval ? entry.tonal_base_interval_semis : entry.interval_semis;
+    for (std::size_t offset = 0; offset < count && declaration_ok; ++offset) {
+      const MaterialNote& leader_note = (*leader)[entry.leader_start_index + offset];
+      const MaterialNote& follower_note = (*follower)[entry.follower_start_index + offset];
+      declaration_ok = follower_note.start_tick == leader_note.start_tick + entry.distance_ticks &&
+                       follower_note.duration == leader_note.duration;
+      if (!declaration_ok)
+        break;
+      if (entry.follower_fragment == MaterialFragment::Answer) {
+        declaration_ok = static_cast<int>(follower_note.pitch) ==
+                         static_cast<int>(leader_note.pitch) + entry.interval_semis;
+      } else if (entry.follower_fragment == MaterialFragment::TonalAnswer) {
+        if (offset < 4) {
+          const std::uint8_t leader_pc = static_cast<std::uint8_t>(leader_note.pitch % 12);
+          if (leader_pc == tonic_pc) {
+            declaration_ok = follower_note.pitch % 12 == dominant_pc;
+          } else if (leader_pc == dominant_pc) {
+            declaration_ok = follower_note.pitch % 12 == tonic_pc;
+          } else {
+            declaration_ok = static_cast<int>(follower_note.pitch) ==
+                             static_cast<int>(leader_note.pitch) + tonal_tail_interval;
+          }
+        } else {
+          declaration_ok = static_cast<int>(follower_note.pitch) ==
+                           static_cast<int>(leader_note.pitch) + tonal_tail_interval;
+        }
+      }
+    }
+
+    if (!declaration_ok) {
       ValidationFailure failure;
       failure.rule_id = "imitation_entry_match";
       failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
+      continue;
+    }
+
+    // On the generation carrier, verify that the declared material window is
+    // actually present in the emitted notes for the declared voices, with
+    // Material provenance and ImitationEntryMatched stamped on both heads.
+    if (!audit_final_score && !notes.empty() && notes.size() == provenance.size()) {
+      const auto emittedMatches = [&](const std::vector<MaterialNote>& expected,
+                                      std::size_t start_index, VoiceId voice, VoiceIntent intent) {
+        for (std::size_t offset = 0; offset < count; ++offset) {
+          const MaterialNote& material_note = expected[start_index + offset];
+          bool found = false;
+          for (std::size_t note_index = 0; note_index < notes.size(); ++note_index) {
+            const NoteEvent& note = notes[note_index];
+            const NoteProvenance& note_provenance = provenance[note_index];
+            if (note.voice != voice || note.start_tick != material_note.start_tick ||
+                note.duration != material_note.duration || note.pitch != material_note.pitch ||
+                note_provenance.source != NoteSource::Material ||
+                note_provenance.voice_intent != intent) {
+              continue;
+            }
+            if (offset == 0 &&
+                !(note_provenance.satisfied_rules & ruleBitMask(RuleBit::ImitationEntryMatched))) {
+              return false;
+            }
+            found = true;
+            break;
+          }
+          if (!found)
+            return false;
+        }
+        return true;
+      };
+      if (!emittedMatches(*leader, entry.leader_start_index, entry.leader_voice,
+                          VoiceIntent::SubjectCarrier) ||
+          !emittedMatches(*follower, entry.follower_start_index, entry.follower_voice,
+                          VoiceIntent::AnswerCarrier)) {
+        ValidationFailure failure;
+        failure.rule_id = "imitation_entry_realization";
+        failure.kind = FailKind::MusicalFail;
+        report.failures.push_back(failure);
+      }
     }
   }
 
@@ -1856,6 +2161,44 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // Organ Passacaglia.
   checkImmutableGround(material.passacaglia_ground, material.passacaglia_ground_period,
                        RuleBit::PassacagliaGroundReplayed, "passacaglia_ground_immutable");
+  // Goldberg's compressed aria-bass phrase is a dedicated 32-tone declaration,
+  // not a passacaglia bar-head ground. Every declared onset/duration/pitch must
+  // recur exactly in every four-bar variation block.
+  if (!material.goldberg_aria_bass.empty() && material.goldberg_aria_bass_period > 0) {
+    Tick score_end = 0;
+    for (const auto& note : notes)
+      score_end = std::max(score_end, note.start_tick + note.duration);
+    bool any = false;
+    bool ok = true;
+    for (Tick base = 0; base < score_end && ok; base += material.goldberg_aria_bass_period) {
+      for (const auto& expected : material.goldberg_aria_bass) {
+        const Tick tick = base + expected.start_tick;
+        if (tick >= score_end)
+          break;
+        bool found = false;
+        for (std::size_t i = 0; i < notes.size(); ++i) {
+          if (!hasRuleBit(provenance, i, RuleBit::GoldbergBassReplayed))
+            continue;
+          any = true;
+          if (notes[i].start_tick == tick && notes[i].duration == expected.duration &&
+              notes[i].pitch == expected.pitch) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!any || !ok) {
+      ValidationFailure failure;
+      failure.rule_id = "goldberg_aria_bass_immutable";
+      failure.kind = FailKind::StructuralFail;
+      report.failures.push_back(failure);
+    }
+  }
 
   // variation_role_ornament_constraint: a Ground-role variation states the
   // ground bass plainly and must stay un-ornamented — no note may subdivide
@@ -1906,11 +2249,15 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (hasRuleBit(provenance, i, RuleBit::PedalPreparation))
         continue;  // pedal points are held against changing harmony.
       const auto& note = notes[i];
-      if (note.start_tick % ticks_per_bar != 0)
+      const Tick authored_tick =
+          provenance[i].has_authored_note ? provenance[i].authored_start_tick : note.start_tick;
+      const std::uint8_t authored_pitch =
+          provenance[i].has_authored_note ? provenance[i].authored_pitch : note.pitch;
+      if (authored_tick % ticks_per_bar != 0)
         continue;  // only the bar downbeat is harmonically anchored.
-      const auto& chord = activeChord(harmonic_plan, note.start_tick);
+      const auto& chord = activeChord(harmonic_plan, authored_tick);
       const auto triad = triadFor(chord);
-      const std::uint8_t pc = static_cast<std::uint8_t>(note.pitch % 12);
+      const std::uint8_t pc = static_cast<std::uint8_t>(authored_pitch % 12);
       bool is_chord_tone = (pc == triad[0] || pc == triad[1] || pc == triad[2]);
       if (!is_chord_tone && hasSeventh(chord.quality)) {
         const std::uint8_t seventh_pc =
@@ -2268,7 +2615,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const Tick t = notes[i].start_tick;
         if (t < cs_first || t >= cs_last)
           continue;
-        if (!isStrongBeat(t, ticks_per_bar))
+        if (!isStructuralAccent(harmonic_plan, t))
           continue;
         if (std::find(ticks.begin(), ticks.end(), t) == ticks.end())
           ticks.push_back(t);

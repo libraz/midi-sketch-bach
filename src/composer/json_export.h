@@ -40,6 +40,15 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
 // generated.json.notes by index, carrying the full NoteProvenance.
 std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance);
 
+/// @brief Emit a self-contained failed-run diagnostic without changing generated.v1.
+///
+/// diagnostic.v1 carries validation status/failures plus index-parallel note and
+/// provenance records. It is intended for CLI/C/WASM diagnostics, never for the
+/// external scorer contract.
+std::string emitDiagnosticJson(const std::vector<NoteEvent>& notes,
+                               const std::vector<NoteProvenance>& provenance,
+                               const ValidationReport& validation);
+
 /// @brief Render a NoteSource enumerator to its lowercase wire string.
 /// @param source Provenance source of a note.
 /// @return One of "material", "compose", "ornament".

@@ -30,6 +30,85 @@ Tick computeDuration(const std::vector<NoteEvent>& notes) {
   return last;
 }
 
+std::string_view validationStatusToWire(ValidationStatus status) {
+  switch (status) {
+    case ValidationStatus::Ok:
+      return "ok";
+    case ValidationStatus::FailedSpan:
+      return "failed_span";
+    case ValidationStatus::FailedSeed:
+      return "failed_seed";
+  }
+  return "failed_span";
+}
+
+std::string_view failKindToWire(FailKind kind) {
+  switch (kind) {
+    case FailKind::StructuralFail:
+      return "StructuralFail";
+    case FailKind::MusicalFail:
+      return "MusicalFail";
+    case FailKind::ConfigFail:
+      return "ConfigFail";
+  }
+  return "MusicalFail";
+}
+
+void writeSpanId(JsonWriter& w, SpanId span_id) {
+  if (span_id == kInvalidSpanId) {
+    w.valueNull();
+  } else {
+    w.value(static_cast<int>(span_id));
+  }
+}
+
+void writeProvenanceObject(JsonWriter& w, const NoteProvenance& p, std::size_t index) {
+  w.beginObject();
+  w.key("index");
+  w.value(static_cast<int>(index));
+  w.key("span_id");
+  writeSpanId(w, p.span_id);
+  w.key("voice_intent");
+  writeStr(w, voiceIntentToString(p.voice_intent));
+  w.key("source");
+  const char* source_str = "Compose";
+  if (p.source == NoteSource::Material)
+    source_str = "Material";
+  else if (p.source == NoteSource::Ornament)
+    source_str = "Ornament";
+  writeStr(w, source_str);
+  w.key("candidate_score");
+  w.value(static_cast<double>(p.candidate_score));
+  if (p.source == NoteSource::Compose) {
+    w.key("shadow_score");
+    w.value(static_cast<double>(p.shadow_score));
+    w.key("shadow_winning_pitch");
+    w.value(static_cast<int>(p.shadow_winning_pitch));
+    w.key("shadow_winning_pitch_without_markov");
+    w.value(static_cast<int>(p.shadow_winning_pitch_without_markov));
+  }
+  if (p.has_authored_note) {
+    w.key("authored_note");
+    w.beginObject();
+    w.key("start_tick");
+    w.value(static_cast<int>(p.authored_start_tick));
+    w.key("duration");
+    w.value(static_cast<int>(p.authored_duration));
+    w.key("pitch");
+    w.value(static_cast<int>(p.authored_pitch));
+    w.endObject();
+  }
+  w.key("satisfied_rules");
+  w.value(p.satisfied_rules.low64());
+  if (p.satisfied_rules.high64() != 0) {
+    w.key("satisfied_rules_high");
+    w.value(p.satisfied_rules.high64());
+  }
+  w.key("rejected_alternatives");
+  w.value(static_cast<int>(p.rejected_alternatives));
+  w.endObject();
+}
+
 }  // namespace
 
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes) {
@@ -172,57 +251,63 @@ std::string emitProvenanceJson(const std::vector<NoteProvenance>& provenance) {
   w.key("notes");
   w.beginArray();
   for (std::size_t i = 0; i < provenance.size(); ++i) {
-    const auto& p = provenance[i];
+    writeProvenanceObject(w, provenance[i], i);
+  }
+  w.endArray();
+  w.endObject();
+  return w.toString();
+}
+
+std::string emitDiagnosticJson(const std::vector<NoteEvent>& notes,
+                               const std::vector<NoteProvenance>& provenance,
+                               const ValidationReport& validation) {
+  JsonWriter w;
+  w.beginObject();
+  w.key("schema_version");
+  writeStr(w, "diagnostic.v1");
+  w.key("index_parallel");
+  w.value(notes.size() == provenance.size());
+  w.key("validation");
+  w.beginObject();
+  w.key("status");
+  writeStr(w, validationStatusToWire(validation.status));
+  w.key("failures");
+  w.beginArray();
+  for (const auto& failure : validation.failures) {
+    w.beginObject();
+    w.key("kind");
+    writeStr(w, failKindToWire(failure.kind));
+    w.key("rule_id");
+    w.value(std::string_view(failure.rule_id));
+    w.key("span_id");
+    writeSpanId(w, failure.span_id);
+    w.endObject();
+  }
+  w.endArray();
+  w.endObject();
+
+  w.key("notes");
+  w.beginArray();
+  for (std::size_t i = 0; i < notes.size(); ++i) {
     w.beginObject();
     w.key("index");
     w.value(static_cast<int>(i));
-    w.key("span_id");
-    if (p.span_id == kInvalidSpanId) {
-      w.valueNull();
-    } else {
-      w.value(static_cast<int>(p.span_id));
-    }
-    w.key("voice_intent");
-    writeStr(w, voiceIntentToString(p.voice_intent));
-    w.key("source");
-    const char* source_str = "Compose";
-    if (p.source == NoteSource::Material)
-      source_str = "Material";
-    else if (p.source == NoteSource::Ornament)
-      source_str = "Ornament";
-    writeStr(w, source_str);
-    w.key("candidate_score");
-    w.value(static_cast<double>(p.candidate_score));
-    // Shadow (corpus-scorer audit) fields are emitted ONLY for Compose notes.
-    // Material and Ornament notes never run the candidate scorer, so their
-    // shadow fields carry no decision — emitting the default zeros would read
-    // as "the scorer chose pitch 0 with probability 0" and pollute the natural
-    // `shadow_winning_pitch != pitch` (scorer-disagreed) diagnostic with one
-    // false hit per verbatim note. Omitting the keys (same pattern as the
-    // optional satisfied_rules_high lane below) keeps a provenance trace
-    // unambiguous: shadow_* present ⟺ this note was scored.
-    if (p.source == NoteSource::Compose) {
-      w.key("shadow_score");
-      w.value(static_cast<double>(p.shadow_score));
-      w.key("shadow_winning_pitch");
-      w.value(static_cast<int>(p.shadow_winning_pitch));
-      w.key("shadow_winning_pitch_without_markov");
-      w.value(static_cast<int>(p.shadow_winning_pitch_without_markov));
-    }
-    w.key("satisfied_rules");
-    // The low 64 rule bits always emit as one integer. The high lane (bits
-    // 64..127) emits as a separate optional `satisfied_rules_high` integer ONLY
-    // when nonzero, so every note that uses no high-lane bit stays byte-identical
-    // to the pre-high-lane output. The first high-lane bit in use is
-    // CountersubjectInvertible (bit 64); notes without it omit the field.
-    w.value(p.satisfied_rules.low64());
-    if (p.satisfied_rules.high64() != 0) {
-      w.key("satisfied_rules_high");
-      w.value(p.satisfied_rules.high64());
-    }
-    w.key("rejected_alternatives");
-    w.value(static_cast<int>(p.rejected_alternatives));
+    w.key("start_tick");
+    w.value(static_cast<int>(notes[i].start_tick));
+    w.key("duration");
+    w.value(static_cast<int>(notes[i].duration));
+    w.key("pitch");
+    w.value(static_cast<int>(notes[i].pitch));
+    w.key("voice");
+    w.value(static_cast<int>(notes[i].voice));
     w.endObject();
+  }
+  w.endArray();
+
+  w.key("provenance");
+  w.beginArray();
+  for (std::size_t i = 0; i < provenance.size(); ++i) {
+    writeProvenanceObject(w, provenance[i], i);
   }
   w.endArray();
   w.endObject();

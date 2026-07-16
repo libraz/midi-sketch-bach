@@ -163,6 +163,60 @@ TEST_F(JsonExportTest, ProvenanceJsonCarriesAuditFields) {
   EXPECT_TRUE(contains(provenance_, "satisfied_rules"));
   EXPECT_TRUE(contains(provenance_, "source"));
   EXPECT_TRUE(contains(provenance_, "span_id"));
+  EXPECT_TRUE(contains(provenance_, "authored_note"));
+}
+
+TEST(JsonExportProvenanceTest, AuthoredNoteIsExplicitAndAbsentForCompose) {
+  NoteProvenance carrier;
+  carrier.source = NoteSource::Material;
+  carrier.has_authored_note = true;
+  carrier.authored_start_tick = 480;
+  carrier.authored_duration = 240;
+  carrier.authored_pitch = 67;
+  const std::string carrier_json = emitProvenanceJson({carrier});
+  EXPECT_TRUE(contains(carrier_json,
+                       "\"authored_note\":{\"start_tick\":480,\"duration\":240,\"pitch\":67}"));
+
+  NoteProvenance compose;
+  compose.source = NoteSource::Compose;
+  EXPECT_FALSE(contains(emitProvenanceJson({compose}), "authored_note"));
+}
+
+TEST(JsonExportDiagnosticTest, CarriesValidationFailureAndIndexParallelProvenance) {
+  NoteEvent note;
+  note.start_tick = 480;
+  note.duration = 240;
+  note.pitch = 67;
+  note.voice = 1;
+  NoteProvenance provenance;
+  provenance.span_id = 9;
+  provenance.voice_intent = VoiceIntent::SequentialCounterline;
+  provenance.source = NoteSource::Compose;
+  provenance.satisfied_rules = RuleIdMask{3, 1};
+
+  ValidationReport report;
+  report.status = ValidationStatus::FailedSpan;
+  report.failures.push_back({9, "parallel_fifth", FailKind::MusicalFail});
+  report.failures.push_back({kInvalidSpanId, "provenance_size_mismatch", FailKind::StructuralFail});
+
+  const std::string json = emitDiagnosticJson({note}, {provenance}, report);
+  EXPECT_TRUE(contains(json, "\"schema_version\":\"diagnostic.v1\""));
+  EXPECT_TRUE(contains(json, "\"index_parallel\":true"));
+  EXPECT_TRUE(contains(json, "\"status\":\"failed_span\""));
+  EXPECT_TRUE(contains(json, "\"kind\":\"MusicalFail\""));
+  EXPECT_TRUE(contains(json, "\"rule_id\":\"parallel_fifth\""));
+  EXPECT_TRUE(contains(json, "\"span_id\":9"));
+  EXPECT_TRUE(contains(json, "\"span_id\":null"));
+  EXPECT_TRUE(contains(json, "\"provenance\":["));
+  EXPECT_TRUE(contains(json, "\"satisfied_rules_high\":1"));
+}
+
+TEST(JsonExportDiagnosticTest, ReportsProvenanceMisalignmentFailClosed) {
+  ValidationReport report;
+  report.status = ValidationStatus::FailedSeed;
+  const std::string json = emitDiagnosticJson({NoteEvent{}}, {}, report);
+  EXPECT_TRUE(contains(json, "\"index_parallel\":false"));
+  EXPECT_TRUE(contains(json, "\"status\":\"failed_seed\""));
 }
 
 TEST(JsonExportShadowFieldTest, ShadowFieldsEmittedOnlyForComposeNotes) {

@@ -63,6 +63,7 @@ MelodicScoringConfig melodicScoringConfig() {
 // local aliases keep the existing call sites (triadPitchClasses, activeChord)
 // unchanged while routing through the single shared implementation.
 using rule_helpers::activeChord;
+using rule_helpers::isStructuralAccent;
 using rule_helpers::triadPitchClasses;
 
 // Functional-harmony helper: set the four functional-harmony provenance
@@ -208,7 +209,6 @@ using rule_helpers::createsParallelPerfect;
 using rule_helpers::createsParallelPerfectAcrossOnset;
 using rule_helpers::createsVerticalDissonance;
 using rule_helpers::createsVoiceCrossing;
-using rule_helpers::isLeadingTone;
 using rule_helpers::isStrongBeat;
 using rule_helpers::sameVoiceStartingAt;
 using rule_helpers::voicePitchAt;
@@ -216,10 +216,11 @@ using rule_helpers::voicePitchAt;
 // Guard form: returns true if `previous` is not a leading tone OR
 // `candidate` is a valid stepwise upward resolution. Used by the
 // candidate enumerator's "may I pick this next pitch?" gate.
-bool resolvesLeadingTone(std::uint8_t previous, int candidate, const HarmonicPlan& plan) {
-  if (!isLeadingTone(previous, plan))
+bool resolvesLeadingTone(std::uint8_t previous, int candidate, const HarmonicPlan& plan,
+                         Tick leading_tick) {
+  if (!rule_helpers::isContextualLeadingTone(previous, plan, leading_tick))
     return true;
-  return rule_helpers::isLeadingToneResolution(previous, candidate, plan);
+  return rule_helpers::isContextualLeadingToneResolution(previous, candidate, plan, leading_tick);
 }
 
 // Cross-span lookahead context for sameVoiceStartingAt: when a Carrier
@@ -284,8 +285,9 @@ bool createsVerticalDissonanceDuring(const std::vector<NoteEvent>& placed, Voice
       continue;
     if (note.start_tick >= end || note.start_tick + note.duration <= start)
       continue;
-    if (!rule_helpers::isConsonantInterval(static_cast<int>(candidate_pitch) -
-                                           static_cast<int>(note.pitch))) {
+    const Tick sample_tick = std::max(start, note.start_tick);
+    if (rule_helpers::createsVerticalDissonance(placed, candidate_voice, candidate_pitch,
+                                                sample_tick)) {
       return true;
     }
   }
@@ -365,22 +367,6 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                                                   const CandidateContext& context,
                                                   std::size_t* saturated_positions) const {
   std::vector<Candidate> out;
-
-  // Diatonic pitch-class mask for the key declared by the HarmonicPlan.
-  // Used as a tiny chromatic penalty at eighth-note weak positions so
-  // diatonic step approaches outrank chromatic alternatives of the same
-  // step distance. The penalty is small (0.05) so genuinely required
-  // chromatic motion is still reachable when no diatonic alternative
-  // survives the rule cascade.
-  std::array<bool, 12> diatonic_pc = {};
-  {
-    static constexpr int kMajorOffsets[7] = {0, 2, 4, 5, 7, 9, 11};
-    static constexpr int kMinorOffsets[7] = {0, 2, 3, 5, 7, 8, 10};
-    const auto* offsets = harmonic_plan.is_minor ? kMinorOffsets : kMajorOffsets;
-    for (int i = 0; i < 7; ++i) {
-      diatonic_pc[(harmonic_plan.tonic_pc + offsets[i]) % 12] = true;
-    }
-  }
 
   if (span.intent == VoiceIntent::SubjectCarrier || span.intent == VoiceIntent::AnswerCarrier ||
       span.intent == VoiceIntent::CountersubjectCarrier) {
@@ -999,6 +985,51 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     return out;
   }
 
+  if (span.intent == VoiceIntent::GoldbergBassCarrier) {
+    const Tick period = material.goldberg_aria_bass_period;
+    if (period > 0 && !material.goldberg_aria_bass.empty()) {
+      for (Tick base = span.start_tick; base < span.end_tick; base += period) {
+        for (const auto& source : material.goldberg_aria_bass) {
+          MaterialNote shifted = source;
+          shifted.start_tick = base + source.start_tick;
+          if (shifted.start_tick >= span.end_tick)
+            break;
+          out.push_back(
+              emitMaterialNote(shifted, harmonic_plan, ruleBitMask(RuleBit::GoldbergBassReplayed)));
+        }
+      }
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::GoldbergVariationCarrier) {
+    for (const auto& variation : material.goldberg_variations) {
+      if (variation.voice != span.voice || variation.start_tick != span.start_tick ||
+          variation.end_tick != span.end_tick) {
+        continue;
+      }
+      RuleIdMask bits = ruleBitMask(RuleBit::GoldbergVariationRealized);
+      if (variation.is_climax)
+        bits |= ruleBitMask(RuleBit::ClimaxPlaced);
+      for (const auto& note : variation.notes)
+        out.push_back(emitMaterialNote(note, harmonic_plan, bits));
+      break;
+    }
+    return out;
+  }
+
+  if (span.intent == VoiceIntent::GoldbergInnerVoiceCarrier) {
+    for (const auto& note : material.goldberg_inner_voice) {
+      if (note.start_tick < span.start_tick)
+        continue;
+      if (note.start_tick >= span.end_tick)
+        break;
+      out.push_back(
+          emitMaterialNote(note, harmonic_plan, ruleBitMask(RuleBit::GoldbergInnerVoiceRealized)));
+    }
+    return out;
+  }
+
   if (span.intent == VoiceIntent::PassacagliaVariation) {
     // Organ Passacaglia variation carrier: verbatim replay of the single
     // PassacagliaVariation whose window matches this span (the fixture sets
@@ -1138,9 +1169,10 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (force_cadence_pc && pc != forced_cadence_pc)
         continue;
       const bool is_triad = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
-      const bool strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
+      const bool strong = isStructuralAccent(harmonic_plan, t);
       const bool strict_harmonic_support = span.intent == VoiceIntent::HarmonicSupport;
-      if (prev_pitch_local != 0 && !resolvesLeadingTone(prev_pitch_local, p, harmonic_plan)) {
+      if (prev_pitch_local != 0 &&
+          !resolvesLeadingTone(prev_pitch_local, p, harmonic_plan, parallel_prev_tick)) {
         continue;
       }
       if (strong && !is_triad)
@@ -1219,9 +1251,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // fixed Material) can coincide with a Compose voice landing on
       // B, fail validation, and bounce the seed.
       if (chord.has_degree && context.placed_notes != nullptr) {
-        const std::uint8_t lt_pc = leadingTonePitchClass(harmonic_plan.tonic_pc);
+        const auto tonal_context = rule_helpers::tonalContextAt(harmonic_plan, t);
+        const std::uint8_t lt_pc = tonal_context.leading_tone_pc;
         const bool chord_owns_lt =
-            (triad[0] == lt_pc) || (triad[1] == lt_pc) || (triad[2] == lt_pc);
+            tonal_context.has_active_leading_tone &&
+            ((triad[0] == lt_pc) || (triad[1] == lt_pc) || (triad[2] == lt_pc));
         if (chord_owns_lt && pc == lt_pc) {
           bool other_voice_has_lt = false;
           for (const auto& placed : *context.placed_notes) {
@@ -1289,45 +1323,6 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       }
 
-      // P10 strong-beat perfect-4th pre-filter. Converts the Validator's
-      // fourth_only_on_weak_beat rule into a confirming check: reject any
-      // candidate that would form a perfect 4th (interval class 5) on a
-      // strong beat with the sounding voice of an adjacent UPPER pair,
-      // matching the Validator scoping (adjacent pair, bottom-of-texture
-      // pair excluded). Without this filter the Composer can land an
-      // upper-pair 4th on a downbeat that the Validator then rejects,
-      // failing the whole span. A 4th inverts to a 5th under octave
-      // inversion, so avoiding it preserves invertibility. The Validator
-      // enforces this rule unconditionally, so the pre-filter runs on every
-      // strong beat too — context.num_voices is always populated from the
-      // voice plan (not only for degree-tagged layouts), so the
-      // bottom-of-texture exclusion is reliable regardless of chord tagging.
-      if (strong && context.placed_notes != nullptr) {
-        bool forms_upper_pair_fourth = false;
-        for (const auto& placed : *context.placed_notes) {
-          if (placed.voice == span.voice)
-            continue;
-          if (placed.start_tick > t)
-            continue;
-          if (t >= placed.start_tick + placed.duration)
-            continue;
-          // Adjacent-pair scoping (V0 = top, V_{N-1} = bottom).
-          const VoiceId hi_voice = std::min(placed.voice, span.voice);
-          const VoiceId lo_voice = std::max(placed.voice, span.voice);
-          if (lo_voice != hi_voice + 1)
-            continue;
-          // Exclude the bottom-of-texture pair (mirrors the Validator).
-          if (context.num_voices >= 2 && lo_voice == context.num_voices - 1)
-            continue;
-          const int cls = std::abs(static_cast<int>(placed.pitch) - p) % 12;
-          if (cls == 5) {
-            forms_upper_pair_fourth = true;
-            break;
-          }
-        }
-        if (forms_upper_pair_fourth)
-          continue;
-      }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
           createsHiddenParallelPerfect(*context.placed_notes, span.voice,
                                        static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
@@ -1435,7 +1430,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         }
       }
 
-      if (isLeadingTone(static_cast<std::uint8_t>(p), harmonic_plan)) {
+      if (rule_helpers::isContextualLeadingTone(static_cast<std::uint8_t>(p), harmonic_plan, t)) {
         const Tick t_next = t + stride;
         bool has_resolution = false;
         if (context.placed_notes != nullptr) {
@@ -1443,13 +1438,13 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
               sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
           if (fixed_next != 0) {
             has_resolution =
-                resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan);
+                resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan, t);
           } else {
             const std::uint8_t future_fixed =
                 nextSameVoiceStartingAfter(*context.placed_notes, span.voice, t_next);
             if (future_fixed != 0) {
               has_resolution =
-                  resolvesLeadingTone(static_cast<std::uint8_t>(p), future_fixed, harmonic_plan);
+                  resolvesLeadingTone(static_cast<std::uint8_t>(p), future_fixed, harmonic_plan, t);
             }
           }
         }
@@ -1468,7 +1463,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
               continue;
             if (static_cast<std::uint8_t>(q % 12) != immediate_forced_pc)
               continue;
-            if (resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan)) {
+            if (resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan, t)) {
               cadence_can_resolve = true;
               break;
             }
@@ -1494,7 +1489,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             const std::uint8_t q_pc_for_cadence = static_cast<std::uint8_t>(q % 12);
             if (next_force_cadence_pc && q_pc_for_cadence != next_forced_cadence_pc)
               continue;
-            if (!resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan))
+            if (!resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan, t))
               continue;
             if (context.placed_notes != nullptr &&
                 createsVoiceCrossing(*context.placed_notes, span.voice,
@@ -1527,10 +1522,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             const auto q_triad = triadPitchClasses(q_chord);
             const std::uint8_t q_pc = static_cast<std::uint8_t>(q % 12);
             const bool q_is_triad = q_pc == q_triad[0] || q_pc == q_triad[1] || q_pc == q_triad[2];
-            if (isStrongBeat(t_next, harmonic_plan.ticksPerBar()) && !q_is_triad) {
+            if (isStructuralAccent(harmonic_plan, t_next) && !q_is_triad) {
               continue;
             }
-            if (!isStrongBeat(t_next) && !q_is_triad && context.placed_notes != nullptr) {
+            if (!isStructuralAccent(harmonic_plan, t_next) && !q_is_triad &&
+                context.placed_notes != nullptr) {
               const Tick q_next_tick = t_next + stride;
               const std::uint8_t fixed_after_q =
                   sameVoiceStartingAt(*context.placed_notes, span.voice, q_next_tick);
@@ -1594,7 +1590,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (t_next < span.end_tick) {
           const ChordEvent& chord_next_lh = activeChord(harmonic_plan, t_next);
           const auto triad_next = triadPitchClasses(chord_next_lh);
-          const bool next_strong = isStrongBeat(t_next, harmonic_plan.ticksPerBar());
+          const bool next_strong = isStructuralAccent(harmonic_plan, t_next);
           bool has_step_followup = false;
           for (int q = p - 2; q <= p + 2; ++q) {
             if (q < context.voice_center - 7 || q > context.voice_center + 12)
@@ -1645,7 +1641,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           if (!has_step_followup)
             continue;
         }
-        if (isStrongBeat(t_next, harmonic_plan.ticksPerBar())) {
+        if (isStructuralAccent(harmonic_plan, t_next)) {
           const ChordEvent& chord_next_lh = activeChord(harmonic_plan, t_next);
           const auto triad_next = triadPitchClasses(chord_next_lh);
           bool has_strong_followup = false;
@@ -1794,7 +1790,10 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // non-diatonic ones; the 0.05 penalty keeps chromatic motion
       // reachable when no diatonic alternative survives the cascade
       // but lets the diatonic neighbor win every tie.
-      if (span.subdivision == Subdivision::Quarter && !strong && !is_triad && !diatonic_pc[pc]) {
+      const int melodic_motion = prev_pitch_local == 0 ? 0 : p - static_cast<int>(prev_pitch_local);
+      if (span.subdivision == Subdivision::Quarter && !strong && !is_triad &&
+          !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(p), harmonic_plan, t,
+                                                melodic_motion)) {
         score -= 0.05f;
         independent_adjustment -= 0.05f;
       }
@@ -1852,7 +1851,9 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       // penalty keeps chromatic motion reachable when the rule cascade
       // leaves no diatonic option, but lets diatonic steps win every
       // tie.
-      if (span.subdivision == Subdivision::Eighth && !strong && !is_triad && !diatonic_pc[pc]) {
+      if (span.subdivision == Subdivision::Eighth && !strong && !is_triad &&
+          !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(p), harmonic_plan, t,
+                                                melodic_motion)) {
         score -= 0.05f;
         independent_adjustment -= 0.05f;
       }
@@ -1927,7 +1928,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (!strong && prev_pitch_local != 0) {
         rules |= ruleBitMask(RuleBit::WeakBeatPassingChecked);
       }
-      if (prev_pitch_local != 0 && isLeadingTone(prev_pitch_local, harmonic_plan)) {
+      if (prev_pitch_local != 0 && rule_helpers::isContextualLeadingTone(
+                                       prev_pitch_local, harmonic_plan, parallel_prev_tick)) {
         rules |= ruleBitMask(RuleBit::LeadingToneResolved);
       }
       if (cadence_cell != nullptr) {
@@ -2005,16 +2007,18 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       }
     }
 
-    if (best_pitch < 0 && prev_pitch_local != 0 && isLeadingTone(prev_pitch_local, harmonic_plan)) {
+    if (best_pitch < 0 && prev_pitch_local != 0 &&
+        rule_helpers::isContextualLeadingTone(prev_pitch_local, harmonic_plan,
+                                              parallel_prev_tick)) {
       for (int p = static_cast<int>(prev_pitch_local) + 1;
            p <= static_cast<int>(prev_pitch_local) + 2; ++p) {
         if (p < 0 || p > 127)
           continue;
-        if (!resolvesLeadingTone(prev_pitch_local, p, harmonic_plan))
+        if (!resolvesLeadingTone(prev_pitch_local, p, harmonic_plan, parallel_prev_tick))
           continue;
         const std::uint8_t pc = static_cast<std::uint8_t>(p % 12);
         const bool is_triad_fallback = (pc == triad[0]) || (pc == triad[1]) || (pc == triad[2]);
-        const bool fallback_strong = isStrongBeat(t, harmonic_plan.ticksPerBar());
+        const bool fallback_strong = isStructuralAccent(harmonic_plan, t);
         if (fallback_strong && !is_triad_fallback)
           continue;
         if (!fallback_strong && !is_triad_fallback) {

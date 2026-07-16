@@ -11,6 +11,14 @@
 
 namespace bach::composer {
 
+// Validation has two distinct responsibilities. Generation checks only notes
+// that CandidateSearch can replace, while FinalScore audits every sounding
+// source after immutable material replay and ornament expansion.
+enum class ValidationScope : std::uint8_t {
+  Generation = 0,
+  FinalScore = 1,
+};
+
 // Composer validator.
 //
 // Counterpoint checks (always run):
@@ -37,7 +45,8 @@ class Validator {
   ValidationReport validate(const std::vector<NoteEvent>& notes,
                             const std::vector<NoteProvenance>& provenance,
                             const HarmonicPlan& harmonic_plan,
-                            const Material& material = Material{}) const;
+                            const Material& material = Material{},
+                            ValidationScope scope = ValidationScope::Generation) const;
 };
 
 /**

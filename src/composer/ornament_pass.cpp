@@ -944,6 +944,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       out_notes.push_back(sub);
       NoteProvenance sub_prov = prov;
       sub_prov.source = NoteSource::Ornament;
+      sub_prov.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
       out_prov.push_back(sub_prov);
     }
   }

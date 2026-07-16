@@ -28,6 +28,16 @@ HarmonicPlan singleCMajor() {
   return plan;
 }
 
+HarmonicPlan singleCDominant() {
+  HarmonicPlan plan = singleCMajor();
+  plan.chords.front().root_pc = 7;
+  plan.chords.front().quality = ChordQuality::Major;
+  plan.chords.front().degree = RomanNumeral::V;
+  plan.chords.front().function = HarmonicFunction::D;
+  plan.chords.front().has_degree = true;
+  return plan;
+}
+
 NoteEvent makePlaced(Tick start, Tick dur, std::uint8_t pitch, VoiceId voice) {
   NoteEvent n;
   n.start_tick = start;
@@ -384,20 +394,9 @@ TEST(CandidateSearchTest, RejectsDissonantVerticalAtStrongBeat) {
       << "G4 (67) forms M2 against placed A4 (69); rule must reject it.";
 }
 
-// Strong-beat perfect-4th rejection in the upper voice pair must hold even
-// when the active chord is NOT degree-tagged and the compose span is a plain
-// SequentialCounterline (intent != HarmonicSupport) — the FugueSubject3v/FugueExposition3v
-// fixture shape. The Validator enforces fourth_only_on_weak_beat for every
-// strong-beat upper-pair regardless of chord tagging, so the pre-filter must
-// match it.
-//
-// Fixture (3 voices, untagged C-major chord): V0 = C5 (72), V2 = C3 (48,
-// bottom voice). The (V1, V2) pair is the excluded bottom-of-texture pair;
-// (V0, V1) is the checked upper pair. With center=66 the score-winner is
-// G4 (67), which forms a perfect 4th (72 - 67 = 5) with V0 on the downbeat.
-// The pre-filter must reject 67 and fall to E4 (64), a m6 (consonant) that
-// also clears voice-crossing (below V0, above V2).
-TEST(CandidateSearchTest, RejectsUpperPairFourthOnStrongBeatWithoutDegreeTagging) {
+// A strong-beat fourth between upper voices is valid when both pitches are
+// consonant over the actual bass: C5 and G4 are octave/fifth above C3.
+TEST(CandidateSearchTest, AllowsUpperPairFourthOverConsonantActualBass) {
   std::vector<NoteEvent> placed = {
       makePlaced(0, kTicksPerBeat, 72, 0),  // V0 C5
       makePlaced(0, kTicksPerBeat, 48, 2),  // V2 C3 (bottom voice)
@@ -415,23 +414,12 @@ TEST(CandidateSearchTest, RejectsUpperPairFourthOnStrongBeatWithoutDegreeTagging
   CandidateSearch search;
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
-  EXPECT_NE(cands.front().pitch, 67u)
-      << "G4 (67) forms a perfect 4th against V0 C5 (72) in the upper pair on a "
-         "downbeat; the pre-filter must reject it even without degree tagging.";
-  EXPECT_EQ(cands.front().pitch, 64u)
-      << "expected E4 (64, m6) as the nearest admissible upper-pair tone, got "
-      << static_cast<int>(cands.front().pitch);
+  EXPECT_EQ(cands.front().pitch, 67u);
 }
 
-// The bottom-of-texture pair is excluded from the strong-beat 4th rule (it
-// inverts to a 5th but is not subject to invertible counterpoint). Here V0
-// (top) is placed an octave above; the compose voice is V2 (bottom) and the
-// pair under test is (V1, V2) — but V1 is absent, so the only pair is
-// (V0, V2), which is NOT adjacent-and-upper. A perfect 4th there must NOT be
-// rejected by this rule. center=67 pulls toward G4 (67); against V0 C5 (72)
-// that is a P4, and since the pair is not an upper adjacent pair the search
-// is free to keep it.
-TEST(CandidateSearchTest, BottomPairFourthOnStrongBeatIsAllowed) {
+// The same pitch-class interval is dissonant when the candidate itself is the
+// actual bass, so the search must not choose G4 beneath C5 on a downbeat.
+TEST(CandidateSearchTest, RejectsFourthAboveCandidateActualBass) {
   std::vector<NoteEvent> placed = {
       makePlaced(0, kTicksPerBeat, 72, 0),  // V0 C5 (top)
   };
@@ -448,10 +436,7 @@ TEST(CandidateSearchTest, BottomPairFourthOnStrongBeatIsAllowed) {
   CandidateSearch search;
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
-  EXPECT_EQ(cands.front().pitch, 67u)
-      << "a perfect 4th in the bottom-of-texture pair is not covered by the "
-         "upper-pair rule and must be admitted; got "
-      << static_cast<int>(cands.front().pitch);
+  EXPECT_NE(cands.front().pitch, 67u);
 }
 
 // A perfect 4th in the upper pair on a WEAK beat is allowed (it only inverts
@@ -622,18 +607,17 @@ TEST(CandidateSearchTest, QuarterSubdivisionBreaksThirdUnisonOnWeakBeat) {
 //
 // Fixture: V2 candidate at strong beat tick 0.
 //   V0 = [start=0, dur=480, p=72], [start=480, dur=480, p=74]
-//   V1 = [start=0,   dur=480, p=65]
+//   V1 = [start=0,   dur=480, p=63]
 // Without the fix, V0's second entry (start=480 > 0) terminates the
-// loop early and V1's F4 (65) is never checked. The search would then
+// loop early and V1's E-flat4 (63) is never checked. The search would then
 // pick E4 (64) at center=64 — m2 against the hidden V1. With the fix,
-// the loop continues past V0's later entries to V1's F4, rejects every
-// candidate above V1 by voice-crossing and 64 by vertical dissonance,
-// and the only surviving triad tone is C4 (60).
+// the loop continues past V0's later entries, rejects 64 by vertical
+// dissonance, and the surviving bass-relative consonance is C4 (60).
 TEST(CandidateSearchTest, VerticalRuleSeesAllPlacedVoicesUnsorted) {
   std::vector<NoteEvent> placed = {
       makePlaced(0, kTicksPerBeat, 72, 0),
       makePlaced(kTicksPerBeat, kTicksPerBeat, 74, 0),
-      makePlaced(0, kTicksPerBeat, 65, 1),
+      makePlaced(0, kTicksPerBeat, 63, 1),
   };
 
   CandidateContext ctx;
@@ -641,9 +625,7 @@ TEST(CandidateSearchTest, VerticalRuleSeesAllPlacedVoicesUnsorted) {
   ctx.prev_pitch = 0;
   ctx.placed_notes = &placed;
   // Three voices in play (V0, V1, V2); the compose voice V2 is the bottom of
-  // the texture, so its pair with V1 is the excluded bottom-of-texture pair
-  // and the C4-against-F4 perfect 4th below is not subject to the upper-pair
-  // strong-beat 4th rule.
+  // the texture, and C4 against E-flat4 is a consonant minor third.
   ctx.num_voices = 3;
 
   Material empty;
@@ -652,7 +634,7 @@ TEST(CandidateSearchTest, VerticalRuleSeesAllPlacedVoicesUnsorted) {
   CandidateSearch search;
   const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
-  EXPECT_EQ(cands.front().pitch, 60u) << "search must see V1=65 even though a later V0 entry has "
+  EXPECT_EQ(cands.front().pitch, 60u) << "search must see V1=63 even though a later V0 entry has "
                                          "start_tick > cur_tick; expected C4 (only consonant non-"
                                          "crossing triad), got "
                                       << static_cast<int>(cands.front().pitch);
@@ -717,7 +699,7 @@ TEST(CandidateSearchTest, ResolvesLeadingToneUpwardToTonic) {
   Span span = makeComposeSpan(kTicksPerBeat, 2 * kTicksPerBeat, 0);
 
   CandidateSearch search;
-  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx);
+  const auto cands = search.enumerate(span, singleCDominant(), empty, ctx);
   ASSERT_EQ(cands.size(), 1u);
   EXPECT_EQ(cands.front().pitch, 72u);
   EXPECT_NE(cands.front().satisfied_rules & (ruleBitMask(RuleBit::LeadingToneResolved)), 0u);
@@ -1556,7 +1538,8 @@ TEST(CandidateSearchTest, EnumerateReportsZeroSaturationOnNormalSpan) {
 }
 
 // Forces a real saturated position. Voice 1's previous pitch is the
-// leading tone B4 (71) in C major, so the leading-tone resolution filter
+// leading tone B4 (71) under C's dominant harmony, so the contextual
+// leading-tone resolution filter
 // admits only the tonic C5 (72) as the next pitch. Placed voice 0 sits at
 // B4 (71); committing 72 in the lower-indexed-below voice 1 against voice
 // 0 at 71 is a voice crossing (voice 1 > voice 0 yet 72 > 71), which the
@@ -1579,7 +1562,7 @@ TEST(CandidateSearchTest, EnumerateCountsSaturatedPositions) {
 
   CandidateSearch search;
   std::size_t saturated = 0;
-  const auto cands = search.enumerate(span, singleCMajor(), empty, ctx, &saturated);
+  const auto cands = search.enumerate(span, singleCDominant(), empty, ctx, &saturated);
 
   EXPECT_TRUE(cands.empty()) << "no candidate survives the leading-tone + voice-crossing cascade";
   EXPECT_EQ(saturated, 1u) << "the single exhausted position must be reported as a silent hole";

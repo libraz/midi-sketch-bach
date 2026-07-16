@@ -54,6 +54,13 @@ NoteProvenance makeProvIntent(SpanId sid, NoteSource src, VoiceIntent intent) {
   return p;
 }
 
+void bindAuthoredNote(const NoteEvent& note, NoteProvenance* provenance) {
+  provenance->has_authored_note = true;
+  provenance->authored_start_tick = note.start_tick;
+  provenance->authored_duration = note.duration;
+  provenance->authored_pitch = note.pitch;
+}
+
 bool hasRule(const ValidationReport& r, const std::string& rule_id) {
   for (const auto& f : r.failures) {
     if (f.rule_id == rule_id)
@@ -76,6 +83,16 @@ HarmonicPlan cMajorWithCadence(CadenceType type) {
   cadence.tick = kTicksPerBeat;
   cadence.type = type;
   plan.cadences.push_back(cadence);
+  return plan;
+}
+
+HarmonicPlan cMajorDominantWhole() {
+  HarmonicPlan plan = cMajorWhole();
+  plan.chords.front().root_pc = 7;
+  plan.chords.front().quality = ChordQuality::Major;
+  plan.chords.front().degree = RomanNumeral::V;
+  plan.chords.front().function = HarmonicFunction::D;
+  plan.chords.front().has_degree = true;
   return plan;
 }
 
@@ -246,6 +263,29 @@ TEST(ValidatorTest, StrongBeatDissonanceIgnoredForMaterialSource) {
   std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Material)};
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
   EXPECT_EQ(r.status, ValidationStatus::Ok);
+}
+
+TEST(ValidatorTest, CommonTimeBeatThreeDissonanceFailsButBeatTwoIsWeak) {
+  std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  ValidationReport beat_two =
+      Validator{}.validate({makeNote(kTicksPerBeat, kTicksPerBeat, 66, 0)}, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(beat_two, "strong_beat_dissonance"));
+
+  ValidationReport beat_three = Validator{}.validate(
+      {makeNote(2 * kTicksPerBeat, kTicksPerBeat, 66, 0)}, prov, cMajorWhole());
+  EXPECT_TRUE(hasRule(beat_three, "strong_beat_dissonance"));
+}
+
+TEST(ValidatorTest, SarabandeBeatTwoDissonanceFailsButStandardTripleAllowsIt) {
+  HarmonicPlan standard = cMajorWhole();
+  standard.ts_numerator = 3;
+  standard.ts_denominator = 4;
+  HarmonicPlan sarabande = standard;
+  sarabande.meter_profile = MeterProfile::SarabandeTriple;
+  const std::vector<NoteEvent> notes = {makeNote(kTicksPerBeat, kTicksPerBeat, 66, 0)};
+  const std::vector<NoteProvenance> prov = {makeProv(0, NoteSource::Compose)};
+  EXPECT_FALSE(hasRule(Validator{}.validate(notes, prov, standard), "strong_beat_dissonance"));
+  EXPECT_TRUE(hasRule(Validator{}.validate(notes, prov, sarabande), "strong_beat_dissonance"));
 }
 
 TEST(ValidatorTest, ParallelFifthFails) {
@@ -463,6 +503,182 @@ TEST(ValidatorTest, WeakBeatNonChordToneOnMaterialSourceIgnored) {
   EXPECT_FALSE(hasRule(r, "unprepared_dissonance"));
 }
 
+TEST(ValidatorTest, FinalScoreAuditAcceptsConsonantResolvedMaterial) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(0, kTicksPerBeat, 52, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 53, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::Ok);
+  EXPECT_TRUE(report.failures.empty());
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesMaterialParallelFifth) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport generation = Validator{}.validate(notes, prov, cMajorWhole());
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_FALSE(hasRule(generation, "parallel_fifth"));
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesOrnamentParallelFifth) {
+  std::vector<NoteEvent> notes = {
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 53, 1),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Ornament));
+
+  ValidationReport generation = Validator{}.validate(notes, prov, cMajorWhole());
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_FALSE(hasRule(generation, "parallel_fifth"));
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesMaterialCrossRelation) {
+  std::vector<NoteEvent> notes = {
+      makeNote(kTicksPerBeat, kTicksPerBeat, 65, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 66, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProv(3, NoteSource::Material),
+      makeProv(4, NoteSource::Material),
+  };
+
+  ValidationReport generation = Validator{}.validate(notes, prov, cMajorWhole());
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_FALSE(hasRule(generation, "cross_relation"));
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "cross_relation"));
+  bool found_span = false;
+  for (const auto& failure : report.failures) {
+    if (failure.rule_id == "cross_relation" && failure.span_id == 4) {
+      found_span = true;
+    }
+  }
+  EXPECT_TRUE(found_span);
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesAccentedMaterialDissonance) {
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 66, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(7, NoteSource::Material)};
+
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "strong_beat_dissonance"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesMaterialMelodicLeap) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 66, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "tritone_melodic"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditCatchesUnresolvedOrnamentLeadingTone) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Ornament));
+
+  ValidationReport report = Validator{}.validate(notes, prov, cMajorDominantWhole(), Material{},
+                                                 ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "leading_tone_resolution"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditRejectsMissingProvenance) {
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 60, 0)};
+
+  ValidationReport report =
+      Validator{}.validate(notes, {}, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  ASSERT_EQ(report.status, ValidationStatus::FailedSpan);
+  ASSERT_EQ(report.failures.size(), 1u);
+  EXPECT_EQ(report.failures[0].rule_id, "note_provenance_alignment");
+  EXPECT_EQ(report.failures[0].kind, FailKind::StructuralFail);
+}
+
+TEST(ValidatorTest, FinalScoreAuditAcceptsExactAuthoredCarrierContext) {
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 66, 0)};
+  std::vector<NoteProvenance> provenance = {makeProv(7, NoteSource::Material)};
+  bindAuthoredNote(notes.front(), &provenance.front());
+
+  const ValidationReport report = Validator{}.validate(notes, provenance, cMajorWhole(), Material{},
+                                                       ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::Ok);
+  EXPECT_FALSE(hasRule(report, "strong_beat_dissonance"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditRejectsCarrierMutationAgainstAuthoredContext) {
+  const NoteEvent authored = makeNote(0, kTicksPerBeat, 60, 0);
+  std::vector<NoteEvent> notes = {authored};
+  std::vector<NoteProvenance> provenance = {makeProv(7, NoteSource::Material)};
+  bindAuthoredNote(authored, &provenance.front());
+  notes.front().pitch = 66;
+
+  const ValidationReport report = Validator{}.validate(notes, provenance, cMajorWhole(), Material{},
+                                                       ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "carrier_declaration_integrity"));
+  EXPECT_TRUE(hasRule(report, "strong_beat_dissonance"));
+}
+
+TEST(ValidatorTest, FinalScoreAuditBindsOrnamentToAuthoredCarrier) {
+  const NoteEvent authored = makeNote(0, kTicksPerBeat, 60, 0);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat / 2, 62, 0),
+      makeNote(kTicksPerBeat / 2, kTicksPerBeat / 2, 60, 0),
+  };
+  std::vector<NoteProvenance> provenance(notes.size(), makeProv(8, NoteSource::Ornament));
+  for (auto& p : provenance) {
+    bindAuthoredNote(authored, &p);
+    p.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
+  }
+
+  ValidationReport report = Validator{}.validate(notes, provenance, cMajorWhole(), Material{},
+                                                 ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::Ok);
+
+  notes.front().pitch = 66;
+  report = Validator{}.validate(notes, provenance, cMajorWhole(), Material{},
+                                ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "ornament_declaration_integrity"));
+
+  notes = {makeNote(0, kTicksPerBeat / 2, 62, 0)};
+  provenance.resize(1);
+  report = Validator{}.validate(notes, provenance, cMajorWhole(), Material{},
+                                ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
+  EXPECT_TRUE(hasRule(report, "ornament_group_integrity"));
+}
+
 TEST(ValidatorTest, VerticalConsonancePasses) {
   // Voice 0 = C5 (60), voice 1 = E4 (52). Interval 8 (m6) is
   // consonant. Strong beat.
@@ -579,7 +795,7 @@ TEST(ValidatorTest, LeadingToneResolutionPassesWhenRaisedToTonic) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
-  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorDominantWhole());
   EXPECT_FALSE(hasRule(r, "leading_tone_resolution"));
 }
 
@@ -589,8 +805,62 @@ TEST(ValidatorTest, LeadingToneResolutionFailsWhenUnresolved) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
-  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorDominantWhole());
   EXPECT_TRUE(hasRule(r, "leading_tone_resolution"));
+}
+
+TEST(ValidatorTest, MinorNaturalDescendingSixSevenAreContextualScaleTones) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.is_minor = true;
+  plan.chords.front().quality = ChordQuality::Minor;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 70, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 68, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(r, "augmented_melodic"));
+  EXPECT_FALSE(hasRule(r, "leading_tone_resolution"));
+}
+
+TEST(ValidatorTest, MinorRaisedSixSevenAscendingAvoidsAugmentedSecond) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.is_minor = true;
+  plan.chords.front().quality = ChordQuality::Minor;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 68, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 71, 0),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 72, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(r, "augmented_melodic"));
+}
+
+TEST(ValidatorTest, MinorDominantRequiresRaisedLeadingToneResolution) {
+  HarmonicPlan plan = cMajorDominantWhole();
+  plan.is_minor = true;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan);
+  EXPECT_TRUE(hasRule(r, "leading_tone_resolution"));
+}
+
+TEST(ValidatorTest, MinorModalSubtonicDoesNotActAsLeadingTone) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.is_minor = true;
+  plan.chords.front().quality = ChordQuality::Minor;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 70, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 68, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(r, "leading_tone_resolution"));
 }
 
 TEST(ValidatorTest, HiddenParallelFifthFails) {
@@ -790,6 +1060,116 @@ TEST(ValidatorTest, SuspensionPreparationAndResolutionAcceptValidPattern) {
   ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
   EXPECT_FALSE(hasRule(r, "suspension_preparation"));
   EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
+}
+
+TEST(ValidatorTest, DeclaredPreparedFourThreeAllowsAccentedFourthAboveBass) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat, 67, 0),        // G over C: prepared P5
+      makeNote(suspension_tick, kTicksPerBeat, 67, 0),  // G over D: P4
+      makeNote(resolution_tick, kTicksPerBeat, 65, 0),  // F over D: m3
+      makeNote(prep_tick, kTicksPerBeat, 48, 1),
+      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.suspension_patterns.push_back(
+      {SuspensionType::Sus4_3, prep_tick, suspension_tick, resolution_tick, 67, 67, 65, 0});
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
+  EXPECT_FALSE(hasRule(r, "suspension_preparation"));
+  EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
+}
+
+TEST(ValidatorTest, AccentedFourThreeWithoutDeclarationFails) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat, 67, 0),
+      makeNote(suspension_tick, kTicksPerBeat, 67, 0),
+      makeNote(resolution_tick, kTicksPerBeat, 65, 0),
+      makeNote(prep_tick, kTicksPerBeat, 48, 1),
+      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), Material{});
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
+}
+
+TEST(ValidatorTest, FourThreeDeclarationWithMismatchedResolutionFailsClosed) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat, 67, 0),
+      makeNote(suspension_tick, kTicksPerBeat, 67, 0),
+      makeNote(resolution_tick, kTicksPerBeat, 65, 0),
+      makeNote(prep_tick, kTicksPerBeat, 48, 1),
+      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.suspension_patterns.push_back(
+      {SuspensionType::Sus4_3, prep_tick, suspension_tick, resolution_tick, 67, 67, 64, 0});
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
+  EXPECT_TRUE(hasRule(r, "suspension_preparation"));
+}
+
+TEST(ValidatorTest, DeclaredCadentialSixFourAllowsFourthResolvingToDominantThird) {
+  HarmonicPlan plan = cMajorWhole();
+  ChordEvent dominant;
+  dominant.start_tick = kTicksPerBeat;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Dominant7;
+  plan.chords.push_back(dominant);
+  plan.cadential_six_fours.push_back({0, kTicksPerBeat, SixFourType::Cadential});
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 59, 0),
+      makeNote(0, 2 * kTicksPerBeat, 43, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan, Material{});
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
+}
+
+TEST(ValidatorTest, CadentialSixFourWithoutDeclarationFails) {
+  HarmonicPlan plan = cMajorWhole();
+  ChordEvent dominant;
+  dominant.start_tick = kTicksPerBeat;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Dominant7;
+  plan.chords.push_back(dominant);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 59, 0),
+      makeNote(0, 2 * kTicksPerBeat, 43, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan, Material{});
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
+}
+
+TEST(ValidatorTest, CadentialSixFourWithWrongResolutionFailsClosed) {
+  HarmonicPlan plan = cMajorWhole();
+  ChordEvent dominant;
+  dominant.start_tick = kTicksPerBeat;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Dominant7;
+  plan.chords.push_back(dominant);
+  plan.cadential_six_fours.push_back({0, kTicksPerBeat, SixFourType::Cadential});
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 58, 0),
+      makeNote(0, 2 * kTicksPerBeat, 43, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  ValidationReport r = Validator{}.validate(notes, prov, plan, Material{});
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
 }
 
 TEST(ValidatorTest, SuspensionResolutionFailsOnLeap) {
@@ -1835,6 +2215,15 @@ TEST(ValidatorTest, ImitationEntryMatchFailsForWrongDistance) {
   EXPECT_TRUE(hasRule(r, "imitation_entry_match"));
 }
 
+TEST(ValidatorTest, ImitationEntryMatchChecksFullRealAnswerContourAndRhythm) {
+  Material m = makeImitationMaterial(4 * kTicksPerBeat, -5);
+  m.subject.push_back({kTicksPerBeat, kTicksPerBeat / 2, 74});
+  m.answer.push_back({5 * kTicksPerBeat, kTicksPerBeat / 2, 70});  // expected 69
+  m.imitation_entries.front().note_count = 2;
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_TRUE(hasRule(r, "imitation_entry_match"));
+}
+
 TEST(ValidatorTest, ImitationEntryMatchSkippedWhenNoEntry) {
   Material m;
   m.subject.push_back({0, kTicksPerBeat, 72});
@@ -1991,85 +2380,46 @@ TEST(ValidatorTest, InvertibleAt8vaSkipsBottomPairIn3Voices) {
   EXPECT_FALSE(hasRule(r, "invertible_at_octave"));
 }
 
-TEST(ValidatorTest, FourthOnlyOnWeakBeatFailsStrongBeatFourth) {
+TEST(ValidatorTest, FourthAboveActualBassFailsOnStructuralAccent) {
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBar, 65, 0),  // F5  V0 (top)
-      makeNote(0, kTicksPerBar, 60, 1),  // C5  V1  -> 5 semis = P4
-      makeNote(0, kTicksPerBar, 48, 2),  // C4  V2 (inert bottom)
+      makeNote(0, kTicksPerBar, 65, 0),  // F4
+      makeNote(0, kTicksPerBar, 60, 1),  // C4 actual bass -> P4
   };
-  std::vector<NoteProvenance> prov = {
-      makeProv(0, NoteSource::Compose),
-      makeProv(1, NoteSource::Compose),
-      makeProv(2, NoteSource::Material),
-  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
-  EXPECT_TRUE(hasRule(r, "fourth_only_on_weak_beat"));
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
 }
 
-TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesWeakBeatFourth) {
-  // V0/V1 form a 4th on a weak beat (beat 2); allowed.
+TEST(ValidatorTest, FourthAboveBassPassesOnWeakBeat) {
   const Tick weak = kTicksPerBeat;
   std::vector<NoteEvent> notes = {
-      makeNote(weak, kTicksPerBeat, 65, 0),  // F5  V0
-      makeNote(weak, kTicksPerBeat, 60, 1),  // C5  V1 -> P4
-      makeNote(weak, kTicksPerBeat, 48, 2),  // C4  V2
+      makeNote(weak, kTicksPerBeat, 65, 0),
+      makeNote(weak, kTicksPerBeat, 60, 1),
   };
-  std::vector<NoteProvenance> prov = {
-      makeProv(0, NoteSource::Compose),
-      makeProv(1, NoteSource::Compose),
-      makeProv(2, NoteSource::Material),
-  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
-  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
 }
 
-TEST(ValidatorTest, FourthOnlyOnWeakBeatSkippedBothMaterial) {
+TEST(ValidatorTest, UpperVoiceFourthPassesWhenBothNotesAreConsonantAboveBass) {
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBar, 65, 0),  // F5  V0
-      makeNote(0, kTicksPerBar, 60, 1),  // C5  V1 -> P4
-      makeNote(0, kTicksPerBar, 48, 2),  // C4  V2
+      makeNote(0, kTicksPerBar, 65, 0),  // F4
+      makeNote(0, kTicksPerBar, 60, 1),  // C4 -> upper-voice P4
+      makeNote(0, kTicksPerBar, 53, 2),  // F3 actual bass
   };
-  std::vector<NoteProvenance> prov = {
-      makeProv(0, NoteSource::Material),
-      makeProv(1, NoteSource::Material),
-      makeProv(2, NoteSource::Material),
-  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
-  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
 }
 
-TEST(ValidatorTest, FourthOnlyOnWeakBeatSkippedForHeldMaterialAtStrongBeat) {
-  const Tick weak = kTicksPerBeat;
+TEST(ValidatorTest, FourthAboveBassSkipsFixedMaterialDuringGenerationValidation) {
   std::vector<NoteEvent> notes = {
-      makeNote(weak, 2 * kTicksPerBar, 65, 0),     // F5 held across barline.
-      makeNote(weak, 2 * kTicksPerBar, 60, 1),     // C5 held across barline.
-      makeNote(0, kTicksPerBar, 48, 2),            // C4 creates the first tick.
-      makeNote(kTicksPerBar, kTicksPerBar, 48, 2)  // C4 creates the strong tick.
+      makeNote(0, kTicksPerBar, 65, 0),
+      makeNote(0, kTicksPerBar, 60, 1),
   };
-  std::vector<NoteProvenance> prov = {
-      makeProv(0, NoteSource::Material),
-      makeProv(1, NoteSource::Material),
-      makeProv(2, NoteSource::Material),
-      makeProv(3, NoteSource::Material),
-  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
-  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
-}
-
-TEST(ValidatorTest, FourthOnlyOnWeakBeatPassesNonFourth) {
-  // V0/V1 form a perfect 5th on a strong beat (consonant non-4th).
-  std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBar, 67, 0),  // G4  V0
-      makeNote(0, kTicksPerBar, 60, 1),  // C4  V1 -> 7 semis = P5
-      makeNote(0, kTicksPerBar, 48, 2),  // C3  V2
-  };
-  std::vector<NoteProvenance> prov = {
-      makeProv(0, NoteSource::Compose),
-      makeProv(1, NoteSource::Compose),
-      makeProv(2, NoteSource::Material),
-  };
-  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), Material{});
-  EXPECT_FALSE(hasRule(r, "fourth_only_on_weak_beat"));
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
 }
 
 // P11 middle_entry_in_related_key tests. Home key is C major
