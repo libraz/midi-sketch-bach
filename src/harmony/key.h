@@ -87,6 +87,17 @@ KeySignature keySignatureFromString(const std::string& str);
 /// @return String such as "C_major", "G_minor".
 std::string keySignatureToString(const KeySignature& key_sig);
 
+/// @brief Convert a key signature to the signed accidental count used by MIDI FF 59.
+/// @return Number of flats (-7..-1) or sharps (1..7); zero for C major/A minor.
+int8_t keySignatureAccidentals(const KeySignature& key_sig);
+
+/// @brief Convert MIDI FF 59 fields back to a key signature.
+/// @param accidentals Signed flats/sharps count in [-7, 7].
+/// @param is_minor MIDI mode byte interpreted as major/minor.
+/// @param out Receives the key signature on success.
+/// @return False for a null output or an accidental count outside [-7, 7].
+bool keySignatureFromMidi(int8_t accidentals, bool is_minor, KeySignature* out);
+
 }  // namespace bach
 
 #endif  // BACH_HARMONY_KEY_H

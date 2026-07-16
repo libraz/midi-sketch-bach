@@ -237,4 +237,30 @@ std::string keySignatureToString(const KeySignature& key_sig) {
   return result;
 }
 
+int8_t keySignatureAccidentals(const KeySignature& key_sig) {
+  // Prefer conventional spellings represented by the public Key enum:
+  // C#, F# use sharps; Eb, Ab, Bb use flats. Minor signatures follow the
+  // same enharmonic convention (C# minor, Eb minor, Ab minor, etc.).
+  static constexpr int8_t kMajorAccidentals[12] = {0, 7, 2, -3, 4, -1, 6, 1, -4, 3, -2, 5};
+  static constexpr int8_t kMinorAccidentals[12] = {-3, 4, -1, -6, 1, -4, 3, -2, -7, 0, -5, 2};
+  const auto tonic = static_cast<uint8_t>(key_sig.tonic);
+  if (tonic >= 12) {
+    return 0;
+  }
+  return key_sig.is_minor ? kMinorAccidentals[tonic] : kMajorAccidentals[tonic];
+}
+
+bool keySignatureFromMidi(int8_t accidentals, bool is_minor, KeySignature* out) {
+  if (!out || accidentals < -7 || accidentals > 7) {
+    return false;
+  }
+  int tonic = (is_minor ? 9 : 0) + 7 * static_cast<int>(accidentals);
+  tonic %= 12;
+  if (tonic < 0) {
+    tonic += 12;
+  }
+  *out = {static_cast<Key>(tonic), is_minor};
+  return true;
+}
+
 }  // namespace bach

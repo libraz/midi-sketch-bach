@@ -395,5 +395,32 @@ TEST(KeySignatureRoundTripTest, MinorKeys) {
   EXPECT_EQ(parsed, ks);
 }
 
+TEST(KeySignatureMidiTest, ConventionalAccidentalCounts) {
+  EXPECT_EQ(keySignatureAccidentals({Key::C, false}), 0);
+  EXPECT_EQ(keySignatureAccidentals({Key::Cs, false}), 7);
+  EXPECT_EQ(keySignatureAccidentals({Key::Eb, false}), -3);
+  EXPECT_EQ(keySignatureAccidentals({Key::A, true}), 0);
+  EXPECT_EQ(keySignatureAccidentals({Key::Cs, true}), 4);
+  EXPECT_EQ(keySignatureAccidentals({Key::Ab, true}), -7);
+}
+
+TEST(KeySignatureMidiTest, AllPublicKeysRoundTrip) {
+  for (uint8_t tonic = 0; tonic < 12; ++tonic) {
+    for (bool is_minor : {false, true}) {
+      const KeySignature expected{static_cast<Key>(tonic), is_minor};
+      KeySignature actual;
+      ASSERT_TRUE(keySignatureFromMidi(keySignatureAccidentals(expected), is_minor, &actual));
+      EXPECT_EQ(actual, expected);
+    }
+  }
+}
+
+TEST(KeySignatureMidiTest, RejectsInvalidFields) {
+  KeySignature out;
+  EXPECT_FALSE(keySignatureFromMidi(-8, false, &out));
+  EXPECT_FALSE(keySignatureFromMidi(8, false, &out));
+  EXPECT_FALSE(keySignatureFromMidi(0, false, nullptr));
+}
+
 }  // namespace
 }  // namespace bach
