@@ -1,15 +1,5 @@
 {
   "mcpServers": {
-    "bach-reference": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "mcp[cli]",
-        "mcp",
-        "run",
-        "scripts/bach_reference_server.py"
-      ]
-    },
     "bach": {
       "command": "node",
       "args": ["../bach-mcp/dist/index.js"]

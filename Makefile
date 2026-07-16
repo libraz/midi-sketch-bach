@@ -1,4 +1,4 @@
-.PHONY: build test clean rebuild format quality-gate wasm wasm-configure wasm-clean serve demo
+.PHONY: build test clean rebuild format format-check quality-gate wasm wasm-configure wasm-clean serve demo
 
 BUILD_DIR := build
 WASM_BUILD_DIR := build-wasm
@@ -19,7 +19,14 @@ rebuild: clean build
 
 format:
 	@find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format -i
+	yarn lint:fix
 	@echo "Formatted all source files."
+	# scripts/*.py (bachlib/) has no configured formatter (no ruff/black config
+	# anywhere in this repo) - left unformatted.
+
+format-check:
+	@find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format --dry-run --Werror
+	yarn lint
 
 quality-gate: format build test
 	@echo "Quality gate passed."

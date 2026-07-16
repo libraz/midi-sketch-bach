@@ -99,11 +99,14 @@ third_party/*
 .DS_Store
 
 # =============================================================================
-# Tools (Claude Code, Serena, etc.)
+# Tools (Claude Code, Codex, Serena, etc.)
 # =============================================================================
 .claude/
 CLAUDE.md
 AGENT.md
+.agents/
+.codex/
+AGENTS.md
 .serena/
 .cache/
 
