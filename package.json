@@ -47,13 +47,13 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@vitest/coverage-v8": "4.1.8",
-    "esbuild": "^0.28.0",
-    "lint-staged": "^17.0.7",
+    "@biomejs/biome": "^2.5.4",
+    "@vitest/coverage-v8": "4.1.10",
+    "esbuild": "^0.28.1",
+    "lint-staged": "^17.0.8",
     "simple-git-hooks": "^2.13.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.10"
   },
   "volta": {
     "node": "22.21.1",
