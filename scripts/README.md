@@ -24,6 +24,7 @@ that reads them also takes an explicit path flag.
 | `listening` | Build a listening packet: generate 20 seeds, score, render top-N to WAV. | `bach_cli`, bach-mcp | `build/listening_packet/` (manifest.json, WAVs, JSON) | human audition |
 | `render` | Render one generated.json to a WAV (simple organ-like synth, no SoundFont). | generated.json | WAV file | human audition |
 | `texture-gate` | Sweep seed × form and check fugue texture gates (active voices, silence, repeated runs, compass, entry-plan nonperiodicity, model score: v1 cross-entropy floor + per-form v2 KL floor). | `bach_cli`, bach-mcp | JSON to stdout (`--out` optional) | humans / CI gating |
+| `morphology` | Analyze generated.v1 on a 32nd-note piano-roll grid, optionally compare a Bach reference, rank local deviations, map them to provenance span/intent, and optionally emit occupancy/onset PBM plus coverage PGM planes. Informational only; it does not change a quality-gate verdict. | generated.v1, optional provenance.v1, `../bach-mcp/dist/index.js` | versioned JSON report, optional PBM/PGM | humans / builder diagnosis |
 | `completion` | Fugue completion diagnostic report (texture gates, entry plan, voice occupancy, subject rhythm, intent spans). | `bach_cli` | markdown to stdout (`--out` md file, `--json-out` JSON) | humans |
 | `coverage` | Bach-technique coverage report; drift-guards `technique_catalog.json` evidence tokens against live C++ enums/rules. | `technique_catalog.json`, `src/composer/{provenance.h,voice_intent.h,validator.cpp}` | text/JSON to stdout (`--json`, `--out`) | humans / drift guard |
 | `validate` | generated.v1 schema validation (no external jsonschema dep). Exit 0 pass / 1 mismatch / 2 IO error. | generated.json, `../bach-mcp/schema/generated.v1.json` | exit code + messages | C++ `schema_validation_test` (via `validate_generated_json.py`) |
@@ -48,6 +49,7 @@ that reads them also takes an explicit path flag.
 | `predictors.py` | Structural predictors (`expected_*_sequence`, `structural_check`) mirroring the C++ fixtures byte-for-byte |
 | `closure.py` | Closure harness engine (gates, seed loop, report) |
 | `texture_metrics.py` / `texture_gate.py` / `completion.py` | Texture diagnostics shared lib + fugue gates + completion report |
+| `morphology.py` | Thin bridge to bach-mcp's canonical piano-roll rasterizer and morphology comparison; no duplicate feature implementation |
 | `coverage.py`, `schema.py`, `audio.py`, `review.py` | coverage / generated.v1 validation / WAV + listening packet / segregation review |
 | `extract_subject.py`, `extract_entry_plan.py`, `extract_texture.py`, `extract_melodic.py` | corpus statistics extraction (`.inc` table generators) |
 | `subject_stats.py` | fugue-subject window statistics (interval trigram, rhythm bigrams, contour archetypes, Ryden distributions) for offline subject synthesis; outputs intermediate JSON only |

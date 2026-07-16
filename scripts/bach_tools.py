@@ -9,6 +9,8 @@ Typical commands:
     python3 scripts/bach_tools.py closure --phase FugueComplete --seeds 20
     python3 scripts/bach_tools.py validate generated.json
     python3 scripts/bach_tools.py texture-gate --forms fugue
+    python3 scripts/bach_tools.py morphology output.generated.json --reference BWV565 \
+        --provenance output.provenance.json
     python3 scripts/bach_tools.py coverage
 """
 
@@ -30,6 +32,7 @@ from bachlib import (  # noqa: E402
     extract_subject,
     extract_texture,
     gen_mirror,
+    morphology,
     ornament_report,
     qualify_subjects,
     review,
@@ -44,6 +47,7 @@ _COMMAND_MODULES = (
     closure,
     audio,  # registers both `render` and `listening`
     texture_gate,
+    morphology,
     completion,
     coverage,
     schema,
