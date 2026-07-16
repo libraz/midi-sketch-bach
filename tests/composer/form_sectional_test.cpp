@@ -325,6 +325,12 @@ TEST(FormSectionalTest, DominantHeadSubjectUsesTonalAnswerInRealization) {
       }
     }
     EXPECT_TRUE(tonal_answer_bit) << formName(form);
+    ASSERT_FALSE(fx.material.imitation_entries.empty()) << formName(form);
+    const ImitationEntry& entry = fx.material.imitation_entries.front();
+    EXPECT_EQ(entry.follower_fragment, MaterialFragment::TonalAnswer) << formName(form);
+    EXPECT_EQ(entry.interval_semis, static_cast<int>(fx.material.tonal_answer.front().pitch) -
+                                        static_cast<int>(fx.material.subject.front().pitch))
+        << formName(form);
   }
 }
 
@@ -1049,7 +1055,9 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
     for (std::uint16_t total : {16, 32, 64}) {
       const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, total);
       const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-      ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+      ASSERT_EQ(r.validation.status, ValidationStatus::Ok)
+          << "seed " << seed << " total " << total << " first rule "
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 
       const int free_bars = freeBarsFor(total);
       const int pedal_solo = free_bars - 5;

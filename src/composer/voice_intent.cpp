@@ -14,7 +14,7 @@ namespace {
 // replacing the previously dual-encoded scattered switch / `||` chains.
 //
 // Order MUST match the VoiceIntent enumerator order
-// (0..FantasiaCarrier=29); the static_assert below guards the size so a
+// (0..GoldbergInnerVoiceCarrier=32); the static_assert below guards the size so a
 // future intent cannot silently miss an entry.
 //
 // provenance_bit is only meaningful when has_provenance_bit is true. A
@@ -102,12 +102,18 @@ constexpr IntentDescriptor kIntentTable[] = {
     // adjacent-section contrast in density / register is measured by the
     // Validator's section_contrast_required rule from notes carrying this bit).
     {"FantasiaCarrier", true, ReplayKind::kVerbatimVector, FantasiaSectionContrast, true},
+    {"GoldbergBassCarrier", true, ReplayKind::kVerbatimVector, GoldbergBassReplayed, true},
+    {"GoldbergVariationCarrier", true, ReplayKind::kVerbatimVector, GoldbergVariationRealized,
+     true},
+    {"GoldbergInnerVoiceCarrier", true, ReplayKind::kVerbatimVector, GoldbergInnerVoiceRealized,
+     true},
 };
 
-constexpr std::size_t kIntentCount = static_cast<std::size_t>(VoiceIntent::FantasiaCarrier) + 1;
+constexpr std::size_t kIntentCount =
+    static_cast<std::size_t>(VoiceIntent::GoldbergInnerVoiceCarrier) + 1;
 
 static_assert(sizeof(kIntentTable) / sizeof(kIntentTable[0]) == kIntentCount,
-              "kIntentTable must have one entry per VoiceIntent enumerator (0..FantasiaCarrier)");
+              "kIntentTable must have one entry per VoiceIntent enumerator");
 
 const IntentDescriptor kUnknownDescriptor = {"Unknown", false, ReplayKind::kCompose, ChordTone,
                                              false};

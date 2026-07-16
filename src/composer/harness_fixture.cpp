@@ -312,14 +312,20 @@ HarnessFixture buildFugueCompleteFixture(int seed) {
     add_note(out.material.nct_figures, bar_tick(15) + 0, kTicksPerBeat, 64);
   }
 
-  // --- Imitation entry: subject (V0) leads, answer (V1) follows a bar
-  // later at -P4 (real answer). Documentary; validated against material.answer. ---
+  // --- Imitation entry: subject (V0) leads the sounding tonal answer (V1). ---
   {
     ImitationEntry entry;
     entry.leader_fragment = MaterialFragment::Subject;
-    entry.follower_fragment = MaterialFragment::Answer;
-    entry.distance_ticks = bar_tick(kSubjectBars);
-    entry.interval_semis = -5;
+    entry.follower_fragment = MaterialFragment::TonalAnswer;
+    entry.leader_voice = 0;
+    entry.follower_voice = 1;
+    entry.note_count = std::min<std::size_t>(16, out.material.tonal_answer.size());
+    entry.distance_ticks =
+        out.material.tonal_answer.front().start_tick - out.material.subject.front().start_tick;
+    entry.interval_semis = static_cast<int>(out.material.tonal_answer.front().pitch) -
+                           static_cast<int>(out.material.subject.front().pitch);
+    entry.tonal_base_interval_semis = -5;
+    entry.has_tonal_base_interval = true;
     out.material.imitation_entries.push_back(entry);
   }
 
@@ -2479,18 +2485,17 @@ HarnessFixture buildPreludeAndFugueFixture(int seed) {
 
 // Build the GoldbergVariations fixture: a Goldberg-style immutable-bass-variation skeleton
 // over 20 bars in C major (internal; transposition happens only at MIDI output).
-// A reduced realization of BWV988: an aria plus four variations over ONE
-// immutable ground, ending on a climactic variation. It reuses the Passacaglia
-// Passacaglia carriers verbatim, introducing no new VoiceIntent / RuleBit /
-// validator rule / material type:
+// A reduced closure realization: an aria plus four variations over one
+// immutable bass outline, ending on a climactic variation. It uses the same
+// dedicated Goldberg material/intents as the shipped builder:
 //
-//   - V1 PassacagliaGround: an immutable 4-bar Goldberg-style bass (one bass
+//   - V2 GoldbergBassCarrier: an immutable 4-bar Goldberg-style bass (one bass
 //     tone per bar under each bar's chord: C2 F2 G2 A2 = the I IV V vi roots an
 //     octave-and-a-bit below the upper voice), authored with cycle-relative
 //     ticks and period-tiled 5x to fill all 20 bars.
-//     passacaglia_ground_period = 4 * kTicksPerBar = 7680. 20 / 4 = 5 clean
-//     cycles, so passacaglia_ground_immutable stays clean.
-//   - V0 PassacagliaVariation (x5): one 4-bar block per movement, rising
+//     goldberg_aria_bass_period = 4 * kTicksPerBar = 7680. 20 / 4 = 5 clean
+//     cycles, so goldberg_aria_bass_immutable stays clean.
+//   - V0 GoldbergVariationCarrier (x5): one 4-bar block per movement, rising
 //     density. Block 0 = Aria (sarabande-like half->quarter, density 0), blocks
 //     1-4 = Var1..Var4 (quarters / eighths / eighths / sixteenths, densities
 //     1 / 2 / 2 / 3). Block 4 (Var4) is flagged is_climax (the registral peak).
@@ -2513,8 +2518,8 @@ HarnessFixture buildPreludeAndFugueFixture(int seed) {
 // seed 1 = 0.8773, seed 2 = 0.8783, seed 3 = 0.8719 -- all clear this
 // fixture's threshold 0.78 with wide margin. The scalar-wave-variation-over-immutable-
 // ground design mirrors the passacaglia fixture (which scored 0.897-0.908 at threshold 0.80). All
-// four seeds also pass the Composer validator (no passacaglia_ground_immutable
-// or variation failures); V0 (>= 72) stays strictly above V1 ground (<= 45), so
+// four seeds also pass the Composer validator (no goldberg_aria_bass_immutable
+// or variation failures); V0 (>= 72) stays strictly above V2 bass (<= 45), so
 // no voice crossing. The structural predictor in scripts/bachlib/predictors.py
 // mirrors this construction byte-for-byte, keeping structural_ok deterministic
 // per seed.
@@ -2531,7 +2536,7 @@ HarnessFixture buildGoldbergVariationsFixture(int seed) {
   const Tick kSixteenth = kTicksPerBeat / 4;   // 120.
   const Tick kHalf = kTicksPerBeat * 2;        // 960.
 
-  // Immutable 4-bar Goldberg-style bass: one bass tone per bar under the bar's
+  // Dedicated 4-bar Goldberg aria-bass outline: one structural tone per bar under the bar's
   // chord (C2 F2 G2 A2 = roots of I IV V vi), cycle-relative ticks (0-based
   // within one 4-bar cycle), one whole-note per bar.
   static constexpr std::uint8_t kGroundPitch[kCycleBars] = {36, 41, 43, 45};
@@ -2540,9 +2545,9 @@ HarnessFixture buildGoldbergVariationsFixture(int seed) {
     gnote.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
     gnote.duration = kTicksPerBar;
     gnote.pitch = kGroundPitch[bar];
-    out.material.passacaglia_ground.push_back(gnote);
+    out.material.goldberg_aria_bass.push_back(gnote);
   }
-  out.material.passacaglia_ground_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
+  out.material.goldberg_aria_bass_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
 
   // Per-bar harmony cycle (bar i -> i % 4): I IV V vi.
   static constexpr std::uint8_t kBarRoot[kCycleBars] = {0, 5, 7, 9};
@@ -2640,21 +2645,21 @@ HarnessFixture buildGoldbergVariationsFixture(int seed) {
         }
       }
     }
-    out.material.passacaglia_variations.push_back(var);
+    out.material.goldberg_variations.push_back(var);
   }
 
-  // VoicePlan: V1 PassacagliaGround over the whole piece (span 0); V0
-  // PassacagliaVariation per block, windows matching each block exactly (spans
-  // 1-5). Distinct span ids. V0 (variation, ~C5 region) stays above V1 (ground,
+  // VoicePlan: V2 GoldbergBassCarrier over the whole piece (span 0); V0
+  // GoldbergVariationCarrier per block, windows matching each block exactly (spans
+  // 1-5). Distinct span ids. V0 (variation, ~C5 region) stays above V2 (ground,
   // C2-A2), so no voice crossing occurs.
-  out.voice_plan.num_voices = 2;
+  out.voice_plan.num_voices = 3;
 
   Span ground;
   ground.id = 0;
   ground.start_tick = 0;
   ground.end_tick = static_cast<Tick>(kBars) * kTicksPerBar;
-  ground.voice = 1;
-  ground.intent = VoiceIntent::PassacagliaGround;
+  ground.voice = 2;
+  ground.intent = VoiceIntent::GoldbergBassCarrier;
   ground.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
   out.voice_plan.spans.push_back(ground);
 
@@ -2664,7 +2669,7 @@ HarnessFixture buildGoldbergVariationsFixture(int seed) {
     var_span.start_tick = static_cast<Tick>(block * kCycleBars) * kTicksPerBar;
     var_span.end_tick = var_span.start_tick + static_cast<Tick>(kCycleBars) * kTicksPerBar;
     var_span.voice = 0;
-    var_span.intent = VoiceIntent::PassacagliaVariation;
+    var_span.intent = VoiceIntent::GoldbergVariationCarrier;
     var_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
     out.voice_plan.spans.push_back(var_span);
   }
@@ -3085,15 +3090,14 @@ HarnessPhaseSpec phaseSpec(HarnessPhase phase) {
               /*with_suite=*/false,
               /*with_wtc_pair=*/true};
     case HarnessPhase::GoldbergVariations:
-      // 20 bar / 2 voice. Goldberg-style immutable-bass-variation
+      // 20 bar / 3 voice. Dedicated Goldberg immutable-bass-variation
       // skeleton (aria + 4 variations x 4 bars). No subject/answer; V0 carries
-      // five PassacagliaVariation blocks and V1 carries a PassacagliaGround bass
-      // tiled 5x, all built by buildGoldbergVariationsFixture. Reuses the Passacaglia Passacaglia
-      // carriers/bits, adding no new VoiceIntent or RuleBit. Every device flag is
+      // five GoldbergVariation blocks and V2 carries a Goldberg aria-bass outline
+      // tiled 5x, all built by buildGoldbergVariationsFixture. Every device flag is
       // false; with_goldberg (the trailing defaulted field) is set true to route
       // the dispatch.
       return {phase,
-              /*voices=*/2,
+              /*voices=*/3,
               /*bars=*/20,
               /*subject_bars=*/0,
               /*with_answer=*/false,
@@ -3745,9 +3749,21 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     // ImitationEntryMatched bit on the entry note of both fragments.
     ImitationEntry entry;
     entry.leader_fragment = MaterialFragment::Subject;
-    entry.follower_fragment = MaterialFragment::Answer;
-    entry.distance_ticks = static_cast<Tick>(subject_bars) * kTicksPerBar;
-    entry.interval_semis = -5;
+    const auto& selected_answer =
+        out.material.use_tonal_answer ? out.material.tonal_answer : out.material.answer;
+    entry.follower_fragment =
+        out.material.use_tonal_answer ? MaterialFragment::TonalAnswer : MaterialFragment::Answer;
+    entry.leader_voice = 0;
+    entry.follower_voice = 1;
+    entry.note_count = std::min<std::size_t>(16, selected_answer.size());
+    entry.distance_ticks =
+        selected_answer.front().start_tick - out.material.subject.front().start_tick;
+    entry.interval_semis = static_cast<int>(selected_answer.front().pitch) -
+                           static_cast<int>(out.material.subject.front().pitch);
+    if (out.material.use_tonal_answer) {
+      entry.tonal_base_interval_semis = -5;
+      entry.has_tonal_base_interval = true;
+    }
     out.material.imitation_entries.push_back(entry);
   }
 

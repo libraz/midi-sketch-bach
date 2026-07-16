@@ -86,9 +86,8 @@ std::uint16_t resolveBars(FormType form, DurationScale scale, std::uint16_t targ
  * @param out Receives the built fixture on success; left untouched otherwise.
  * @return FormDirectorStatus::Ok on success, or a diagnostic status on a
  *         configuration violation (incompatible character / unknown form).
- * @note Per-form layout is currently delegated to the existing phase builders
- *       via internal stubs; dedicated builders replace those over time. The
- *       fixture's meter field is set from the form's FormSpec.
+ * @note Each form is dispatched to its dedicated builder. The fixture's meter
+ *       field is set from the form's FormSpec.
  */
 FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* out);
 

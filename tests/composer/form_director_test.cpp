@@ -97,6 +97,7 @@ TEST(FormDirectorResolveBars, ScaleMultipliersApplyThenSnapAndClamp) {
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Long, 0), 128);
   // Full ~4x -> 168 -> clamps to 128.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Full, 0), 128);
+  EXPECT_EQ(resolveBars(FormType::GoldbergVariations, DurationScale::Full, 0), 128);
 }
 
 TEST(FormDirectorResolveBars, SnapRoundsToNearestMultiple) {

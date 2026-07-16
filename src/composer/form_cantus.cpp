@@ -1130,6 +1130,8 @@ GoldbergVariationKind goldbergVariationKind(std::size_t variation_index) {
   // full 30-variation set (v == 30) is NOT a canon: it is the densest figuration
   // peak (the BWV988 "Quodlibet" slot), so the canon rule is capped at v < 30.
   const std::size_t variation_number = variation_index + 1;
+  if (variation_number == 30)
+    return GoldbergVariationKind::Quodlibet;
   if (variation_number % 3 == 0 && variation_number < 30)
     return GoldbergVariationKind::Canon;
   return GoldbergVariationKind::Figuration;
@@ -1411,17 +1413,27 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   const bool da_capo = bars >= 24;
   const int da_capo_block = da_capo ? num_blocks - 1 : -1;
 
-  // Immutable tiled ground (period 4 bars) over the whole piece, including the
-  // aria. The ground is the LOWEST voice (V2); its tones are chord roots so
-  // downbeat anchoring stays consonant; tiling exactly keeps
-  // passacaglia_ground_immutable clean.
+  // Dedicated compressed aria-bass phrase: 32 structural tones across four
+  // bars (eight eighth-note positions per bar). Each bar articulates its root,
+  // third, and fifth while returning to the root on both structural accents.
+  // The complete phrase is repeated unchanged through every variation and da
+  // capo; it is not represented as Passacaglia material.
   const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
-  for (int bar = 0; bar < kCycleBars; ++bar)
-    out.material.passacaglia_ground.push_back(
-        materialNote(barTick(bar), kTicksPerBar, ground[static_cast<std::size_t>(bar)]));
-  out.material.passacaglia_ground_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
+  const Tick bass_unit = kTicksPerBeat / 2;
+  for (int bar = 0; bar < kCycleBars; ++bar) {
+    const int root = ground[static_cast<std::size_t>(bar)];
+    const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
+    const int third = root + (chord.minor ? 3 : 4);
+    const int fifth = root + 7;
+    const std::array<int, 8> phrase = {root, third, fifth, third, root, fifth, third, root};
+    for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
+      out.material.goldberg_aria_bass.push_back(
+          materialNote(barTick(bar) + static_cast<Tick>(pos) * bass_unit, bass_unit, phrase[pos]));
+    }
+  }
+  out.material.goldberg_aria_bass_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
 
   // Canon follower line (V1). Populated only for canonic variation blocks; the
   // follower notes for every canon block are appended here in time order (one
@@ -1431,8 +1443,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // TrioVoiceIndependent bit, but because it is the ONLY voice carrying that bit
   // the voice_independence_threshold rule stays inert (it needs >= 2 such
   // voices), so no soft-fail is introduced.
-  std::vector<MaterialNote> canon_follower;
-  std::vector<int> canon_blocks;  // block indices realized as canons (for V1 spans).
+  std::vector<MaterialNote> inner_voice;
+  std::vector<int> inner_blocks;
 
   // Per-bar harmony (ground cycle, tiled). Drives the variation downbeat anchor.
   out.harmony.tonic_pc = 0;
@@ -1491,7 +1503,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                       goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
                       mode, kVarRegisterBase, offset);
       }
-      out.material.passacaglia_variations.push_back(var);
+      out.material.goldberg_variations.push_back(var);
       continue;
     }
 
@@ -1514,8 +1526,32 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int canon_number = static_cast<int>(variation_number / 3);
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
-        buildCanonBlock(var, canon_follower, blk * kCycleBars, imitation_degrees, mode, ground);
-        canon_blocks.push_back(blk);
+        buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground);
+        inner_blocks.push_back(blk);
+        break;
+      }
+      case GoldbergVariationKind::Quodlibet: {
+        // Variation 30 combines the dense principal figuration with a second,
+        // independently recurring chord-tone tune in the middle register.
+        var.density_level = 2;
+        for (int local = 0; local < kCycleBars; ++local) {
+          const int bar = blk * kCycleBars + local;
+          const BarChord chord =
+              goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
+          appendVariationBar(var, bar, chord, mode, 4, kVarRegisterBase, offset);
+          const int root_pc = chord.root_pc;
+          const int third_pc = (root_pc + (chord.minor ? 3 : 4)) % 12;
+          const int fifth_pc = (root_pc + 7) % 12;
+          const std::array<int, 4> theme_pcs = {third_pc, fifth_pc, root_pc, fifth_pc};
+          for (std::size_t beat = 0; beat < theme_pcs.size(); ++beat) {
+            int pitch = 60 + ((theme_pcs[beat] - 60) % 12 + 12) % 12;
+            while (pitch > 67)
+              pitch -= 12;
+            inner_voice.push_back(materialNote(
+                barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
+          }
+        }
+        inner_blocks.push_back(blk);
         break;
       }
       case GoldbergVariationKind::Figuration:
@@ -1600,28 +1636,14 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                              /*prefer_descending=*/false, /*lift_to_context=*/true);
     }
 
-    out.material.passacaglia_variations.push_back(var);
+    out.material.goldberg_variations.push_back(var);
   }
 
-  // Hand the accumulated canon-follower notes to a single V1 TrioVoiceLine. The
-  // line is time-sorted by construction (blocks processed in order, notes within
-  // a block in onset order), so the TrioVoiceCarrier replay branch's window
-  // clipping (which assumes ascending onsets) is satisfied.
-  if (!canon_follower.empty()) {
-    TrioVoiceLine follower_line;
-    follower_line.voice = 1;
-    follower_line.manual = 1;  // documentary (Swell); V1 = secondary line.
-    follower_line.notes = std::move(canon_follower);
-    out.material.trio_voices.push_back(std::move(follower_line));
-  }
+  out.material.goldberg_inner_voice = std::move(inner_voice);
 
   // VoicePlan (3 voices, strictly ordered by register so voice_crossing never
-  // fires): V0 = principal line (PassacagliaVariation per block, C4-C6 region);
-  // V1 = canon follower (TrioVoiceCarrier, one span per canon block, C3-region);
-  // V2 = the immutable ground (PassacagliaGround over the whole piece, C2). The
-  // ground carrier is window-matched implicitly (period-tiled), and the
-  // PassacagliaVariation / TrioVoiceCarrier branches match by window / voice
-  // respectively, so the three carriers never bleed into one another.
+  // fires): V0 = principal variation, V1 = canon/quodlibet inner line, and V2
+  // = the immutable aria-bass phrase. All use dedicated Goldberg carriers.
   out.voice_plan.num_voices = 3;
   SpanId next_span_id = 0;
 
@@ -1630,35 +1652,31 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   ground_span.start_tick = 0;
   ground_span.end_tick = barTick(bars);
   ground_span.voice = 2;
-  ground_span.intent = VoiceIntent::PassacagliaGround;
+  ground_span.intent = VoiceIntent::GoldbergBassCarrier;
   ground_span.subdivision = Subdivision::Quarter;
   out.voice_plan.spans.push_back(ground_span);
 
-  // V0 principal line: one PassacagliaVariation span per block, window-matched.
+  // V0 principal line: one dedicated variation span per block.
   for (int blk = 0; blk < num_blocks; ++blk) {
     Span var_span;
     var_span.id = next_span_id++;
     var_span.start_tick = barTick(blk * kCycleBars);
     var_span.end_tick = var_span.start_tick + static_cast<Tick>(kCycleBars) * kTicksPerBar;
     var_span.voice = 0;
-    var_span.intent = VoiceIntent::PassacagliaVariation;
+    var_span.intent = VoiceIntent::GoldbergVariationCarrier;
     var_span.subdivision = Subdivision::Quarter;
     out.voice_plan.spans.push_back(var_span);
   }
 
-  // V1 canon follower: one TrioVoiceCarrier span per canon block. The branch
-  // matches material.trio_voices by voice and clips to [start_tick, end_tick),
-  // so a per-block window selects exactly that canon's follower notes (the
-  // follower is delayed one bar and truncated at the block end, so it sounds in
-  // bars 1..3 of the block). V1 is silent outside these windows.
-  for (int blk : canon_blocks) {
+  // V1 inner line: canon followers plus the variation-30 Quodlibet tune.
+  for (int blk : inner_blocks) {
     Span follower_span;
     follower_span.id = next_span_id++;
     follower_span.start_tick = barTick(blk * kCycleBars);
     follower_span.end_tick =
         follower_span.start_tick + static_cast<Tick>(kCycleBars) * kTicksPerBar;
     follower_span.voice = 1;
-    follower_span.intent = VoiceIntent::TrioVoiceCarrier;
+    follower_span.intent = VoiceIntent::GoldbergInnerVoiceCarrier;
     follower_span.subdivision = Subdivision::Quarter;
     out.voice_plan.spans.push_back(follower_span);
   }

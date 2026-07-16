@@ -1,26 +1,22 @@
-// Goldberg-style immutable-bass variation skeleton tests.
+// Dedicated Goldberg immutable-bass closure-fixture tests.
 //
 // An Aria (bars 0-3) + four variations (bars 4-19) over an immutable 4-bar
-// Goldberg-style bass tiled 5x, 2 voices, C major. This skeleton introduces no
-// new VoiceIntent / RuleBit / validator rule / Material type; it reuses the
-// Passacaglia carriers (PassacagliaGround V1 + PassacagliaVariation V0) and bits
-// (59/60/61). The full 30-variation canon engine (src/forms/goldberg/) is out of
-// scope here.
+// Goldberg-style bass tiled 5x, 3 planned voices (V1 rests), C major.
+// Passacaglia payloads and intents deliberately remain empty: the miniature uses
+// GoldbergBassCarrier V2 + GoldbergVariationCarrier V0 and their dedicated bits.
 //
-// These tests cover only the GoldbergVariations fixture integration (the Passacaglia
-// candidate search / validator unit behaviour is already covered by
-// passacaglia_test.cpp):
+// These tests cover the small closure fixture; the public 128-bar form and its
+// canon/Quodlibet structure are covered by form_cantus/goldberg_canon tests:
 //   1. The GoldbergVariations fixture runs through the full Composer cleanly for every seed
 //      family (seed % 4 selects the scalar-wave start offset): no validator
-//      failure, two voices, 172 notes (V0 variation 152 + V1 ground 20).
-//   2. All three reused Passacaglia bits (PassacagliaGroundReplayed=59,
-//      VariationApplied=60, ClimaxPlaced=61) appear somewhere in provenance.
+//      failure, 172 notes (V0 variation 152 + V2 bass 20).
+//   2. Dedicated Goldberg bass/variation bits and the climax marker appear.
 //   3. ClimaxPlaced fires ONLY on block 4 (bars 16-19) notes -- never on the
 //      Aria or the first three variations.
 //   4. The Goldberg bass is immutable across all 5 cycles (the
-//      passacaglia_ground_immutable rule stays silent on the clean fixture, and
+//      goldberg_aria_bass_immutable rule stays silent on the clean fixture, and
 //      each replayed 4-bar cycle reproduces the canonical ground pitches).
-//   5. Five PassacagliaVariation blocks are present with densities 0/1/2/2/3.
+//   5. Five dedicated Goldberg variation blocks are present with densities 0/1/2/2/3.
 
 #include <gtest/gtest.h>
 
@@ -55,13 +51,13 @@ bool hasRule(const ValidationReport& r, const std::string& rule_id) {
 
 }  // namespace
 
-// --- 1 & 2. GoldbergVariations fixture integration + all three reused bits -------------
+// --- 1 & 2. GoldbergVariations fixture integration + dedicated bits -------------
 
 // The Goldberg-style fixture must run through the full Composer cleanly for
 // every seed family (seed % 4 selects the scalar-wave start offset): no
-// validator failure, two voices, 172 notes, and all three reused Passacaglia
+// validator failure, 172 notes, and the dedicated Goldberg
 // bits present somewhere in the provenance.
-TEST(GoldbergTest, GoldbergVariationsFixtureValidatesCleanAndStampsAllReusedBits) {
+TEST(GoldbergTest, GoldbergVariationsFixtureValidatesCleanAndStampsDedicatedBits) {
   for (int seed : {0, 1, 2, 3}) {
     const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, seed);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -71,34 +67,34 @@ TEST(GoldbergTest, GoldbergVariationsFixtureValidatesCleanAndStampsAllReusedBits
         << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     ASSERT_FALSE(r.notes.empty());
     ASSERT_EQ(r.notes.size(), r.provenance.size());
-    EXPECT_EQ(fx.voice_plan.num_voices, 2);
+    EXPECT_EQ(fx.voice_plan.num_voices, 3);
 
-    // V0 variation 152 + V1 ground 20 = 172 notes.
+    // V0 variation 152 + V2 bass 20 = 172 notes.
     EXPECT_EQ(r.notes.size(), 172u) << "seed " << seed;
     std::size_t v0 = 0;
     std::size_t v1 = 0;
     for (const auto& n : r.notes) {
       if (n.voice == 0)
         ++v0;
-      else if (n.voice == 1)
+      else if (n.voice == 2)
         ++v1;
     }
     EXPECT_EQ(v0, 152u) << "seed " << seed << " V0 variation note count";
-    EXPECT_EQ(v1, 20u) << "seed " << seed << " V1 ground note count";
+    EXPECT_EQ(v1, 20u) << "seed " << seed << " V2 bass note count";
 
     bool saw_ground = false;
     bool saw_variation = false;
     bool saw_climax = false;
     for (const auto& p : r.provenance) {
-      if (p.satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed))
+      if (p.satisfied_rules & bit(RuleBit::GoldbergBassReplayed))
         saw_ground = true;
-      if (p.satisfied_rules & bit(RuleBit::VariationApplied))
+      if (p.satisfied_rules & bit(RuleBit::GoldbergVariationRealized))
         saw_variation = true;
       if (p.satisfied_rules & bit(RuleBit::ClimaxPlaced))
         saw_climax = true;
     }
-    EXPECT_TRUE(saw_ground) << "seed " << seed << " missing PassacagliaGroundReplayed";
-    EXPECT_TRUE(saw_variation) << "seed " << seed << " missing VariationApplied";
+    EXPECT_TRUE(saw_ground) << "seed " << seed << " missing GoldbergBassReplayed";
+    EXPECT_TRUE(saw_variation) << "seed " << seed << " missing GoldbergVariationRealized";
     EXPECT_TRUE(saw_climax) << "seed " << seed << " missing ClimaxPlaced";
   }
 }
@@ -121,7 +117,7 @@ TEST(GoldbergTest, ClimaxPlacedOnlyOnFinalVariationBlock) {
   for (std::size_t i = 0; i < r.notes.size(); ++i) {
     const bool is_climax = (r.provenance[i].satisfied_rules & bit(RuleBit::ClimaxPlaced)) != 0;
     const bool is_variation =
-        (r.provenance[i].satisfied_rules & bit(RuleBit::VariationApplied)) != 0;
+        (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergVariationRealized)) != 0;
     const Tick t = r.notes[i].start_tick;
     if (is_climax) {
       ++climax_notes;
@@ -140,20 +136,20 @@ TEST(GoldbergTest, ClimaxPlacedOnlyOnFinalVariationBlock) {
 
 // --- 4. Ground immutable across all 5 cycles --------------------------------
 
-// The reused passacaglia_ground_immutable rule stays silent on the clean
-// fixture, and the V1 PassacagliaGround notes replay the canonical 4-bar
+// The dedicated goldberg_aria_bass_immutable rule stays silent on the clean
+// fixture, and the V2 GoldbergBassCarrier notes replay the canonical 4-bar
 // Goldberg bass (C2 F2 G2 A2) verbatim for all 5 cycles.
 TEST(GoldbergTest, GroundImmutableAcrossAllFiveCycles) {
   const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, 1);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
 
-  EXPECT_FALSE(hasRule(r.validation, "passacaglia_ground_immutable"));
+  EXPECT_FALSE(hasRule(r.validation, "goldberg_aria_bass_immutable"));
 
   // Collect the ground notes in tick order.
   std::map<Tick, std::uint8_t> ground;
   for (std::size_t i = 0; i < r.notes.size(); ++i) {
-    if (r.provenance[i].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed))
+    if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed))
       ground[r.notes[i].start_tick] = r.notes[i].pitch;
   }
   ASSERT_EQ(ground.size(), 20u);  // 4 bars x 5 cycles.
@@ -172,12 +168,14 @@ TEST(GoldbergTest, GroundImmutableAcrossAllFiveCycles) {
 
 // --- 5. Five variation blocks with densities 0/1/2/2/3 ----------------------
 
-// The fixture material must declare exactly five PassacagliaVariation blocks
+// The fixture material must declare exactly five dedicated Goldberg variation blocks
 // (Aria + four variations) with the documented rising density tiers and only
 // block 4 flagged is_climax.
 TEST(GoldbergTest, FiveVariationBlocksWithRisingDensity) {
   const HarnessFixture fx = buildHarnessFixture(HarnessPhase::GoldbergVariations, 2);
-  const auto& blocks = fx.material.passacaglia_variations;
+  EXPECT_TRUE(fx.material.passacaglia_ground.empty());
+  EXPECT_TRUE(fx.material.passacaglia_variations.empty());
+  const auto& blocks = fx.material.goldberg_variations;
   ASSERT_EQ(blocks.size(), 5u);
 
   const std::array<int, 5> expected_density = {0, 1, 2, 2, 3};

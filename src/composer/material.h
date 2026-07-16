@@ -147,8 +147,19 @@ struct SequenceTemplate {
 struct ImitationEntry {
   MaterialFragment leader_fragment = MaterialFragment::Subject;
   MaterialFragment follower_fragment = MaterialFragment::Answer;
+  VoiceId leader_voice = 0;
+  VoiceId follower_voice = 1;
+  std::size_t leader_start_index = 0;
+  std::size_t follower_start_index = 0;
+  std::size_t note_count = 0;  // 0 = all available notes from both start indices.
   Tick distance_ticks = 0;
   int interval_semis = 0;
+  // A tonal answer's first note may use a tonic/dominant mutation rather than
+  // the real-answer transposition used by its remaining contour. Builders
+  // declare that underlying interval explicitly so short/truncated answers
+  // remain verifiable without consulting an unused real-answer fragment.
+  int tonal_base_interval_semis = 0;
+  bool has_tonal_base_interval = false;
 };
 
 // Development-section declarations. Each holds (a) the carrier's
@@ -534,6 +545,13 @@ struct Material {
   Tick passacaglia_ground_period = 0;
   Tick passacaglia_ground_split_from = 0;
   std::vector<PassacagliaVariation> passacaglia_variations;
+  // Goldberg Variations. This is deliberately separate from Passacaglia:
+  // one compressed four-bar aria-bass phrase carries 32 structural tones and
+  // is mapped unchanged through aria, 30 variation slots, and da capo.
+  std::vector<MaterialNote> goldberg_aria_bass;
+  Tick goldberg_aria_bass_period = 0;
+  std::vector<PassacagliaVariation> goldberg_variations;
+  std::vector<MaterialNote> goldberg_inner_voice;
   // Organ Trio Sonata. The (up to three) independent voice lines of a trio
   // sonata; each is replayed verbatim by a TrioVoiceCarrier span matched by
   // voice. The Validator's voice_independence_threshold rule measures their

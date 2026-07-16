@@ -2,15 +2,14 @@
 // canon-extended buildGoldbergVariationsForm builder (form_cantus.cpp), which
 // realizes a BWV988-style aria + N variations (+ da capo) with every third
 // variation (3, 6, ..., 27) a canon at a rising imitation interval, the final
-// variation (30) the densest figuration peak, and a three-voice layout
+// variation (30) a two-tune Quodlibet, and a three-voice layout
 // (V0 principal / V1 canon follower / V2 immutable ground) strictly ordered by
 // register.
 //
 // Canon correctness is guaranteed by construction and asserted STRUCTURALLY
 // (the follower is a diatonic transposition of the leader, delayed one bar and
 // truncated at the block end). There is no canon identity provenance bit
-// (RuleIdMask is full): the follower carries TrioVoiceIndependent (its reused
-// carrier's bit), and the structural assertions below pin the canon shape.
+// with dedicated Goldberg carrier provenance.
 
 #include <gtest/gtest.h>
 
@@ -23,6 +22,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/form_director.h"
+#include "composer/validator.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -65,7 +65,7 @@ Tick blockStart(int blk) {
 TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
   for (bool minor : {false, true}) {
     const HarnessFixture fx = build(minor, 128, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     // 128 / 4 = 32 blocks: aria (block 0) + 30 variations (blocks 1..30) + da
     // capo (block 31).
     ASSERT_EQ(blocks.size(), 32u) << "minor=" << minor;
@@ -75,12 +75,18 @@ TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
     EXPECT_EQ(blocks.front().density_level, 0);
     EXPECT_EQ(blocks.back().notes.size(), 8u);
     EXPECT_EQ(blocks.back().density_level, 0);
+    EXPECT_TRUE(fx.material.passacaglia_ground.empty());
+    EXPECT_TRUE(fx.material.passacaglia_variations.empty());
+    EXPECT_TRUE(fx.material.trio_voices.empty());
+    ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
 
     // Variation v (1-based) == block v. v % 3 == 0 && v < 30 is a canon.
     for (int v = 1; v <= 30; ++v) {
       const GoldbergVariationKind kind = goldbergVariationKind(static_cast<std::size_t>(v - 1));
       if (v % 3 == 0 && v < 30) {
         EXPECT_EQ(kind, GoldbergVariationKind::Canon) << "variation " << v;
+      } else if (v == 30) {
+        EXPECT_EQ(kind, GoldbergVariationKind::Quodlibet);
       } else {
         EXPECT_EQ(kind, GoldbergVariationKind::Figuration) << "variation " << v;
       }
@@ -88,17 +94,68 @@ TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
   }
 }
 
+TEST(GoldbergCanon, DaCapoRestatesAriaExactlyAtShiftedOnsets) {
+  const HarnessFixture fx = build(false, 128, 1);
+  const auto& aria = fx.material.goldberg_variations.front().notes;
+  const auto& da_capo = fx.material.goldberg_variations.back().notes;
+  ASSERT_EQ(aria.size(), da_capo.size());
+  const Tick shift = blockStart(31);
+  for (std::size_t i = 0; i < aria.size(); ++i) {
+    EXPECT_EQ(da_capo[i].pitch, aria[i].pitch);
+    EXPECT_EQ(da_capo[i].duration, aria[i].duration);
+    EXPECT_EQ(da_capo[i].start_tick, aria[i].start_tick + shift);
+  }
+}
+
+TEST(GoldbergCanon, AriaBassMutationFailsDedicatedImmutableRule) {
+  const HarnessFixture fx = build(false, 128, 1);
+  ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  bool mutated = false;
+  for (std::size_t i = 0; i < result.notes.size(); ++i) {
+    if (result.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed)) {
+      ++result.notes[i].pitch;
+      mutated = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(mutated);
+  const ValidationReport report =
+      Validator{}.validate(result.notes, result.provenance, fx.harmony, fx.material);
+  bool found = false;
+  for (const auto& failure : report.failures)
+    found = found || failure.rule_id == "goldberg_aria_bass_immutable";
+  EXPECT_TRUE(found);
+}
+
+TEST(GoldbergCanon, MissingAriaBassCarrierFailsClosed) {
+  const HarnessFixture fx = build(false, 128, 1);
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  const ValidationReport report = Validator{}.validate(notes, provenance, fx.harmony, fx.material);
+  bool found = false;
+  for (const auto& failure : report.failures)
+    found = found || failure.rule_id == "goldberg_aria_bass_immutable";
+  EXPECT_TRUE(found);
+}
+
 // Variation 30 is the densest figuration tier (design secondary peak), distinct
 // from the arc climax block.
-TEST(GoldbergCanon, Variation30IsFigurationPeak) {
+TEST(GoldbergCanon, Variation30IsQuodlibetPeak) {
   const HarnessFixture fx = build(false, 128, 1);
-  const auto& blocks = fx.material.passacaglia_variations;
+  const auto& blocks = fx.material.goldberg_variations;
   ASSERT_EQ(blocks.size(), 32u);
-  // Block 30 == variation 30: figuration, density tier 2 (sixteenths).
+  EXPECT_EQ(goldbergVariationKind(29), GoldbergVariationKind::Quodlibet);
+  // Block 30 combines dense principal figuration with a middle-register tune.
   const auto& v30 = blocks[30];
   EXPECT_EQ(v30.density_level, 2) << "variation 30 must be the densest figuration tier";
   // 4 bars x 4 beats x 4 sixteenths = 64 notes.
   EXPECT_EQ(v30.notes.size(), 64u);
+  std::size_t inner_notes = 0;
+  for (const auto& note : fx.material.goldberg_inner_voice) {
+    if (note.start_tick >= blockStart(30) && note.start_tick < blockStart(31))
+      ++inner_notes;
+  }
+  EXPECT_EQ(inner_notes, 16u);
 }
 
 // Full set validates cleanly and is deterministic across the seed x mode matrix.
@@ -135,11 +192,10 @@ TEST(GoldbergCanon, FollowerIsDiatonicTransposeDelayedAndTruncated) {
   for (bool minor : {false, true}) {
     const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
     const HarnessFixture fx = build(minor, 128, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     ASSERT_EQ(blocks.size(), 32u);
-    ASSERT_EQ(fx.material.trio_voices.size(), 1u) << "minor=" << minor;
-    const auto& follower = fx.material.trio_voices.front().notes;
-    EXPECT_EQ(fx.material.trio_voices.front().voice, 1);
+    const auto& follower = fx.material.goldberg_inner_voice;
+    ASSERT_FALSE(follower.empty()) << "minor=" << minor;
 
     for (int v = 3; v < 30; v += 3) {
       const int blk = v;  // block index == variation number.
@@ -190,51 +246,50 @@ TEST(GoldbergCanon, FollowerIsDiatonicTransposeDelayedAndTruncated) {
   }
 }
 
-// The follower line is the ONLY material in V1: V1 is silent in every non-canon
-// (aria / figuration / da capo) block. No V1 note onset falls outside a canon
-// block window.
-TEST(GoldbergCanon, V1SilentOutsideCanonBlocks) {
+// V1 sounds only in canon blocks and the dedicated Quodlibet slot.
+TEST(GoldbergCanon, V1SoundsOnlyInCanonAndQuodlibetBlocks) {
   const HarnessFixture fx = build(false, 128, 1);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
   // Canon block windows (variations 3,6,...,27 => blocks 3,6,...,27).
-  auto inCanonBlock = [](Tick t) -> bool {
+  auto inInnerVoiceBlock = [](Tick t) -> bool {
     for (int v = 3; v < 30; v += 3) {
       if (t >= blockStart(v) && t < blockStart(v + 1))
         return true;
     }
-    return false;
+    return t >= blockStart(30) && t < blockStart(31);
   };
   int v1_notes = 0;
   for (const auto& n : r.notes) {
     if (n.voice != 1)
       continue;
     ++v1_notes;
-    EXPECT_TRUE(inCanonBlock(n.start_tick))
-        << "V1 note outside a canon block at tick " << n.start_tick;
+    EXPECT_TRUE(inInnerVoiceBlock(n.start_tick))
+        << "V1 note outside canon/Quodlibet blocks at tick " << n.start_tick;
   }
   EXPECT_GT(v1_notes, 0) << "the full set must contain canon-follower notes on V1";
 }
 
 // The immutable ground (V2) tiles exactly with a 4-bar period through all 32
-// blocks: one ground note per bar, repeating period-4, for the whole 128 bars.
+// blocks: the 32-tone four-bar aria bass repeats for the whole 128 bars.
 TEST(GoldbergCanon, GroundTilesExactlyAcrossAllBlocks) {
   for (bool minor : {false, true}) {
     const HarnessFixture fx = build(minor, 128, 1);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     std::map<Tick, std::uint8_t> ground;
     for (std::size_t i = 0; i < r.notes.size(); ++i) {
-      if (r.provenance[i].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed)) {
+      if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed)) {
         ground[r.notes[i].start_tick] = r.notes[i].pitch;
         EXPECT_EQ(r.notes[i].voice, 2) << "ground must be the lowest voice V2";
       }
     }
-    ASSERT_EQ(static_cast<int>(ground.size()), 128) << "minor=" << minor;
-    ASSERT_EQ(fx.material.passacaglia_ground.size(), 4u);
+    ASSERT_EQ(static_cast<int>(ground.size()), 128 * 8) << "minor=" << minor;
+    ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
     for (int bar = 0; bar < 128; ++bar) {
       const auto it = ground.find(static_cast<Tick>(bar) * kTicksPerBar);
       ASSERT_NE(it, ground.end()) << "bar " << bar;
-      EXPECT_EQ(it->second, fx.material.passacaglia_ground[static_cast<std::size_t>(bar % 4)].pitch)
+      EXPECT_EQ(it->second,
+                fx.material.goldberg_aria_bass[static_cast<std::size_t>(bar % 4) * 8].pitch)
           << "minor=" << minor << " bar " << bar;
     }
   }
@@ -282,7 +337,7 @@ TEST(GoldbergCanon, VoicesStrictlyOrderedByRegister) {
 // present (>= 24).
 TEST(GoldbergCanon, MidSizeKindsAndDaCapo) {
   const HarnessFixture fx = build(false, 64, 1);
-  const auto& blocks = fx.material.passacaglia_variations;
+  const auto& blocks = fx.material.goldberg_variations;
   ASSERT_EQ(blocks.size(), 16u);  // 64 / 4.
   // Da capo present: last block is the m=2 aria.
   EXPECT_EQ(blocks.back().notes.size(), 8u);
@@ -296,8 +351,7 @@ TEST(GoldbergCanon, MidSizeKindsAndDaCapo) {
         << "variation " << v;
   }
   // The realized canon follower exists (variations 3,6,9,12 are canons).
-  ASSERT_EQ(fx.material.trio_voices.size(), 1u);
-  EXPECT_FALSE(fx.material.trio_voices.front().notes.empty());
+  EXPECT_FALSE(fx.material.goldberg_inner_voice.empty());
 
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
@@ -310,7 +364,7 @@ TEST(GoldbergCanon, MidSizeKindsAndDaCapo) {
 TEST(GoldbergCanon, MinimumSizeHasNoCanonAndGracefulDegrade) {
   for (bool minor : {false, true}) {
     const HarnessFixture fx = build(minor, 12, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     ASSERT_EQ(blocks.size(), 3u);  // 12 / 4 = aria + 2 variations.
     // No da capo (< 24): the last block is a figuration variation, not the aria.
     EXPECT_GT(blocks.back().notes.size(), 8u) << "no da capo below 24 bars";
@@ -318,7 +372,7 @@ TEST(GoldbergCanon, MinimumSizeHasNoCanonAndGracefulDegrade) {
     EXPECT_EQ(goldbergVariationKind(0u), GoldbergVariationKind::Figuration);
     EXPECT_EQ(goldbergVariationKind(1u), GoldbergVariationKind::Figuration);
     // No canon => no follower line.
-    EXPECT_TRUE(fx.material.trio_voices.empty()) << "minor=" << minor;
+    EXPECT_TRUE(fx.material.goldberg_inner_voice.empty()) << "minor=" << minor;
 
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     EXPECT_EQ(r.validation.status, ValidationStatus::Ok)

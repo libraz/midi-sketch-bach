@@ -319,6 +319,13 @@ enum RuleBit : std::uint8_t {
   //   become a forbidden dissonance under octave inversion (a perfect fifth
   //   inverts to a fourth).
   CountersubjectInvertible = 64,
+  GoldbergBassReplayed = 65,
+  GoldbergVariationRealized = 66,
+  GoldbergInnerVoiceRealized = 67,
+  // Post-composition ornament expansion is bound to the authored carrier
+  // note recorded below.  FinalScore validation accepts the idiomatic
+  // neighbour figure only when this bit and the declaration agree.
+  OrnamentRealized = 68,
 };
 
 constexpr RuleIdMask ruleBitMask(int bit) {
@@ -360,6 +367,15 @@ struct NoteProvenance {
   // the interval-Markov term's effect on selection.
   std::uint8_t shadow_winning_pitch_without_markov = 0;
   NoteSource source = NoteSource::Compose;
+  // Independent authored-note declaration for fixed carriers.  It is copied
+  // before any ornament pass and deliberately remains unchanged when that
+  // carrier is subdivided.  FinalScore validation therefore has a trusted,
+  // index-parallel context against which it can reject mutated carrier pitches
+  // and malformed ornament expansions instead of exempting notes by source.
+  bool has_authored_note = false;
+  Tick authored_start_tick = 0;
+  Tick authored_duration = 0;
+  std::uint8_t authored_pitch = 0;
   RuleIdMask satisfied_rules = 0;
   std::uint16_t rejected_alternatives = 0;
 };

@@ -143,15 +143,10 @@ enum class HarnessPhase : std::uint8_t {
                         // SubjectCarrier stretto-leader restatement (bars 20-23).
                         // Self-contained builder (buildPreludeAndFugueFixture).
   ,
-  GoldbergVariations = 26  // 2 voice, 20 bar. Goldberg-style immutable-bass
-                           // variation skeleton (aria + 4 variations x 4 bars, C major;
-                           // a reduced realization of BWV988). An assembly reusing the
-                           // Passacaglia Passacaglia carriers, adding no new VoiceIntent or
-                           // RuleBit. V1 carries an immutable 4-bar Goldberg-style bass
-                           // (PassacagliaGround) tiled 5x across all 20 bars
-                           // (passacaglia_ground_period = 4 * kTicksPerBar; 5 clean cycles
-                           // keep passacaglia_ground_immutable clean). V0 carries five
-                           // PassacagliaVariation blocks (Aria + Var1..Var4) of rising
+  GoldbergVariations = 26  // 3 voice, 20 bar closure fixture. Dedicated Goldberg
+                           // material/carriers: V2 carries a four-bar aria-bass outline
+                           // (GoldbergBassCarrier) tiled across the miniature and V0 carries
+                           // five GoldbergVariationCarrier blocks (Aria + Var1..Var4) of rising
                            // density (half/quarter sarabande / quarters / eighths / eighths
                            // / sixteenths), each a gate-3-clearing C-major scalar wave
                            // (reuses organPreludeScaleUp). The last block (Var4) is is_climax
@@ -221,7 +216,7 @@ struct HarnessPhaseSpec {
   // the positional aggregate initialisers for the fugue layouts stay valid
   // (this field value-initialises to false for them).
   bool with_wtc_pair = false;
-  // GoldbergVariations: dedicated two-voice Goldberg-style immutable-bass-variation
+  // GoldbergVariations: dedicated three-voice Goldberg-style immutable-bass-variation
   // builder. Defaulted so the positional aggregate initialisers for the fugue
   // layouts stay valid (this field value-initialises to false for them).
   bool with_goldberg = false;

@@ -77,6 +77,12 @@ bool isFormCharacterCompatible(FormType form, SubjectCharacter character) {
 std::uint16_t resolveBars(FormType form, DurationScale scale, std::uint16_t target_bars) {
   const FormSpec& spec = formSpec(form);
 
+  // The public Goldberg `full` contract is the complete compressed layout:
+  // aria + 30 four-bar variation slots + aria da capo = 128 bars.
+  if (target_bars == 0 && form == FormType::GoldbergVariations && scale == DurationScale::Full) {
+    return 128;
+  }
+
   // target_bars > 0 overrides the scale entirely; otherwise derive a raw length
   // from the form's natural length and the requested scale multiplier.
   std::uint32_t raw = target_bars;

@@ -421,8 +421,7 @@ TEST(FormCantusChorale, EmbellishedCantusFirmusRepeatedRunBounded) {
 
 // --- Goldberg structural contracts ------------------------------------------
 
-// The ground bass tiles exactly with a 4-bar period: V1 has one ground note per
-// bar, and the pitch sequence repeats with period 4 for the whole piece.
+// The 32-tone aria bass tiles exactly with a four-bar period on V2.
 TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
   for (bool minor : {false, true}) {
     for (std::uint32_t seed : kSeeds) {
@@ -433,19 +432,19 @@ TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
 
         std::map<Tick, std::uint8_t> ground;
         for (std::size_t i = 0; i < r.notes.size(); ++i) {
-          if (r.provenance[i].satisfied_rules & bit(RuleBit::PassacagliaGroundReplayed))
+          if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed))
             ground[r.notes[i].start_tick] = r.notes[i].pitch;
         }
-        ASSERT_EQ(static_cast<int>(ground.size()), bars)
+        ASSERT_EQ(static_cast<int>(ground.size()), bars * 8)
             << "minor=" << minor << " seed=" << seed << " bars=" << bars;
         // The canonical period is the first 4 ground tones; every bar must match
         // its period-4 counterpart.
-        ASSERT_EQ(fx.material.passacaglia_ground.size(), 4u);
+        ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
         for (int bar = 0; bar < bars; ++bar) {
           const auto it = ground.find(static_cast<Tick>(bar) * kTicksPerBar);
           ASSERT_NE(it, ground.end()) << "bar " << bar;
           EXPECT_EQ(it->second,
-                    fx.material.passacaglia_ground[static_cast<std::size_t>(bar % 4)].pitch)
+                    fx.material.goldberg_aria_bass[static_cast<std::size_t>(bar % 4) * 8].pitch)
               << "minor=" << minor << " seed=" << seed << " bar " << bar;
         }
       }
@@ -463,11 +462,11 @@ TEST(FormCantusGoldberg, GroundFollowsSeedVariant) {
     for (std::size_t variant = 0; variant < detail::kGroundVariantCount; ++variant) {
       const HarnessFixture fx = build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe,
                                       0, probe_seed[variant]);
-      ASSERT_EQ(fx.material.passacaglia_ground.size(), 4u);
+      ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
       const auto& expected =
           minor ? detail::kGoldbergGroundsMinor[variant] : detail::kGoldbergGroundsMajor[variant];
       for (std::size_t bar = 0; bar < 4; ++bar) {
-        EXPECT_EQ(fx.material.passacaglia_ground[bar].pitch, expected[bar])
+        EXPECT_EQ(fx.material.goldberg_aria_bass[bar * 8].pitch, expected[bar])
             << "minor " << minor << " variant " << variant << " bar " << bar;
       }
     }
@@ -481,10 +480,10 @@ TEST(FormCantusGoldberg, CongruentSeedsShareGround) {
         build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 1);
     const HarnessFixture fx_b =
         build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 4);
-    ASSERT_EQ(fx_a.material.passacaglia_ground.size(), fx_b.material.passacaglia_ground.size());
-    for (std::size_t bar = 0; bar < fx_a.material.passacaglia_ground.size(); ++bar) {
-      EXPECT_EQ(fx_a.material.passacaglia_ground[bar].pitch,
-                fx_b.material.passacaglia_ground[bar].pitch)
+    ASSERT_EQ(fx_a.material.goldberg_aria_bass.size(), fx_b.material.goldberg_aria_bass.size());
+    for (std::size_t bar = 0; bar < fx_a.material.goldberg_aria_bass.size(); ++bar) {
+      EXPECT_EQ(fx_a.material.goldberg_aria_bass[bar].pitch,
+                fx_b.material.goldberg_aria_bass[bar].pitch)
           << "minor " << minor << " bar " << bar;
     }
   }
@@ -497,8 +496,8 @@ TEST(FormCantusGoldberg, AriaSpecialLayoutInFirstFourBars) {
     for (std::uint32_t seed : kSeeds) {
       const HarnessFixture fx =
           build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, seed);
-      ASSERT_FALSE(fx.material.passacaglia_variations.empty());
-      const auto& aria = fx.material.passacaglia_variations.front();
+      ASSERT_FALSE(fx.material.goldberg_variations.empty());
+      const auto& aria = fx.material.goldberg_variations.front();
       EXPECT_EQ(aria.start_tick, 0u);
       EXPECT_EQ(aria.end_tick, static_cast<Tick>(4) * kTicksPerBar);
       EXPECT_EQ(aria.density_level, 0);
@@ -525,7 +524,7 @@ TEST(FormCantusGoldberg, DaCapoRestatementWhenLongEnough) {
   {
     const HarnessFixture fx =
         build(FormType::GoldbergVariations, false, SubjectCharacter::Severe, 20, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     ASSERT_EQ(blocks.size(), 5u);
     EXPECT_GT(blocks.back().notes.size(), 8u) << "20-bar final block must not be the aria";
   }
@@ -533,7 +532,7 @@ TEST(FormCantusGoldberg, DaCapoRestatementWhenLongEnough) {
   for (std::uint16_t bars : {24, 40, 128}) {
     const HarnessFixture fx =
         build(FormType::GoldbergVariations, false, SubjectCharacter::Severe, bars, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     ASSERT_FALSE(blocks.empty());
     const auto& last = blocks.back();
     EXPECT_EQ(last.density_level, 0) << "bars=" << bars;
@@ -552,7 +551,7 @@ TEST(FormCantusGoldberg, ClimaxBlockAtArcPosition) {
   for (std::uint16_t bars : {20, 40, 128}) {
     const HarnessFixture fx =
         build(FormType::GoldbergVariations, false, SubjectCharacter::Severe, bars, 1);
-    const auto& blocks = fx.material.passacaglia_variations;
+    const auto& blocks = fx.material.goldberg_variations;
     const int num_blocks = static_cast<int>(blocks.size());
 
     int climax_count = 0;
@@ -601,8 +600,8 @@ TEST(FormCantusGoldberg, VariationKindDispatchFollowsBwv988Scheme) {
   }
   // Variation 30 (zero-based 29) is the figuration peak, NOT a canon, even
   // though 30 % 3 == 0 (the BWV988 Quodlibet slot).
-  EXPECT_EQ(goldbergVariationKind(29u), GoldbergVariationKind::Figuration)
-      << "variation 30 is the figuration peak, not a canon";
+  EXPECT_EQ(goldbergVariationKind(29u), GoldbergVariationKind::Quodlibet)
+      << "variation 30 is the Quodlibet slot, not a canon";
   // Determinism: repeated calls agree.
   for (std::size_t idx : {2u, 5u, 29u})
     EXPECT_EQ(goldbergVariationKind(idx), goldbergVariationKind(idx)) << "index " << idx;
@@ -684,7 +683,7 @@ TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
     for (bool minor : {false, true}) {
       const HarnessFixture fx =
           build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, /*bars=*/128, seed);
-      const auto& vars = fx.material.passacaglia_variations;
+      const auto& vars = fx.material.goldberg_variations;
       ASSERT_GE(vars.size(), 6u);
       // Aria layout unchanged: two half notes per bar.
       for (const MaterialNote& n : vars[0].notes)

@@ -34,10 +34,9 @@ struct ResolvedRequest {
 // One builder per FormType. Each assembles the (Material, HarmonicPlan,
 // VoicePlan) triple plus meter for its form.
 //
-// These are currently placeholders that replay the matching proven phase
-// fixture so the form-director pipeline is end-to-end runnable. Each is
-// replaced by a dedicated builder that honours ResolvedRequest length, mode,
-// character, and the arc curve.
+// Every declaration below has a dedicated builder that honours ResolvedRequest
+// length, mode, character, and the arc curve; forms are not collapsed into a
+// shared generator.
 HarnessFixture buildFugueForm(const ResolvedRequest& req);
 HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req);
 HarnessFixture buildTrioSonataForm(const ResolvedRequest& req);
@@ -50,14 +49,13 @@ HarnessFixture buildChaconneForm(const ResolvedRequest& req);
 HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req);
 
 // Per-variation realization kind for the Goldberg variation framework. The
-// variation COUNT is already length-driven (one block per 4-bar ground cycle
-// after the aria), and the per-variation dispatch is a switch on this enum so a
-// later task can add a Canon kind (every third variation in a full BWV988) and
-// route it without restructuring the builder. Canon is intentionally out of
-// scope for this skeleton: only Figuration is realized today.
+// variation COUNT is length-driven (one block per 4-bar aria-bass cycle after
+// the aria). The per-variation dispatch distinguishes figuration, the nine
+// rising canons, and the final Quodlibet slot.
 enum class GoldbergVariationKind : std::uint8_t {
-  Figuration = 0,  // scalar-wave figuration variation (the only realized kind).
-  Canon = 1,       // reserved: canonic variation (later task), not yet realized.
+  Figuration = 0,
+  Canon = 1,
+  Quodlibet = 2,
 };
 
 /**
@@ -65,9 +63,8 @@ enum class GoldbergVariationKind : std::uint8_t {
  * @param variation_index Zero-based index of the variation block (the aria is
  *        not a variation and is never passed here; index 0 is the first
  *        post-aria variation).
- * @return The realization kind for that variation. Today every variation is
- *         Figuration; the switch in the builder is the single extension point a
- *         later canon task hooks into.
+ * @return Figuration, Canon (variations 3..27 by threes), or Quodlibet
+ *         (variation 30).
  * @note Pure function of the index, exposed so the dispatch table is unit
  *       testable without reaching into the builder.
  */

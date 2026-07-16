@@ -42,6 +42,7 @@
 #include "composer/minor_material.h"
 #include "composer/ornament_pass.h"
 #include "composer/subject_catalog.h"
+#include "composer/validator.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -233,6 +234,54 @@ TEST(FormFugueTest, DominantHeadSubjectUsesTonalAnswerInRealization) {
     }
   }
   EXPECT_TRUE(tonal_answer_bit);
+
+  ASSERT_FALSE(fx.material.imitation_entries.empty());
+  const ImitationEntry& entry = fx.material.imitation_entries.front();
+  EXPECT_EQ(entry.follower_fragment, MaterialFragment::TonalAnswer);
+  EXPECT_EQ(entry.distance_ticks,
+            fx.material.tonal_answer.front().start_tick - fx.material.subject.front().start_tick);
+  EXPECT_EQ(entry.interval_semis, static_cast<int>(fx.material.tonal_answer.front().pitch) -
+                                      static_cast<int>(fx.material.subject.front().pitch));
+
+  bool subject_head_stamped = false;
+  bool tonal_head_stamped = false;
+  for (std::size_t i = 0; i < r.notes.size(); ++i) {
+    const bool stamped = static_cast<bool>(r.provenance[i].satisfied_rules &
+                                           ruleBitMask(RuleBit::ImitationEntryMatched));
+    if (r.notes[i].voice == entry.leader_voice &&
+        r.notes[i].start_tick == fx.material.subject.front().start_tick) {
+      subject_head_stamped = stamped;
+    }
+    if (r.notes[i].voice == entry.follower_voice &&
+        r.notes[i].start_tick == fx.material.tonal_answer.front().start_tick) {
+      tonal_head_stamped = stamped;
+    }
+  }
+  EXPECT_TRUE(subject_head_stamped);
+  EXPECT_TRUE(tonal_head_stamped);
+
+  Material unused_real_mutation = fx.material;
+  ASSERT_GT(unused_real_mutation.answer.size(), 5u);
+  ++unused_real_mutation.answer[5].pitch;
+  ValidationReport unused_report =
+      Validator{}.validate(r.notes, r.provenance, fx.harmony, unused_real_mutation);
+  EXPECT_FALSE(hasRule(unused_report, "imitation_entry_match"));
+  EXPECT_FALSE(hasRule(unused_report, "imitation_entry_realization"));
+
+  ComposeResult sounding_mutation = r;
+  bool mutated = false;
+  for (auto& note : sounding_mutation.notes) {
+    if (note.voice == entry.follower_voice &&
+        note.start_tick == fx.material.tonal_answer[5].start_tick) {
+      ++note.pitch;
+      mutated = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(mutated);
+  ValidationReport sounding_report = Validator{}.validate(
+      sounding_mutation.notes, sounding_mutation.provenance, fx.harmony, fx.material);
+  EXPECT_TRUE(hasRule(sounding_report, "imitation_entry_realization"));
 }
 
 TEST(FormFugueTest, CountersubjectAccompaniesAnswerAndThirdEntry) {

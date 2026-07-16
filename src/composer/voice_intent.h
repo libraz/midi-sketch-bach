@@ -223,7 +223,14 @@ enum class VoiceIntent : std::uint8_t {
   // Validator's section_contrast_required rule (a soft MusicalFail) measures
   // from the notes carrying this bit. The per-section density / register
   // separation is the fixture's responsibility.
-  FantasiaCarrier = 29
+  FantasiaCarrier = 29,
+
+  // Dedicated Goldberg carriers. These do not borrow Passacaglia or Trio
+  // semantics: the aria bass, principal variation, and canon/quodlibet inner
+  // line each have their own material payload and provenance identity.
+  GoldbergBassCarrier = 30,
+  GoldbergVariationCarrier = 31,
+  GoldbergInnerVoiceCarrier = 32
 };
 
 // How CandidateSearch turns a span of this intent into Candidates.

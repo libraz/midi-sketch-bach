@@ -1125,11 +1125,28 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // declared interval is the actual pitch offset between the two band-placed
   // first notes (real answer base -5 plus the answer's octave fit).
   {
+    const auto& selected_answer =
+        use_tonal_answer ? out.material.tonal_answer : out.material.answer;
     ImitationEntry entry;
     entry.leader_fragment = MaterialFragment::Subject;
-    entry.follower_fragment = MaterialFragment::Answer;
-    entry.distance_ticks = barTick(kSubjectBars);
-    entry.interval_semis = answer_total - v0_off;
+    entry.follower_fragment =
+        use_tonal_answer ? MaterialFragment::TonalAnswer : MaterialFragment::Answer;
+    entry.leader_voice = 0;
+    entry.follower_voice = 1;
+    const std::size_t available =
+        std::min<std::size_t>(out.material.subject.size(), selected_answer.size());
+    while (entry.note_count < available && out.material.subject[entry.note_count].duration ==
+                                               selected_answer[entry.note_count].duration) {
+      ++entry.note_count;
+    }
+    entry.distance_ticks =
+        selected_answer.front().start_tick - out.material.subject.front().start_tick;
+    entry.interval_semis = static_cast<int>(selected_answer.front().pitch) -
+                           static_cast<int>(out.material.subject.front().pitch);
+    if (use_tonal_answer) {
+      entry.tonal_base_interval_semis = answer_total - v0_off;
+      entry.has_tonal_base_interval = true;
+    }
     out.material.imitation_entries.push_back(entry);
   }
 
