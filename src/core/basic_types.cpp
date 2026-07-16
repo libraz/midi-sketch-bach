@@ -296,10 +296,8 @@ MetricalStrength getMetricalStrength(int beat_in_bar, MeterProfile profile) {
   if (beat_in_bar == 0)
     return MetricalStrength::Strong;
   if (profile == MeterProfile::SarabandeTriple && beat_in_bar == 1) {
-    return MetricalStrength::Strong;
-  }
-  if (beat_in_bar == 1)
     return MetricalStrength::Medium;
+  }
   return MetricalStrength::Weak;
 }
 

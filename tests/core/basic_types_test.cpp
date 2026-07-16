@@ -366,15 +366,15 @@ TEST(TimeSignatureEventTest, DefaultValues) {
 // MetricalStrength / MeterProfile
 // ---------------------------------------------------------------------------
 
-TEST(MetricalStrengthTest, StandardTriple_S_M_W) {
+TEST(MetricalStrengthTest, StandardTriple_S_W_W) {
   EXPECT_EQ(getMetricalStrength(0, MeterProfile::StandardTriple), MetricalStrength::Strong);
-  EXPECT_EQ(getMetricalStrength(1, MeterProfile::StandardTriple), MetricalStrength::Medium);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::StandardTriple), MetricalStrength::Weak);
   EXPECT_EQ(getMetricalStrength(2, MeterProfile::StandardTriple), MetricalStrength::Weak);
 }
 
-TEST(MetricalStrengthTest, SarabandeTriple_S_S_W) {
+TEST(MetricalStrengthTest, SarabandeTriple_S_M_W) {
   EXPECT_EQ(getMetricalStrength(0, MeterProfile::SarabandeTriple), MetricalStrength::Strong);
-  EXPECT_EQ(getMetricalStrength(1, MeterProfile::SarabandeTriple), MetricalStrength::Strong);
+  EXPECT_EQ(getMetricalStrength(1, MeterProfile::SarabandeTriple), MetricalStrength::Medium);
   EXPECT_EQ(getMetricalStrength(2, MeterProfile::SarabandeTriple), MetricalStrength::Weak);
 }
 

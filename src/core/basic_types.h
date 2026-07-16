@@ -70,16 +70,16 @@ struct TimeSignatureEvent {
 /// @brief Metrical strength level for beat hierarchy.
 /// Used by canon and variation generators for note placement scoring.
 enum class MetricalStrength : uint8_t {
-  Strong,  ///< Beat 1: unprepared dissonance penalized.
-  Medium,  ///< Beat 2: Sarabande expressive strong beat.
-  Weak     ///< Beat 3: relatively free.
+  Strong,  ///< Primary accent (normally the bar downbeat).
+  Medium,  ///< Secondary structural accent (4/4 beat 3, Sarabande beat 2).
+  Weak     ///< Non-structural beat or subdivision.
 };
 
 /// @brief Meter profile for beat emphasis patterns.
 /// Sarabande's beat 2 emphasis requires distinct handling.
 enum class MeterProfile : uint8_t {
-  StandardTriple,  ///< Normal 3/4: Strong-Medium-Weak (most variations).
-  SarabandeTriple  ///< Sarabande 3/4: Strong-Strong-Weak (Aria, Var 13 etc).
+  StandardTriple,  ///< Default hierarchy; in 3/4 only beat 1 is structural.
+  SarabandeTriple  ///< Sarabande 3/4 adds a secondary accent on beat 2.
 };
 
 /// @brief Determine metrical strength for a beat position.
