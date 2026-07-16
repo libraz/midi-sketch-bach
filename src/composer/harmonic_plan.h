@@ -188,6 +188,7 @@ struct HarmonicPlan {
   // byte-identical (ticksPerBar() == kTicksPerBar == 1920).
   std::uint8_t ts_numerator = 4;
   std::uint8_t ts_denominator = 4;
+  MeterProfile meter_profile = MeterProfile::StandardTriple;
 
   /**
    * @brief Ticks per bar implied by the plan's time signature.

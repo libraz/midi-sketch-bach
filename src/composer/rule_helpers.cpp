@@ -57,6 +57,46 @@ bool isStrongBeat(Tick tick, Tick ticks_per_bar) {
   return (tick % ticks_per_bar) == 0;
 }
 
+MetricalStrength metricalStrengthAt(const HarmonicPlan& plan, Tick tick) {
+  const Tick ticks_per_bar = plan.ticksPerBar();
+  if (ticks_per_bar == 0 || plan.ts_denominator == 0) {
+    return MetricalStrength::Weak;
+  }
+  const Tick beat_ticks = kTicksPerBeat * 4 / plan.ts_denominator;
+  if (beat_ticks == 0) {
+    return MetricalStrength::Weak;
+  }
+  const Tick position = tick % ticks_per_bar;
+  if (position == 0) {
+    return MetricalStrength::Strong;
+  }
+
+  const bool compound = plan.ts_numerator > 3 && plan.ts_numerator % 3 == 0;
+  if (compound) {
+    const Tick pulse_ticks = beat_ticks * 3;
+    return pulse_ticks > 0 && position % pulse_ticks == 0 ? MetricalStrength::Medium
+                                                          : MetricalStrength::Weak;
+  }
+  if (position % beat_ticks != 0) {
+    return MetricalStrength::Weak;
+  }
+  const Tick beat = position / beat_ticks;
+  if (plan.ts_numerator == 4 && beat == 2) {
+    return MetricalStrength::Medium;
+  }
+  if (plan.ts_numerator == 3 && plan.meter_profile == MeterProfile::SarabandeTriple && beat == 1) {
+    return MetricalStrength::Medium;
+  }
+  if (plan.ts_numerator > 4 && plan.ts_numerator % 2 == 0 && beat == plan.ts_numerator / 2) {
+    return MetricalStrength::Medium;
+  }
+  return MetricalStrength::Weak;
+}
+
+bool isStructuralAccent(const HarmonicPlan& plan, Tick tick) {
+  return metricalStrengthAt(plan, tick) != MetricalStrength::Weak;
+}
+
 std::uint8_t pitchClass(std::uint8_t pitch) {
   return static_cast<std::uint8_t>(pitch % 12);
 }
@@ -75,6 +115,146 @@ bool isLeadingToneResolution(std::uint8_t leading, int resolution, const Harmoni
          std::abs(resolution - static_cast<int>(leading)) <= 2;
 }
 
+namespace {
+
+const ChordEvent* chordAt(const HarmonicPlan& plan, Tick tick) {
+  const ChordEvent* active = nullptr;
+  for (const auto& chord : plan.chords) {
+    if (chord.start_tick > tick)
+      break;
+    active = &chord;
+  }
+  return active;
+}
+
+bool chordContainsPc(const ChordEvent& chord, std::uint8_t pc) {
+  int third = 4;
+  int fifth = 7;
+  switch (chord.quality) {
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+      third = 3;
+      break;
+    case ChordQuality::Diminished:
+    case ChordQuality::HalfDiminished7:
+    case ChordQuality::Diminished7:
+      third = 3;
+      fifth = 6;
+      break;
+    case ChordQuality::Augmented:
+      fifth = 8;
+      break;
+    default:
+      break;
+  }
+  const std::uint8_t root = static_cast<std::uint8_t>(chord.root_pc % 12);
+  if (pc == root || pc == static_cast<std::uint8_t>((root + third) % 12) ||
+      pc == static_cast<std::uint8_t>((root + fifth) % 12)) {
+    return true;
+  }
+  int seventh = -1;
+  switch (chord.quality) {
+    case ChordQuality::Dominant7:
+    case ChordQuality::Minor7:
+    case ChordQuality::HalfDiminished7:
+      seventh = 10;
+      break;
+    case ChordQuality::Major7:
+      seventh = 11;
+      break;
+    case ChordQuality::Diminished7:
+      seventh = 9;
+      break;
+    default:
+      break;
+  }
+  return seventh >= 0 && pc == static_cast<std::uint8_t>((root + seventh) % 12);
+}
+
+}  // namespace
+
+TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick) {
+  TonalContext context;
+  context.tonic_pc = static_cast<std::uint8_t>(plan.tonic_pc % 12);
+  context.is_minor = plan.is_minor;
+  for (const auto& modulation : plan.modulations) {
+    if (modulation.tick > tick)
+      break;
+    context.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
+    context.is_minor = modulation.to_is_minor;
+  }
+  context.leading_tone_pc = static_cast<std::uint8_t>((context.tonic_pc + 11) % 12);
+  context.resolution_pc = context.tonic_pc;
+  const ChordEvent* chord = chordAt(plan, tick);
+  if (chord == nullptr)
+    return context;
+  if (chord->has_secondary_of) {
+    context.is_secondary_dominant = true;
+    context.has_active_leading_tone = true;
+    context.leading_tone_pc = static_cast<std::uint8_t>((chord->root_pc + 4) % 12);
+    context.resolution_pc = static_cast<std::uint8_t>((chord->root_pc + 5) % 12);
+    return context;
+  }
+  const bool dominant = chord->function == HarmonicFunction::D ||
+                        chord->degree == RomanNumeral::V ||
+                        chord->quality == ChordQuality::Dominant7;
+  context.has_active_leading_tone = dominant;
+  return context;
+}
+
+bool isContextualScalePitch(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick,
+                            int melodic_motion) {
+  const TonalContext context = tonalContextAt(plan, tick);
+  const std::uint8_t pc = static_cast<std::uint8_t>(pitch % 12);
+  const ChordEvent* chord = chordAt(plan, tick);
+  if (chord != nullptr && (chord->has_secondary_of || chord->is_borrowed) &&
+      chordContainsPc(*chord, pc)) {
+    return true;
+  }
+  const int relative = (static_cast<int>(pc) - context.tonic_pc + 12) % 12;
+  if (!context.is_minor) {
+    return relative == 0 || relative == 2 || relative == 4 || relative == 5 || relative == 7 ||
+           relative == 9 || relative == 11;
+  }
+  if (relative == 0 || relative == 2 || relative == 3 || relative == 5 || relative == 7)
+    return true;
+  if (relative == 8 || relative == 10)
+    return melodic_motion <= 0 && !context.has_active_leading_tone;
+  if (relative == 9)
+    return melodic_motion > 0;
+  if (relative == 11)
+    return melodic_motion > 0 || context.has_active_leading_tone;
+  return false;
+}
+
+bool isContextualLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick) {
+  const TonalContext context = tonalContextAt(plan, tick);
+  return context.has_active_leading_tone && pitch % 12 == context.leading_tone_pc;
+}
+
+bool isContextualLeadingToneResolution(std::uint8_t leading, int resolution,
+                                       const HarmonicPlan& plan, Tick tick) {
+  if (resolution < 0 || resolution > 127)
+    return false;
+  const TonalContext context = tonalContextAt(plan, tick);
+  return context.has_active_leading_tone && leading % 12 == context.leading_tone_pc &&
+         resolution % 12 == context.resolution_pc && resolution > leading &&
+         resolution - static_cast<int>(leading) <= 2;
+}
+
+bool isContextualAugmentedMelodicInterval(std::uint8_t from, std::uint8_t to,
+                                          const HarmonicPlan& plan, Tick from_tick, Tick to_tick) {
+  const int signed_motion = static_cast<int>(to) - static_cast<int>(from);
+  const int semis = std::abs(signed_motion) % 12;
+  if (semis == 6)
+    return true;
+  if (semis != 3)
+    return false;
+  const int direction = (signed_motion > 0) - (signed_motion < 0);
+  return !isContextualScalePitch(from, plan, from_tick, direction) ||
+         !isContextualScalePitch(to, plan, to_tick, direction);
+}
+
 bool isPerfectInterval(int semitones) {
   const int abs_semi = std::abs(semitones) % 12;
   return abs_semi == 0 || abs_semi == 7;
@@ -83,6 +263,24 @@ bool isPerfectInterval(int semitones) {
 bool isConsonantInterval(int semis) {
   const int pc = std::abs(semis) % 12;
   return pc == 0 || pc == 3 || pc == 4 || pc == 5 || pc == 7 || pc == 8 || pc == 9;
+}
+
+bool isConsonantAboveBass(std::uint8_t pitch, std::uint8_t bass_pitch) {
+  if (pitch < bass_pitch)
+    return false;
+  const int pc = (static_cast<int>(pitch) - static_cast<int>(bass_pitch)) % 12;
+  return pc == 0 || pc == 3 || pc == 4 || pc == 7 || pc == 8 || pc == 9;
+}
+
+bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b,
+                               std::uint8_t bass_pitch) {
+  const int interval = static_cast<int>(pitch_a) - static_cast<int>(pitch_b);
+  const int pc = std::abs(interval) % 12;
+  if (pc != 5)
+    return isConsonantInterval(interval);
+  if (std::min(pitch_a, pitch_b) == bass_pitch)
+    return false;
+  return isConsonantAboveBass(pitch_a, bass_pitch) && isConsonantAboveBass(pitch_b, bass_pitch);
 }
 
 bool isCrossRelationPc(std::uint8_t a, std::uint8_t b) {
@@ -201,6 +399,13 @@ bool createsVoiceCrossing(const std::vector<NoteEvent>& placed, VoiceId candidat
 
 bool createsVerticalDissonance(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                                std::uint8_t candidate_pitch, Tick cur_tick) {
+  std::uint8_t bass_pitch = candidate_pitch;
+  for (const auto& note : placed) {
+    if (note.voice == candidate_voice || note.start_tick > cur_tick)
+      continue;
+    if (note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration)
+      bass_pitch = std::min(bass_pitch, note.pitch);
+  }
   for (const auto& note : placed) {
     if (note.voice == candidate_voice)
       continue;
@@ -209,8 +414,7 @@ bool createsVerticalDissonance(const std::vector<NoteEvent>& placed, VoiceId can
     const bool sounding = note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
     if (!sounding)
       continue;
-    const int interval = static_cast<int>(candidate_pitch) - static_cast<int>(note.pitch);
-    if (!isConsonantInterval(interval)) {
+    if (!isBassSensitiveConsonance(candidate_pitch, note.pitch, bass_pitch)) {
       return true;
     }
   }

@@ -44,6 +44,39 @@ TEST(RuleHelpersTest, IsStrongBeatDetectsBarDownbeats) {
   EXPECT_FALSE(isStrongBeat(kTicksPerBeat * 2));
 }
 
+TEST(RuleHelpersTest, MetricalStrengthRecognizesCommonTimeSecondaryAccent) {
+  HarmonicPlan plan = cMajor();
+  plan.ts_numerator = 4;
+  plan.ts_denominator = 4;
+  EXPECT_EQ(metricalStrengthAt(plan, 0), MetricalStrength::Strong);
+  EXPECT_EQ(metricalStrengthAt(plan, kTicksPerBeat), MetricalStrength::Weak);
+  EXPECT_EQ(metricalStrengthAt(plan, 2 * kTicksPerBeat), MetricalStrength::Medium);
+  EXPECT_EQ(metricalStrengthAt(plan, 3 * kTicksPerBeat), MetricalStrength::Weak);
+  EXPECT_TRUE(isStructuralAccent(plan, 2 * kTicksPerBeat));
+}
+
+TEST(RuleHelpersTest, MetricalStrengthDistinguishesSarabandeBeatTwo) {
+  HarmonicPlan standard = cMajor();
+  standard.ts_numerator = 3;
+  standard.ts_denominator = 4;
+  HarmonicPlan sarabande = standard;
+  sarabande.meter_profile = MeterProfile::SarabandeTriple;
+  EXPECT_EQ(metricalStrengthAt(standard, kTicksPerBeat), MetricalStrength::Weak);
+  EXPECT_EQ(metricalStrengthAt(sarabande, kTicksPerBeat), MetricalStrength::Medium);
+  EXPECT_FALSE(isStructuralAccent(standard, kTicksPerBeat));
+  EXPECT_TRUE(isStructuralAccent(sarabande, kTicksPerBeat));
+}
+
+TEST(RuleHelpersTest, CompoundMeterUsesDottedPulseGrid) {
+  HarmonicPlan plan = cMajor();
+  plan.ts_numerator = 6;
+  plan.ts_denominator = 8;
+  const Tick eighth = kTicksPerBeat / 2;
+  EXPECT_EQ(metricalStrengthAt(plan, eighth), MetricalStrength::Weak);
+  EXPECT_EQ(metricalStrengthAt(plan, 3 * eighth), MetricalStrength::Medium);
+  EXPECT_TRUE(isStructuralAccent(plan, 3 * eighth));
+}
+
 TEST(RuleHelpersTest, IsLeadingToneRecognizesSeventhDegreeInBothModes) {
   // In C major (tonic 0): leading tone is B (pc 11).
   EXPECT_TRUE(isLeadingTone(71, cMajor()));   // B4
@@ -87,6 +120,86 @@ TEST(RuleHelpersTest, IsConsonantIntervalMatchesBaroqueSet) {
   for (int s : {1, 2, 6, 10, 11}) {
     EXPECT_FALSE(isConsonantInterval(s)) << s;
   }
+}
+
+TEST(RuleHelpersTest, FourthIsDissonantAboveActualBass) {
+  EXPECT_FALSE(isConsonantAboveBass(65, 60));
+  EXPECT_FALSE(isBassSensitiveConsonance(65, 60, 60));
+}
+
+TEST(RuleHelpersTest, UpperVoiceFourthIsValidOverConsonantBass) {
+  // F4 and C4 form a fourth, but both are consonant over F3.
+  EXPECT_TRUE(isBassSensitiveConsonance(65, 60, 53));
+}
+
+TEST(RuleHelpersTest, ContextualMinorPolicyDistinguishesNaturalAndRaisedUpperDegrees) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent tonic;
+  tonic.start_tick = 0;
+  tonic.root_pc = 0;
+  tonic.quality = ChordQuality::Minor;
+  tonic.degree = RomanNumeral::I;
+  tonic.function = HarmonicFunction::T;
+  tonic.has_degree = true;
+  plan.chords.push_back(tonic);
+
+  EXPECT_TRUE(isContextualScalePitch(70, plan, 0, -2));  // Bb descending
+  EXPECT_TRUE(isContextualScalePitch(68, plan, 0, -2));  // Ab descending
+  EXPECT_FALSE(isContextualScalePitch(70, plan, 0, 2));  // Bb ascending
+  EXPECT_FALSE(isContextualScalePitch(68, plan, 0, 1));  // Ab ascending
+  EXPECT_TRUE(isContextualScalePitch(69, plan, 0, 2));   // A natural ascending
+  EXPECT_TRUE(isContextualScalePitch(71, plan, 0, 1));   // B natural ascending
+  EXPECT_FALSE(isContextualLeadingTone(70, plan, 0));    // modal subtonic
+}
+
+TEST(RuleHelpersTest, ContextualLeadingToneFollowsDominantAndSecondaryTarget) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent dominant;
+  dominant.start_tick = 0;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Major;
+  dominant.degree = RomanNumeral::V;
+  dominant.function = HarmonicFunction::D;
+  dominant.has_degree = true;
+  plan.chords.push_back(dominant);
+  EXPECT_TRUE(isContextualLeadingTone(71, plan, 0));
+  EXPECT_TRUE(isContextualLeadingToneResolution(71, 72, plan, 0));
+
+  ChordEvent secondary;
+  secondary.start_tick = kTicksPerBeat;
+  secondary.root_pc = 2;  // D major = V/V; F# resolves to G.
+  secondary.quality = ChordQuality::Major;
+  secondary.function = HarmonicFunction::D;
+  secondary.has_secondary_of = true;
+  secondary.secondary_of = RomanNumeral::V;
+  plan.chords.push_back(secondary);
+  const TonalContext context = tonalContextAt(plan, kTicksPerBeat);
+  EXPECT_TRUE(context.is_secondary_dominant);
+  EXPECT_EQ(context.leading_tone_pc, 6);
+  EXPECT_EQ(context.resolution_pc, 7);
+  EXPECT_TRUE(isContextualLeadingTone(66, plan, kTicksPerBeat));
+  EXPECT_TRUE(isContextualLeadingToneResolution(66, 67, plan, kTicksPerBeat));
+}
+
+TEST(RuleHelpersTest, ContextualPolicyUsesLatestLocalKey) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  ChordEvent g_dominant;
+  g_dominant.start_tick = kTicksPerBeat;
+  g_dominant.root_pc = 2;  // D dominant of local G.
+  g_dominant.quality = ChordQuality::Major;
+  g_dominant.degree = RomanNumeral::V;
+  g_dominant.function = HarmonicFunction::D;
+  g_dominant.has_degree = true;
+  plan.chords.push_back(g_dominant);
+  plan.modulations.push_back({kTicksPerBeat, 0, 7, false, false, ModulationType::Phrase});
+  const TonalContext context = tonalContextAt(plan, kTicksPerBeat);
+  EXPECT_EQ(context.tonic_pc, 7);
+  EXPECT_EQ(context.leading_tone_pc, 6);
 }
 
 TEST(RuleHelpersTest, IsCrossRelationPcDetectsChromaticPairs) {

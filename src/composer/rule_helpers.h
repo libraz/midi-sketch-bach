@@ -33,6 +33,12 @@ const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at);
 // global kTicksPerBar (4/4 = 1920) so pre-meter callers stay byte-identical.
 bool isStrongBeat(Tick tick, Tick ticks_per_bar = kTicksPerBar);
 
+/// @brief Return the centralized meter/profile-aware strength at a tick.
+MetricalStrength metricalStrengthAt(const HarmonicPlan& plan, Tick tick);
+
+/// @brief True for primary or secondary structural accents.
+bool isStructuralAccent(const HarmonicPlan& plan, Tick tick);
+
 std::uint8_t pitchClass(std::uint8_t pitch);
 
 // Returns true iff `pitch` is the diatonic leading tone of the plan's key
@@ -47,11 +53,41 @@ bool isLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan);
 // || isLeadingToneResolution(prev, cand, plan)`.
 bool isLeadingToneResolution(std::uint8_t leading, int resolution, const HarmonicPlan& plan);
 
+// Local tonal policy derived from the latest modulation and active harmony.
+// `leading_tone_pc` resolves to `resolution_pc`; `has_active_leading_tone` is
+// false outside dominant/secondary-dominant contexts.
+struct TonalContext {
+  std::uint8_t tonic_pc = 0;
+  bool is_minor = false;
+  bool is_secondary_dominant = false;
+  bool has_active_leading_tone = false;
+  std::uint8_t leading_tone_pc = 11;
+  std::uint8_t resolution_pc = 0;
+};
+
+TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick);
+bool isContextualScalePitch(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick,
+                            int melodic_motion);
+bool isContextualLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick);
+bool isContextualLeadingToneResolution(std::uint8_t leading, int resolution,
+                                       const HarmonicPlan& plan, Tick tick);
+bool isContextualAugmentedMelodicInterval(std::uint8_t from, std::uint8_t to,
+                                          const HarmonicPlan& plan, Tick from_tick, Tick to_tick);
+
 // Interval primitives (semitones, can be signed).
 
 bool isPerfectInterval(int semitones);
 
 bool isConsonantInterval(int semitones);
+
+// Common-practice vertical consonance is bass-sensitive: a perfect fourth is
+// dissonant when its lower note is the actual bass, but the same interval may
+// occur between upper voices when both pitches are consonant above the bass.
+// Contextual exceptions (prepared suspensions / declared six-four chords) are
+// deliberately handled by the validator because they require material and
+// harmonic declarations.
+bool isConsonantAboveBass(std::uint8_t pitch, std::uint8_t bass_pitch);
+bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b, std::uint8_t bass_pitch);
 
 bool isCrossRelationPc(std::uint8_t a, std::uint8_t b);
 
