@@ -126,10 +126,19 @@ BachEventData* bach_get_events(BachHandle handle);
 /// @param data Pointer returned by bach_get_events
 void bach_free_events(BachEventData* data);
 
+/// @brief Get the diagnostic.v1 document from the most recent validation failure.
+/// @param handle Bach handle
+/// @return Diagnostic JSON, or nullptr when the last request did not reach a
+///         failed validation. Free with bach_free_events().
+BachEventData* bach_get_diagnostic(BachHandle handle);
+
 /// @brief Get generation info.
 /// @param handle Bach handle
-/// @return Pointer to static BachInfo (valid until next call, do not free)
-BachInfo* bach_get_info(BachHandle handle);
+/// @return Per-handle snapshot valid until the next generation on that handle
+///         or bach_destroy(); nullptr for an invalid handle. Calls for distinct
+///         handles do not share storage. Concurrent access to the same handle
+///         requires caller synchronization. Do not free the returned pointer.
+const BachInfo* bach_get_info(BachHandle handle);
 
 // ============================================================================
 // Form Enumeration

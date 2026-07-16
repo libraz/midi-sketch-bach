@@ -12,6 +12,7 @@ set(BACH_TEST_SOURCES
   core/interval_test.cpp
   core/scale_test.cpp
   core/json_helpers_test.cpp
+  core/json_parser_test.cpp
   core/note_source_test.cpp
   core/instrument_program_test.cpp
   core/rng_util_test.cpp
@@ -46,6 +47,54 @@ target_include_directories(bach_tests
 )
 
 gtest_discover_tests(bach_tests)
+
+# ============================================================================
+# Native C API product-path tests
+# ============================================================================
+
+find_package(Threads REQUIRED)
+
+add_executable(bach_c_api_tests
+  c_api/bach_c_api_test.cpp
+  ${CMAKE_SOURCE_DIR}/src/bach_c.cpp
+)
+
+target_link_libraries(bach_c_api_tests
+  PRIVATE
+    bach_application_lib
+    GTest::gtest_main
+    Threads::Threads
+)
+
+target_include_directories(bach_c_api_tests
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+    ${CMAKE_SOURCE_DIR}/tests
+)
+
+gtest_discover_tests(bach_c_api_tests)
+
+add_executable(bach_application_tests
+  application/composition_service_test.cpp
+)
+target_link_libraries(bach_application_tests
+  PRIVATE
+    bach_application_lib
+    GTest::gtest_main
+)
+target_include_directories(bach_application_tests
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+    ${CMAKE_SOURCE_DIR}/tests
+)
+target_compile_definitions(bach_application_tests
+  PRIVATE
+    BACH_CLI_PATH="$<TARGET_FILE:bach_cli>"
+)
+add_dependencies(bach_application_tests bach_cli)
+gtest_discover_tests(bach_application_tests)
 
 # ============================================================================
 # Composer rebuild test targets (isolated from bach_lib)

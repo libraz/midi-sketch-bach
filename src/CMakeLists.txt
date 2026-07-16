@@ -45,11 +45,30 @@ target_compile_features(bach_lib PUBLIC cxx_std_17)
 add_subdirectory(composer)
 
 # ============================================================================
+# Shared shipped-product application service
+# ============================================================================
+
+add_library(bach_application_lib STATIC
+  application/composition_service.cpp
+)
+target_include_directories(bach_application_lib
+  PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/generated
+)
+target_link_libraries(bach_application_lib
+  PUBLIC
+    bach_lib
+    bach_composer_lib
+)
+target_compile_features(bach_application_lib PUBLIC cxx_std_17)
+
+# ============================================================================
 # WASM executable
 # ============================================================================
 
 if(BUILD_WASM)
-  add_executable(bach ${BACH_LIB_SOURCES} bach_c.cpp)
+  add_executable(bach bach_c.cpp)
   target_include_directories(bach PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/generated
@@ -58,7 +77,7 @@ if(BUILD_WASM)
   target_compile_features(bach PUBLIC cxx_std_17)
 
   # bach_c.cpp drives the composer subsystem; link the composer library.
-  target_link_libraries(bach PRIVATE bach_composer_lib)
+  target_link_libraries(bach PRIVATE bach_application_lib)
 
   # Copy to dist directory
   add_custom_command(TARGET bach POST_BUILD
@@ -74,5 +93,5 @@ if(BUILD_WASM)
 
 elseif(BUILD_CLI)
   add_executable(bach_cli cli_main.cpp)
-  target_link_libraries(bach_cli PRIVATE bach_lib bach_composer_lib)
+  target_link_libraries(bach_cli PRIVATE bach_application_lib)
 endif()
