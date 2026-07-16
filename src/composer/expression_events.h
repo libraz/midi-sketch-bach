@@ -9,14 +9,18 @@
 
 namespace bach::composer {
 
+enum class RitardandoStyle : std::uint8_t {
+  None,
+  Gentle,
+  Rhetorical,
+};
+
 /**
  * @brief Build an arc-driven organ registration plan as a stream of CC events.
  *
- * Produces a small, seed-independent sequence of MIDI Control-Change events
- * that trace the macro-form energy arc (Establish -> Develop -> Climax ->
- * Resolve). Each registration point emits both CC#7 (Main Volume) and CC#11
- * (Expression) at the same value, mirroring the legacy organ RegistrationPlan
- * convention (a single velocity hint drove both controllers per channel).
+ * Produces a small, seed-independent sequence of CC#7 stop-registration
+ * terraces that trace the macro-form energy arc. It deliberately emits no
+ * CC#11 continuous swell; organ expression is an opt-in performance profile.
  *
  * Design values are ported from the legacy 3-point organ registration plan
  * (src/organ/registration.cpp), which is forbidden to include here per the
@@ -51,7 +55,7 @@ namespace bach::composer {
  *        placed at this tick instead, clamped to stay after the establish phase
  *        and at least one bar before the piece end so the arc still rises to it
  *        and settles after it.
- * @return CC events (CC#7 + CC#11 pairs) in non-decreasing tick order. Empty if
+ * @return CC#7 events in non-decreasing tick order. Empty if
  *         total_ticks is 0.
  * @note Pure function of its arguments: no RNG, identical output every call.
  */
@@ -99,8 +103,9 @@ std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_tic
  * Only CC#11 (Expression) is emitted: the phrase breath is a performance
  * inflection, not a registration change, so CC#7 (the registration level)
  * stays with buildRegistrationPlan. Callers layer this onto every voice track
- * for instruments that shape dynamics continuously (organ swell pedal, bowed
- * strings, piano); a harpsichord has no dynamic control, so callers skip it.
+ * for profiles that opt into continuous dynamics (bowed strings and piano by
+ * default). Organ, harpsichord, and plucked profiles skip it unless a future
+ * explicit swell-manual profile enables it.
  *
  * @param cycle_count Number of arc cycles in the piece (>= 1). Selects the
  *        macro-curve tier exactly as in buildRegistrationPlan.
@@ -137,7 +142,8 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
  * @note Pure function of its arguments: no RNG, identical output every call.
  */
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
-                                             Tick ticks_per_bar);
+                                             Tick ticks_per_bar,
+                                             RitardandoStyle style = RitardandoStyle::Rhetorical);
 
 }  // namespace bach::composer
 

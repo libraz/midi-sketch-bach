@@ -32,10 +32,9 @@ std::vector<std::uint8_t> volumeSequence(const std::vector<CcEvent>& events) {
 // buildRegistrationPlan
 // ---------------------------------------------------------------------------
 
-TEST(ExpressionEventsTest, RegistrationEmitsVolumeAndExpressionPairs) {
+TEST(ExpressionEventsTest, RegistrationEmitsDiscreteVolumeOnly) {
   const auto events = buildRegistrationPlan(16, 4, kTicksPerBar, 16 * kTicksPerBar);
   ASSERT_FALSE(events.empty());
-  // Equal counts of CC#7 and CC#11.
   int vol = 0;
   int expr = 0;
   for (const auto& evt : events) {
@@ -44,8 +43,8 @@ TEST(ExpressionEventsTest, RegistrationEmitsVolumeAndExpressionPairs) {
     if (evt.controller == 11)
       ++expr;
   }
-  EXPECT_EQ(vol, expr);
   EXPECT_GT(vol, 0);
+  EXPECT_EQ(expr, 0);
 }
 
 TEST(ExpressionEventsTest, RegistrationValuesInMidiRange) {
@@ -91,12 +90,9 @@ TEST(ExpressionEventsTest, RegistrationTicksWithinPieceAndSorted) {
 
 TEST(ExpressionEventsTest, RegistrationPointCountScalesWithCycles) {
   const Tick total = 16 * kTicksPerBar;
-  // 2 points (opening + settle) -> 4 CC events.
-  EXPECT_EQ(buildRegistrationPlan(16, 1, kTicksPerBar, total).size(), 4u);
-  // 3 points -> 6 CC events.
-  EXPECT_EQ(buildRegistrationPlan(16, 2, kTicksPerBar, total).size(), 6u);
-  // 4 points -> 8 CC events.
-  EXPECT_EQ(buildRegistrationPlan(16, 4, kTicksPerBar, total).size(), 8u);
+  EXPECT_EQ(buildRegistrationPlan(16, 1, kTicksPerBar, total).size(), 2u);
+  EXPECT_EQ(buildRegistrationPlan(16, 2, kTicksPerBar, total).size(), 3u);
+  EXPECT_EQ(buildRegistrationPlan(16, 4, kTicksPerBar, total).size(), 4u);
 }
 
 TEST(ExpressionEventsTest, RegistrationEmptyForZeroTicks) {
@@ -126,17 +122,17 @@ TEST(ExpressionEventsTest, RegistrationDefaultClimaxIsLegacyByteIdentical) {
   // Pin the exact 4-point arc (opening 75, develop 85 at 1/2, climax 95 at 3/4,
   // settle 88 at end-1) so a future change to the peak placement cannot silently
   // shift the legacy (climax_tick == 0) stream. Events at equal ticks stay in
-  // push order (CC#7 then CC#11), so indices 0/2/4/6 are the CC#7 points.
+  // one CC#7 event per structural point.
   const Tick total = 24 * kTicksPerBar;
-  ASSERT_EQ(legacy.size(), 8u);
+  ASSERT_EQ(legacy.size(), 4u);
   EXPECT_EQ(legacy[0].tick, 0u);
   EXPECT_EQ(legacy[0].value, 75);
-  EXPECT_EQ(legacy[2].tick, total / 2);
-  EXPECT_EQ(legacy[2].value, 85);
-  EXPECT_EQ(legacy[4].tick, total * 3 / 4);
-  EXPECT_EQ(legacy[4].value, 95);
-  EXPECT_EQ(legacy[6].tick, total - 1);
-  EXPECT_EQ(legacy[6].value, 88);
+  EXPECT_EQ(legacy[1].tick, total / 2);
+  EXPECT_EQ(legacy[1].value, 85);
+  EXPECT_EQ(legacy[2].tick, total * 3 / 4);
+  EXPECT_EQ(legacy[2].value, 95);
+  EXPECT_EQ(legacy[3].tick, total - 1);
+  EXPECT_EQ(legacy[3].value, 88);
 }
 
 TEST(ExpressionEventsTest, RegistrationPeakLandsAtClimaxTick) {
@@ -343,6 +339,22 @@ TEST(ExpressionEventsTest, RitardandoValuesMatchDesign) {
   EXPECT_EQ(events[1].bpm, 90);  // 90% at its mid-point
   EXPECT_EQ(events[2].bpm, 85);  // 85% entering the final bar
   EXPECT_EQ(events[3].bpm, 78);  // 78% allargando floor
+}
+
+TEST(ExpressionEventsTest, RitardandoNoneEmitsNoTempoSteps) {
+  EXPECT_TRUE(
+      buildFinalRitardando(100, 16 * kTicksPerBar, kTicksPerBar, RitardandoStyle::None).empty());
+}
+
+TEST(ExpressionEventsTest, GentleRitardandoStaysCloserToBaseTempo) {
+  const auto gentle =
+      buildFinalRitardando(100, 16 * kTicksPerBar, kTicksPerBar, RitardandoStyle::Gentle);
+  const auto rhetorical =
+      buildFinalRitardando(100, 16 * kTicksPerBar, kTicksPerBar, RitardandoStyle::Rhetorical);
+  ASSERT_EQ(gentle.size(), 4u);
+  ASSERT_EQ(rhetorical.size(), 4u);
+  EXPECT_GT(gentle.back().bpm, rhetorical.back().bpm);
+  EXPECT_EQ(gentle.back().bpm, 90);
 }
 
 TEST(ExpressionEventsTest, RitardandoLastEventBeforeTotalTicks) {

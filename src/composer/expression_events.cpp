@@ -29,13 +29,12 @@ constexpr int kTerraceBase = 78;  ///< Level of the first terrace step.
 constexpr int kTerraceStep = 4;   ///< Added per subsequent terrace step.
 constexpr int kTerraceCap = 92;   ///< Ceiling, below the climax peak.
 
-/// @brief Append a CC#7 + CC#11 pair at one registration point.
+/// @brief Append one discrete CC#7 registration point.
 /// @param events Destination event stream.
 /// @param tick Tick position for both controller changes.
-/// @param value Controller value applied to both CC#7 and CC#11.
+/// @param value Controller value applied to CC#7.
 void addRegistrationPoint(std::vector<CcEvent>& events, Tick tick, std::uint8_t value) {
   events.push_back({tick, kCcMainVolume, value});
-  events.push_back({tick, kCcExpression, value});
 }
 
 /// @brief Macro energy-arc value at a tick, by linear interpolation.
@@ -125,7 +124,7 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
     peak_tick = std::clamp<Tick>(climax_tick, lo, hi);
   }
 
-  events.reserve(8);  // At most 4 points x 2 controllers.
+  events.reserve(4);
 
   if (cycle_count <= 1) {
     // Minimal pieces: opening moderate, then settle.
@@ -215,9 +214,9 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
 }
 
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
-                                             Tick ticks_per_bar) {
+                                             Tick ticks_per_bar, RitardandoStyle style) {
   std::vector<TempoEvent> events;
-  if (total_ticks == 0) {
+  if (total_ticks == 0 || style == RitardandoStyle::None) {
     return events;
   }
 
@@ -238,17 +237,25 @@ std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks
     if (step_tick == 0) {
       step_tick = total_ticks / 2;
     }
-    events.push_back({step_tick, scale(85, 100)});
+    events.push_back(
+        {step_tick, style == RitardandoStyle::Gentle ? scale(92, 100) : scale(85, 100)});
     return events;
   }
 
   const Tick half_bar = ticks_per_bar / 2;
   const Tick penultimate_bar_tick = total_ticks - 2 * ticks_per_bar;
   const Tick final_bar_tick = total_ticks - ticks_per_bar;
-  events.push_back({penultimate_bar_tick, scale(94, 100)});
-  events.push_back({penultimate_bar_tick + half_bar, scale(90, 100)});
-  events.push_back({final_bar_tick, scale(85, 100)});
-  events.push_back({final_bar_tick + half_bar, scale(78, 100)});
+  if (style == RitardandoStyle::Gentle) {
+    events.push_back({penultimate_bar_tick, scale(98, 100)});
+    events.push_back({penultimate_bar_tick + half_bar, scale(96, 100)});
+    events.push_back({final_bar_tick, scale(93, 100)});
+    events.push_back({final_bar_tick + half_bar, scale(90, 100)});
+  } else {
+    events.push_back({penultimate_bar_tick, scale(94, 100)});
+    events.push_back({penultimate_bar_tick + half_bar, scale(90, 100)});
+    events.push_back({final_bar_tick, scale(85, 100)});
+    events.push_back({final_bar_tick + half_bar, scale(78, 100)});
+  }
 
   // Integer rounding at low BPM can collapse adjacent percentages to the same
   // value; keep the stream strictly decreasing by dropping non-step events.
