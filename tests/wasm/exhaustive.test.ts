@@ -43,14 +43,15 @@ describe('Exhaustive Parameter Tests', () => {
     ];
     const seeds = [1, 42, 12345, 99999];
 
-    it.each(
-      allForms.flatMap((form) => seeds.map((seed) => [form, seed] as const)),
-    )('form=%s seed=%i', (form, seed) => {
-      bach = new BachGenerator();
-      bach.generate({ form, seed });
-      const midi = bach.getMidi();
-      expect(midi.length).toBeGreaterThan(0);
-    });
+    it.each(allForms.flatMap((form) => seeds.map((seed) => [form, seed] as const)))(
+      'form=%s seed=%i',
+      (form, seed) => {
+        bach = new BachGenerator();
+        bach.generate({ form, seed });
+        const midi = bach.getMidi();
+        expect(midi.length).toBeGreaterThan(0);
+      },
+    );
   });
 
   describe('BPM sweep', () => {
@@ -117,14 +118,15 @@ describe('Exhaustive Parameter Tests', () => {
       };
     });
 
-    it.each(
-      combinations.map((c) => [c.index, c] as const),
-    )('combination #%i should generate without crash', (_index, config) => {
-      bach = new BachGenerator();
-      bach.generate(config);
-      const midi = bach.getMidi();
-      expect(midi.length).toBeGreaterThan(0);
-    });
+    it.each(combinations.map((c) => [c.index, c] as const))(
+      'combination #%i should generate without crash',
+      (_index, config) => {
+        bach = new BachGenerator();
+        bach.generate(config);
+        const midi = bach.getMidi();
+        expect(midi.length).toBeGreaterThan(0);
+      },
+    );
   });
 
   describe('Stress test - rapid sequential generation', () => {

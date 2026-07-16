@@ -184,15 +184,16 @@ describe('BachGenerator - All forms, major and minor', () => {
     bach?.destroy();
   });
 
-  it.each(
-    allForms.flatMap((form) => [[form, false] as const, [form, true] as const]),
-  )('should generate %s (minor=%s)', (form, isMinor) => {
-    bach = new BachGenerator();
-    bach.generate({ form, isMinor, seed: 42 });
-    const midi = bach.getMidi();
-    expect(midi.length).toBeGreaterThan(0);
-    expect([...midi.slice(0, 4)]).toEqual(MIDI_HEADER);
-  });
+  it.each(allForms.flatMap((form) => [[form, false] as const, [form, true] as const]))(
+    'should generate %s (minor=%s)',
+    (form, isMinor) => {
+      bach = new BachGenerator();
+      bach.generate({ form, isMinor, seed: 42 });
+      const midi = bach.getMidi();
+      expect(midi.length).toBeGreaterThan(0);
+      expect([...midi.slice(0, 4)]).toEqual(MIDI_HEADER);
+    },
+  );
 });
 
 describe('BachGenerator - Key and Character', () => {
@@ -217,17 +218,15 @@ describe('BachGenerator - Key and Character', () => {
     expect(midi.length).toBeGreaterThan(0);
   });
 
-  it.each([
-    'severe',
-    'playful',
-    'noble',
-    'restless',
-  ])('should generate fugue with character=%s', (character) => {
-    bach = new BachGenerator();
-    bach.generate({ form: 'fugue', character, seed: 42 });
-    const midi = bach.getMidi();
-    expect(midi.length).toBeGreaterThan(0);
-  });
+  it.each(['severe', 'playful', 'noble', 'restless'])(
+    'should generate fugue with character=%s',
+    (character) => {
+      bach = new BachGenerator();
+      bach.generate({ form: 'fugue', character, seed: 42 });
+      const midi = bach.getMidi();
+      expect(midi.length).toBeGreaterThan(0);
+    },
+  );
 
   it('should throw on invalid character-form combo', () => {
     const generator = new BachGenerator();
