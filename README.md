@@ -1,6 +1,6 @@
 # midi-sketch-bach
 
-[![CI](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/libraz/midi-sketch-bach/ci.yml?branch=main&label=CI)](https://github.com/libraz/midi-sketch-bach/actions)
 [![codecov](https://codecov.io/gh/libraz/midi-sketch-bach/branch/main/graph/badge.svg)](https://codecov.io/gh/libraz/midi-sketch-bach)
 [![Live Demo](https://img.shields.io/badge/demo-bach.midi--sketch.libraz.net-6b21a8)](https://bach.midi-sketch.libraz.net/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-green)](LICENSE)
@@ -43,6 +43,11 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 | Form | After the manner of | Voices |
 |------|---------------------|--------|
 | Goldberg Variations | BWV 988 | 3 |
+
+`Goldberg Variations` is a compressed structural model, not a reconstruction of
+the BWV 988 score. Its dedicated 32-tone aria-bass phrase is mapped to four-bar
+slots; `--scale full` produces 128 bars: aria, 30 variations (nine canons and a
+two-tune Quodlibet slot), and an exact aria da capo.
 
 Every fugue enforces proper exposition, real/tonal answer, countersubject, episodes, and stretto. Parallel fifths and octaves are forbidden. Voice crossing is resolved.
 

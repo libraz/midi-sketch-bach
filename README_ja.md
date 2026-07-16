@@ -1,6 +1,6 @@
 # midi-sketch-bach
 
-[![CI](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml/badge.svg)](https://github.com/libraz/midi-sketch-bach/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/libraz/midi-sketch-bach/ci.yml?branch=main&label=CI)](https://github.com/libraz/midi-sketch-bach/actions)
 [![codecov](https://codecov.io/gh/libraz/midi-sketch-bach/branch/main/graph/badge.svg)](https://codecov.io/gh/libraz/midi-sketch-bach)
 [![Live Demo](https://img.shields.io/badge/demo-bach.midi--sketch.libraz.net-6b21a8)](https://bach.midi-sketch.libraz.net/ja/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0%20%2F%20Commercial-green)](LICENSE)
@@ -43,6 +43,11 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 | 形式 | 範とする作品 | 声部数 |
 |------|-------------|--------|
 | ゴルトベルク変奏曲 | BWV 988 | 3 |
+
+`Goldberg Variations` は BWV 988 の楽譜再現ではなく、圧縮した構造モデルです。
+専用の32音からなるアリア低音句を4小節単位へ写像し、`--scale full` では
+アリア、30変奏（9つのカノンと2旋律のクォドリベット枠）、アリア・ダ・カーポの
+全128小節を生成します。
 
 フーガでは提示部・真正/変格応答・対主題・嬉遊部・ストレッタを正しく構成し、平行5度・平行8度は禁則として排除、声部交差も解決します。
 
@@ -94,6 +99,7 @@ make demo   # http://localhost:8080/demo/
 | `--seed N` | 乱数シード（0 = ランダム） | `0` |
 | `--json` | JSONイベントデータ出力 | - |
 | `--generated-json` | generated.v1 + provenance.v1 JSON出力 | - |
+| `--free-counterpoint` | 実験的: 内声をスコア付き探索で生成（デフォルト無効） | - |
 | `-o FILE` | 出力ファイルパス | `output.mid` |
 
 ## ビルド
