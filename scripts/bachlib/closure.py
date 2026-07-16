@@ -226,8 +226,8 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
         if miss:
             sys.stderr.write(
                 "GoldbergVariations closure requires --required-rule-bit masks for all three "
-                f"reused Passacaglia bits {list(GOLDBERG_VARIATIONS_REQUIRED_BITS)} "
-                "(PassacagliaGroundReplayed=59, VariationApplied=60, "
+                f"dedicated Goldberg/climax bits {list(GOLDBERG_VARIATIONS_REQUIRED_BITS)} "
+                "(GoldbergBassReplayed=65, GoldbergVariationRealized=66, "
                 f"ClimaxPlaced=61); missing {miss}.\n"
             )
             return 2

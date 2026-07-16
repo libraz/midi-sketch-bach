@@ -357,22 +357,21 @@ PHASE_DEFAULTS = {
     #     --required-rule-bit PedalPreparation=54
     "PreludeAndFugue": {"tag": "p24", "threshold": 0.80, "min_pass": 10},
     # The GoldbergVariations fixture is a Goldberg-style immutable-bass variation skeleton: a
-    # 20-bar / 2-voice C-major movement = an Aria (bars 0-3) + four variations
+    # 20-bar / 3-planned-voice C-major movement = an Aria (bars 0-3) + four variations
     # (bars 4-19) over an immutable 4-bar Goldberg-style bass tiled 5x. It is a
-    # reduced-scope, reuse-only assembly (no new VoiceIntent / RuleBit / validator
-    # rule / Material type): it reuses the Passacaglia Passacaglia carriers
-    # (PassacagliaGround V1 + PassacagliaVariation V0) and bits (59/60/61). The
-    # full 30-variation canon engine (forms/goldberg/) is out of scope. The
+    # reduced closure assembly using the dedicated GoldbergBassCarrier V2 and
+    # GoldbergVariationCarrier V0 with bits 65/66 plus ClimaxPlaced=61. The
+    # public 30-variation canon/Quodlibet engine is covered separately. The
     # threshold holds the standard solo bar (0.78 / 10-of-20) for the reduced-scope
     # Goldberg subset. The Aria (m=2, two half-notes/bar) plus the rising-density
     # variation scalar waves (m = 4 / 8 / 8 / 16) reuse the proven OrganPrelude C-major
     # scalar-wave construction, so model_prob holds ~0.86-0.88 with margin across
     # the offsets (offset = seed % 4 only rotates the per-bar scalar-wave start
-    # degree). GoldbergVariations closure asserts the three reused Passacaglia RuleBits fire:
+    # degree). GoldbergVariations closure asserts the dedicated identity bits fire:
     #   python3 scripts/bach_tools.py closure --phase GoldbergVariations \
     #     --all-bits-min 10 \
-    #     --required-rule-bit PassacagliaGroundReplayed=59 \
-    #     --required-rule-bit VariationApplied=60 \
+    #     --required-rule-bit GoldbergBassReplayed=65 \
+    #     --required-rule-bit GoldbergVariationRealized=66 \
     #     --required-rule-bit ClimaxPlaced=61
     "GoldbergVariations": {"tag": "p25", "threshold": 0.78, "min_pass": 10},
 }

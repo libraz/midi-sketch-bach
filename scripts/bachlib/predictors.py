@@ -706,13 +706,13 @@ def expected_wtc_pair_sequence(
 def expected_goldberg_sequence(
     fixture: dict[str, Any],
 ) -> dict[tuple[int, str], list[tuple[int, int]]]:
-    """Predict the GoldbergVariations PassacagliaGround + PassacagliaVariation note streams.
+    """Predict the dedicated Goldberg bass + variation carrier note streams.
 
     Mirrors buildGoldbergVariationsFixture in src/composer/harness_fixture.cpp: 20 bars =
-    an Aria (bars 0-3) + four variations (bars 4-19), 2 voices, C major. V1
+    an Aria (bars 0-3) + four variations (bars 4-19), C major. V2
     carries the immutable 4-bar Goldberg-style bass (GOLDBERG_VARIATIONS_GROUND, one
-    whole-note per bar) tiled 5x (PassacagliaGround). V0 carries five 4-bar
-    blocks (PassacagliaVariation, GOLDBERG_VARIATIONS_BLOCK_SPEC): the Aria (block 0) plus
+    whole-note per bar) tiled 5x (GoldbergBassCarrier). V0 carries five 4-bar
+    blocks (GoldbergVariationCarrier, GOLDBERG_VARIATIONS_BLOCK_SPEC): the Aria (block 0) plus
     four rising-density variations. The is_climax flag on block 4 changes only
     the ClimaxPlaced bit (not pitch / tick), so it is not modeled here.
 
@@ -735,8 +735,8 @@ def expected_goldberg_sequence(
     C-major scale walk verbatim.
 
     @param fixture fixture_for_seed() output for the seed under test.
-    @return {(1, "PassacagliaGround"): [(start_tick, pitch)] (20 notes),
-             (0, "PassacagliaVariation"): [(start_tick, pitch)] (152 notes)}
+    @return {(2, "GoldbergBassCarrier"): [(start_tick, pitch)] (20 notes),
+             (0, "GoldbergVariationCarrier"): [(start_tick, pitch)] (152 notes)}
             sorted by tick.
     """
     ticks_per_bar = 1920
@@ -746,7 +746,7 @@ def expected_goldberg_sequence(
     blocks = 5
     offset = fixture["harm_idx"] % 4
 
-    # PassacagliaGround: the immutable 4-bar Goldberg bass period-tiled 5x.
+    # GoldbergBassCarrier: the immutable 4-bar Goldberg bass period-tiled 5x.
     ground: list[tuple[int, int]] = []
     cycles = (cycle_bars * blocks) // cycle_bars  # 5.
     for cycle in range(cycles):
@@ -755,7 +755,7 @@ def expected_goldberg_sequence(
             ground.append((tick, GOLDBERG_VARIATIONS_GROUND[bar]))
     ground.sort()
 
-    # PassacagliaVariation: the Aria block + four rising-density variation blocks.
+    # GoldbergVariationCarrier: the Aria block + four rising-density variation blocks.
     variation: list[tuple[int, int]] = []
     for block in range(blocks):
         _density, m, base_midi, _is_climax = GOLDBERG_VARIATIONS_BLOCK_SPEC[block]
@@ -785,8 +785,8 @@ def expected_goldberg_sequence(
                     variation.append((tick, wave[idx % len(wave)]))
     variation.sort()
     return {
-        (1, "PassacagliaGround"): ground,
-        (0, "PassacagliaVariation"): variation,
+        (2, "GoldbergBassCarrier"): ground,
+        (0, "GoldbergVariationCarrier"): variation,
     }
 
 
@@ -943,6 +943,9 @@ def extract_carrier_sequences(
             "PassacagliaVariation",
             "TrioVoiceCarrier",
             "FantasiaCarrier",
+            "GoldbergBassCarrier",
+            "GoldbergVariationCarrier",
+            "GoldbergInnerVoiceCarrier",
         ):
             continue
         voice = int(g.get("voice", -1))
@@ -1018,8 +1021,8 @@ def structural_check(generated_json: Path, provenance_json: Path,
         ]
     elif phase == "GoldbergVariations":
         keys = [
-            ((1, "PassacagliaGround"), "ground_ok", "ground_diff"),
-            ((0, "PassacagliaVariation"), "variation_ok", "variation_diff"),
+            ((2, "GoldbergBassCarrier"), "ground_ok", "ground_diff"),
+            ((0, "GoldbergVariationCarrier"), "variation_ok", "variation_diff"),
         ]
     elif phase == "PreludeAndFugue":
         keys = [

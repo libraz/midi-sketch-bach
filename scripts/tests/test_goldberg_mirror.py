@@ -1,18 +1,18 @@
-"""Goldberg-style immutable-bass variation GoldbergVariations C++/Python drift guard.
+"""Dedicated Goldberg immutable-bass closure-fixture C++/Python drift guard.
 
 The load-bearing guard: the bachlib.mirror GOLDBERG_VARIATIONS mirror constants
 (GOLDBERG_VARIATIONS_GROUND, GOLDBERG_VARIATIONS_BAR_ROOT, GOLDBERG_VARIATIONS_BAR_MINOR, the GOLDBERG_VARIATIONS_BLOCK_SPEC
 table -- including is_climax on block 4 -- and GOLDBERG_VARIATIONS_GROUND_PERIOD) must match
 the C++ GoldbergVariations fixture source (the kGroundPitch[kCycleBars] / kBarRoot[kCycleBars]
 / kBarMinor[kCycleBars] initialisers and the kBlockSpec[kBlocks] table in
-buildGoldbergVariationsFixture, src/composer/harness_fixture.cpp), and the three reused
-Passacaglia RuleBit numbers (PassacagliaGroundReplayed=59, VariationApplied=60,
-ClimaxPlaced=61) must match provenance.h. A renamed constant or an altered ground
+buildGoldbergVariationsFixture, src/composer/harness_fixture.cpp), and the dedicated
+Goldberg RuleBit numbers (GoldbergBassReplayed=65, GoldbergVariationRealized=66,
+plus ClimaxPlaced=61) must match provenance.h. A renamed constant or an altered ground
 / progression / block table that the Python predictor still claims would make
 structural_ok diverge from the CLI output; this drift guard fails instead. The
-GoldbergVariations fixture is a reduced-scope reuse-only assembly (no new VoiceIntent /
-RuleBit / validator rule), so the bit guard asserts the three numbers stay pinned
-to their existing provenance.h values, and the predictor must reproduce all 172
+GoldbergVariations fixture is a reduced closure assembly using dedicated Goldberg
+material and intents, so the bit guard asserts the three numbers stay pinned and
+the predictor must reproduce all 172
 notes byte-for-byte -- including the SPECIAL Aria (block 0) two-half-note layout,
 which is NOT the scalar wave the other four blocks use.
 """
@@ -139,7 +139,7 @@ class GoldbergVariationsCppDriftGuardTest(unittest.TestCase):
         # The C++ ground period is kCycleBars * kTicksPerBar = 4 * 1920 = 7680.
         self.assertRegex(
             body,
-            r"passacaglia_ground_period\s*=\s*static_cast<Tick>\(kCycleBars\)\s*\*\s*kTicksPerBar",
+            r"goldberg_aria_bass_period\s*=\s*static_cast<Tick>\(kCycleBars\)\s*\*\s*kTicksPerBar",
         )
 
     def test_constants_are_4_bar_cycle(self) -> None:
@@ -152,16 +152,15 @@ class GoldbergVariationsCppDriftGuardTest(unittest.TestCase):
 class GoldbergVariationsRequiredBitsTest(unittest.TestCase):
     """The GoldbergVariations required-bit set must track provenance.h RuleBit values."""
 
-    def test_required_bits_are_59_60_61(self) -> None:
-        # Reduced-scope reuse-only assembly: it reuses the Passacaglia Passacaglia bits.
-        self.assertEqual(rpc.GOLDBERG_VARIATIONS_REQUIRED_BITS, (59, 60, 61))
+    def test_required_bits_are_65_66_61(self) -> None:
+        self.assertEqual(rpc.GOLDBERG_VARIATIONS_REQUIRED_BITS, (65, 66, 61))
 
     def test_matches_provenance_enum(self) -> None:
         prov = PROVENANCE_H.read_text(encoding="utf-8")
         enum_body = prov.split("enum RuleBit", 1)[1].split("};", 1)[0]
         names = dict(re.findall(r"(\w+)\s*=\s*(\d+)", enum_body))
-        self.assertEqual(int(names["PassacagliaGroundReplayed"]), 59)
-        self.assertEqual(int(names["VariationApplied"]), 60)
+        self.assertEqual(int(names["GoldbergBassReplayed"]), 65)
+        self.assertEqual(int(names["GoldbergVariationRealized"]), 66)
         self.assertEqual(int(names["ClimaxPlaced"]), 61)
 
 
@@ -174,13 +173,13 @@ class GoldbergVariationsSequenceShapeTest(unittest.TestCase):
             seqs = rpc.expected_goldberg_sequence(fixture)
             self.assertEqual(
                 set(seqs.keys()),
-                {(1, "PassacagliaGround"), (0, "PassacagliaVariation")},
+                {(2, "GoldbergBassCarrier"), (0, "GoldbergVariationCarrier")},
             )
             # V1 ground: 4-bar bass tiled 5x = 20 notes.
-            self.assertEqual(len(seqs[(1, "PassacagliaGround")]), 20, f"seed {seed} ground")
+            self.assertEqual(len(seqs[(2, "GoldbergBassCarrier")]), 20, f"seed {seed} ground")
             # V0 variation: Aria 8 + Var1 16 + Var2 32 + Var3 32 + Var4 64 = 152.
             self.assertEqual(
-                len(seqs[(0, "PassacagliaVariation")]), 152, f"seed {seed} variation"
+                len(seqs[(0, "GoldbergVariationCarrier")]), 152, f"seed {seed} variation"
             )
             total = sum(len(v) for v in seqs.values())
             self.assertEqual(total, 172, f"seed {seed} total")
@@ -189,7 +188,7 @@ class GoldbergVariationsSequenceShapeTest(unittest.TestCase):
         # Block 0 (bars 0-3, ticks 0..7680) must be two half-notes/bar (m=2):
         # eight notes total, on ticks bar*1920 and bar*1920+960.
         seqs = rpc.expected_goldberg_sequence({"harm_idx": 0, "subj_idx": 0, "seed": 0})
-        v0 = seqs[(0, "PassacagliaVariation")]
+        v0 = seqs[(0, "GoldbergVariationCarrier")]
         aria_ticks = sorted(t for t, _p in v0 if t < 4 * 1920)
         self.assertEqual(
             aria_ticks,
@@ -199,14 +198,14 @@ class GoldbergVariationsSequenceShapeTest(unittest.TestCase):
     def test_climax_block_is_sixteenths(self) -> None:
         # Block 4 (bars 16-19, ticks 30720..38400) must be 16 sixteenths/bar = 64.
         seqs = rpc.expected_goldberg_sequence({"harm_idx": 0, "subj_idx": 0, "seed": 0})
-        v0 = seqs[(0, "PassacagliaVariation")]
+        v0 = seqs[(0, "GoldbergVariationCarrier")]
         climax = [t for t, _p in v0 if 16 * 1920 <= t < 20 * 1920]
         self.assertEqual(len(climax), 64)
 
     def test_ground_is_immutable_across_cycles(self) -> None:
         # Every 4-bar cycle replays the same Goldberg bass pitch sequence.
         seqs = rpc.expected_goldberg_sequence({"harm_idx": 2, "subj_idx": 0, "seed": 2})
-        ground = seqs[(1, "PassacagliaGround")]
+        ground = seqs[(2, "GoldbergBassCarrier")]
         for cycle in range(5):
             pitches = [p for _t, p in ground[cycle * 4:(cycle + 1) * 4]]
             self.assertEqual(tuple(pitches), rpc.GOLDBERG_VARIATIONS_GROUND, f"cycle {cycle}")

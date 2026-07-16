@@ -321,16 +321,14 @@ PRELUDE_AND_FUGUE_FUGUE_ENTRIES: tuple[tuple[int, int, str, int], ...] = (
 # and the kBlockSpec[kBlocks] table in buildGoldbergVariationsFixture
 # (src/composer/harness_fixture.cpp) or the structural predictor reports false
 # mismatches. A drift-guard test (test_goldberg_mirror.py) asserts these match the
-# C++ source. The GoldbergVariations fixture is a reduced-scope, reuse-only assembly: it
-# reuses the Passacaglia Passacaglia carriers (PassacagliaGround / PassacagliaVariation)
-# + bits and the OrganPrelude C-major scale walk (ORGAN_PRELUDE_CMAJ_SCALE /
-# organPrelude_scale_up) for its variation figuration, so no new scale / carrier
-# constant is defined here.
+# C++ source. The reduced closure fixture uses dedicated GoldbergBassCarrier /
+# GoldbergVariationCarrier identities plus the OrganPrelude C-major scale walk
+# (ORGAN_PRELUDE_CMAJ_SCALE / organPrelude_scale_up) for its figuration.
 #   kGroundPitch[bar in cycle]: the immutable 4-bar Goldberg-style bass, one
 #   whole-note per bar, chord root an octave low (C2 F2 G2 A2 = roots of I IV V
 #   vi), tiled 5x over the 20 bars.
 GOLDBERG_VARIATIONS_GROUND: tuple[int, ...] = (36, 41, 43, 45)
-# passacaglia_ground_period = 4 bars * kTicksPerBar (1920) = 7680.
+# goldberg_aria_bass_period = 4 bars * kTicksPerBar (1920) = 7680.
 GOLDBERG_VARIATIONS_GROUND_PERIOD = 4 * 1920
 #   kBarRoot[bar % 4] / kBarMinor[bar % 4]: the diatonic C-major I IV V vi
 #   progression cycled over 20 bars (the vi degree, index 3, is minor).
@@ -465,12 +463,7 @@ KEYBOARD_SUITE_REQUIRED_BITS: tuple[int, ...] = (52, 63, 49)
 # are trivially bypassed.
 PRELUDE_AND_FUGUE_REQUIRED_BITS: tuple[int, ...] = (52, 54)
 
-# The GoldbergVariations Goldberg-style immutable-bass variation skeleton is a
-# reduced-scope, reuse-only assembly: it stamps the three already-existing
-# Passacaglia Passacaglia RuleBits across its notes (provenance.h):
-# PassacagliaGroundReplayed = 59 (every PassacagliaGround note), VariationApplied
-# = 60 (every PassacagliaVariation note), and ClimaxPlaced = 61 (every note of
-# the is_climax variation block, i.e. block 4 / bars 16-19). No new RuleBit is
-# introduced. All three must be asserted or the bit checks are trivially
-# bypassed.
-GOLDBERG_VARIATIONS_REQUIRED_BITS: tuple[int, ...] = (59, 60, 61)
+# The GoldbergVariations closure fixture stamps its dedicated Goldberg bass and
+# variation RuleBits plus the shared climax marker (provenance.h). All three
+# must be asserted or the bit checks are trivially bypassed.
+GOLDBERG_VARIATIONS_REQUIRED_BITS: tuple[int, ...] = (65, 66, 61)

@@ -94,8 +94,8 @@ def parse_required_rule_bit(value: str) -> tuple[str, int]:
         bit_index = int(bit, 0)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"invalid rule bit: {value}") from exc
-    if bit_index < 0 or bit_index >= 64:
-        raise argparse.ArgumentTypeError(f"rule bit out of range 0..63: {value}")
+    if bit_index < 0 or bit_index >= 128:
+        raise argparse.ArgumentTypeError(f"rule bit out of range 0..127: {value}")
     return name, bit_index
 
 
@@ -107,15 +107,26 @@ def provenance_rule_counts(
     with provenance_json.open(encoding="utf-8") as f:
         payload = json.load(f)
     notes = payload.get("notes", [])
+    if not isinstance(notes, list):
+        notes = []
+
+    def has_lane_bit(note: object, bit_index: int) -> bool:
+        if not isinstance(note, dict):
+            return False
+        lane_key = "satisfied_rules" if bit_index < 64 else "satisfied_rules_high"
+        lane = note.get(lane_key)
+        if (
+            not isinstance(lane, int)
+            or isinstance(lane, bool)
+            or lane < 0
+            or lane > (1 << 64) - 1
+        ):
+            return False
+        return (lane & (1 << (bit_index % 64))) != 0
+
     out: dict[str, bool] = {}
     for name, bit in required_bits:
-        mask = 1 << bit
-        out[name] = any(
-            isinstance(note, dict)
-            and isinstance(note.get("satisfied_rules"), int)
-            and (note["satisfied_rules"] & mask) != 0
-            for note in notes
-        )
+        out[name] = any(has_lane_bit(note, bit) for note in notes)
     return out
 
 
