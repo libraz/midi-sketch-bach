@@ -8,6 +8,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/minor_material.h"
+#include "composer/ornament_pass.h"
 #include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
@@ -46,29 +47,6 @@ struct BarChord {
 constexpr bool inHarmonicMinor(int pc) {
   const int p = ((pc % 12) + 12) % 12;
   return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 11;
-}
-
-// Whether the cadential landing's trill opens on its lower turn note.
-//
-// The landing holds a leading tone that the ornament post-pass expands into a
-// cadential trill. That pass chooses the trill's opening from one bit of a
-// deterministic placement hash keyed by (seed, bar, voice): the von-unten
-// doppelt-cadence opens on the lower turn note -- the harmonic-minor sixth
-// degree, a whole tone below the leading tone (tonic - 3) -- while every other
-// opening starts on the leading tone (tonic - 1). The two choices give the
-// landing's first reconstructed implicit-voice cell a different bass extreme,
-// so the final figuration bar must vet its closing seam against the one the
-// pass will actually pick. This mirrors that single hash bit; the trill note
-// lives on voice 0 (the solo flow) in the penultimate (dominant) bar. The
-// cello-prelude minor-seed regression sweep guards the mirror against drift.
-inline bool cadenceLandingOpensOnTurnNote(std::uint32_t seed, int bars) {
-  std::uint64_t x = (static_cast<std::uint64_t>(seed) << 32) ^
-                    (static_cast<std::uint64_t>(static_cast<std::uint32_t>(bars - 2)) << 8);
-  x += 0x9E3779B97F4A7C15ull;
-  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
-  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
-  x ^= (x >> 31);
-  return ((x >> 1) & 1ull) != 0ull;
 }
 
 // @brief Build an N-bar per-bar progression from the shared 4-chord harmony
@@ -544,7 +522,12 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       // The trill opens on the lower turn note (tonic - 3) or the leading tone
       // (tonic - 1); the seam must be vetted against the one the ornament pass
       // will pick for this piece.
-      const bool opens_on_turn = cadenceLandingOpensOnTurnNote(req.seed, bars);
+      // The landing's held leading tone becomes a cadential trill whose opening
+      // the ornament pass keys to placementHash(seed, bar, voice). It sits in
+      // the penultimate (dominant) bar -- bar index bars - 2 -- on the solo flow
+      // line (voice 0), so vet the closing seam against that exact opening.
+      const VoiceId solo_flow_voice = 0;
+      const bool opens_on_turn = cadenceTrillOpensVonUnten(req.seed, bars - 2, solo_flow_voice);
       for (int oidx = 0; oidx < 3 && !placed; ++oidx) {
         anchor = cand_anchors[anchor_order[oidx]];
         const int final_tonic = landingTonicFor(anchor);

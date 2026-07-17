@@ -12,17 +12,6 @@
 
 namespace bach::composer {
 
-namespace {
-
-using detail::inScale;
-using detail::Mode;
-
-constexpr Tick kQuarter = duration::kQuarterNote;  // 480
-constexpr Tick kHalf = duration::kHalfNote;        // 960
-constexpr Tick kEighth = duration::kEighthNote;    // 240
-constexpr int kMidiMin = 0;
-constexpr int kMidiMax = 127;
-
 // Deterministic placement hash keyed by (seed, bar, voice). Pure: no RNG.
 // SplitMix64-style mix so adjacent (bar, voice) keys do not correlate.
 std::uint64_t placementHash(std::uint32_t seed, int bar, VoiceId voice) {
@@ -34,6 +23,24 @@ std::uint64_t placementHash(std::uint32_t seed, int bar, VoiceId voice) {
   x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
   return x ^ (x >> 31);
 }
+
+// Whether a long cadence trill on (seed, bar, voice) opens with the
+// von-unten doppelt-cadence (its lower turn note) rather than the appuy
+// (upper-neighbour) opening. Pure; the single source of that choice.
+bool cadenceTrillOpensVonUnten(std::uint32_t seed, int bar, VoiceId voice) {
+  return ((placementHash(seed, bar, voice) >> 1) & 1ull) != 0ull;
+}
+
+namespace {
+
+using detail::inScale;
+using detail::Mode;
+
+constexpr Tick kQuarter = duration::kQuarterNote;  // 480
+constexpr Tick kHalf = duration::kHalfNote;        // 960
+constexpr Tick kEighth = duration::kEighthNote;    // 240
+constexpr int kMidiMin = 0;
+constexpr int kMidiMax = 127;
 
 // Diatonic upper neighbour of `pitch` in `mode`. Walks up by semitone until a
 // scale member is reached. Returns -1 when no in-range neighbour exists.
@@ -908,7 +915,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
             // from the upper tone.
             TrillOnset onset = TrillOnset::UpperStart;
             if (note.duration >= kHalf) {
-              const bool von_unten = in_cadence_window && ((roll >> 1) & 1ull) != 0ull;
+              const bool von_unten =
+                  in_cadence_window && cadenceTrillOpensVonUnten(params.seed, bar, note.voice);
               onset = von_unten ? TrillOnset::VonUnten : TrillOnset::Appuy;
             }
             // Long trills (longer than a quarter) pace at sixteenths: a

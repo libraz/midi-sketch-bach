@@ -149,6 +149,35 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
  */
 void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params);
 
+/**
+ * @brief Deterministic placement hash keyed by (seed, bar, voice).
+ *
+ * Pure SplitMix64-style mix (no RNG) that drives every placement choice in the
+ * pass. Exposed so form builders can predict a landing's ornament before the
+ * pass runs.
+ *
+ * @param seed Piece seed.
+ * @param bar Zero-based bar index of the ornamented note.
+ * @param voice Voice carrying the ornamented note.
+ * @return 64-bit placement hash.
+ */
+std::uint64_t placementHash(std::uint32_t seed, int bar, VoiceId voice);
+
+/**
+ * @brief Whether a long cadence trill opens with the von-unten doppelt-cadence.
+ *
+ * Selects the lower-turn-note opening over the appuy (upper-neighbour) opening
+ * from a single bit of placementHash(seed, bar, voice). Pure and the single
+ * source of that choice; exposed so a form builder can vet a landing's closing
+ * seam against the opening the pass will actually pick.
+ *
+ * @param seed Piece seed.
+ * @param bar Zero-based bar index of the trilled landing tone.
+ * @param voice Voice carrying the landing tone.
+ * @return True when the trill opens on its lower turn note.
+ */
+bool cadenceTrillOpensVonUnten(std::uint32_t seed, int bar, VoiceId voice);
+
 }  // namespace bach::composer
 
 #endif  // BACH_COMPOSER_ORNAMENT_PASS_H
