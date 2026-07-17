@@ -334,10 +334,10 @@ TEST(FormSectionalTest, DominantHeadSubjectUsesTonalAnswerInRealization) {
   }
 }
 
-// The fugue tail keeps a full three-voice texture through its development
-// fill (V0 running line + V1 quarter-anchor counterline + V2 sustained
-// support). Long fills previously rested V1 entirely, thinning the second
-// half of the piece to two voices between the exposition and the stretto.
+// The fugue tail keeps all three voices present in every development bar while
+// allowing V2 to breathe during each bar's second half. Long fills previously
+// rested V1 entirely, thinning the second half of the piece to two voices
+// between the exposition and the stretto.
 // Allowed thin bars in the second half: the stretto leader bar (the follower
 // enters at a 1-bar delay by design) plus one boundary bar of slack.
 TEST(FormSectionalTest, FugueTailDevelopmentKeepsThreeVoiceTexture) {
@@ -365,6 +365,85 @@ TEST(FormSectionalTest, FugueTailDevelopmentKeepsThreeVoiceTexture) {
                               << " second half rests a voice for " << thin_bars << " bars";
     }
   }
+}
+
+TEST(FormSectionalTest, FugueTailDevelopmentAlternatesGrainOverPulsedBass) {
+  const FormType form = FormType::ToccataAndFugue;
+  for (std::uint32_t seed : {1u, 4u}) {
+    const std::uint16_t bars = 64;
+    const HarnessFixture fx = buildFixture(form, seed, false, bars);
+    const int free_bars = freeBarsFor(bars);
+    const int cadence_start = static_cast<int>(bars) - 2;
+    bool saw_eighth_bar = false;
+    bool saw_sixteenth_bar = false;
+    bool saw_pulsed_bass = false;
+    bool saw_exposition_support = false;
+
+    for (const FigurationSection& section : fx.material.figuration_sections) {
+      const int first_bar = static_cast<int>(section.start_tick / kBar);
+      const int last_bar = static_cast<int>(section.end_tick / kBar) - 1;
+      if (section.voice == 2 && section.is_pedal_prep && first_bar >= free_bars &&
+          first_bar < free_bars + 12) {
+        for (const MaterialNote& note : section.notes) {
+          saw_exposition_support = saw_exposition_support || note.duration >= kTicksPerBar;
+        }
+      }
+      if (first_bar < free_bars + 12 || last_bar >= cadence_start) {
+        continue;
+      }
+      if (section.voice == 1 && !section.is_pedal_prep) {
+        for (int bar = first_bar; bar <= last_bar; ++bar) {
+          bool has_sixteenth = false;
+          for (const MaterialNote& note : section.notes) {
+            if (static_cast<int>(note.start_tick / kBar) != bar) {
+              continue;
+            }
+            has_sixteenth = has_sixteenth || note.duration == kTicksPerBeat / 4;
+          }
+          if ((bar - first_bar) % 2 == 0) {
+            EXPECT_FALSE(has_sixteenth) << formName(form) << " seed " << seed << " bar " << bar;
+            saw_eighth_bar = true;
+          } else {
+            EXPECT_TRUE(has_sixteenth) << formName(form) << " seed " << seed << " bar " << bar;
+            saw_sixteenth_bar = true;
+          }
+        }
+      }
+      if (section.voice == 2 && section.is_pedal_prep) {
+        ASSERT_EQ(section.notes.size(), static_cast<std::size_t>(last_bar - first_bar + 1));
+        for (const MaterialNote& note : section.notes) {
+          EXPECT_EQ(note.start_tick % kBar, 0u);
+          EXPECT_EQ(note.duration, 2 * kTicksPerBeat);
+        }
+        saw_pulsed_bass = true;
+      }
+    }
+
+    EXPECT_TRUE(saw_eighth_bar) << formName(form) << " seed " << seed;
+    EXPECT_TRUE(saw_sixteenth_bar) << formName(form) << " seed " << seed;
+    EXPECT_TRUE(saw_pulsed_bass) << formName(form) << " seed " << seed;
+    EXPECT_TRUE(saw_exposition_support) << formName(form) << " seed " << seed;
+  }
+}
+
+TEST(FormSectionalTest, FantasiaFugueTailKeepsContinuousDevelopmentSupport) {
+  const HarnessFixture fx = buildFixture(FormType::FantasiaAndFugue, 1, false, 64);
+  const int free_bars = freeBarsFor(64);
+  const int cadence_start = 62;
+  bool saw_development_support = false;
+  for (const FigurationSection& section : fx.material.figuration_sections) {
+    const int first_bar = static_cast<int>(section.start_tick / kBar);
+    const int last_bar = static_cast<int>(section.end_tick / kBar) - 1;
+    if (section.voice != 2 || !section.is_pedal_prep || first_bar < free_bars + 12 ||
+        last_bar >= cadence_start) {
+      continue;
+    }
+    for (const MaterialNote& note : section.notes) {
+      EXPECT_GE(note.duration, kTicksPerBar);
+    }
+    saw_development_support = true;
+  }
+  EXPECT_TRUE(saw_development_support);
 }
 
 TEST(FormSectionalTest, CountersubjectAccompaniesAnswerAndThirdEntry) {
@@ -595,30 +674,43 @@ TEST(FormSectionalTest, ToccataDramaticusFermataBreath) {
   }
 }
 
-TEST(FormSectionalTest, ToccataTripletDriveInSecondHalf) {
-  // Dramaticus and Perpetuus tighten to sixteenth triplets (80-tick notes) in
-  // the section's last half. At least one V0 wave bar in [free_bars/2, ...)
-  // carries 80-tick durations, and its beat onsets are diatonic chord anchors.
+TEST(FormSectionalTest, ToccataTripletDriveIsLimitedToFinalTwoRunningBars) {
+  // Dramaticus and Perpetuus reserve sixteenth triplets for a two-bar burst
+  // immediately before the closing block. Earlier wave bars remain ordinary
+  // sixteenths even in long forms.
   for (std::uint32_t seed : {std::uint32_t{4}, std::uint32_t{5}}) {  // Dramaticus, Perpetuus.
-    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 64);
-    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    ASSERT_TRUE(r.validation.failures.empty())
-        << "seed " << seed << " fails: "
-        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
-    const int free_bars = freeBarsFor(64);
-    bool found_triplet = false;
-    for (int bar = free_bars / 2; bar < free_bars; ++bar) {
-      const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
-      const bool triplet =
-          !notes.empty() && std::all_of(notes.begin(), notes.end(), [](const NoteEvent& n) {
-            return n.duration == static_cast<Tick>(80);
-          });
-      if (triplet) {
-        found_triplet = true;
-        EXPECT_EQ(notes.size(), 24u) << "seed " << seed << " bar " << bar << " triplet count";
+    for (std::uint16_t total :
+         {std::uint16_t{16}, std::uint16_t{32}, std::uint16_t{64}, std::uint16_t{128}}) {
+      const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, total);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_TRUE(r.validation.failures.empty())
+          << "seed " << seed << " total " << total << " fails: "
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      const int free_bars = freeBarsFor(total);
+      int triplet_bars = 0;
+      for (int bar = 0; bar < free_bars; ++bar) {
+        const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
+        const bool triplet =
+            !notes.empty() && std::all_of(notes.begin(), notes.end(), [](const NoteEvent& n) {
+              return n.duration == static_cast<Tick>(80);
+            });
+        if (triplet) {
+          ++triplet_bars;
+          EXPECT_GE(bar, free_bars - 3) << "seed " << seed << " total " << total;
+          EXPECT_LE(bar, free_bars - 2) << "seed " << seed << " total " << total;
+          EXPECT_EQ(notes.size(), 24u) << "seed " << seed << " total " << total << " bar " << bar;
+        }
+      }
+      EXPECT_EQ(triplet_bars, 2) << "seed " << seed << " total " << total;
+
+      if (total >= 32) {
+        const std::vector<NoteEvent> middle = barVoiceNotes(r.notes, free_bars / 2, 0);
+        ASSERT_EQ(middle.size(), 16u) << "seed " << seed << " total " << total;
+        for (const NoteEvent& note : middle) {
+          EXPECT_EQ(note.duration, kTicksPerBeat / 4) << "seed " << seed << " total " << total;
+        }
       }
     }
-    EXPECT_TRUE(found_triplet) << "seed " << seed << " has no triplet wave bar in the last half";
   }
 }
 
@@ -1141,8 +1233,8 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
             EXPECT_EQ(n->duration, kTicksPerBeat) << ctx;
         } else {
           // Wave bar: running V0 figuration over both accompaniment layers.
-          // The last-half bars tighten to sixteenth triplets (80 ticks), still
-          // shorter than an eighth, so the density bound below holds either way.
+          // The final two running bars tighten to sixteenth triplets (80 ticks),
+          // still shorter than an eighth, so the density bound below holds.
           EXPECT_FALSE(by_voice[0].empty()) << ctx;
           EXPECT_FALSE(by_voice[1].empty()) << ctx;
           EXPECT_FALSE(by_voice[2].empty()) << ctx;
@@ -1185,8 +1277,8 @@ SweepBars dramaticusSweepBars(int free_bars) {
 // A minor-mode Dramaticus toccata (seed % 4 == 0) with the cascade layout
 // injects two BWV565 diminished-seventh sweep bars: they contain ONLY the four
 // leading-tone dim7 pitch classes, and each matches its neighbouring wave bar's
-// subdivision (sixteenths, tightening to sixteenth triplets in the section's
-// second half).
+// subdivision (sixteenths, tightening to sixteenth triplets only in the final
+// two running bars).
 TEST(FormSectionalTest, DramaticusMinorDim7SweepBars) {
   for (std::uint32_t seed : {4u, 8u, 12u}) {
     ASSERT_EQ(seed % 4u, 0u) << "seed " << seed << " is not a Dramaticus archetype";
@@ -1213,9 +1305,9 @@ TEST(FormSectionalTest, DramaticusMinorDim7SweepBars) {
               << ") is not a dim7 tone";
         }
         // Subdivision matches the neighbouring wave bars: sixteenths (120 ticks,
-        // 16 notes) before the drive half, sixteenth triplets (80 ticks, 24
-        // notes) at or after it.
-        const bool triplet = bar >= free_bars / 2;
+        // 16 notes) until the final two running bars, then sixteenth triplets
+        // (80 ticks, 24 notes).
+        const bool triplet = bar >= free_bars - 3;
         const Tick expected_dur = triplet ? 80 : (kTicksPerBeat / 4);
         const std::size_t expected_count = triplet ? 24u : 16u;
         EXPECT_EQ(notes.size(), expected_count)

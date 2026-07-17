@@ -730,8 +730,8 @@ void appendChordBlockBarAlternating(std::vector<MaterialNote>& dst, int bar, con
 /// @param band_hi V0 register band ceiling.
 /// @param triplet When true, six sixteenth-triplet notes per beat (80 ticks
 ///        each); otherwise four sixteenths per beat -- matching the neighbouring
-///        wave bars' subdivision (the toccata's drive tightens to triplets in
-///        the section's second half).
+///        wave bars' subdivision (the toccata's drive tightens to triplets only
+///        in the final two running bars).
 void appendDim7SweepBar(std::vector<MaterialNote>& dst, int bar, int tonic_pc, int band_lo,
                         int band_hi, bool triplet) {
   const int leading = (((tonic_pc + 11) % 12) + 12) % 12;
@@ -814,7 +814,8 @@ Split splitBars(int total) {
 // All material is Material; band confinement keeps V0 >= V1 >= V2.
 // ---------------------------------------------------------------------------
 void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
-                     const std::vector<ChordSpec>& plan, const ResolvedRequest& req) {
+                     const std::vector<ChordSpec>& plan, const ResolvedRequest& req,
+                     bool open_development_texture) {
   HarnessFixture& out = *asm_ctx.out;
   const Mode mode = req.mode;
   const int fig_offset = static_cast<int>(req.seed % 4);
@@ -861,28 +862,32 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // against every earlier voice already recorded in the registry; the notes
   // between anchors walk stepwise so the line stays conjunct, and every emitted
   // note is recorded so a later voice avoids a parallel against it.
-  auto add_counterline = [&](VoiceId voice, int first, int last, int notes_per_beat) {
+  auto add_counterline = [&](VoiceId voice, int first, int last, int notes_per_beat,
+                             int alternate_notes_per_beat = 0) {
     FigurationSection section;
     section.voice = voice;
     section.start_tick = barTick(first);
     section.end_tick = barTick(last + 1);
     int prev_anchor = 0;
     for (int bar = first; bar <= last; ++bar) {
+      const int density = alternate_notes_per_beat > 0 && (bar - first) % 2 == 1
+                              ? alternate_notes_per_beat
+                              : notes_per_beat;
       appendFigurationBar(registry, section, bar, voice, plan[static_cast<std::size_t>(bar)], mode,
-                          notes_per_beat, fig_offset, prev_anchor);
+                          density, fig_offset, prev_anchor);
     }
     coalesceConsecutiveSamePitch(section.notes);
     out.material.figuration_sections.push_back(section);
     pushSpan(asm_ctx, voice, first, last, VoiceIntent::FigurationCarrier);
   };
 
-  // --- Add one sustained chord-tone support note over [first_bar, last_bar]. ---
-  // A consonant, parallel-free chord tone of the first bar's chord, held as one
-  // whole-bar-per-bar tone in the voice band (FigurationCarrier so it replays
-  // verbatim). Used to thicken bars that would otherwise rest a voice (the
-  // second half of the solo subject entry, the post-stretto fill, the cadence)
-  // up to a >= 2-voice texture without adding a second running figuration line.
-  auto add_sustained_support = [&](VoiceId voice, int first, int last) {
+  // --- Add one sustained chord-tone support note per bar. ---
+  // A consonant, parallel-free chord tone at each bar head, held for the
+  // caller-selected pulse (a whole bar by default). FigurationCarrier replays
+  // it verbatim. Used to thicken bars that would otherwise rest a voice without
+  // adding a second running figuration line.
+  auto add_sustained_support = [&](VoiceId voice, int first, int last,
+                                   Tick pulse_duration = kTicksPerBar) {
     FigurationSection section;
     section.voice = voice;
     section.start_tick = barTick(first);
@@ -900,8 +905,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
           consonantChordTone(plan[static_cast<std::size_t>(bar)], voice, kBandLo[voice],
                              kBandHi[voice], centre, theme_pitches, line_prev, motions, mode,
                              /*downbeat=*/true);
-      addNote(section.notes, bar_start, kTicksPerBar, pitch);
-      registry.record(bar_start, voice, pitch, kTicksPerBar);
+      addNote(section.notes, bar_start, pulse_duration, pitch);
+      registry.record(bar_start, voice, pitch, pulse_duration);
       line_prev = pitch;
     }
     coalesceConsecutiveSamePitch(section.notes);
@@ -1160,6 +1165,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   //
   // Stretto placement: align the leader to the arc climax cycle when one lands
   // inside the development region; otherwise place it just before the cadence.
+  const int v1_alternate_density = open_development_texture ? 4 : 0;
+  const Tick bass_pulse = open_development_texture ? 2 * kTicksPerBeat : kTicksPerBar;
   if (full_exposition && cadence_start - next_free_bar >= 4) {
     // Find a climax-cycle downbeat (multiple of 4) inside the development window.
     int leader_bar = -1;
@@ -1215,31 +1222,27 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     // thematic voices (V0 leader, V1 follower) already sound above it.
     add_counterline(2, leader_bar, leader_bar + 3, 2);
 
-    // Figuration fill before and after the stretto block, keeping the full
-    // three-voice texture through the development: V0 and V1 eighth-note wave
-    // counterlines in their disjoint bands over a V2 sustained chord-tone
-    // support (a single-anchor-per-beat V1 degenerates into a two-pitch
-    // pendulum once same-pitch quarters coalesce; the eighth wave walks the
-    // scale between anchors like the stretto-window bass line). Lines are
-    // built top-down so each lower line reads everything already sounding
-    // above it from the registry and picks consonant, parallel-free tones
-    // (long fills previously rested V1 entirely, thinning the fugue to two
-    // voices between the exposition and the stretto).
+    // The toccata tail opens the development texture: V1 alternates eighth and
+    // sixteenth bars while V2 supports only the first half of each bar. The
+    // fantasia keeps continuous eighth-note counterlines and whole-bar bass
+    // support as part of its denser contrapuntal identity. Both variants keep
+    // at least two sounding voices and a three-voice downbeat. Lines are built
+    // top-down so each lower line selects consonant, parallel-free tones.
     if (leader_bar > next_free_bar) {
       add_counterline(0, next_free_bar, leader_bar - 1, 2);
-      add_counterline(1, next_free_bar, leader_bar - 1, 2);
-      add_sustained_support(2, next_free_bar, leader_bar - 1);
+      add_counterline(1, next_free_bar, leader_bar - 1, 2, v1_alternate_density);
+      add_sustained_support(2, next_free_bar, leader_bar - 1, bass_pulse);
     }
     if (leader_bar + 4 < cadence_start) {
       add_counterline(0, leader_bar + 4, cadence_start - 1, 2);
-      add_counterline(1, leader_bar + 4, cadence_start - 1, 2);
-      add_sustained_support(2, leader_bar + 4, cadence_start - 1);
+      add_counterline(1, leader_bar + 4, cadence_start - 1, 2, v1_alternate_density);
+      add_sustained_support(2, leader_bar + 4, cadence_start - 1, bass_pulse);
     }
   } else if (cadence_start > next_free_bar) {
     // Short tail: the same three-layer fill up to the cadence.
     add_counterline(0, next_free_bar, cadence_start - 1, 2);
-    add_counterline(1, next_free_bar, cadence_start - 1, 2);
-    add_sustained_support(2, next_free_bar, cadence_start - 1);
+    add_counterline(1, next_free_bar, cadence_start - 1, 2, v1_alternate_density);
+    add_sustained_support(2, next_free_bar, cadence_start - 1, bass_pulse);
   }
 
   // === CADENCE ==============================================================
@@ -1655,13 +1658,13 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       if (kind == FreeBarKind::kDim7Sweep) {
         // BWV565 leading-tone diminished-seventh roll (minor-mode Dramaticus).
         // The roll subdivision matches the neighbouring wave bars: sixteenths,
-        // tightening to sixteenth triplets in the section's second half (the
-        // same drive condition the wave bars use below). The roll is confined to
-        // the V0 band so it sounds above the V1 punctuation and V2 pedal exactly
-        // like a wave bar; the accompaniment layers are identical to a wave bar's
-        // (V2 pedal + V1 head punctuation), so the dim7 rolls over the pedal like
-        // the model piece.
-        const bool tighten_sweep = bar >= free_bars / 2;
+        // tightening to sixteenth triplets only in the final two running bars
+        // before the close (the same drive condition the wave bars use below).
+        // The roll is confined to the V0 band so it sounds above the V1
+        // punctuation and V2 pedal exactly like a wave bar; the accompaniment
+        // layers are identical to a wave bar's, so the dim7 rolls over the
+        // pedal like the model piece.
+        const bool tighten_sweep = bar >= free_bars - 3;
         appendDim7SweepBar(section.notes, bar, static_cast<int>(out.harmony.tonic_pc), kBandLo[0],
                            kBandHi[0], tighten_sweep);
         lp.pedal = true;
@@ -1683,12 +1686,13 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       // so the wave still fits the V0 band.
       const int base = std::clamp(kBandLo[0] + std::max<int>(0, arc.register_shift), kBandLo[0],
                                   kBandHi[0] - 12);
-      // The drive to the fugue tightens from sixteenths to triplet sixteenths:
-      // in the section's last half the Dramaticus and Perpetuus wave bars
-      // subdivide into sixteenth triplets.
+      // The drive to the fugue tightens from sixteenths to triplet sixteenths
+      // only for the final two running bars before the closing block. Limiting
+      // the burst preserves the rhetorical acceleration without demanding a
+      // long, mechanically continuous triplet run from one manual voice.
       const bool tighten =
           (archetype == ToccataArchetype::Dramaticus || archetype == ToccataArchetype::Perpetuus) &&
-          bar >= free_bars / 2;
+          bar >= free_bars - 3;
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch,
                           /*rotate_figures=*/true, /*triplet=*/tighten);
@@ -1751,7 +1755,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
                           /*v1_punct_dur=*/kTicksPerBeat * 2);
 
   // --- FUGUE TAIL (bars free_bars .. total-1). ---
-  appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req);
+  appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,
+                  /*open_development_texture=*/true);
 
   return out;
 }
@@ -1918,7 +1923,8 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
                           /*v1_punct_dur=*/kTicksPerBeat);
 
   // --- FUGUE TAIL (bars free_bars .. total-1). ---
-  appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req);
+  appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,
+                  /*open_development_texture=*/false);
 
   return out;
 }
