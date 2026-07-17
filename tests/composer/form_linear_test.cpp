@@ -240,6 +240,24 @@ TEST(FormLinearCello, LongFormBigramSurfaceStaysSpread) {
   }
 }
 
+// A minor cello prelude never leaks an augmented second into the cadential
+// landing. The figuration loop stops two bars short of the appended landing,
+// and the final figuration bar's closing cell is vetted so its implicit
+// bass/top streams voice-lead into the landing trill (whose lower turn note is
+// the out-of-harmonic-minor sixth degree) without a forbidden leap. This swept
+// the whole minor-seed range; the seeds below include the JS preset seeds and
+// several formerly-failing low seeds, at the natural cadence length where the
+// landing seam is exercised.
+TEST(FormLinearCello, MinorLandingSeamHasNoAugmentedSecond) {
+  const std::uint16_t bars = testLengths(FormType::CelloPrelude)[0];
+  for (std::uint32_t seed : {5u, 6u, 11u, 17u, 23u, 26u, 42u, 179622u, 273227u, 448290u}) {
+    const ComposeResult r = build(FormType::CelloPrelude, seed, /*is_minor=*/true, bars, nullptr);
+    EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+        << "seed=" << seed << " first=" << firstFailure(r);
+    EXPECT_TRUE(r.validation.failures.empty()) << "seed=" << seed << " first=" << firstFailure(r);
+  }
+}
+
 // --- TrioSonata -------------------------------------------------------------
 
 TEST(FormLinearTrio, ValidatesCleanAcrossMatrix) {

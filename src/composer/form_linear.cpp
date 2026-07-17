@@ -48,6 +48,29 @@ constexpr bool inHarmonicMinor(int pc) {
   return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 11;
 }
 
+// Whether the cadential landing's trill opens on its lower turn note.
+//
+// The landing holds a leading tone that the ornament post-pass expands into a
+// cadential trill. That pass chooses the trill's opening from one bit of a
+// deterministic placement hash keyed by (seed, bar, voice): the von-unten
+// doppelt-cadence opens on the lower turn note -- the harmonic-minor sixth
+// degree, a whole tone below the leading tone (tonic - 3) -- while every other
+// opening starts on the leading tone (tonic - 1). The two choices give the
+// landing's first reconstructed implicit-voice cell a different bass extreme,
+// so the final figuration bar must vet its closing seam against the one the
+// pass will actually pick. This mirrors that single hash bit; the trill note
+// lives on voice 0 (the solo flow) in the penultimate (dominant) bar. The
+// cello-prelude minor-seed regression sweep guards the mirror against drift.
+inline bool cadenceLandingOpensOnTurnNote(std::uint32_t seed, int bars) {
+  std::uint64_t x = (static_cast<std::uint64_t>(seed) << 32) ^
+                    (static_cast<std::uint64_t>(static_cast<std::uint32_t>(bars - 2)) << 8);
+  x += 0x9E3779B97F4A7C15ull;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+  x ^= (x >> 31);
+  return ((x >> 1) & 1ull) != 0ull;
+}
+
 // @brief Build an N-bar per-bar progression from the shared 4-chord harmony
 //        catalogs, ending on a design-valued V -> I(i) cadence.
 //
@@ -210,6 +233,52 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // CelloPrelude/16/17 compact note language), so the model scorer's
   // large_leap_ratio stays ~0.
 
+  // Register window low for a bar (the floor its anchor is realized above),
+  // lifted an octave at the climax cycle. Shared by the per-bar walk and the
+  // cadence-register simulation below so both agree on the octave.
+  auto barWindowLo = [&](int bar_idx) {
+    const std::size_t cyc = static_cast<std::size_t>(bar_idx / 4);
+    const ArcPoint point = req.arc(std::min(cyc, req.cycle_count - 1));
+    return 43 + ((point.register_shift >= 6) ? 12 : 0);
+  };
+  // Chord tone of `bar_idx` NEAREST `prev`, realized in that bar's window (the
+  // same voice-leading rule the per-bar loop applies). Kept as a reusable
+  // helper so the cadence landing can extend the anchor chain through the
+  // final V and I bars without re-emitting them.
+  auto nearestAnchorForBar = [&](int bar_idx, int prev) {
+    const int root_pc = chords[static_cast<std::size_t>(bar_idx)].root_pc % 12;
+    const int third_semi = chords[static_cast<std::size_t>(bar_idx)].minor ? 3 : 4;
+    const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
+    const int wlo = barWindowLo(bar_idx);
+    int best = wlo;
+    int best_dist = 1 << 20;
+    for (int tone = 0; tone < 3; ++tone) {
+      int cand = wlo + (((triad_pc[tone] - wlo) % 12) + 12) % 12;
+      while (cand + 12 - prev <= prev - cand)  // climb to the nearest octave.
+        cand += 12;
+      const int dist = std::abs(cand - prev);
+      if (dist < best_dist) {
+        best_dist = dist;
+        best = cand;
+      }
+    }
+    return best;
+  };
+  // The cadence-landing tonic register: extend the voice-leading anchor chain
+  // through the appended (not emitted) final V and I bars from the last
+  // figuration bar's closing anchor, then take the tonic C nearest the tonic
+  // bar's anchor. This is the register the pre-landing chain would have reached
+  // had the two cadence bars run, so the held tonic voice-leads from the line's
+  // close rather than snapping to the figuration bar's own octave.
+  auto landingTonicFor = [&](int final_bar_anchor) {
+    const int anchor_v = nearestAnchorForBar(bars - 2, final_bar_anchor);
+    const int anchor_i = nearestAnchorForBar(bars - 1, anchor_v);
+    int tonic = 48;  // tonic C nearest the tonic bar's anchor.
+    while (tonic + 12 - anchor_i <= anchor_i - tonic)
+      tonic += 12;
+    return tonic;
+  };
+
   // Voice-led anchor: each bar opens on the chord tone NEAREST the previous
   // bar's closing register, so the implicit bass/top streams never jump an
   // octave at the bar boundary (the failure mode of a fixed per-bar register).
@@ -219,7 +288,11 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // the first bar), used to vet each bar figure across the bar seam.
   int prev_cell_lo = -1;
   int prev_cell_hi = -1;
-  for (int bar = 0; bar < bars; ++bar) {
+  // Stop two bars short: the final two bars are the cadential landing appended
+  // below (a held leading tone then the tonic), not sixteenth figuration. The
+  // last iteration (bar == bars - 3) is the final audible figuration bar, so
+  // its closing anchor is the register the landing voice-leads from.
+  for (int bar = 0; bar < bars - 2; ++bar) {
     const std::size_t cycle = static_cast<std::size_t>(bar / 4);
     const ArcPoint arc = req.arc(std::min(cycle, req.cycle_count - 1));
 
@@ -250,22 +323,36 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     const int oct_shift = (arc.register_shift >= 6) ? 12 : 0;
     const int window_lo = 43 + oct_shift;  // ~G2 (+oct at climax).
 
-    // Anchor = the chord tone nearest the previous bar's close, realized in this
-    // bar's register window. Try each triad tone in the octave nearest
-    // prev_anchor; pick the closest. This voice-leads the bar openings so the
-    // bass/top streams move by a small interval at every boundary.
-    int anchor = window_lo;
-    int best_dist = 1 << 20;
+    // Anchor candidates = the three triad tones realized in this bar's register
+    // window, each climbed to the octave nearest prev_anchor and ordered
+    // nearest-first by distance to prev_anchor. Mid-piece only the nearest is
+    // used (bass/top streams move by a small interval at every boundary); the
+    // final figuration bar tries them in order so it can voice-lead into the
+    // cadential landing without a forbidden seam.
+    int cand_anchors[3];
+    int cand_dist[3];
     for (int tone = 0; tone < 3; ++tone) {
       int cand = window_lo + (((triad_pc[tone] - window_lo) % 12) + 12) % 12;
       while (cand + 12 - prev_anchor <= prev_anchor - cand)  // climb to the nearest octave.
         cand += 12;
-      const int dist = std::abs(cand - prev_anchor);
-      if (dist < best_dist) {
-        best_dist = dist;
-        anchor = cand;
+      cand_anchors[tone] = cand;
+      cand_dist[tone] = std::abs(cand - prev_anchor);
+    }
+    int anchor_order[3] = {0, 1, 2};
+    for (int aidx = 0; aidx < 3; ++aidx) {
+      for (int bidx = aidx + 1; bidx < 3; ++bidx) {
+        if (cand_dist[anchor_order[bidx]] < cand_dist[anchor_order[aidx]]) {
+          const int tmp = anchor_order[aidx];
+          anchor_order[aidx] = anchor_order[bidx];
+          anchor_order[bidx] = tmp;
+        }
       }
     }
+    int anchor = cand_anchors[anchor_order[0]];
+    // Forward-seam pitches into the cadential landing, set only for the final
+    // figuration bar's anchor candidate under test (< 0 skips the seam check).
+    int landing_lo = -1;  // the landing leading tone (implicit bass of the trill).
+    int landing_hi = -1;  // the landing tonic (implicit top of the trill).
 
     // The bar figure rotates per BAR among three textures the real solo-cello
     // prelude mixes: the small oscillation cell, a scale-run triangle, and a
@@ -398,6 +485,25 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         pl = lo[cell];
         ph = hi[cell];
       }
+      // Forward seam into the cadential landing (final figuration bar only). The
+      // landing writes a full-bar leading tone then the tonic; the ornament pass
+      // expands the held leading tone into a cadential trill. The first landing
+      // cell the validator reconstructs has its implicit bass at the trill's
+      // opening pitch -- the lower turn note (tonic - 3) or the leading tone
+      // (tonic - 1), captured here as landing_lo -- and its top at the tonic
+      // (landing_hi). The last figuration cell's bass/top extremes must voice-
+      // lead into them without a forbidden leap; from a C bass the out-of-scale
+      // sixth turn note is an augmented second, exactly the seam this rejects.
+      if (landing_lo >= 0) {
+        if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(lo[3]),
+                                                 static_cast<std::uint8_t>(landing_lo),
+                                                 out.harmony) ||
+            rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(hi[3]),
+                                                 static_cast<std::uint8_t>(landing_hi),
+                                                 out.harmony)) {
+          return false;
+        }
+      }
       return true;
     };
     std::array<int, 16> pitches{};
@@ -407,22 +513,49 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // the same figure, freezing the cycle-opening contour the rotation
     // exists to vary.
     const int pref = (static_cast<int>(req.seed) + bar + static_cast<int>(cycle)) % 4;
-    for (int attempt = 0; attempt < 4 && !placed; ++attempt) {
-      switch ((pref + attempt) % 4) {
-        case 0:
-          oscillation_bar(pitches);
-          break;
-        case 1:
-          run_triangle_bar(pitches);
-          break;
-        case 2:
-          broken_thirds_bar(pitches);
-          break;
-        default:
-          pedal_bariolage_bar(pitches);
-          break;
+    auto try_figures = [&]() {
+      for (int attempt = 0; attempt < 4; ++attempt) {
+        switch ((pref + attempt) % 4) {
+          case 0:
+            oscillation_bar(pitches);
+            break;
+          case 1:
+            run_triangle_bar(pitches);
+            break;
+          case 2:
+            broken_thirds_bar(pitches);
+            break;
+          default:
+            pedal_bariolage_bar(pitches);
+            break;
+        }
+        if (cells_safe(pitches))
+          return true;
       }
-      placed = cells_safe(pitches);
+      return false;
+    };
+    if (bar == bars - 3) {
+      // Final figuration bar: enumerate the realized triad-tone anchors
+      // nearest-first, trying the four figures per anchor, and take the first
+      // pair whose closing cell voice-leads into the cadential landing without
+      // a forbidden seam. From the harmonic-minor sixth every figure's seam
+      // into the landing leading tone is an augmented second, so a nearer
+      // anchor alone cannot always clear it -- a farther chord tone can.
+      // The trill opens on the lower turn note (tonic - 3) or the leading tone
+      // (tonic - 1); the seam must be vetted against the one the ornament pass
+      // will pick for this piece.
+      const bool opens_on_turn = cadenceLandingOpensOnTurnNote(req.seed, bars);
+      for (int oidx = 0; oidx < 3 && !placed; ++oidx) {
+        anchor = cand_anchors[anchor_order[oidx]];
+        const int final_tonic = landingTonicFor(anchor);
+        landing_hi = final_tonic;
+        landing_lo = final_tonic - (opens_on_turn ? 3 : 1);
+        placed = try_figures();
+      }
+      if (!placed)
+        anchor = cand_anchors[anchor_order[0]];  // restore the nearest for the fallback.
+    } else {
+      placed = try_figures();
     }
     if (!placed) {
       oscillation_bar(pitches);  // constant-stream fallback (prior behavior).
@@ -444,12 +577,12 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // trill -- the only ornament the solo line takes) resolving to a full-bar
   // tonic. No approach run: the two held notes form only a dropped partial
   // cell for the implicit-voice analysis, so the cell streams end on the last
-  // sixteenth bar's extremes without a seam leap. The tonic register
-  // voice-leads from the closing anchor so the landing does not leap.
+  // sixteenth bar's extremes without a seam leap. The tonic register extends
+  // the anchor chain through the final V and I bars (the same value the final
+  // figuration bar vetted its closing seam against), so the landing does not
+  // leap and matches the seam the figuration bar was chosen to satisfy.
   {
-    int final_tonic = 48;  // tonic C nearest the line's closing register.
-    while (final_tonic + 12 - prev_anchor <= prev_anchor - final_tonic)
-      final_tonic += 12;
+    const int final_tonic = landingTonicFor(prev_anchor);
     appendCompactCadentialLanding(out.material.arpeggio_template.notes,
                                   static_cast<Tick>(bars - 2) * kTicksPerBar, 2 * kTicksPerBar,
                                   final_tonic - 1, final_tonic);
