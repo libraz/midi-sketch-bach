@@ -252,8 +252,8 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   meta.total_bars = out->total_bars;
   meta.description = out->form_display + " in " + meta.key_name;
   out->homepage_events_json = composer::buildHomepageEventsJson(out->composition, meta);
-  out->generated_json =
-      composer::emitGeneratedJson(out->composition.notes, out->composition.validation);
+  out->generated_json = composer::emitGeneratedJson(out->composition.notes,
+                                                    out->composition.validation, out->tempo_events);
   out->provenance_json = composer::emitProvenanceJson(out->composition.provenance);
   out->status = CompositionStatus::Ok;
   return out->status;

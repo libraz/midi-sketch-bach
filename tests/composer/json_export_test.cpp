@@ -83,6 +83,18 @@ TEST_F(JsonExportTest, GeneratedJsonHasMinimalShape) {
   EXPECT_TRUE(contains(generated_, "\"notes\":"));
 }
 
+TEST_F(JsonExportTest, GeneratedJsonCarriesTempoMapWhenProvided) {
+  const std::vector<TempoEvent> tempos = {{0, 72}, {kTicksPerBar, 60}};
+  const std::string json = emitGeneratedJson(result_.notes, result_.validation, tempos);
+  EXPECT_TRUE(contains(json,
+                       "\"tempos\":[{\"tick\":0,\"bpm\":72},"
+                       "{\"tick\":1920,\"bpm\":60}]"));
+}
+
+TEST_F(JsonExportTest, LegacyGeneratedJsonOmitsUnknownTempo) {
+  EXPECT_FALSE(contains(generated_, "\"tempos\":"));
+}
+
 TEST_F(JsonExportTest, GeneratedJsonCarriesInfoMetricsWhenAvailable) {
   EXPECT_TRUE(contains(generated_, "\"info\":"));
   EXPECT_TRUE(contains(generated_, "\"subject_features\":"));

@@ -71,6 +71,8 @@ TEST(CompositionServiceTest, ResolvesAndOwnsCompleteProductOutput) {
   EXPECT_FALSE(product.midi_bytes.empty());
   EXPECT_NE(product.homepage_events_json.find("\"form\":\"fugue\""), std::string::npos);
   EXPECT_NE(product.generated_json.find("\"schema_version\":\"generated.v1\""), std::string::npos);
+  EXPECT_NE(product.generated_json.find("\"tempos\":[{\"tick\":0,\"bpm\":100}]"),
+            std::string::npos);
   EXPECT_NE(product.provenance_json.find("\"schema_version\":\"provenance.v1\""),
             std::string::npos);
   EXPECT_TRUE(product.diagnostic_json.empty());
@@ -115,6 +117,7 @@ TEST(CompositionServiceTest, GoldbergFullResolvesCompletePublicLayout) {
   EXPECT_EQ(product.total_bars, 128);
   EXPECT_EQ(product.performance_profile.final_ritardando, composer::RitardandoStyle::Gentle);
   EXPECT_EQ(product.tempo_events.size(), 5u);
+  EXPECT_NE(product.generated_json.find("\"tempos\":[{\"tick\":0,\"bpm\":84}"), std::string::npos);
 }
 
 TEST(CompositionServiceTest, FinalScoreGateAcceptsEveryShippedForm) {

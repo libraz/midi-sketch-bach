@@ -30,11 +30,15 @@ namespace bach::composer {
 constexpr std::uint32_t kTicksPerBeatExport = kTicksPerBeat;
 
 // Emit the evaluator-facing JSON. Contains the polyphonic note stream, the
-// minimum metadata an external evaluator needs to interpret tick units, and
-// optional info-level validation metrics.
+// minimum metadata an external evaluator needs to interpret tick units,
+// an optional MIDI-aligned tempo map, and optional info-level validation
+// metrics. Legacy overloads omit tempo rather than guessing it.
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes);
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
                               const ValidationReport& validation);
+std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
+                              const ValidationReport& validation,
+                              const std::vector<TempoEvent>& tempo_events);
 
 // Emit the developer-facing audit JSON. One entry per note, parallel to
 // generated.json.notes by index, carrying the full NoteProvenance.

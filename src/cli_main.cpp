@@ -463,8 +463,9 @@ int runComposerMode(const CliOptions& opts) {
     } else {
       json_path += ".json";
     }
+    const std::vector<bach::TempoEvent> tempo_events = {{0, opts.bpm}};
     const std::string generated =
-        bach::composer::emitGeneratedJson(result.notes, result.validation);
+        bach::composer::emitGeneratedJson(result.notes, result.validation, tempo_events);
     const std::string provenance = bach::composer::emitProvenanceJson(result.provenance);
     std::ofstream f(json_path);
     if (f.is_open()) {

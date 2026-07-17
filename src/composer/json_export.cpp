@@ -118,6 +118,12 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes) {
 
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
                               const ValidationReport& validation) {
+  return emitGeneratedJson(notes, validation, {});
+}
+
+std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
+                              const ValidationReport& validation,
+                              const std::vector<TempoEvent>& tempo_events) {
   JsonWriter w;
   w.beginObject();
   w.key("schema_version");
@@ -126,6 +132,19 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
   w.value(static_cast<int>(kTicksPerBeatExport));
   w.key("duration_ticks");
   w.value(static_cast<int>(computeDuration(notes)));
+  if (!tempo_events.empty()) {
+    w.key("tempos");
+    w.beginArray();
+    for (const auto& tempo : tempo_events) {
+      w.beginObject();
+      w.key("tick");
+      w.value(static_cast<int>(tempo.tick));
+      w.key("bpm");
+      w.value(static_cast<int>(tempo.bpm));
+      w.endObject();
+    }
+    w.endArray();
+  }
   w.key("notes");
   w.beginArray();
   for (std::size_t i = 0; i < notes.size(); ++i) {
