@@ -37,6 +37,7 @@ class ExtractEntryPlanStatsTest(unittest.TestCase):
             rows = extract_entry_plan_stats.load_rows([csv_path])
             summary = extract_entry_plan_stats.summarize(rows)
             self.assertEqual(summary["piece_count"], 2)
+            self.assertAlmostEqual(summary["subject_length_mean"], 2.0)
             # Entry interval gaps: wtc01 (4, 4), wtc02 (6).
             self.assertAlmostEqual(summary["entry_interval_mean"], 14 / 3)
             # True episode length subtracts the 2-bar subject duration.
@@ -48,7 +49,9 @@ class ExtractEntryPlanStatsTest(unittest.TestCase):
             report = root / "entry_plan_stats.md"
             extract_entry_plan_stats.write_inc(summary, inc)
             extract_entry_plan_stats.write_report(summary, report, [csv_path])
-            self.assertIn("kEntryPlanStatsPieceCount = 2", inc.read_text(encoding="utf-8"))
+            inc_text = inc.read_text(encoding="utf-8")
+            self.assertIn("kEntryPlanStatsPieceCount = 2", inc_text)
+            self.assertIn("kSubjectLengthMeanBars = 2.000000", inc_text)
             self.assertIn("stretto_rate", report.read_text(encoding="utf-8"))
 
     def test_episode_length_differs_from_entry_interval(self) -> None:
@@ -91,13 +94,13 @@ class DezIngestionTest(unittest.TestCase):
             subject_row = next(row for row in rows if row["kind"] == "S")
             self.assertEqual(subject_row["piece"], "bwv999")
             self.assertEqual(subject_row["bar"], "0")
-            self.assertEqual(subject_row["duration"], "4")
+            self.assertEqual(subject_row["duration"], "1")
 
     def test_overlap_based_stretto_detection(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            # Second subject starts at bar 3, before the first (start 0,
-            # duration 5) finishes -> stretto by overlap.
+            # Dezrann values are quarter-note beats. The second subject starts
+            # at 0.75 bars, before the first (duration 1.25 bars) finishes.
             stretto = self._write_dez(
                 root,
                 "bwv_stretto",
@@ -130,16 +133,30 @@ class DezIngestionTest(unittest.TestCase):
                 [
                     {"type": "S", "start": 0, "duration": 4, "staff": "1"},
                     {"type": "S", "start": 12, "duration": 4, "staff": "2"},
-                    {"type": "S", "start": 30, "duration": 4, "staff": "3"},
+                    {"type": "S", "start": 28, "duration": 4, "staff": "3"},
                 ],
             )
             rows = extract_entry_plan_stats.load_rows([path])
             summary = extract_entry_plan_stats.summarize(rows)
-            # Gaps 12 and 18.
-            self.assertEqual(summary["entry_interval_deciles"][4], 12)
-            self.assertAlmostEqual(summary["entry_interval_mean"], 15.0)
-            # Episodes: (12 - 4) and (18 - 4).
-            self.assertAlmostEqual(summary["episode_length_mean"], 11.0)
+            # Quarter-note gaps 12 and 16 normalize to 3 and 4 bars.
+            self.assertEqual(summary["entry_interval_deciles"][4], 3)
+            self.assertAlmostEqual(summary["entry_interval_mean"], 3.5)
+            self.assertAlmostEqual(summary["subject_length_mean"], 1.0)
+            self.assertGreaterEqual(summary["subject_length_mean"], 1.0)
+            self.assertLessEqual(summary["subject_length_mean"], 4.0)
+            # Episodes: (3 - 1) and (4 - 1).
+            self.assertAlmostEqual(summary["episode_length_mean"], 2.5)
+
+    def test_non_numeric_dezrann_time_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = self._write_dez(
+                root,
+                "bad",
+                [{"type": "S", "start": "later", "duration": 4, "staff": "1"}],
+            )
+            with self.assertRaisesRegex(ValueError, "non-numeric label start"):
+                extract_entry_plan_stats.load_dez_rows(path)
 
 
 if __name__ == "__main__":

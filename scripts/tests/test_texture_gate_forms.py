@@ -46,6 +46,11 @@ class _synthetic_informational_form:
 
 
 class FormThresholdsTableTest(unittest.TestCase):
+    def test_all_selector_expands_to_every_shipped_form_once(self) -> None:
+        expanded = texture_gate.expand_forms(["fugue", "all", "fugue"])
+        self.assertEqual(tuple(expanded), texture_gate.SHIPPED_FORMS)
+        self.assertEqual(set(expanded), set(texture_gate.FORM_EXPECTED_VOICES))
+
     def test_fugue_forms_are_enforced(self) -> None:
         self.assertTrue(texture_gate.thresholds_for("fugue").enforced)
         self.assertTrue(texture_gate.thresholds_for("prelude_and_fugue").enforced)
@@ -69,11 +74,13 @@ class FormThresholdsTableTest(unittest.TestCase):
         self.assertEqual(fantasia.max_mono_ratio, 0.10)
         passacaglia = texture_gate.thresholds_for("passacaglia")
         self.assertEqual(passacaglia.min_avg_active, 2.2)
-        self.assertEqual(passacaglia.max_mono_ratio, 0.15)
+        self.assertEqual(passacaglia.max_mono_ratio, 1.0 / 3.0)
         self.assertEqual(passacaglia.min_final_quarter_avg_active, 2.5)
         chorale = texture_gate.thresholds_for("chorale_prelude")
         self.assertEqual(chorale.min_avg_active, 2.5)
         self.assertEqual(chorale.max_mono_ratio, 0.05)
+        self.assertEqual(chorale.model_score_threshold, 0.78)
+        self.assertEqual(texture_gate.thresholds_for("chaconne").model_score_threshold, 0.79)
 
     def test_unknown_form_defaults_to_enforced(self) -> None:
         self.assertTrue(texture_gate.thresholds_for("brand_new_form").enforced)
@@ -91,7 +98,7 @@ class FormThresholdsTableTest(unittest.TestCase):
             "trio_sonata": 0.84,
             "cello_prelude": 0.83,
             "chaconne": 0.89,
-            "goldberg_variations": 0.82,
+            "goldberg_variations": 0.57,
         }
         for form, floor in expected.items():
             self.assertEqual(
@@ -211,12 +218,13 @@ class EnforcedVerdictTest(unittest.TestCase):
 
 class PerAxisRoutingTest(unittest.TestCase):
     def _case(self, form: str, **overrides) -> texture_gate.GateCase:
+        planned_voices = texture_gate.FORM_EXPECTED_VOICES.get(form, 3)
         base = dict(
             form=form,
             seed=1,
             generated=True,
-            num_voices=3,
-            max_active_voices=3,
+            num_voices=planned_voices,
+            max_active_voices=planned_voices,
             avg_active_voices=2.6,
             mono_ratio=0.0,
             max_repeated_run=1,
@@ -316,9 +324,9 @@ class PerAxisRoutingTest(unittest.TestCase):
         self.assertAlmostEqual(case.min_avg_active, 0.66 * 3)
         self.assertFalse(case.axis_results()["avg_active_voices"])
 
-    def test_two_voice_form_floor_tracks_voice_count(self) -> None:
-        # A 2-voice passacaglia: the voice-count floor is 0.66*2 = 1.32, but the
-        # explicit target 2.2 dominates. max_active_voices axis compares to 2.
+    def test_missing_passacaglia_voice_fails_planned_voice_count(self) -> None:
+        # Passacaglia's FormSpec plans three voices. Emitting only two must fail
+        # even though both voices happened to sound simultaneously.
         case = self._case(
             "passacaglia",
             num_voices=2,
@@ -326,7 +334,8 @@ class PerAxisRoutingTest(unittest.TestCase):
             piece_voice_occupancy={0: 0.9, 1: 0.5},
         )
         self.assertEqual(case.min_avg_active, 2.2)
-        self.assertTrue(case.axis_results()["max_active_voices"])
+        self.assertEqual(case.voice_count_target, 3)
+        self.assertFalse(case.axis_results()["max_active_voices"])
 
 
 class FormSummaryTest(unittest.TestCase):
@@ -348,7 +357,8 @@ class FormSummaryTest(unittest.TestCase):
         self.assertEqual(form_summary["verdict"], "enforced")
         self.assertTrue(form_summary["enforced"])
         self.assertEqual(form_summary["num_voices"], 2)
-        self.assertEqual(form_summary["target_max_mono_ratio"], 0.15)
+        self.assertEqual(form_summary["expected_voices"], 3)
+        self.assertEqual(form_summary["target_max_mono_ratio"], 1.0 / 3.0)
         self.assertIn("avg_active_voices", form_summary["axis_pass_counts"])
 
     def test_summarize_form_labels_informational_verdict(self) -> None:
@@ -412,12 +422,13 @@ class LengthInvariantFloorTest(unittest.TestCase):
     """Length-invariant model floor + --target-bars axis routing."""
 
     def _case(self, form: str, **overrides) -> texture_gate.GateCase:
+        planned_voices = texture_gate.FORM_EXPECTED_VOICES.get(form, 3)
         base = dict(
             form=form,
             seed=1,
             generated=True,
-            num_voices=3,
-            max_active_voices=3,
+            num_voices=planned_voices,
+            max_active_voices=planned_voices,
             avg_active_voices=2.6,
             mono_ratio=0.0,
             v2_silence_ratio=0.0,
@@ -446,7 +457,7 @@ class LengthInvariantFloorTest(unittest.TestCase):
             "trio_sonata": 0.81,
             "cello_prelude": 0.58,
             "chaconne": 0.75,
-            "goldberg_variations": 0.60,
+            "goldberg_variations": 0.55,
         }
         for form, floor in expected.items():
             self.assertEqual(

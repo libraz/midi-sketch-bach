@@ -12,8 +12,8 @@ actually used by ``bach-mcp/schema/generated.v1.json``:
 External ``jsonschema`` package is intentionally NOT required so this
 script stays usable from CI without extra pip installs.
 
-The schema path defaults to ``../bach-mcp/schema/generated.v1.json``
-relative to the repo root. Exits 0 on pass, 1 on schema mismatch, 2 on
+The schema path defaults to the vendored ``schema/generated.v1.json``
+in this repository. Exits 0 on pass, 1 on schema mismatch, 2 on
 IO / parse error.
 """
 
@@ -26,10 +26,9 @@ from typing import Any
 
 from bachlib.common import REPO_ROOT
 
-# Default schema lives in the sibling bach-mcp checkout (one level above the
-# repo root). Anchoring on REPO_ROOT keeps this stable regardless of where the
-# bachlib package sits relative to the old top-level scripts modules.
-DEFAULT_SCHEMA = REPO_ROOT.parent / "bach-mcp" / "schema" / "generated.v1.json"
+# The wire contract ships with this repository so validation never depends on
+# a sibling checkout or silently skips in CI.
+DEFAULT_SCHEMA = REPO_ROOT / "schema" / "generated.v1.json"
 
 
 def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
@@ -96,7 +95,7 @@ def _add_arguments(parser) -> None:
         type=Path,
         nargs="?",
         default=None,
-        help="schema JSON (defaults to ../bach-mcp/schema/generated.v1.json)",
+        help="schema JSON (defaults to schema/generated.v1.json)",
     )
 
 

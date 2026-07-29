@@ -92,6 +92,32 @@ class FugueTextureGateTest(unittest.TestCase):
             fugue_texture_gate.model_scoring_unavailable(summary, no_model_score=False)
         )
 
+    def test_partial_model_failure_is_reported_per_form(self) -> None:
+        complete = fugue_texture_gate.GateCase(form="fugue", seed=1, generated=True)
+        complete.model_score = 0.9
+        complete.model_score_v2 = 0.9
+        complete.model_score_v2_length_invariant = 0.9
+        incomplete = fugue_texture_gate.GateCase(
+            form="trio_sonata", seed=1, generated=True
+        )
+        incomplete.model_score = 0.9
+
+        self.assertEqual(
+            fugue_texture_gate.forms_with_incomplete_model_scoring(
+                [complete, incomplete], no_model_score=False
+            ),
+            {"trio_sonata": {"scored": 0, "generated": 1}},
+        )
+
+    def test_partial_model_failure_check_respects_explicit_opt_out(self) -> None:
+        unscored = fugue_texture_gate.GateCase(form="fugue", seed=1, generated=True)
+        self.assertEqual(
+            fugue_texture_gate.forms_with_incomplete_model_scoring(
+                [unscored], no_model_score=True
+            ),
+            {},
+        )
+
     def test_count_intent_spans_deduplicates_by_span_id(self) -> None:
         provenance = [
             {"span_id": 1, "voice_intent": "FortspinnungSpan"},
@@ -116,6 +142,39 @@ class FugueTextureGateTest(unittest.TestCase):
         occupancy = fugue_texture_gate.compute_piece_voice_occupancy(notes)
         self.assertAlmostEqual(occupancy[0], 0.5)
         self.assertAlmostEqual(occupancy[1], 1.0)
+
+    def test_compute_piece_voice_occupancy_retains_missing_expected_voice(self) -> None:
+        notes = [
+            {"voice": 0, "start_tick": 0, "duration": 1920},
+            {"voice": 1, "start_tick": 0, "duration": 1920},
+        ]
+        occupancy = fugue_texture_gate.compute_piece_voice_occupancy(
+            notes, expected_voices=3
+        )
+        self.assertEqual(occupancy, {0: 1.0, 1: 1.0, 2: 0.0})
+
+    def test_evaluate_rejects_fugue_when_planned_voice_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "generated.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "notes": [
+                            {"voice": 0, "pitch": 72, "start_tick": 0, "duration": 1920},
+                            {"voice": 1, "pitch": 60, "start_tick": 0, "duration": 1920},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            case = fugue_texture_gate.evaluate_generated_json("fugue", 1, path)
+
+        self.assertEqual(case.num_voices, 2)
+        self.assertEqual(case.voice_count_target, 3)
+        self.assertEqual(case.piece_voice_occupancy[2], 0.0)
+        self.assertFalse(case.axis_results()["max_active_voices"])
+        self.assertFalse(case.axis_results()["min_piece_voice_occupancy"])
+        self.assertFalse(case.passes_texture_gate)
 
     def test_gate_rejects_thin_texture_and_silent_voice(self) -> None:
         thin = fugue_texture_gate.GateCase(

@@ -284,11 +284,11 @@ def distribution_summary(bars: list[int], total_bars: int) -> dict:
     return {
         "ornament_notes": len(bars),
         "total_bars": total_bars,
-        "bar_histogram": {str(bar): count for bar, count in sorted(histogram.items())},
+        "bar_histogram": {str(bar + 1): count for bar, count in sorted(histogram.items())},
         "quarter_counts": quarter_counts,
         "middle_half_count": quarter_counts[1] + quarter_counts[2],
         "cadence_window_count": cadence_count,
-        "most_common_bar": histogram.most_common(1)[0][0] if histogram else None,
+        "most_common_bar": histogram.most_common(1)[0][0] + 1 if histogram else None,
     }
 
 

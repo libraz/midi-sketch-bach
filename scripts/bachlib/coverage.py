@@ -69,6 +69,11 @@ def extract_validator_rules(source: str | None = None) -> set[str]:
     rules: set[str] = set()
     for stmt in re.findall(r"rule_id\s*=\s*(.*?);", src, re.S):
         rules.update(re.findall(r'"([a-z][a-z0-9_]+)"', stmt))
+    # Suspension validation centralizes failure construction in a small helper,
+    # so these rule ids are passed as arguments rather than assigned directly.
+    rules.update(
+        re.findall(r'addSuspensionFailure\("([a-z][a-z0-9_]+)"\)', src)
+    )
     return rules
 
 
@@ -95,12 +100,12 @@ def validate_catalog(
     problems: dict[str, Any] = {
         "count_mismatches": [],
         "duplicate_ids": [],
-        "bad_status": [],
+        "invalid_status": [],
         "empty_evidence_for_covered": [],
         "evidence_for_unimplemented": [],
         "unresolved_evidence": [],
     }
-    expected = catalog["expected_domain_counts"]
+    expected = catalog.get("expected_domain_counts", {})
     seen_ids: set[str] = set()
 
     for domain_key, domain in catalog["domains"].items():
@@ -119,7 +124,7 @@ def validate_catalog(
 
         status = item.get("status")
         if status not in VALID_STATUS:
-            problems["bad_status"].append({"id": iid, "status": status})
+            problems["invalid_status"].append({"id": iid, "status": status})
 
         evidence = item.get("evidence", {})
         total_tokens = sum(len(evidence.get(k, [])) for k in vocab)
@@ -145,7 +150,9 @@ def compute_coverage(catalog: dict[str, Any]) -> dict[str, Any]:
     for domain_key, domain in catalog["domains"].items():
         tally = {"implemented": 0, "partial": 0, "unimplemented": 0}
         for item in domain["items"]:
-            tally[item["status"]] += 1
+            status = item.get("status")
+            if status in tally:
+                tally[status] += 1
         count = len(domain["items"])
         weighted = sum(STATUS_WEIGHT[status] * num for status, num in tally.items())
         per_domain[domain_key] = {

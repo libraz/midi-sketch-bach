@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,12 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import bachlib as rpc  # noqa: E402
+from bachlib.closure import (  # noqa: E402
+    WORK_DIR_SENTINEL,
+    WORK_DIR_SENTINEL_CONTENT,
+    _check_required_bits,
+    prepare_work_dir,
+)
 from bachlib.phases import fixture_for_seed  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
@@ -108,6 +115,41 @@ class CppDriftGuardTest(unittest.TestCase):
             rpc.CELLO_PRELUDE_BARPLAN,
             "CELLO_PRELUDE_BARPLAN drifted from kBarPlan in harness_fixture.cpp",
         )
+
+
+class ClosureWorkDirectorySafetyTest(unittest.TestCase):
+    def test_new_directory_gets_ownership_sentinel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp) / "closure"
+            prepare_work_dir(work_dir)
+            self.assertEqual(
+                (work_dir / WORK_DIR_SENTINEL).read_text(encoding="utf-8"),
+                WORK_DIR_SENTINEL_CONTENT,
+            )
+
+    def test_unowned_existing_directory_is_preserved_and_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp) / "closure"
+            work_dir.mkdir()
+            payload = work_dir / "keep.txt"
+            payload.write_text("user data", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unowned"):
+                prepare_work_dir(work_dir)
+            self.assertEqual(payload.read_text(encoding="utf-8"), "user data")
+
+    def test_owned_directory_is_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp) / "closure"
+            prepare_work_dir(work_dir)
+            stale = work_dir / "stale.mid"
+            stale.write_bytes(b"old")
+            prepare_work_dir(work_dir)
+            self.assertFalse(stale.exists())
+            self.assertTrue((work_dir / WORK_DIR_SENTINEL).is_file())
+
+    def test_repository_root_is_always_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            prepare_work_dir(REPO_ROOT)
 
 
 class ExpectedCarrierSequencesTest(unittest.TestCase):
@@ -269,6 +311,26 @@ class FugueCompleteBitCountTest(unittest.TestCase):
         self.assertEqual(int(names["ArpeggioFlowActive"]), 47)
         self.assertEqual(int(names["ImplicitVoiceTracked"]), 48)
         self.assertEqual(rpc.CELLO_PRELUDE_REQUIRED_BITS, (47, 48))
+
+
+class RequiredBitGuardTest(unittest.TestCase):
+    def test_fugue_complete_accepts_each_required_bit_exactly_once(self) -> None:
+        required = [(f"Rule{bit}", bit) for bit in range(47)]
+        self.assertIsNone(_check_required_bits("FugueComplete", required))
+
+    def test_fugue_complete_rejects_47_entries_with_a_missing_bit(self) -> None:
+        required = [(f"Rule{bit}", bit) for bit in range(46)]
+        required.append(("DuplicateBitUnderAnotherName", 45))
+        self.assertEqual(_check_required_bits("FugueComplete", required), 2)
+
+    def test_duplicate_name_is_rejected_even_when_bits_are_distinct(self) -> None:
+        required = [(f"Rule{bit}", bit) for bit in range(47)]
+        required[46] = ("Rule45", 46)
+        self.assertEqual(_check_required_bits("FugueComplete", required), 2)
+
+    def test_fugue_complete_reports_missing_set_not_pair_count(self) -> None:
+        required = [(f"Rule{bit}", bit) for bit in range(46)]
+        self.assertEqual(_check_required_bits("FugueComplete", required), 2)
 
 
 if __name__ == "__main__":

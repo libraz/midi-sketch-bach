@@ -155,6 +155,13 @@ def extract() -> dict[str, object]:
         chaconne, "kVarT0", source_label="buildChaconneFixture"
     )
     values["CHACONNE_CMIN_SCALE"] = _parse_scale_pcs(figuration, "chaconneInScale")
+    chaconne_blocks = re.search(r"kBlocks\[4\]\s*=\s*\{(.*?)\};", chaconne, re.S)
+    if chaconne_blocks is None:
+        raise AssertionError("could not locate kBlocks in buildChaconneFixture")
+    values["CHACONNE_BLOCK_NOTES_PER_BEAT"] = tuple(
+        int(re.findall(r"\d+", row)[-1])
+        for row in re.findall(r"\{([^{}]+)\}", chaconne_blocks.group(1))
+    )
 
     # OrganPrelude.
     organ = _builder_body(fixture, "buildOrganPreludeFixture")
@@ -194,6 +201,15 @@ def extract() -> dict[str, object]:
     )
     values["PASSACAGLIA_BAR_MINOR"] = _parse_bool_array(
         passacaglia, "kIsMinor", source_label="buildPassacagliaFixture"
+    )
+    passacaglia_blocks = re.search(
+        r"kBlocks\[kCycles\]\s*=\s*\{(.*?)\};", passacaglia, re.S
+    )
+    if passacaglia_blocks is None:
+        raise AssertionError("could not locate kBlocks in buildPassacagliaFixture")
+    values["PASSACAGLIA_BLOCK_NPB"] = tuple(
+        int(re.findall(r"\d+", row)[1])
+        for row in re.findall(r"\{([^{}]+)\}", passacaglia_blocks.group(1))
     )
 
     # TrioSonata.
@@ -531,6 +547,7 @@ def render(values: dict[str, object]) -> str:
         chaconne_ground=_fmt_int_tuple_inline(v["CHACONNE_GROUND"]),  # type: ignore[arg-type]
         chaconne_var_t0=_fmt_int_tuple_inline(v["CHACONNE_VAR_T0"]),  # type: ignore[arg-type]
         chaconne_cmin=_fmt_int_tuple_inline(v["CHACONNE_CMIN_SCALE"]),  # type: ignore[arg-type]
+        chaconne_block_npb=_fmt_int_tuple_inline(v["CHACONNE_BLOCK_NOTES_PER_BEAT"]),  # type: ignore[arg-type]
         organ_bar_root_inner=organ_bar_root_inner,
         organ_minor_rows=organ_minor_rows,
         organ_cmaj=_fmt_int_tuple_inline(v["ORGAN_PRELUDE_CMAJ_SCALE"]),  # type: ignore[arg-type]
@@ -541,6 +558,7 @@ def render(values: dict[str, object]) -> str:
         passacaglia_var_t0=_fmt_int_tuple_inline(v["PASSACAGLIA_VAR_T0"]),  # type: ignore[arg-type]
         passacaglia_bar_root=_fmt_int_tuple_inline(v["PASSACAGLIA_BAR_ROOT"]),  # type: ignore[arg-type]
         passacaglia_bar_minor=_fmt_bool_tuple_inline(v["PASSACAGLIA_BAR_MINOR"]),  # type: ignore[arg-type]
+        passacaglia_block_npb=_fmt_int_tuple_inline(v["PASSACAGLIA_BLOCK_NPB"]),  # type: ignore[arg-type]
         trio_bar_root=_fmt_int_tuple_inline(v["TRIO_SONATA_BAR_ROOT"]),  # type: ignore[arg-type]
         trio_bar_minor=_fmt_bool_tuple_inline(v["TRIO_SONATA_BAR_MINOR"]),  # type: ignore[arg-type]
         trio_v0_base=v["TRIO_SONATA_V0_BASE"],
@@ -671,7 +689,7 @@ CELLO_PRELUDE_FIGURES: tuple[tuple[int, int, int, int], ...] = (
 # Chaconne chaconne fixture mirror. Keep byte-identical with kGroundPitch /
 # kVarT0 / the C-minor scale walk in buildChaconneFixture
 # (src/composer/harness_fixture.cpp) or the structural predictor reports false
-# mismatches. A drift-guard test (P16-D) asserts these match the C++ source.
+# mismatches. The generated-mirror drift guard asserts these match the C++ source.
 #   kGroundPitch[bar in cycle]: descending tetrachord C3 Bb2 Ab2 G2.
 CHACONNE_GROUND: tuple[int, ...] = {chaconne_ground}
 # kVarT0[bar in cycle]: the lowest variation tone of each chord (i VII VI V
@@ -681,7 +699,7 @@ CHACONNE_VAR_T0: tuple[int, ...] = {chaconne_var_t0}
 CHACONNE_CMIN_SCALE: tuple[int, ...] = {chaconne_cmin}
 # Per-block notes-per-beat (kBlocks in buildChaconneFixture): Ground=quarter,
 # Respond=eighth, Propel/Assert=sixteenth. Used by the variation predictor.
-CHACONNE_BLOCK_NOTES_PER_BEAT: tuple[int, ...] = (1, 2, 4, 4)
+CHACONNE_BLOCK_NOTES_PER_BEAT: tuple[int, ...] = {chaconne_block_npb}
 
 
 def chaconne_scale_up(midi: int, steps: int) -> int:
@@ -815,7 +833,7 @@ PASSACAGLIA_BAR_ROOT: tuple[int, ...] = {passacaglia_bar_root}
 PASSACAGLIA_BAR_MINOR: tuple[bool, ...] = {passacaglia_bar_minor}
 # Per-cycle notes-per-beat (kBlocks in buildPassacagliaFixture): cycle0=eighth,
 # cycle1/2=sixteenth. Used by the variation predictor.
-PASSACAGLIA_BLOCK_NPB: tuple[int, ...] = (2, 4, 4)
+PASSACAGLIA_BLOCK_NPB: tuple[int, ...] = {passacaglia_block_npb}
 
 # TrioSonata organ-trio-sonata fixture mirror. Keep byte-identical with kBarRoot /
 # kBarMinor and the per-voice scalar-wave / pedal construction in

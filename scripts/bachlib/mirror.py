@@ -42,7 +42,7 @@ CELLO_PRELUDE_FIGURES: tuple[tuple[int, int, int, int], ...] = (
 # Chaconne chaconne fixture mirror. Keep byte-identical with kGroundPitch /
 # kVarT0 / the C-minor scale walk in buildChaconneFixture
 # (src/composer/harness_fixture.cpp) or the structural predictor reports false
-# mismatches. A drift-guard test (P16-D) asserts these match the C++ source.
+# mismatches. The generated-mirror drift guard asserts these match the C++ source.
 #   kGroundPitch[bar in cycle]: descending tetrachord C3 Bb2 Ab2 G2.
 CHACONNE_GROUND: tuple[int, ...] = (48, 46, 44, 43)
 # kVarT0[bar in cycle]: the lowest variation tone of each chord (i VII VI V

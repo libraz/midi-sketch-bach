@@ -4,8 +4,8 @@ The C++ validator embeds an ``info.texture_metrics`` object in the generated.v1
 JSON. This test regenerates several forms with ``bach_cli`` and asserts that
 ``texture_metrics.compute_texture_metrics`` reproduces those values from the
 same note array. Integer fields must match exactly; floating-point fields are
-compared against the serialized C++ value rounded to the JSON writer's six
-significant figures, which is the precision the embedded values actually carry.
+compared against the serialized C++ value rounded to the JSON writer's 17
+significant figures, which preserves a round-trippable IEEE-754 double.
 
 The form set spans both 4/4 pieces and the 3/4 passacaglia so the
 meter-independence of ``avg_active_voices`` and ``mono_ratio`` (tick-weighted
@@ -38,12 +38,11 @@ _FORMS = ("fugue", "toccata_and_fugue", "passacaglia", "chorale_prelude")
 def _serialized(value: float) -> float:
     """Round ``value`` to the JSON writer's serialization precision.
 
-    The generated.v1 JSON writer prints doubles with ``std::ostringstream``'s
-    default formatting, i.e. six significant figures (equivalent to Python's
-    ``%.6g``). The embedded validator values are therefore only that precise,
-    so the Python recomputation is rounded the same way before comparison.
+    The generated.v1 JSON writer prints doubles with 17 significant figures.
+    Mirror that formatting before comparison so both sides exercise the wire
+    representation rather than relying on Python's display formatting.
     """
-    return float(f"{value:.6g}")
+    return float(f"{value:.17g}")
 
 
 @unittest.skipUnless(BACH_CLI.exists(), f"bach_cli not built at {BACH_CLI}")
@@ -96,9 +95,8 @@ class TextureMetricsEquivalenceTest(unittest.TestCase):
                     f"{form}: compass_violation_count",
                 )
 
-                # The C++ value is the recomputed value rounded to the JSON
-                # writer's six significant figures, so rounding the Python
-                # recomputation the same way must reproduce it exactly.
+                # Round through the same 17-significant-digit wire format used
+                # by JsonWriter before comparing the recomputed values.
                 self.assertEqual(
                     _serialized(computed.avg_active_voices),
                     cpp["avg_active_voices"],

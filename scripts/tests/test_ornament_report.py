@@ -65,8 +65,8 @@ class DistributionSummaryTest(unittest.TestCase):
         self.assertEqual(summary["quarter_counts"], [1, 1, 2, 1])
         self.assertEqual(summary["middle_half_count"], 3)
         self.assertEqual(summary["cadence_window_count"], 1)
-        self.assertEqual(summary["most_common_bar"], 9)
-        self.assertEqual(summary["bar_histogram"]["9"], 2)
+        self.assertEqual(summary["most_common_bar"], 10)
+        self.assertEqual(summary["bar_histogram"]["10"], 2)
 
     def test_empty_input(self) -> None:
         summary = ornament_report.distribution_summary([], total_bars=8)

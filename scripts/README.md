@@ -20,14 +20,15 @@ that reads them also takes an explicit path flag.
 
 | Command | Purpose | Inputs | Outputs | Consumed by |
 |---|---|---|---|---|
-| `closure` | Phase closure harness: drives `bach_cli --composer-phase <PhaseN>` across seeds, scores via bach-mcp, checks model threshold + required rule bits + byte-stable structural layout. Primary gate for composer changes. `--jobs N` parallelizes seeds (deterministic report). | built `bach_cli`, `../bach-mcp/dist/index.js` | `build/closure_report_<tag>.json` + compact JSON summary on stdout | humans / CI gating |
+| `closure` | Phase closure harness: drives `bach_cli --composer-phase <PhaseN>` across seeds, scores via bach-mcp, checks model threshold + required rule bits + byte-stable structural layout. It is a scoring-engine/fixture regression harness, not the shipped-form product gate. `--jobs N` parallelizes seeds (deterministic report). | built `bach_cli`, `../bach-mcp/dist/index.js` | `build/closure_report_<tag>.json` + compact JSON summary on stdout | humans / CI gating |
 | `listening` | Build a listening packet: generate 20 seeds, score, render top-N to WAV. | `bach_cli`, bach-mcp | `build/listening_packet/` (manifest.json, WAVs, JSON) | human audition |
 | `render` | Render one generated.json to a WAV (simple organ-like synth, no SoundFont). | generated.json | WAV file | human audition |
-| `texture-gate` | Sweep seed × form and check fugue texture gates (active voices, silence, repeated runs, compass, entry-plan nonperiodicity, model score: v1 cross-entropy floor + per-form v2 KL floor). | `bach_cli`, bach-mcp | JSON to stdout (`--out` optional) | humans / CI gating |
+| `texture-gate` | Sweep seed × shipped form and check texture gates (active voices, silence, repeated runs, compass, entry-plan nonperiodicity, model score: v1 cross-entropy floor + per-form v2 KL floor). Run `texture-gate --forms all` for the scored product gate; the native `FinalScoreGateSweepsEveryShippedFormConfiguration` test covers final validation for every supported request combination. | `bach_cli`, bach-mcp | JSON to stdout (`--out` optional) | humans / CI gating |
 | `morphology` | Analyze generated.v1 on a 32nd-note piano-roll grid, optionally compare a Bach reference, rank local deviations, map them to provenance span/intent, and optionally emit occupancy/onset PBM plus coverage PGM planes. Informational only; it does not change a quality-gate verdict. | generated.v1, optional provenance.v1, `../bach-mcp/dist/index.js` | versioned JSON report, optional PBM/PGM | humans / builder diagnosis |
 | `completion` | Fugue completion diagnostic report (texture gates, entry plan, voice occupancy, subject rhythm, intent spans). | `bach_cli` | markdown to stdout (`--out` md file, `--json-out` JSON) | humans |
 | `coverage` | Bach-technique coverage report; drift-guards `technique_catalog.json` evidence tokens against live C++ enums/rules. | `technique_catalog.json`, `src/composer/{provenance.h,voice_intent.h,validator.cpp}` | text/JSON to stdout (`--json`, `--out`) | humans / drift guard |
-| `validate` | generated.v1 schema validation (no external jsonschema dep). Exit 0 pass / 1 mismatch / 2 IO error. | generated.json, `../bach-mcp/schema/generated.v1.json` | exit code + messages | C++ `schema_validation_test` (via `validate_generated_json.py`) |
+| `validate` | generated.v1 schema validation (no external jsonschema dep). Exit 0 pass / 1 mismatch / 2 IO error. | generated.json, vendored `schema/generated.v1.json` | exit code + messages | C++ `schema_validation_test` (via `validate_generated_json.py`) |
+| `ornament-report` | Report ornament placement and vocabulary by one-based bar number, or sweep form × character × seed. | generated.v1 + provenance.v1, or `bach_cli` | JSON to stdout (`--out` optional) | ornament-distribution review |
 | `extract-subject` | WTC I fugue-subject features from Algomus labels (external clone; not vendored). | `../algomus-data`, `../bach-mcp/data/reference` | `build/algomus_wtc_subject_features.json` | human analysis |
 | `extract-subject-stats` | Fugue-subject window statistics (2nd-order interval Markov, rhythm bigrams, contour archetypes, Ryden feature distributions) from Algomus labels + a monophonic-prefix heuristic over corpus fugue movements. | `../algomus-data`, `../bach-mcp/data/reference` | intermediate JSON (default `build/subject_stats.json`, not vendored) | offline subject synthesis |
 | `synth-subjects` | Offline fugue-subject pool synthesis: deterministic seeded sampling from the subject-window statistics under the catalog hard constraints (16 positions, 71,72 tail, register envelope, interval whitelist, exact 4-bar rhythm), degeneracy guards, KL-shape ranking with a trigram-NLL floor, dedup against the shipped subjects. | `build/subject_stats.json`, `src/composer/minor_material.h` (read-only) | intermediate JSON (default `build/subject_pool.json`, not vendored) | subject qualification harness |
@@ -58,6 +59,20 @@ that reads them also takes an explicit path flag.
 
 Tests import these modules directly (`import bachlib as rpc` for the
 mirror/predictor surface).
+
+## Melodic scorer environment
+
+The free-counterpoint measurement path can be configured with environment
+variables. Shipped carrier-based generation does not consult these settings.
+
+| Variable | Values / default |
+|---|---|
+| `BACH_MELODIC_SELECTION` | `current` (default) or `shadow` |
+| `BACH_MELODIC_STEP_BONUS` | `0` disables the step bonus; enabled otherwise |
+| `BACH_MELODIC_WP` | proximity weight, default `2.0` |
+| `BACH_MELODIC_WR` | range weight, default `1.0` |
+| `BACH_MELODIC_WSD` | scale-degree weight, default `0.0` |
+| `BACH_MELODIC_WM` | interval-Markov weight, default `0.0` |
 
 ## Tests
 

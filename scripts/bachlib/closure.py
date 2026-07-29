@@ -54,6 +54,36 @@ from bachlib.phases import (
 )
 from bachlib.predictors import structural_check
 
+WORK_DIR_SENTINEL = ".bach-closure-workdir"
+WORK_DIR_SENTINEL_CONTENT = "midi-sketch-bach closure work directory\n"
+
+
+def prepare_work_dir(work_dir: Path) -> None:
+    """Create or reset a closure-owned work directory.
+
+    Existing directories are removed only when they contain the exact sentinel
+    written by a previous closure run. Broad repository/home/root targets and
+    symlinks are always rejected.
+    """
+    resolved = work_dir.resolve()
+    forbidden = {
+        Path("/").resolve(),
+        Path.home().resolve(),
+        REPO_ROOT.resolve(),
+        REPO_ROOT.parent.resolve(),
+    }
+    if resolved in forbidden or work_dir.is_symlink():
+        raise ValueError(f"unsafe closure work directory: {work_dir}")
+    sentinel = work_dir / WORK_DIR_SENTINEL
+    if work_dir.exists():
+        if not work_dir.is_dir() or not sentinel.is_file():
+            raise ValueError(f"refusing to remove unowned work directory: {work_dir}")
+        if sentinel.read_text(encoding="utf-8") != WORK_DIR_SENTINEL_CONTENT:
+            raise ValueError(f"invalid closure work-directory sentinel: {sentinel}")
+        shutil.rmtree(work_dir)
+    work_dir.mkdir(parents=True)
+    (work_dir / WORK_DIR_SENTINEL).write_text(WORK_DIR_SENTINEL_CONTENT, encoding="utf-8")
+
 
 def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]:
     midi = work_dir / f"bach_harness_{tag}_seed{seed}.mid"
@@ -110,19 +140,32 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
     @param required_rule_bit Parsed (name, bit) pairs supplied on the CLI.
     @return An exit code (2) to abort with, or None when the guard passes.
     """
-    if phase == "FugueComplete" and len(required_rule_bit) < FUGUE_COMPLETE_REQUIRED_BIT_COUNT:
+    names = [name for name, _ in required_rule_bit]
+    bits = [bit for _, bit in required_rule_bit]
+    duplicate_names = sorted({name for name in names if names.count(name) > 1})
+    duplicate_bits = sorted({bit for bit in bits if bits.count(bit) > 1})
+    if duplicate_names or duplicate_bits:
         sys.stderr.write(
-            "FugueComplete closure requires all "
-            f"{FUGUE_COMPLETE_REQUIRED_BIT_COUNT} --required-rule-bit masks "
-            f"(got {len(required_rule_bit)}); the 47-bit milestone gate "
-            "must not be bypassed. See the RuleBit catalog in this script.\n"
+            "duplicate --required-rule-bit entries are not allowed; "
+            f"duplicate names={duplicate_names}, duplicate bits={duplicate_bits}.\n"
         )
         return 2
 
-    supplied = {bit for _, bit in required_rule_bit}
+    supplied = set(bits)
 
     def missing(bits: tuple[int, ...]) -> list[int]:
         return [b for b in bits if b not in supplied]
+
+    if phase == "FugueComplete":
+        required = tuple(range(FUGUE_COMPLETE_REQUIRED_BIT_COUNT))
+        miss = missing(required)
+        if miss:
+            sys.stderr.write(
+                "FugueComplete closure requires --required-rule-bit masks for "
+                f"every organ-fugue RuleBit 0..{FUGUE_COMPLETE_REQUIRED_BIT_COUNT - 1}; "
+                f"missing {miss}.\n"
+            )
+            return 2
 
     if phase == "CelloPrelude":
         miss = missing(CELLO_PRELUDE_REQUIRED_BITS)
@@ -245,8 +288,7 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--all-bits-min",
         type=int,
-        default=10,
-        help="gate (4): minimum number of seeds in which ALL required rule bits fire",
+        help="gate (4): minimum all-required-bits seeds (default: --seeds)",
     )
     parser.add_argument(
         "--jobs",
@@ -299,6 +341,7 @@ def run(args: argparse.Namespace) -> int:
     required_rule_min = (
         args.required_rule_min if args.required_rule_min is not None else args.seeds
     )
+    all_bits_min = args.all_bits_min if args.all_bits_min is not None else args.seeds
     report_path = args.out or (REPO_ROOT / "build" / f"closure_report_{tag}.json")
     work_dir = args.work_dir or (report_path.parent / f"closure_work_{tag}")
     index_js = args.bach_mcp_index or Path(os.environ.get("BACH_MCP_INDEX_JS", DEFAULT_INDEX_JS))
@@ -310,9 +353,11 @@ def run(args: argparse.Namespace) -> int:
         sys.stderr.write(f"bach-mcp index.js missing: {index_js}\n")
         return 2
 
-    if work_dir.exists():
-        shutil.rmtree(work_dir)
-    work_dir.mkdir(parents=True)
+    try:
+        prepare_work_dir(work_dir)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
     def run_seed(seed: int) -> dict[str, Any]:
@@ -426,7 +471,7 @@ def run(args: argparse.Namespace) -> int:
     # Require all-bits-fire seeds in >= all_bits_min of the runs.
     # Only enforced when rule bits are actually being checked.
     all_bits_pass = (
-        all_bits_seed_count >= args.all_bits_min if args.required_rule_bit else True
+        all_bits_seed_count >= all_bits_min if args.required_rule_bit else True
     )
     passed = compute_passed(
         seed_count=args.seeds,
@@ -457,7 +502,7 @@ def run(args: argparse.Namespace) -> int:
         "required_rule_min": required_rule_min,
         "required_rule_counts": rule_hit_counts,
         "required_rule_pass": rule_pass,
-        "all_bits_min": args.all_bits_min,
+        "all_bits_min": all_bits_min,
         "all_bits_seed_count": all_bits_seed_count,
         "all_bits_pass": all_bits_pass,
         "passed": passed,

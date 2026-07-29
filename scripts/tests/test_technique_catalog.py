@@ -115,6 +115,29 @@ class CoverageComputationTest(unittest.TestCase):
         self.assertGreater(t["weighted_coverage"], 0.0)
         self.assertLessEqual(t["weighted_coverage"], 1.0)
 
+    def test_unknown_status_is_reported_without_crashing_coverage(self) -> None:
+        catalog = {
+            "domains": {
+                "test": {
+                    "items": [
+                        {
+                            "id": "bad",
+                            "status": "future",
+                            "evidence": {
+                                "rule_bits": [],
+                                "validator_rules": [],
+                                "voice_intents": [],
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+        result = cov.compute_coverage(catalog)
+        self.assertEqual(result["totals"]["count"], 1)
+        problems = cov.validate_catalog(catalog, cov.known_tokens())
+        self.assertTrue(problems["invalid_status"])
+
 
 if __name__ == "__main__":
     unittest.main()
