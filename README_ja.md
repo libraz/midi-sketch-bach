@@ -31,7 +31,8 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 | パッサカリア | BWV 582 | 3 |
 | 幻想曲とフーガ | BWV 537, 542 | 3 |
 
-**無伴奏弦楽作品** ── 和声駆動・単旋律：
+**弦楽作品** ── 独奏弦の音色を想定した和声駆動の書法です。シャコンヌは
+不変の低音を軸に複数声部で実現します：
 
 | 形式 | 範とする作品 | 楽器 |
 |------|-------------|------|
@@ -46,10 +47,12 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 
 `Goldberg Variations` は BWV 988 の楽譜再現ではなく、圧縮した構造モデルです。
 専用の32音からなるアリア低音句を4小節単位へ写像し、`--scale full` では
-アリア、30変奏（9つのカノンと2旋律のクォドリベット枠）、アリア・ダ・カーポの
-全128小節を生成します。
+アリア、30変奏（9つのカノンと2旋律のクォドリベット枠）、終端コーダを伴う
+アリア再提示の全128小節を生成します。
 
-フーガでは提示部・真正/変格応答・対主題・嬉遊部・ストレッタを正しく構成し、平行5度・平行8度は禁則として排除、声部交差も解決します。
+フーガでは提示部・真正/変格応答・対主題・嬉遊部・ストレッタを構成します。
+最終スコア validator は出力ノート上の平行5度・平行8度と声部交差を監査し、
+固定素材に由来する検出結果も報告します。
 
 ## クイックスタート
 
@@ -89,13 +92,13 @@ make demo   # http://localhost:8080/demo/
 
 | オプション | 説明 | デフォルト |
 |-----------|------|-----------|
-| `--form FORM` | 楽曲形式 | `prelude_and_fugue` |
+| `--form FORM` | 楽曲形式 | `fugue` |
 | `--key KEY` | 調（例: `g_minor`, `D_major`） | `C_major` |
-| `--character CH` | `severe`, `playful`, `noble`, `restless` | 自動 |
+| `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | 自動 |
-| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short`（フーガは `medium`） |
+| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
 | `--bars N` | 目標小節数（`--scale`を上書き） | - |
-| `--bpm N` | テンポ（40-200） | `72` |
+| `--bpm N` | テンポ（40-200） | `100` |
 | `--seed N` | 乱数シード（0 = ランダム） | `0` |
 | `--json` | JSONイベントデータ出力 | - |
 | `--generated-json` | generated.v1 + provenance.v1 JSON出力 | - |

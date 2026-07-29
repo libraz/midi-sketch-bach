@@ -31,7 +31,8 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 | Passacaglia | BWV 582 | 3 |
 | Fantasia and Fugue | BWV 537, 542 | 3 |
 
-**Solo String Works** — harmony-driven, single line:
+**String Works** — harmony-driven writing for a solo-string timbre; the
+Chaconne uses a polyphonic realization around its immutable bass:
 
 | Form | After the manner of | Instrument |
 |------|---------------------|------------|
@@ -47,9 +48,12 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 `Goldberg Variations` is a compressed structural model, not a reconstruction of
 the BWV 988 score. Its dedicated 32-tone aria-bass phrase is mapped to four-bar
 slots; `--scale full` produces 128 bars: aria, 30 variations (nine canons and a
-two-tune Quodlibet slot), and an exact aria da capo.
+two-tune Quodlibet slot), and an aria restatement with an explicit terminal
+coda.
 
-Every fugue enforces proper exposition, real/tonal answer, countersubject, episodes, and stretto. Parallel fifths and octaves are forbidden. Voice crossing is resolved.
+Every fugue builds an exposition, real/tonal answer, countersubject, episodes,
+and stretto. The final-score validator audits parallel fifths/octaves and voice
+crossing on the emitted notes and reports any authored-material findings.
 
 ## Quick Start
 
@@ -89,17 +93,17 @@ make demo   # http://localhost:8080/demo/
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--form FORM` | Composition form | `prelude_and_fugue` |
+| `--form FORM` | Composition form | `fugue` |
 | `--key KEY` | Key (e.g. `g_minor`, `D_major`) | `C_major` |
-| `--character CH` | `severe`, `playful`, `noble`, `restless` | auto |
+| `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | auto |
-| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` (`medium` for fugue) |
+| `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
 | `--bars N` | Target bar count (overrides `--scale`) | - |
-| `--bpm N` | Tempo (40-200) | `72` |
+| `--bpm N` | Tempo (40-200) | `100` |
 | `--seed N` | Random seed (0 = random) | `0` |
 | `--json` | Output JSON event data | - |
 | `--generated-json` | Output generated.v1 + provenance.v1 JSON | - |
-| `--free-counterpoint` | Experimental: generate the inner voice via scored search (off by default) | - |
+| `--free-counterpoint` | Experimental: generate the Passacaglia secondary counterline via scored search (off by default); other forms report an explicit unavailable diagnostic | - |
 | `-o FILE` | Output path | `output.mid` |
 
 ## Build
