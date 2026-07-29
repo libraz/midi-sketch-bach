@@ -1,6 +1,6 @@
 {
   "name": "@libraz/midi-sketch-bach",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
   "packageManager": "yarn@4.12.0",
   "description": "Bach Instrumental MIDI Generator - WASM library",
@@ -47,10 +47,10 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.4",
+    "@biomejs/biome": "^2.5.6",
     "@vitest/coverage-v8": "4.1.10",
     "esbuild": "^0.28.1",
-    "lint-staged": "^17.0.8",
+    "lint-staged": "^17.2.0",
     "simple-git-hooks": "^2.13.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
