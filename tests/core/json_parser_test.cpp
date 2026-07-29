@@ -36,6 +36,21 @@ TEST(JsonParserTest, DecodesSupportedEscapesAndUnicode) {
   EXPECT_EQ(values["text"].string_val, std::string("A\n\t\"\\/\b\f\ré"));
 }
 
+TEST(JsonParserTest, DecodesUnicodeSurrogatePairAndRejectsLoneSurrogates) {
+  std::map<std::string, JsonValue> values;
+  ASSERT_EQ(parse(R"({"text":"G clef \uD834\uDD1E"})", &values), JsonParseStatus::Ok);
+  EXPECT_EQ(values["text"].string_val, std::string("G clef \xF0\x9D\x84\x9E"));
+
+  for (const std::string& json : {
+           R"({"text":"\uD834"})",
+           R"({"text":"\uDD1E"})",
+           R"({"text":"\uD834\u0041"})",
+       }) {
+    SCOPED_TRACE(json);
+    EXPECT_EQ(parse(json, &values), JsonParseStatus::SyntaxError);
+  }
+}
+
 TEST(JsonParserTest, IntegralConversionsRejectFractionAndBounds) {
   std::map<std::string, JsonValue> values;
   ASSERT_EQ(parse(R"({"fraction":1.5,"negative":-1,"maximum":4294967295})", &values),

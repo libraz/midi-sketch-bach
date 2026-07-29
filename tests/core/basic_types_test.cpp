@@ -139,6 +139,20 @@ TEST(BasicTypesTest, FormTypeToString) {
   EXPECT_STREQ(formTypeToString(FormType::GoldbergVariations), "goldberg_variations");
 }
 
+TEST(BasicTypesTest, FormTypeToDisplayString) {
+  EXPECT_STREQ(formTypeToDisplayString(FormType::Fugue), "Fugue");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::PreludeAndFugue), "Prelude and Fugue");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::TrioSonata), "Trio Sonata");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::ChoralePrelude), "Chorale Prelude");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::ToccataAndFugue), "Toccata and Fugue");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::Passacaglia), "Passacaglia");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::FantasiaAndFugue), "Fantasia and Fugue");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::CelloPrelude), "Cello Prelude");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::Chaconne), "Chaconne");
+  EXPECT_STREQ(formTypeToDisplayString(FormType::GoldbergVariations), "Goldberg Variations");
+  EXPECT_STREQ(formTypeToDisplayString(static_cast<FormType>(255)), "Composition");
+}
+
 TEST(BasicTypesTest, FormTypeFromStringValidInputs) {
   EXPECT_EQ(formTypeFromString("fugue"), FormType::Fugue);
   EXPECT_EQ(formTypeFromString("prelude_and_fugue"), FormType::PreludeAndFugue);
@@ -206,6 +220,18 @@ TEST(BasicTypesTest, InstrumentTypeToString) {
   EXPECT_STREQ(instrumentTypeToString(InstrumentType::Violin), "violin");
   EXPECT_STREQ(instrumentTypeToString(InstrumentType::Cello), "cello");
   EXPECT_STREQ(instrumentTypeToString(InstrumentType::Guitar), "guitar");
+}
+
+TEST(BasicTypesTest, FormInstrumentCompatibilityProtectsDesignedCompass) {
+  EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::Fugue, InstrumentType::Organ));
+  EXPECT_FALSE(isInstrumentCompatibleWithForm(FormType::Fugue, InstrumentType::Cello));
+  EXPECT_TRUE(
+      isInstrumentCompatibleWithForm(FormType::GoldbergVariations, InstrumentType::Harpsichord));
+  EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::GoldbergVariations, InstrumentType::Piano));
+  EXPECT_FALSE(
+      isInstrumentCompatibleWithForm(FormType::GoldbergVariations, InstrumentType::Violin));
+  EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::CelloPrelude, InstrumentType::Cello));
+  EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::Chaconne, InstrumentType::Violin));
 }
 
 // ---------------------------------------------------------------------------

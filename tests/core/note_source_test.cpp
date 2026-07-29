@@ -80,6 +80,13 @@ TEST(BachNoteSourceTest, SpecificSourceStringsMatchJsonFormat) {
   EXPECT_STREQ(bachNoteSourceToString(BachNoteSource::QuodlibetMelody), "quodlibet_melody");
 }
 
+TEST(BachNoteSourceTest, RemovingUnusedGoldbergNamesPreservesPublicValues) {
+  EXPECT_EQ(static_cast<std::uint8_t>(BachNoteSource::GoldbergSoggetto), 25u);
+  EXPECT_EQ(static_cast<std::uint8_t>(BachNoteSource::QuodlibetMelody), 29u);
+  EXPECT_EQ(static_cast<std::uint8_t>(BachNoteSource::ChaconneBass), 32u);
+  EXPECT_EQ(static_cast<std::uint8_t>(BachNoteSource::CadenceApproach), 37u);
+}
+
 // ---------------------------------------------------------------------------
 // BachTransformStep string conversion tests
 // ---------------------------------------------------------------------------
@@ -214,7 +221,6 @@ TEST(ProtectionLevelTest, ImmutableSources) {
   EXPECT_EQ(getProtectionLevel(BachNoteSource::ToccataFigure), ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::ChaconneBass), ProtectionLevel::Immutable);
   EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergSoggetto), ProtectionLevel::Immutable);
-  EXPECT_EQ(getProtectionLevel(BachNoteSource::GoldbergFughetta), ProtectionLevel::Immutable);
 }
 
 TEST(ProtectionLevelTest, FlexibleSources) {
@@ -411,12 +417,7 @@ TEST(BachNoteSourceTest, NonUnknownSourcesNeverReturnUnknownString) {
       BachNoteSource::GoldbergBass,
       BachNoteSource::GoldbergFigura,
       BachNoteSource::GoldbergSoggetto,
-      BachNoteSource::GoldbergDance,
-      BachNoteSource::GoldbergFughetta,
-      BachNoteSource::GoldbergInvention,
       BachNoteSource::QuodlibetMelody,
-      BachNoteSource::GoldbergOverture,
-      BachNoteSource::GoldbergSuspension,
   };
   for (auto src : non_unknown) {
     const char* str = bachNoteSourceToString(src);

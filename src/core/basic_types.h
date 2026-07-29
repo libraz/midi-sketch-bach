@@ -340,6 +340,9 @@ enum class FormType : uint8_t {
 /// @brief Convert FormType to human-readable string.
 const char* formTypeToString(FormType form);
 
+/// @brief Convert FormType to its human-facing display name.
+const char* formTypeToDisplayString(FormType form);
+
 /// @brief Parse FormType from string (e.g. "fugue", "prelude_and_fugue").
 /// @param str String representation of form type.
 /// @return Parsed FormType, defaults to FormType::Fugue on unrecognized input.
@@ -361,6 +364,10 @@ const char* instrumentTypeToString(InstrumentType inst);
 /// @param form The form type.
 /// @return Default instrument appropriate for the form.
 InstrumentType defaultInstrumentForForm(FormType form);
+
+/// @brief Whether an explicitly requested instrument preserves the form's
+///        designed compass and texture.
+bool isInstrumentCompatibleWithForm(FormType form, InstrumentType instrument);
 
 /// @brief Parse an InstrumentType from a string.
 /// @param str String such as "organ", "harpsichord", "piano", "violin", "cello", "guitar".
@@ -466,6 +473,7 @@ struct Track {
   uint8_t channel = 0;
   uint8_t program = 0;  // GM program number
   std::string name;
+  std::string instrument_name;  ///< SMF FF04 instrument-name payload.
   std::vector<NoteEvent> notes;
   std::vector<MidiEvent> events;  // Raw MIDI events (CC, pitch bend, etc.)
   /// Arc-driven control-change events. Empty by default: tracks without

@@ -48,6 +48,11 @@ struct ParsedMidi {
 ///
 /// Handles note on/off pairing, running status, tempo meta-events,
 /// and BACH metadata text events.
+///
+/// @note Internal verification support only. The shipped product is a
+/// generator and intentionally exposes no MIDI-import surface through the
+/// CLI, C API, or WASM. Tests use MidiReader as an independent SMF round-trip
+/// oracle for MidiWriter output.
 class MidiReader {
  public:
   MidiReader() = default;

@@ -8,6 +8,7 @@
 
 #include "core/basic_types.h"
 #include "core/gm_program.h"
+#include "core/pitch_utils.h"
 
 namespace bach {
 namespace {
@@ -71,6 +72,9 @@ TEST(InstrumentProgramTest, ApplyInstrumentFillsEmptyNamesWithVoiceIndex) {
   EXPECT_EQ(tracks[0].name, "Voice 0");
   EXPECT_EQ(tracks[1].name, "Voice 1");
   EXPECT_EQ(tracks[2].name, "Voice 2");
+  EXPECT_EQ(tracks[0].instrument_name, "cello");
+  EXPECT_EQ(tracks[1].instrument_name, "cello");
+  EXPECT_EQ(tracks[2].instrument_name, "cello");
 }
 
 TEST(InstrumentProgramTest, ApplyInstrumentPreservesExistingNames) {
@@ -101,6 +105,30 @@ TEST(InstrumentProgramTest, ApplyInstrumentOverwritesPreviousProgram) {
 
   EXPECT_EQ(tracks[0].program, GmProgram::kHarpsichord);
   EXPECT_EQ(tracks[1].program, GmProgram::kHarpsichord);
+}
+
+TEST(InstrumentProgramTest, OutputRangeUsesOneOctaveForTheEntirePiece) {
+  std::vector<NoteEvent> notes(2);
+  notes[0].pitch = 36;
+  notes[1].pitch = 84;
+
+  const auto shift = selectOutputOctaveShift(notes, Key::B, InstrumentType::Violin);
+  ASSERT_TRUE(shift.has_value());
+  EXPECT_EQ(*shift, 12);
+  const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Violin);
+  for (const NoteEvent& note : notes) {
+    const int rendered = static_cast<int>(note.pitch) + keyTranspositionSemitones(Key::B) + *shift;
+    EXPECT_GE(rendered, range.low);
+    EXPECT_LE(rendered, range.high);
+  }
+}
+
+TEST(InstrumentProgramTest, OutputRangeRejectsPieceThatNoOctaveCanFit) {
+  std::vector<NoteEvent> notes(2);
+  notes[0].pitch = 36;
+  notes[1].pitch = 96;
+
+  EXPECT_FALSE(selectOutputOctaveShift(notes, Key::B, InstrumentType::Violin).has_value());
 }
 
 }  // namespace

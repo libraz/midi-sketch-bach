@@ -2,7 +2,20 @@
 
 #include "core/basic_types.h"
 
+#include <array>
+
 namespace bach {
+namespace {
+
+constexpr std::array<const char*, 10> kFormDisplayNames = {
+    "Fugue",       "Prelude and Fugue",  "Trio Sonata",   "Chorale Prelude", "Toccata and Fugue",
+    "Passacaglia", "Fantasia and Fugue", "Cello Prelude", "Chaconne",        "Goldberg Variations",
+};
+static_assert(kFormDisplayNames.size() ==
+                  static_cast<std::size_t>(FormType::GoldbergVariations) + 1,
+              "Form display names must cover every FormType");
+
+}  // namespace
 
 const char* voiceRoleToString(VoiceRole role) {
   switch (role) {
@@ -154,6 +167,11 @@ const char* formTypeToString(FormType form) {
   return "unknown";
 }
 
+const char* formTypeToDisplayString(FormType form) {
+  const std::size_t index = static_cast<std::size_t>(form);
+  return index < kFormDisplayNames.size() ? kFormDisplayNames[index] : "Composition";
+}
+
 FormType formTypeFromString(const std::string& str) {
   if (str == "fugue")
     return FormType::Fugue;
@@ -248,6 +266,26 @@ InstrumentType defaultInstrumentForForm(FormType form) {
   }
 
   return InstrumentType::Organ;
+}
+
+bool isInstrumentCompatibleWithForm(FormType form, InstrumentType instrument) {
+  switch (form) {
+    case FormType::Fugue:
+    case FormType::PreludeAndFugue:
+    case FormType::TrioSonata:
+    case FormType::ChoralePrelude:
+    case FormType::ToccataAndFugue:
+    case FormType::Passacaglia:
+    case FormType::FantasiaAndFugue:
+      return instrument == InstrumentType::Organ;
+    case FormType::CelloPrelude:
+      return instrument == InstrumentType::Cello;
+    case FormType::Chaconne:
+      return instrument == InstrumentType::Violin;
+    case FormType::GoldbergVariations:
+      return instrument == InstrumentType::Harpsichord || instrument == InstrumentType::Piano;
+  }
+  return false;
 }
 
 InstrumentType instrumentTypeFromString(const std::string& str) {

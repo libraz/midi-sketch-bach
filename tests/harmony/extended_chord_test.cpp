@@ -200,8 +200,9 @@ TEST(ExtendedDegreeMinorSemitonesTest, bIII_Is3) {
   EXPECT_EQ(degreeMinorSemitones(ChordDegree::bIII), 3);
 }
 
-TEST(ExtendedDegreeMinorSemitonesTest, V_of_iii_Is11) {
-  EXPECT_EQ(degreeMinorSemitones(ChordDegree::V_of_iii), 11);
+TEST(ExtendedDegreeMinorSemitonesTest, V_of_iii_Is10) {
+  // In C minor, III is E-flat and its dominant is B-flat.
+  EXPECT_EQ(degreeMinorSemitones(ChordDegree::V_of_iii), 10);
 }
 
 }  // namespace

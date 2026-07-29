@@ -46,8 +46,9 @@ bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale, int& out_degree
 
 /// @brief Convert a MIDI pitch to an absolute scale degree spanning octaves.
 ///
-/// The absolute degree encodes both the octave and the within-octave degree:
-/// `abs_degree = octave * 7 + degree_in_octave`, where octave = pitch / 12.
+/// The absolute degree encodes both the tonic-relative octave and the
+/// within-octave degree: `abs_degree = tonic_octave * 7 + degree_in_octave`.
+/// This keeps degrees below a non-C tonic in the preceding tonic octave.
 /// Non-scale pitches are snapped to the nearest scale tone before conversion.
 ///
 /// @param pitch MIDI note number (0-127).

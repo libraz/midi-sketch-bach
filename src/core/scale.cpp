@@ -84,13 +84,17 @@ bool pitchToScaleDegree(uint8_t pitch, Key key, ScaleType scale, int& out_degree
 
 int pitchToAbsoluteDegree(uint8_t pitch, Key key, ScaleType scale) {
   // Snap non-scale tones to the nearest scale pitch first.
-  uint8_t snapped = nearestScaleTone(pitch, key, scale);
+  const uint8_t snapped = nearestScaleTone(pitch, key, scale);
 
-  int octave = static_cast<int>(snapped) / 12;
   int degree_in_octave = 0;
   pitchToScaleDegree(snapped, key, scale, degree_in_octave);
 
-  return octave * kScaleDegreeCount + degree_in_octave;
+  // Anchor the octave at the key tonic, not at MIDI pitch class C.  Degrees
+  // below a non-C tonic (for example F# below G) belong to the preceding tonic
+  // octave even though they share the tonic's MIDI octave number.
+  const int tonic_relative = static_cast<int>(snapped) - static_cast<int>(key);
+  const int tonic_octave = tonic_relative >= 0 ? tonic_relative / 12 : (tonic_relative - 11) / 12;
+  return tonic_octave * kScaleDegreeCount + degree_in_octave;
 }
 
 uint8_t absoluteDegreeToPitch(int abs_degree, Key key, ScaleType scale) {

@@ -4,6 +4,8 @@
 #include "core/json_helpers.h"
 
 #include <cmath>
+#include <iomanip>
+#include <locale>
 #include <sstream>
 
 namespace bach {
@@ -95,7 +97,11 @@ void JsonWriter::value(double val) {
     buffer_ += "null";
   } else {
     std::ostringstream oss;
-    oss << val;
+    // JSON numbers are locale-independent and must round-trip the IEEE-754
+    // value. A process-wide locale with ',' as the decimal separator must not
+    // leak into a wire-format payload.
+    oss.imbue(std::locale::classic());
+    oss << std::setprecision(17) << val;
     buffer_ += oss.str();
   }
   if (!needs_comma_.empty()) {

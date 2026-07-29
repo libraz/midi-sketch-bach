@@ -465,6 +465,19 @@ TEST(HarmonicTimelineCadenceTest, PerfectCadence) {
   EXPECT_EQ(evts.back().chord.degree, ChordDegree::I);
 }
 
+TEST(HarmonicTimelineCadenceTest, ImperfectAuthenticCadenceUsesInvertedTonic) {
+  KeySignature c_major = {Key::C, false};
+  auto timeline =
+      HarmonicTimeline::createStandard(c_major, kTicksPerBar * 4, HarmonicResolution::Bar);
+  timeline.applyCadence(CadenceType::ImperfectAuthentic, c_major);
+  const auto& evts = timeline.events();
+  ASSERT_GE(evts.size(), 2u);
+  EXPECT_EQ(evts[evts.size() - 2].chord.degree, ChordDegree::V);
+  EXPECT_EQ(evts[evts.size() - 2].chord.quality, ChordQuality::Major);
+  EXPECT_EQ(evts.back().chord.degree, ChordDegree::I);
+  EXPECT_EQ(evts.back().chord.inversion, 1);
+}
+
 TEST(HarmonicTimelineCadenceTest, DeceptiveCadence) {
   KeySignature c_major = {Key::C, false};
   auto timeline =

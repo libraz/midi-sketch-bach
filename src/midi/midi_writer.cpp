@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "core/pitch_utils.h"
 #include "midi/midi_stream.h"
 
 namespace bach {
@@ -19,24 +20,12 @@ struct WriteEvent {
   uint8_t status = 0;
   uint8_t data1 = 0;
   uint8_t data2 = 0;
+  uint8_t data_length = 2;
   int priority = 0;  // Lower = earlier at same tick (note-off before note-on)
 };
 
-/// @brief Apply key transposition and clamp to valid MIDI range.
-/// @param pitch Original pitch in C major context.
-/// @param key Target key (Key::C = 0 offset, Key::Cs = +1, etc.).
-/// @return Transposed and clamped MIDI pitch.
-uint8_t applyKeyTranspose(uint8_t pitch, Key key) {
-  int offset = static_cast<int>(key);
-  int result = static_cast<int>(pitch) + offset;
-  if (result < 0)
-    result = 0;
-  if (result > 127)
-    result = 127;
-  return static_cast<uint8_t>(result);
-}
-
 constexpr std::uint32_t kMaxMidiTempoUsec = 0x00FFFFFF;
+constexpr std::uint32_t kMaxVlq = 0x0FFFFFFF;
 
 bool isValidTempo(std::uint16_t bpm) {
   return bpm > 0 && kMicrosecondsPerMinute / bpm <= kMaxMidiTempoUsec;
@@ -73,7 +62,8 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
 MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
                                    const std::vector<TempoEvent>& tempo_events,
                                    const std::vector<TimeSignatureEvent>& time_sig_events,
-                                   const KeySignature& key_signature, const std::string& metadata) {
+                                   const KeySignature& key_signature, const std::string& metadata,
+                                   int output_octave_shift) {
   data_.clear();
 
   for (const auto& tempo : tempo_events) {
@@ -84,6 +74,25 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
   for (const auto& time_signature : time_sig_events) {
     if (!isValidTimeSignature(time_signature.time_sig)) {
       return MidiWriterStatus::InvalidTimeSignature;
+    }
+  }
+  for (const auto& tempo : tempo_events) {
+    if (tempo.tick > kMaxVlq)
+      return MidiWriterStatus::InvalidVariableLength;
+  }
+  for (const auto& time_signature : time_sig_events) {
+    if (time_signature.tick > kMaxVlq)
+      return MidiWriterStatus::InvalidVariableLength;
+  }
+  for (const auto& track : tracks) {
+    for (const auto& note : track.notes) {
+      const std::uint64_t end = static_cast<std::uint64_t>(note.start_tick) + note.duration;
+      if (note.start_tick > kMaxVlq || end > kMaxVlq)
+        return MidiWriterStatus::InvalidVariableLength;
+    }
+    for (const auto& event : track.events) {
+      if (event.tick > kMaxVlq)
+        return MidiWriterStatus::InvalidVariableLength;
     }
   }
 
@@ -101,7 +110,7 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
 
   for (const auto& track : tracks) {
     if (!track.notes.empty() || !track.events.empty()) {
-      writeTrack(track, key_signature.tonic);
+      writeTrack(track, key_signature.tonic, output_octave_shift);
     }
   }
   return MidiWriterStatus::Ok;
@@ -141,7 +150,7 @@ void MidiWriter::writeHeader(uint16_t num_tracks, uint16_t division) {
   writeBE16(data_, division);
 }
 
-void MidiWriter::writeTrack(const Track& track, Key key) {
+void MidiWriter::writeTrack(const Track& track, Key key, int output_octave_shift) {
   std::vector<uint8_t> track_buf;
 
   // Program change at tick 0
@@ -160,12 +169,29 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
     }
   }
 
+  if (!track.instrument_name.empty()) {
+    writeVariableLength(track_buf, 0);
+    track_buf.push_back(0xFF);
+    track_buf.push_back(0x04);  // Instrument Name
+    writeVariableLength(track_buf, static_cast<uint32_t>(track.instrument_name.size()));
+    for (char chr : track.instrument_name) {
+      track_buf.push_back(static_cast<uint8_t>(chr));
+    }
+  }
+
   // Convert NoteEvents to on/off event pairs.
   std::vector<WriteEvent> events;
   events.reserve(track.notes.size() * 2 + track.events.size());
 
   for (const auto& note : track.notes) {
-    uint8_t out_pitch = applyKeyTranspose(note.pitch, key);
+    // A same-tick note-off is sorted before its note-on. Emitting a zero-length
+    // note would therefore leave the note on indefinitely on a MIDI device.
+    // Renderer normally removes these, but MidiWriter is public and must be
+    // safe when used directly.
+    if (note.duration == 0)
+      continue;
+    const uint8_t out_pitch =
+        transposePitchBySemitones(note.pitch, keyTranspositionSemitones(key) + output_octave_shift);
 
     WriteEvent on_event;
     on_event.tick = note.start_tick;
@@ -191,6 +217,8 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
     raw_event.status = evt.status;
     raw_event.data1 = evt.data1;
     raw_event.data2 = evt.data2;
+    const uint8_t message = static_cast<uint8_t>(evt.status & 0xF0);
+    raw_event.data_length = (message == 0xC0 || message == 0xD0) ? 1 : 2;
     raw_event.priority = 2;  // Raw events after note-on/off at same tick
     events.push_back(raw_event);
   }
@@ -213,7 +241,7 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
   }
 
   // Sort by tick, then by priority (note-off before note-on).
-  std::sort(events.begin(), events.end(), [](const WriteEvent& lhs, const WriteEvent& rhs) {
+  std::stable_sort(events.begin(), events.end(), [](const WriteEvent& lhs, const WriteEvent& rhs) {
     if (lhs.tick != rhs.tick)
       return lhs.tick < rhs.tick;
     return lhs.priority < rhs.priority;
@@ -226,7 +254,8 @@ void MidiWriter::writeTrack(const Track& track, Key key) {
     writeVariableLength(track_buf, delta);
     track_buf.push_back(evt.status);
     track_buf.push_back(evt.data1 & 0x7F);
-    track_buf.push_back(evt.data2 & 0x7F);
+    if (evt.data_length == 2)
+      track_buf.push_back(evt.data2 & 0x7F);
     prev_tick = evt.tick;
   }
 

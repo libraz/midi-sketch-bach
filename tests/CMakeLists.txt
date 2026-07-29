@@ -46,7 +46,7 @@ target_include_directories(bach_tests
     ${CMAKE_SOURCE_DIR}/tests
 )
 
-gtest_discover_tests(bach_tests)
+gtest_discover_tests(bach_tests DISCOVERY_TIMEOUT 30)
 
 # ============================================================================
 # Native C API product-path tests
@@ -73,7 +73,7 @@ target_include_directories(bach_c_api_tests
     ${CMAKE_SOURCE_DIR}/tests
 )
 
-gtest_discover_tests(bach_c_api_tests)
+gtest_discover_tests(bach_c_api_tests DISCOVERY_TIMEOUT 30)
 
 add_executable(bach_application_tests
   application/composition_service_test.cpp
@@ -94,7 +94,7 @@ target_compile_definitions(bach_application_tests
     BACH_CLI_PATH="$<TARGET_FILE:bach_cli>"
 )
 add_dependencies(bach_application_tests bach_cli)
-gtest_discover_tests(bach_application_tests)
+gtest_discover_tests(bach_application_tests DISCOVERY_TIMEOUT 30)
 
 # ============================================================================
 # Composer rebuild test targets (isolated from bach_lib)

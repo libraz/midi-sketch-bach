@@ -14,43 +14,40 @@ namespace bach {
 /// Maps to the "provenance.source" field in output.json.
 enum class BachNoteSource : uint8_t {
   Unknown = 0,
-  FugueSubject,        // Subject entry
-  SubjectCore,         // Subject core Kerngestalt notes (immutable identity)
-  FugueAnswer,         // Answer (Real/Tonal)
-  Countersubject,      // Countersubject
-  EpisodeMaterial,     // Episode motif
-  FreeCounterpoint,    // Free counterpoint
-  CantusFixed,         // Cantus firmus (immutable)
-  Ornament,            // Trill, mordent, turn
-  PedalPoint,          // Pedal point
-  ArpeggioFlow,        // Flow arpeggio (BWV1007)
-  TextureNote,         // Arch texture (BWV1004)
-  GroundBass,          // Ground bass (immutable)
-  CollisionAvoid,      // Modified by collision avoidance
-  PostProcess,         // Modified by post-processing
-  ChromaticPassing,    // Chromatic passing tone between chord tones
-  FalseEntry,          // Truncated subject opening that diverges to free counterpoint
-  Coda,                // Coda design value (Principle 4: immutable)
-  SequenceNote,        // Diatonic sequence note (structural protection)
-  CanonDux,            ///< Canon leader voice.
-  CanonComes,          ///< Canon follower, derived from dux.
-  CanonFreeBass,       ///< Free bass in canon variation.
-  GoldbergAria,        ///< Aria theme.
-  GoldbergBass,        ///< Realized bass line.
-  GoldbergFigura,      ///< Elaboratio figura pattern (Figurenlehre).
-  GoldbergSoggetto,    ///< Inventio soggetto (short subject for canon/fughetta/invention).
-  GoldbergDance,       ///< Dance variation pattern (Passepied, Gigue, Sarabande).
-  GoldbergFughetta,    ///< Fughetta/alla breve fugal variation entry.
-  GoldbergInvention,   ///< Invention/Sinfonia variation free counterpoint.
-  QuodlibetMelody,     ///< Folk melody in Quodlibet.
-  GoldbergOverture,    ///< French Overture variation (Var 16 Grave + Fugato).
-  GoldbergSuspension,  ///< BlackPearl (Var 25) suspension-driven notes.
-  ChaconneBass,        ///< Realized chaconne bass line (structural, role-dependent).
-  PreludeFiguration,   ///< Harmony-first prelude figuration note (structurally consonant).
-  ToccataGesture,      ///< Stylus Phantasticus gesture note (structural, octave shift only).
-  ToccataFigure,       ///< Vocabulary figure note (semi-protected, octave shift only).
-  GrandPause,          ///< Structural silence marker (immutable).
-  CadenceApproach      ///< Notes shaped by cadence approach formulas.
+  FugueSubject,      // Subject entry
+  SubjectCore,       // Subject core Kerngestalt notes (immutable identity)
+  FugueAnswer,       // Answer (Real/Tonal)
+  Countersubject,    // Countersubject
+  EpisodeMaterial,   // Episode motif
+  FreeCounterpoint,  // Free counterpoint
+  CantusFixed,       // Cantus firmus (immutable)
+  Ornament,          // Trill, mordent, turn
+  PedalPoint,        // Pedal point
+  ArpeggioFlow,      // Flow arpeggio (BWV1007)
+  TextureNote,       // Arch texture (BWV1004)
+  GroundBass,        // Ground bass (immutable)
+  CollisionAvoid,    // Modified by collision avoidance
+  PostProcess,       // Modified by post-processing
+  ChromaticPassing,  // Chromatic passing tone between chord tones
+  FalseEntry,        // Truncated subject opening that diverges to free counterpoint
+  Coda,              // Coda design value (Principle 4: immutable)
+  SequenceNote,      // Diatonic sequence note (structural protection)
+  CanonDux,          ///< Canon leader voice.
+  CanonComes,        ///< Canon follower, derived from dux.
+  CanonFreeBass,     ///< Free bass in canon variation.
+  GoldbergAria,      ///< Aria theme.
+  GoldbergBass,      ///< Realized bass line.
+  GoldbergFigura,    ///< Elaboratio figura pattern (Figurenlehre).
+  GoldbergSoggetto,  ///< Short subject used by a Goldberg canon.
+  // Values 26..28 and 30..31 were unused Goldberg concepts. Keep the gaps so
+  // removing those names does not renumber the public provenance ABI.
+  QuodlibetMelody = 29,  ///< Folk melody in Quodlibet.
+  ChaconneBass = 32,     ///< Realized chaconne bass line (structural, role-dependent).
+  PreludeFiguration,     ///< Harmony-first prelude figuration note (structurally consonant).
+  ToccataGesture,        ///< Stylus Phantasticus gesture note (structural, octave shift only).
+  ToccataFigure,         ///< Vocabulary figure note (semi-protected, octave shift only).
+  GrandPause,            ///< Structural silence marker (immutable).
+  CadenceApproach        ///< Notes shaped by cadence approach formulas.
 };
 
 /// @brief Convert BachNoteSource to human-readable string.

@@ -261,10 +261,9 @@ TEST(PitchToAbsoluteDegreeTest, GMajorAbsoluteDegree) {
   int deg_a4 = scale_util::pitchToAbsoluteDegree(69, Key::G, ScaleType::Major);
   EXPECT_EQ(deg_a4, 36);
 
-  // Round-trip works for tones within the same MIDI octave as the tonic:
-  // G4=67, A4=69, B4=71 all have MIDI octave 5, same as G's position.
-  const uint8_t same_octave_pitches[] = {67, 69, 71};
-  for (uint8_t pitch : same_octave_pitches) {
+  // Round-trip also covers degrees that wrap past MIDI pitch class C.
+  const uint8_t pitches[] = {67, 69, 71, 72, 74, 76, 78};
+  for (uint8_t pitch : pitches) {
     int abs_deg = scale_util::pitchToAbsoluteDegree(pitch, Key::G, ScaleType::Major);
     uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::G, ScaleType::Major);
     EXPECT_EQ(recovered, pitch) << "G major round-trip failed for MIDI pitch "
@@ -285,6 +284,24 @@ TEST(AbsoluteDegreeToPitchTest, LowPitchRoundTrip) {
   int abs_deg = scale_util::pitchToAbsoluteDegree(36, Key::C, ScaleType::Major);
   uint8_t recovered = scale_util::absoluteDegreeToPitch(abs_deg, Key::C, ScaleType::Major);
   EXPECT_EQ(recovered, 36);
+}
+
+TEST(AbsoluteDegreeToPitchTest, EveryKeyAndScaleToneRoundTripsAcrossOctaves) {
+  const ScaleType scales[] = {ScaleType::Major, ScaleType::NaturalMinor, ScaleType::HarmonicMinor,
+                              ScaleType::MelodicMinor};
+  for (int tonic = 0; tonic < 12; ++tonic) {
+    const Key key = static_cast<Key>(tonic);
+    for (const ScaleType scale : scales) {
+      for (int pitch = 12; pitch <= 115; ++pitch) {
+        const auto midi = static_cast<uint8_t>(pitch);
+        if (!scale_util::isScaleTone(midi, key, scale))
+          continue;
+        const int degree = scale_util::pitchToAbsoluteDegree(midi, key, scale);
+        EXPECT_EQ(scale_util::absoluteDegreeToPitch(degree, key, scale), midi)
+            << "key=" << tonic << " scale=" << static_cast<int>(scale) << " pitch=" << pitch;
+      }
+    }
+  }
 }
 
 }  // namespace

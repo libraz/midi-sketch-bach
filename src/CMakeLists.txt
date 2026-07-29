@@ -5,6 +5,7 @@
 set(BACH_LIB_SOURCES
   # core/
   core/basic_types.cpp
+  core/perfect_motion.cpp
   core/pitch_utils.cpp
   core/interval.cpp
   core/scale.cpp
@@ -20,6 +21,7 @@ set(BACH_LIB_SOURCES
 
   # midi/
   midi/midi_writer.cpp
+  # Internal SMF round-trip oracle; intentionally not wired to CLI/C/WASM import.
   midi/midi_reader.cpp
   midi/midi_stream.cpp
   midi/velocity_curve.cpp

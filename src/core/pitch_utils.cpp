@@ -99,16 +99,7 @@ std::string pitchToNoteName(uint8_t pitch) {
 }
 
 uint8_t transposePitch(uint8_t pitch, Key key) {
-  int offset = static_cast<int>(key);
-  int transposed = static_cast<int>(pitch) + offset;
-
-  // Clamp to valid MIDI range
-  if (transposed < 0)
-    transposed = 0;
-  if (transposed > 127)
-    transposed = 127;
-
-  return static_cast<uint8_t>(transposed);
+  return transposePitchBySemitones(pitch, keyTranspositionSemitones(key));
 }
 
 bool isDiatonicInKey(int pitch, Key key, bool is_minor) {

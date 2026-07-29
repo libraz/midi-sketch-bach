@@ -66,7 +66,9 @@ TEST(DegreeMinorSemitonesTest, NaturalMinorScaleOffsets) {
   EXPECT_EQ(degreeMinorSemitones(ChordDegree::IV), 5);
   EXPECT_EQ(degreeMinorSemitones(ChordDegree::V), 7);
   EXPECT_EQ(degreeMinorSemitones(ChordDegree::vi), 8);
-  EXPECT_EQ(degreeMinorSemitones(ChordDegree::viiDim), 10);
+  EXPECT_EQ(degreeMinorSemitones(ChordDegree::viiDim), 11);
+  EXPECT_EQ(degreeMinorSemitones(ChordDegree::V_of_ii), 9);
+  EXPECT_EQ(degreeMinorSemitones(ChordDegree::V_of_iii), 10);
 }
 
 // ---------------------------------------------------------------------------

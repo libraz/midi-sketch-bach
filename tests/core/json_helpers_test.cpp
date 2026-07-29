@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <locale>
 #include <string>
 
 namespace bach {
@@ -80,10 +81,25 @@ TEST(JsonWriterTest, DoubleValue) {
   writer.key("score");
   writer.value(0.95);
   writer.endObject();
-  std::string result = writer.toString();
-  // Floating-point formatting may vary; check it starts correctly.
-  EXPECT_TRUE(result.find("\"score\":0.95") != std::string::npos ||
-              result.find("\"score\":0.950") != std::string::npos);
+  EXPECT_EQ(writer.toString(), R"({"score":0.94999999999999996})");
+}
+
+TEST(JsonWriterTest, DoubleValueUsesClassicLocaleAndRoundTripPrecision) {
+  class CommaDecimal final : public std::numpunct<char> {
+   protected:
+    char do_decimal_point() const override { return ','; }
+  };
+
+  const std::locale original = std::locale();
+  std::locale::global(std::locale(original, new CommaDecimal));
+  JsonWriter writer;
+  writer.beginObject();
+  writer.key("score");
+  writer.value(0.1);
+  writer.endObject();
+  std::locale::global(original);
+
+  EXPECT_EQ(writer.toString(), R"({"score":0.10000000000000001})");
 }
 
 // ---------------------------------------------------------------------------

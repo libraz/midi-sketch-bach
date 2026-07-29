@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "midi/midi_reader.h"
 #include "midi/midi_stream.h"
 
 namespace bach {
@@ -45,6 +46,33 @@ TEST(MidiWriterTest, DefaultConstructionProducesEmptyData) {
   MidiWriter writer;
   auto bytes = writer.toBytes();
   EXPECT_TRUE(bytes.empty()) << "Freshly constructed MidiWriter should have no data";
+}
+
+TEST(MidiWriterTest, ZeroDurationNotesAreNotEmitted) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0, 0);
+  writer.build({track}, {{0, 120}});
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(writer.toBytes())) << reader.getError();
+  std::size_t note_count = 0;
+  for (const auto& parsed_track : reader.getParsedMidi().tracks)
+    note_count += parsed_track.notes.size();
+  EXPECT_EQ(note_count, 0u);
+}
+
+TEST(MidiWriterTest, RejectsTicksBeyondFourByteVariableLengthLimit) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0x10000000u, 1);
+  EXPECT_EQ(writer.build({track}, {{0, 120}}), MidiWriterStatus::InvalidVariableLength);
+}
+
+TEST(MidiWriterTest, WritesRawProgramChangeWithOneDataByte) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0, 480);
+  track.events.push_back({0, 0xC0, 19, 0});
+  ASSERT_EQ(writer.build({track}, {{0, 120}}), MidiWriterStatus::Ok);
+  MidiReader reader;
+  EXPECT_TRUE(reader.read(writer.toBytes())) << reader.getError();
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +147,22 @@ TEST(MidiWriterTest, HeaderTrackCountMatchesTracks) {
   EXPECT_EQ(num_tracks, 3u) << "Expected 2 content tracks + 1 metadata track";
 }
 
+TEST(MidiWriterTest, AppliesWholePieceOutputOctaveAdjustment) {
+  MidiWriter writer;
+  const std::vector<Track> tracks = {makeSimpleTrack(0, 40, "Violin", 36, 0, kTicksPerBeat)};
+
+  ASSERT_EQ(writer.build(tracks, {{0, 120}}, {}, KeySignature{Key::B, false}, "", 12),
+            MidiWriterStatus::Ok);
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(writer.toBytes())) << reader.getError();
+  const auto& parsed_tracks = reader.getParsedMidi().tracks;
+  const auto content = std::find_if(parsed_tracks.begin(), parsed_tracks.end(),
+                                    [](const ParsedTrack& track) { return !track.notes.empty(); });
+  ASSERT_NE(content, parsed_tracks.end());
+  ASSERT_EQ(content->notes.size(), 1u);
+  EXPECT_EQ(content->notes[0].pitch, 47);  // C2 - 1 + 12
+}
+
 // ---------------------------------------------------------------------------
 // Build with one track containing notes
 // ---------------------------------------------------------------------------
@@ -136,6 +180,21 @@ TEST(MidiWriterTest, BuildWithOneTrackContainingNotes) {
   // Verify track count in header: 1 content track + 1 metadata track = 2
   uint16_t num_tracks = readBE16(bytes.data(), 10);
   EXPECT_EQ(num_tracks, 2u);
+}
+
+TEST(MidiWriterTest, WritesTrackAndInstrumentNameMetaEvents) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 42, "Voice 0", kMidiC4, 0, kTicksPerBeat);
+  track.instrument_name = "cello";
+  ASSERT_EQ(writer.build({track}, {{0, 120}}, Key::C), MidiWriterStatus::Ok);
+
+  const auto bytes = writer.toBytes();
+  const std::vector<uint8_t> track_name = {0xFF, 0x03, 0x07, 'V', 'o', 'i', 'c', 'e', ' ', '0'};
+  const std::vector<uint8_t> instrument_name = {0xFF, 0x04, 0x05, 'c', 'e', 'l', 'l', 'o'};
+  EXPECT_NE(std::search(bytes.begin(), bytes.end(), track_name.begin(), track_name.end()),
+            bytes.end());
+  EXPECT_NE(std::search(bytes.begin(), bytes.end(), instrument_name.begin(), instrument_name.end()),
+            bytes.end());
 }
 
 TEST(MidiWriterTest, BuildWithMultipleNotesInTrack) {

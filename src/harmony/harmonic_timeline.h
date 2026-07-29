@@ -46,9 +46,12 @@ enum class CadenceType : uint8_t {
 
 /// @brief A time-ordered sequence of harmonic events.
 ///
-/// The HarmonicTimeline is the central harmonic data structure shared by
-/// both Organ and Solo String systems. It provides lookup by tick position
-/// and supports variable event densities (beat, bar, or section level).
+/// HarmonicTimeline is a supported standalone C++ harmony utility retained for
+/// source/ABI compatibility and direct progression construction. The shipped
+/// composer uses composer::HarmonicPlan as its canonical form-level contract;
+/// the two types are intentionally not interchangeable or parallel generation
+/// paths. This class remains independently tested rather than half-connected
+/// to the composer pipeline.
 ///
 /// Events must be added in chronological order. The timeline is immutable
 /// once built for a given generation pass.

@@ -89,6 +89,26 @@ TEST(ParallelDetectionTest, ParallelOctaves) {
   EXPECT_FALSE(isParallelOctaves(12, 7));  // Octave to 5th
 }
 
+TEST(ParallelDetectionTest, PerfectMotionUsesPitchClassForCompoundParallels) {
+  EXPECT_EQ(classifyPerfectMotion(72, 74, 53, 55), PerfectMotionKind::ParallelFifth);
+  EXPECT_EQ(classifyPerfectMotion(84, 86, 60, 62), PerfectMotionKind::ParallelOctave);
+  EXPECT_TRUE(isParallelPerfectMotion(72, 74, 53, 55));
+  EXPECT_TRUE(isForbiddenPerfectMotion(84, 86, 60, 62));
+}
+
+TEST(ParallelDetectionTest, HiddenPerfectRequiresUpperVoiceLeapOverWholeTone) {
+  EXPECT_EQ(classifyPerfectMotion(64, 67, 60, 60), PerfectMotionKind::None);
+  EXPECT_EQ(classifyPerfectMotion(64, 67, 59, 60), PerfectMotionKind::HiddenFifth);
+  EXPECT_EQ(classifyPerfectMotion(65, 67, 59, 60), PerfectMotionKind::None);
+  EXPECT_TRUE(isForbiddenPerfectMotion(64, 67, 59, 60));
+  EXPECT_FALSE(isParallelPerfectMotion(64, 67, 59, 60));
+}
+
+TEST(ParallelDetectionTest, PerfectMotionAllowsObliqueAndContraryMotion) {
+  EXPECT_EQ(classifyPerfectMotion(67, 67, 60, 60), PerfectMotionKind::None);
+  EXPECT_EQ(classifyPerfectMotion(65, 67, 62, 60), PerfectMotionKind::None);
+}
+
 // ---------------------------------------------------------------------------
 // Pitch class and octave
 // ---------------------------------------------------------------------------
@@ -253,8 +273,8 @@ TEST(PitchUtilsTest, TransposePitch) {
   // C major -> C major (no transposition)
   EXPECT_EQ(transposePitch(60, Key::C), 60);
 
-  // C major -> G major (+7 semitones)
-  EXPECT_EQ(transposePitch(60, Key::G), 67);
+  // C major -> G major (-5 semitones, shortest direction)
+  EXPECT_EQ(transposePitch(60, Key::G), 55);
 
   // C major -> D major (+2 semitones)
   EXPECT_EQ(transposePitch(60, Key::D), 62);
@@ -262,8 +282,17 @@ TEST(PitchUtilsTest, TransposePitch) {
 
 TEST(PitchUtilsTest, TransposePitchClamping) {
   // Should not exceed MIDI range
-  EXPECT_EQ(transposePitch(127, Key::G), 127);  // Clamped at 127
+  EXPECT_EQ(transposePitch(127, Key::G), 122);
   EXPECT_LE(transposePitch(120, Key::B), 127);
+}
+
+TEST(PitchUtilsTest, KeyTranspositionUsesShortestSignedDirection) {
+  EXPECT_EQ(keyTranspositionSemitones(Key::F), 5);
+  EXPECT_EQ(keyTranspositionSemitones(Key::Fs), 6);
+  EXPECT_EQ(keyTranspositionSemitones(Key::G), -5);
+  EXPECT_EQ(keyTranspositionSemitones(Key::B), -1);
+  EXPECT_EQ(transposePitch(60, Key::G), 55);
+  EXPECT_EQ(transposePitch(0, Key::B), 0);
 }
 
 // ---------------------------------------------------------------------------

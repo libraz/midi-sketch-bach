@@ -135,6 +135,31 @@ bool isParallelFifths(int interval1, int interval2);
 /// @return True if both intervals are perfect octaves/unisons (mod 12).
 bool isParallelOctaves(int interval1, int interval2);
 
+/// Contrapuntal perfect-interval motion between an explicitly ordered upper
+/// and lower voice.
+enum class PerfectMotionKind : uint8_t {
+  None = 0,
+  ParallelFifth,
+  ParallelOctave,
+  HiddenFifth,
+  HiddenOctave,
+};
+
+/// Classify same-direction motion into a perfect fifth/octave.
+///
+/// True parallels require the same perfect pitch-class interval at both
+/// onsets. Hidden perfects require a different preceding interval and an
+/// upper-voice leap greater than a whole tone. Oblique and contrary motion
+/// return None.
+PerfectMotionKind classifyPerfectMotion(int upper_prev, int upper_curr, int lower_prev,
+                                        int lower_curr);
+
+/// True only for parallel fifths or octaves, excluding hidden perfects.
+bool isParallelPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
+
+/// True for a parallel perfect or a hidden perfect reached by upper-voice leap.
+bool isForbiddenPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
+
 // ---------------------------------------------------------------------------
 // Pitch utility functions
 // ---------------------------------------------------------------------------
@@ -203,6 +228,22 @@ int degreeToPitch(int degree, int base_note, int key_offset, ScaleType scale = S
 /// @param pitch MIDI note number (0-127).
 /// @return String like "C4", "F#3", "Bb5".
 std::string pitchToNoteName(uint8_t pitch);
+
+/// @brief Transpose a pitch by a signed semitone offset.
+/// @param pitch MIDI note number before transposition.
+/// @param semitones Signed transposition interval.
+/// @return Transposed MIDI note number clamped to [0, 127].
+inline uint8_t transposePitchBySemitones(uint8_t pitch, int semitones) {
+  return clampPitch(static_cast<int>(pitch) + semitones, 0, 127);
+}
+
+/// @brief Resolve the current C-major-to-key semitone offset policy.
+/// @param key Target key.
+/// @return Signed semitone offset applied at public output surfaces.
+inline int keyTranspositionSemitones(Key key) {
+  const int pitch_class = static_cast<int>(key);
+  return pitch_class <= 6 ? pitch_class : pitch_class - 12;
+}
 
 /// @brief Transpose a pitch from C major to the target key.
 /// @param pitch MIDI note number in C major context.

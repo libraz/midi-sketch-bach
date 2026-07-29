@@ -460,6 +460,20 @@ void HarmonicTimeline::applyCadence(CadenceType cadence, const KeySignature& key
       last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
       break;
     }
+    case CadenceType::ImperfectAuthentic: {
+      // IAC: retain an authentic V -> I resolution but distinguish it from a
+      // PAC structurally through an inverted final tonic. The timeline does
+      // not carry soprano scale-degree information, so I6 is its explicit,
+      // inspectable IAC realization.
+      if (events_.size() >= 2) {
+        auto& penult = events_[events_.size() - 2];
+        penult.chord = buildChord(key_sig, ChordDegree::V, kChordOctave);
+        penult.bass_pitch = computeBassPitch(penult.chord, kBassOctave);
+      }
+      last.chord = buildChord(key_sig, ChordDegree::I, kChordOctave, /*inversion=*/1);
+      last.bass_pitch = computeBassPitch(last.chord, kBassOctave);
+      break;
+    }
     case CadenceType::Deceptive: {
       // V -> vi instead of V -> I
       if (events_.size() >= 2) {

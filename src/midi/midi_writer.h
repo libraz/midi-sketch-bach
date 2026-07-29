@@ -17,6 +17,7 @@ enum class MidiWriterStatus : std::uint8_t {
   Ok = 0,
   InvalidTempo = 1,
   InvalidTimeSignature = 2,
+  InvalidVariableLength = 3,
 };
 
 /// @brief MIDI file writer that produces Standard MIDI File (SMF) Type 1 output.
@@ -57,7 +58,8 @@ class MidiWriter {
   MidiWriterStatus build(const std::vector<Track>& tracks,
                          const std::vector<TempoEvent>& tempo_events,
                          const std::vector<TimeSignatureEvent>& time_sig_events,
-                         const KeySignature& key_signature, const std::string& metadata = "");
+                         const KeySignature& key_signature, const std::string& metadata = "",
+                         int output_octave_shift = 0);
 
   /// @brief Get the binary MIDI data after build().
   /// @return Byte vector containing complete SMF Type 1 data.
@@ -75,7 +77,7 @@ class MidiWriter {
   void writeHeader(uint16_t num_tracks, uint16_t division);
 
   /// Write a single track as an MTrk chunk with note events.
-  void writeTrack(const Track& track, Key key);
+  void writeTrack(const Track& track, Key key, int output_octave_shift);
 
   /// Write the metadata track (tempo map, time signature, BACH metadata text).
   void writeMetadataTrack(const std::vector<TempoEvent>& tempo_events,

@@ -53,7 +53,7 @@ void skipWhitespace(const char* json, size_t length, size_t& pos) {
 }
 
 bool appendUtf8(std::uint32_t code_point, std::string* out) {
-  if (code_point >= 0xD800 && code_point <= 0xDFFF) {
+  if ((code_point >= 0xD800 && code_point <= 0xDFFF) || code_point > 0x10FFFF) {
     return false;
   }
   if (code_point <= 0x7F) {
@@ -66,7 +66,10 @@ bool appendUtf8(std::uint32_t code_point, std::string* out) {
     out->push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
     out->push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
   } else {
-    return false;
+    out->push_back(static_cast<char>(0xF0 | (code_point >> 18)));
+    out->push_back(static_cast<char>(0x80 | ((code_point >> 12) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | ((code_point >> 6) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | (code_point & 0x3F)));
   }
   return true;
 }
@@ -135,6 +138,27 @@ bool parseString(const char* json, std::size_t length, std::size_t* pos, std::st
             code_point = (code_point << 4) | static_cast<std::uint32_t>(digit);
           }
           *pos += 4;
+          if (code_point >= 0xD800 && code_point <= 0xDBFF) {
+            // RFC 8259 represents non-BMP code points as one high/low UTF-16
+            // surrogate pair. Consume the second escape as part of this
+            // scalar; lone or mismatched surrogates remain syntax errors.
+            if (*pos + 6 >= length || json[*pos + 1] != '\\' || json[*pos + 2] != 'u')
+              return false;
+            std::uint32_t low = 0;
+            for (std::size_t offset = 3; offset <= 6; ++offset) {
+              const int digit = hexDigit(json[*pos + offset]);
+              if (digit < 0)
+                return false;
+              low = (low << 4) | static_cast<std::uint32_t>(digit);
+            }
+            if (low < 0xDC00 || low > 0xDFFF)
+              return false;
+            code_point =
+                0x10000 + ((code_point - 0xD800) << 10) + static_cast<std::uint32_t>(low - 0xDC00);
+            *pos += 6;
+          } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
+            return false;
+          }
           if (!appendUtf8(code_point, out))
             return false;
           break;

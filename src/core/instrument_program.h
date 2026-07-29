@@ -4,9 +4,11 @@
 #define BACH_CORE_INSTRUMENT_PROGRAM_H
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "core/basic_types.h"
+#include "harmony/key.h"
 
 namespace bach {
 
@@ -20,6 +22,23 @@ namespace bach {
 /// @param instrument The instrument type.
 /// @return GM program number (0-indexed per the MIDI specification).
 std::uint8_t gmProgramFor(InstrumentType instrument);
+
+/// Inclusive sounding-MIDI compass used by the output adapter for one instrument.
+struct InstrumentPitchRange {
+  std::uint8_t low = 0;
+  std::uint8_t high = 127;
+};
+
+/// @brief Return the playable sounding range used for MIDI export.
+InstrumentPitchRange pitchRangeFor(InstrumentType instrument);
+
+/// @brief Select a single octave displacement for a complete C-major score.
+///
+/// The result is added after key transposition. It is either zero or a
+/// whole-octave multiple; individual notes are never clamped. `nullopt`
+/// means the complete score cannot fit the requested instrument's compass.
+std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
+                                           InstrumentType instrument);
 
 /// @brief Apply an instrument to a set of tracks.
 ///

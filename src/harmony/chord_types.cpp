@@ -141,7 +141,7 @@ uint8_t degreeMinorSemitones(ChordDegree degree) {
     case ChordDegree::vi:
       return 8;
     case ChordDegree::viiDim:
-      return 10;
+      return 11;  // Raised leading tone in harmonic minor.
     case ChordDegree::bII:
       return 1;
     case ChordDegree::V_of_V:
@@ -151,7 +151,7 @@ uint8_t degreeMinorSemitones(ChordDegree degree) {
     case ChordDegree::V_of_IV:
       return 0;
     case ChordDegree::V_of_ii:
-      return 8;
+      return 9;
     case ChordDegree::bVI:
       return 8;  // Ab in A minor
     case ChordDegree::bVII:
@@ -159,7 +159,7 @@ uint8_t degreeMinorSemitones(ChordDegree degree) {
     case ChordDegree::bIII:
       return 3;  // C in A minor (same as natural minor III)
     case ChordDegree::V_of_iii:
-      return 11;  // B in minor context (V/iii root)
+      return 10;
   }
   return 0;
 }
