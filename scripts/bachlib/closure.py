@@ -54,16 +54,13 @@ from bachlib.phases import (
 )
 from bachlib.predictors import structural_check
 
-WORK_DIR_SENTINEL = ".bach-closure-workdir"
-WORK_DIR_SENTINEL_CONTENT = "midi-sketch-bach closure work directory\n"
-
-
 def prepare_work_dir(work_dir: Path) -> None:
-    """Create or reset a closure-owned work directory.
+    """Create or reset a closure work directory.
 
-    Existing directories are removed only when they contain the exact sentinel
-    written by a previous closure run. Broad repository/home/root targets and
-    symlinks are always rejected.
+    The filesystem root, the home directory, the repository root and its parent
+    are always rejected, as is a symlink, so a mistyped --work-dir cannot point
+    the reset at a broad target. Any other existing directory is cleared: each
+    run starts from an empty directory so a stale artifact cannot be scored.
     """
     resolved = work_dir.resolve()
     forbidden = {
@@ -74,15 +71,11 @@ def prepare_work_dir(work_dir: Path) -> None:
     }
     if resolved in forbidden or work_dir.is_symlink():
         raise ValueError(f"unsafe closure work directory: {work_dir}")
-    sentinel = work_dir / WORK_DIR_SENTINEL
     if work_dir.exists():
-        if not work_dir.is_dir() or not sentinel.is_file():
-            raise ValueError(f"refusing to remove unowned work directory: {work_dir}")
-        if sentinel.read_text(encoding="utf-8") != WORK_DIR_SENTINEL_CONTENT:
-            raise ValueError(f"invalid closure work-directory sentinel: {sentinel}")
+        if not work_dir.is_dir():
+            raise ValueError(f"closure work directory is not a directory: {work_dir}")
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
-    (work_dir / WORK_DIR_SENTINEL).write_text(WORK_DIR_SENTINEL_CONTENT, encoding="utf-8")
 
 
 def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]:

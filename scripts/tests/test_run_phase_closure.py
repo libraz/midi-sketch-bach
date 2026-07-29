@@ -16,8 +16,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import bachlib as rpc  # noqa: E402
 from bachlib.closure import (  # noqa: E402
-    WORK_DIR_SENTINEL,
-    WORK_DIR_SENTINEL_CONTENT,
     _check_required_bits,
     prepare_work_dir,
 )
@@ -118,38 +116,50 @@ class CppDriftGuardTest(unittest.TestCase):
 
 
 class ClosureWorkDirectorySafetyTest(unittest.TestCase):
-    def test_new_directory_gets_ownership_sentinel(self) -> None:
+    def test_missing_directory_is_created_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work_dir = Path(tmp) / "closure"
             prepare_work_dir(work_dir)
-            self.assertEqual(
-                (work_dir / WORK_DIR_SENTINEL).read_text(encoding="utf-8"),
-                WORK_DIR_SENTINEL_CONTENT,
-            )
+            self.assertTrue(work_dir.is_dir())
+            self.assertEqual(list(work_dir.iterdir()), [])
 
-    def test_unowned_existing_directory_is_preserved_and_rejected(self) -> None:
+    def test_existing_directory_is_reset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work_dir = Path(tmp) / "closure"
             work_dir.mkdir()
-            payload = work_dir / "keep.txt"
-            payload.write_text("user data", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "unowned"):
-                prepare_work_dir(work_dir)
-            self.assertEqual(payload.read_text(encoding="utf-8"), "user data")
-
-    def test_owned_directory_is_reset(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            work_dir = Path(tmp) / "closure"
-            prepare_work_dir(work_dir)
             stale = work_dir / "stale.mid"
             stale.write_bytes(b"old")
             prepare_work_dir(work_dir)
             self.assertFalse(stale.exists())
-            self.assertTrue((work_dir / WORK_DIR_SENTINEL).is_file())
+            self.assertEqual(list(work_dir.iterdir()), [])
+
+    def test_file_target_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp) / "closure"
+            work_dir.write_text("not a directory", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not a directory"):
+                prepare_work_dir(work_dir)
+            self.assertTrue(work_dir.is_file())
+
+    def test_symlink_target_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload_dir = Path(tmp) / "payload"
+            payload_dir.mkdir()
+            payload = payload_dir / "keep.txt"
+            payload.write_text("user data", encoding="utf-8")
+            work_dir = Path(tmp) / "closure"
+            work_dir.symlink_to(payload_dir, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                prepare_work_dir(work_dir)
+            self.assertEqual(payload.read_text(encoding="utf-8"), "user data")
 
     def test_repository_root_is_always_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsafe"):
             prepare_work_dir(REPO_ROOT)
+
+    def test_home_directory_is_always_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            prepare_work_dir(Path.home())
 
 
 class ExpectedCarrierSequencesTest(unittest.TestCase):
