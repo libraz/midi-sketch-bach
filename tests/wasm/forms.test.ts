@@ -228,6 +228,16 @@ describe('BachGenerator - Key and Character', () => {
     },
   );
 
+  it.each(['Severe', 'Playful', 'Noble', 'Restless'])(
+    'should generate fugue with enumerated character=%s',
+    (character) => {
+      bach = new BachGenerator();
+      bach.generate({ form: 'fugue', character, seed: 42 });
+      const midi = bach.getMidi();
+      expect(midi.length).toBeGreaterThan(0);
+    },
+  );
+
   it('should throw on invalid character-form combo', () => {
     const generator = new BachGenerator();
     // Restless character is not compatible with ChoralePrelude.

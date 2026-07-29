@@ -3,7 +3,14 @@
  */
 
 import { getApi, getModule } from './internal';
-import type { BachConfig, BachInfo, DiagnosticData, EventData } from './types';
+import type {
+  BachConfig,
+  BachInfo,
+  DiagnosticData,
+  EventData,
+  GeneratedData,
+  ProvenanceData,
+} from './types';
 
 /** Serialize BachConfig to JSON string for the C API. */
 function configToJson(config: BachConfig): string {
@@ -64,9 +71,18 @@ export class BachGenerator {
     this.checkDestroyed();
     const api = getApi();
     const json = configToJson(config);
-    const error = api.generateFromJson(this.handle, json, json.length);
+    // The C ABI expects a UTF-8 byte count, whereas String#length counts
+    // UTF-16 code units. Passing the latter truncates non-ASCII JSON.
+    const error = api.generateFromJson(
+      this.handle,
+      json,
+      new TextEncoder().encode(json).byteLength,
+    );
     if (error !== 0) {
-      throw new Error(`Generation failed: ${api.errorString(error)}`);
+      throw new Error(
+        `Generation failed: ${api.errorString(error)}. ` +
+          'Call getDiagnostic() for validation details when available.',
+      );
     }
   }
 
@@ -121,6 +137,16 @@ export class BachGenerator {
     return JSON.parse(jsonStr) as EventData;
   }
 
+  /** Get generated.v1 data from the most recent successful generation. */
+  getGenerated(): GeneratedData {
+    return this.getSuccessfulJson(this.requireApi().getGenerated(this.handle), 'generated.v1');
+  }
+
+  /** Get provenance.v1 data from the most recent successful generation. */
+  getProvenance(): ProvenanceData {
+    return this.getSuccessfulJson(this.requireApi().getProvenance(this.handle), 'provenance.v1');
+  }
+
   /** Get diagnostic.v1 from the most recent composer validation failure. */
   getDiagnostic(): DiagnosticData | null {
     this.checkDestroyed();
@@ -145,26 +171,16 @@ export class BachGenerator {
     const api = getApi();
     const m = getModule();
 
-    // bach_get_info returns a pointer to this generator's BachInfo snapshot.
-    const ptr = api.getInfo(this.handle);
-
-    // BachInfo layout (C struct with natural alignment):
-    //   uint16_t total_bars   @ offset 0  (2 bytes)
-    //   [2 bytes padding]
-    //   uint32_t total_ticks  @ offset 4  (4 bytes)
-    //   uint16_t bpm          @ offset 8  (2 bytes)
-    //   uint8_t  track_count  @ offset 10 (1 byte)
-    //   [1 byte padding]
-    //   uint32_t seed_used    @ offset 12 (4 bytes)
-    //   Total: 16 bytes
-    const view = new DataView(m.HEAPU8.buffer, ptr, 16);
-    return {
-      totalBars: view.getUint16(0, true),
-      totalTicks: view.getUint32(4, true),
-      bpm: view.getUint16(8, true),
-      trackCount: view.getUint8(10),
-      seedUsed: view.getUint32(12, true),
-    };
+    // Use the layout-independent JSON accessor: C struct padding and size_t
+    // layout vary between WASM32 and native builds.
+    const ptr = api.getInfoJson(this.handle);
+    if (ptr === 0) {
+      throw new Error('No generation info available. Call generate() first.');
+    }
+    const jsonPtr = m.HEAPU32[ptr >> 2];
+    const json = m.UTF8ToString(jsonPtr);
+    api.freeEvents(ptr);
+    return JSON.parse(json) as BachInfo;
   }
 
   /**
@@ -183,5 +199,21 @@ export class BachGenerator {
     if (this.destroyed) {
       throw new Error('BachGenerator has been destroyed');
     }
+  }
+
+  private requireApi() {
+    this.checkDestroyed();
+    return getApi();
+  }
+
+  private getSuccessfulJson<T>(ptr: number, name: string): T {
+    if (ptr === 0) {
+      throw new Error(`No ${name} data available. Call generate() first.`);
+    }
+    const m = getModule();
+    const jsonPtr = m.HEAPU32[ptr >> 2];
+    const jsonStr = m.UTF8ToString(jsonPtr);
+    getApi().freeEvents(ptr);
+    return JSON.parse(jsonStr) as T;
   }
 }

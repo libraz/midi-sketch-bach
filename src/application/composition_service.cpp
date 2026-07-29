@@ -10,39 +10,15 @@
 #include "composer/harness_fixture.h"
 #include "composer/json_export.h"
 #include "composer/ornament_pass.h"
+#include "composer/renderer.h"
 #include "composer/validator.h"
 #include "core/instrument_program.h"
 #include "core/rng_util.h"
 #include "midi/midi_writer.h"
+#include "midi/velocity_curve.h"
 
 namespace bach::application {
 namespace {
-
-std::string formDisplayName(FormType form) {
-  switch (form) {
-    case FormType::Fugue:
-      return "Fugue";
-    case FormType::PreludeAndFugue:
-      return "Prelude and Fugue";
-    case FormType::TrioSonata:
-      return "Trio Sonata";
-    case FormType::ChoralePrelude:
-      return "Chorale Prelude";
-    case FormType::ToccataAndFugue:
-      return "Toccata and Fugue";
-    case FormType::Passacaglia:
-      return "Passacaglia";
-    case FormType::FantasiaAndFugue:
-      return "Fantasia and Fugue";
-    case FormType::CelloPrelude:
-      return "Cello Prelude";
-    case FormType::Chaconne:
-      return "Chaconne";
-    case FormType::GoldbergVariations:
-      return "Goldberg Variations";
-  }
-  return "Composition";
-}
 
 std::vector<VoiceId> voicesForIntent(const composer::VoicePlan& plan,
                                      std::initializer_list<composer::VoiceIntent> intents) {
@@ -60,6 +36,27 @@ std::vector<VoiceId> voicesForIntent(const composer::VoicePlan& plan,
   return voices;
 }
 
+void mergeControlChanges(std::vector<CcEvent>* events) {
+  if (events == nullptr || events->empty())
+    return;
+  std::stable_sort(events->begin(), events->end(), [](const CcEvent& lhs, const CcEvent& rhs) {
+    if (lhs.tick != rhs.tick)
+      return lhs.tick < rhs.tick;
+    return lhs.controller < rhs.controller;
+  });
+  std::vector<CcEvent> merged;
+  merged.reserve(events->size());
+  for (const CcEvent& event : *events) {
+    if (!merged.empty() && merged.back().tick == event.tick &&
+        merged.back().controller == event.controller) {
+      merged.back().value = std::max(merged.back().value, event.value);
+    } else {
+      merged.push_back(event);
+    }
+  }
+  *events = std::move(merged);
+}
+
 std::uint32_t totalTicks(const std::vector<NoteEvent>& notes) {
   std::uint32_t result = 0;
   for (const auto& note : notes) {
@@ -68,18 +65,58 @@ std::uint32_t totalTicks(const std::vector<NoteEvent>& notes) {
   return result;
 }
 
+bool hasContrastingFugueSection(FormType form) {
+  return form == FormType::PreludeAndFugue || form == FormType::ToccataAndFugue ||
+         form == FormType::FantasiaAndFugue;
+}
+
+void appendSectionTempoChanges(std::vector<TempoEvent>* events, FormType form,
+                               const std::vector<Tick>& cadence_ticks, Tick ticks_per_bar,
+                               std::uint32_t total_ticks, std::uint16_t bpm) {
+  if (events == nullptr || !hasContrastingFugueSection(form) || ticks_per_bar == 0 ||
+      total_ticks == 0) {
+    return;
+  }
+  const std::uint16_t fugue_bpm =
+      static_cast<std::uint16_t>(std::max(1, (static_cast<int>(bpm) * 108 + 50) / 100));
+  for (const Tick cadence_tick : cadence_ticks) {
+    const Tick boundary = cadence_tick + ticks_per_bar;
+    if (boundary > 0 && boundary < total_ticks) {
+      events->push_back({boundary, fugue_bpm});
+      return;
+    }
+  }
+}
+
+void sortTempoEvents(std::vector<TempoEvent>* events) {
+  if (events == nullptr) {
+    return;
+  }
+  std::stable_sort(
+      events->begin(), events->end(),
+      [](const TempoEvent& left, const TempoEvent& right) { return left.tick < right.tick; });
+  events->erase(std::unique(events->begin(), events->end(),
+                            [](const TempoEvent& left, const TempoEvent& right) {
+                              return left.tick == right.tick;
+                            }),
+                events->end());
+}
+
 }  // namespace
 
 PerformanceProfile resolvePerformanceProfile(FormType form, InstrumentType instrument) {
   PerformanceProfile profile;
-  profile.registration_terraces = instrument == InstrumentType::Organ;
+  profile.registration_terraces =
+      instrument == InstrumentType::Organ || instrument == InstrumentType::Harpsichord;
   profile.continuous_expression = instrument == InstrumentType::Piano ||
                                   instrument == InstrumentType::Violin ||
                                   instrument == InstrumentType::Cello;
   switch (form) {
-    case FormType::Fugue:
     case FormType::TrioSonata:
       profile.final_ritardando = composer::RitardandoStyle::None;
+      break;
+    case FormType::Fugue:
+      profile.final_ritardando = composer::RitardandoStyle::Gentle;
       break;
     case FormType::ToccataAndFugue:
     case FormType::FantasiaAndFugue:
@@ -97,43 +134,58 @@ PerformanceProfile resolvePerformanceProfile(FormType form, InstrumentType instr
   return profile;
 }
 
+void resolveDefaults(CompositionRequest* request) {
+  if (request != nullptr && request->bpm == 0) {
+    request->bpm = kDefaultBpm;
+  }
+}
+
 CompositionStatus compose(const CompositionRequest& request, CompositionProduct* out) {
   if (!out) {
     return CompositionStatus::InvalidArgument;
   }
   *out = CompositionProduct{};
-  if (request.bpm == 0) {
-    return CompositionStatus::InvalidArgument;
-  }
-  out->form = request.form;
-  out->key = request.key;
-  out->character = request.character;
-  out->scale = request.scale;
-  out->bpm = request.bpm;
-  out->seed = request.seed == 0 ? rng::generateRandomSeed() : request.seed;
-  out->instrument =
-      request.instrument_specified ? request.instrument : defaultInstrumentForForm(request.form);
-  out->performance_profile = resolvePerformanceProfile(request.form, out->instrument);
-  out->form_display = formDisplayName(request.form);
+  CompositionRequest effective = request;
+  resolveDefaults(&effective);
+  out->form = effective.form;
+  out->key = effective.key;
+  out->character = effective.character;
+  out->scale = effective.scale;
+  out->bpm = effective.bpm;
+  out->seed = effective.seed == 0 ? rng::generateRandomSeed() : effective.seed;
+  out->instrument = effective.instrument_specified ? effective.instrument
+                                                   : defaultInstrumentForForm(effective.form);
+  out->performance_profile = resolvePerformanceProfile(effective.form, out->instrument);
+  out->form_display = formTypeToDisplayString(effective.form);
 
-  if (!composer::isFormCharacterCompatible(request.form, request.character)) {
+  if (!composer::isFormCharacterCompatible(effective.form, effective.character)) {
     out->status = CompositionStatus::IncompatibleCharacter;
     return out->status;
   }
+  if (effective.instrument_specified &&
+      !isInstrumentCompatibleWithForm(effective.form, effective.instrument)) {
+    out->status = CompositionStatus::IncompatibleInstrument;
+    return out->status;
+  }
 
-  out->resolved_bars = composer::resolveBars(request.form, request.scale, request.target_bars);
+  out->resolved_bars =
+      composer::resolveBars(effective.form, effective.scale, effective.target_bars);
   composer::ComposeRequest compose_request;
-  compose_request.form = request.form;
-  compose_request.is_minor = request.key.is_minor;
-  compose_request.character = request.character;
+  compose_request.form = effective.form;
+  compose_request.is_minor = effective.key.is_minor;
+  compose_request.character = effective.character;
   compose_request.target_bars = out->resolved_bars;
   compose_request.seed = out->seed;
-  compose_request.enable_free_counterpoint = request.enable_free_counterpoint;
+  compose_request.enable_free_counterpoint = effective.enable_free_counterpoint;
 
   composer::HarnessFixture fixture;
   const auto director_status = composer::buildFormFixture(compose_request, &fixture);
   if (director_status == composer::FormDirectorStatus::IncompatibleCharacter) {
     out->status = CompositionStatus::IncompatibleCharacter;
+    return out->status;
+  }
+  if (director_status == composer::FormDirectorStatus::FreeCounterpointUnavailable) {
+    out->status = CompositionStatus::FreeCounterpointUnavailable;
     return out->status;
   }
   if (director_status != composer::FormDirectorStatus::Ok) {
@@ -157,20 +209,23 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   out->total_ticks = totalTicks(out->composition.notes);
 
   composer::OrnamentParams ornament;
-  ornament.character = request.character;
+  ornament.character = effective.character;
   ornament.instrument = out->instrument;
   ornament.mode =
-      request.key.is_minor ? composer::detail::Mode::Minor : composer::detail::Mode::Major;
+      effective.key.is_minor ? composer::detail::Mode::Minor : composer::detail::Mode::Major;
   ornament.seed = out->seed;
   ornament.ticks_per_bar = ticks_per_bar;
-  ornament.bpm = request.bpm;
+  ornament.ts_numerator = fixture.harmony.ts_numerator;
+  ornament.meter_profile = fixture.harmony.meter_profile;
+  ornament.harmonic_plan = &fixture.harmony;
+  ornament.bpm = effective.bpm;
   ornament.exempt_voices =
       voicesForIntent(fixture.voice_plan, {composer::VoiceIntent::GroundCarrier,
                                            composer::VoiceIntent::PassacagliaGround,
                                            composer::VoiceIntent::GoldbergBassCarrier});
   ornament.skeleton_exempt_voices =
       voicesForIntent(fixture.voice_plan, {composer::VoiceIntent::CantusFirmusCarrier});
-  if (request.form == FormType::GoldbergVariations) {
+  if (effective.form == FormType::GoldbergVariations) {
     ornament.aria_end_tick = 4 * ticks_per_bar;
   }
   ornament.section_cadence_ticks = fixture.section_cadence_ticks;
@@ -197,9 +252,21 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
     out->status = CompositionStatus::FinalValidationFailed;
     return out->status;
   }
+  // The composer deliberately emits instrument-neutral notes. Apply the
+  // phrase-aware velocity curve only after FinalScore validation (velocity is
+  // not a contrapuntal input), then re-render so MIDI and public event JSON
+  // expose the same updated note attributes. This preserves pitch/onset/order
+  // and therefore provenance index alignment.
+  std::vector<Tick> cadence_ticks;
+  cadence_ticks.reserve(fixture.harmony.cadences.size());
+  for (const auto& cadence : fixture.harmony.cadences) {
+    cadence_ticks.push_back(cadence.tick);
+  }
+  applyVelocityCurve(out->composition.notes, out->instrument, cadence_ticks);
+  out->composition.tracks = composer::Renderer{}.render(out->composition.notes);
   applyInstrument(out->composition.tracks, out->instrument);
 
-  const composer::FormSpec& spec = composer::formSpec(request.form);
+  const composer::FormSpec& spec = composer::formSpec(effective.form);
   const std::uint16_t snap = spec.snap_bars == 0 ? 1 : spec.snap_bars;
   std::size_t cycle_count = out->resolved_bars / snap;
   if (cycle_count == 0) {
@@ -218,22 +285,39 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
     }
   }
   if (out->performance_profile.continuous_expression) {
-    const auto phrase =
-        composer::buildPhraseDynamics(cycle_count, snap, ticks_per_bar, out->total_ticks);
+    const Tick phrase_climax =
+        fixture.climax_end_tick > fixture.climax_start_tick ? fixture.climax_start_tick : 0;
+    const auto phrase = composer::buildPhraseDynamics(cycle_count, snap, ticks_per_bar,
+                                                      out->total_ticks, phrase_climax);
     for (auto& track : out->composition.tracks) {
       track.cc_events.insert(track.cc_events.end(), phrase.begin(), phrase.end());
     }
   }
+  for (auto& track : out->composition.tracks) {
+    mergeControlChanges(&track.cc_events);
+  }
 
-  out->tempo_events.push_back({0, request.bpm});
-  const auto ritard = composer::buildFinalRitardando(request.bpm, out->total_ticks, ticks_per_bar,
-                                                     out->performance_profile.final_ritardando);
+  out->tempo_events.push_back({0, effective.bpm});
+  appendSectionTempoChanges(&out->tempo_events, effective.form, fixture.section_cadence_ticks,
+                            ticks_per_bar, out->total_ticks, effective.bpm);
+  const auto ritard =
+      composer::buildFinalRitardando(effective.bpm, out->total_ticks, ticks_per_bar,
+                                     out->performance_profile.final_ritardando, spec.ts_numerator);
   out->tempo_events.insert(out->tempo_events.end(), ritard.begin(), ritard.end());
+  sortTempoEvents(&out->tempo_events);
   out->time_signature_events.push_back({0, {spec.ts_numerator, spec.ts_denominator}});
+
+  const auto output_octave_shift =
+      selectOutputOctaveShift(out->composition.notes, effective.key.tonic, out->instrument);
+  if (!output_octave_shift) {
+    out->status = CompositionStatus::MidiFailed;
+    return out->status;
+  }
+  out->output_octave_shift = *output_octave_shift;
 
   MidiWriter writer;
   if (writer.build(out->composition.tracks, out->tempo_events, out->time_signature_events,
-                   request.key) != MidiWriterStatus::Ok) {
+                   effective.key, "", out->output_octave_shift) != MidiWriterStatus::Ok) {
     out->status = CompositionStatus::MidiFailed;
     return out->status;
   }
@@ -244,12 +328,16 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
           : static_cast<std::uint16_t>((out->total_ticks + ticks_per_bar - 1) / ticks_per_bar);
 
   composer::HomepageMeta meta;
-  meta.form_name = formTypeToString(request.form);
-  meta.key_name = keySignatureToString(request.key);
-  meta.bpm = request.bpm;
+  meta.form_name = formTypeToString(effective.form);
+  meta.key_name = keySignatureToString(effective.key);
+  meta.output_key = effective.key.tonic;
+  meta.output_octave_shift = out->output_octave_shift;
+  meta.bpm = effective.bpm;
   meta.seed = out->seed;
   meta.total_ticks = out->total_ticks;
   meta.total_bars = out->total_bars;
+  meta.tempo_events = out->tempo_events;
+  meta.time_signature_events = out->time_signature_events;
   meta.description = out->form_display + " in " + meta.key_name;
   out->homepage_events_json = composer::buildHomepageEventsJson(out->composition, meta);
   out->generated_json = composer::emitGeneratedJson(out->composition.notes,

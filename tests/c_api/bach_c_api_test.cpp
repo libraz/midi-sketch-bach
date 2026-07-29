@@ -32,6 +32,15 @@ BachError generate(BachHandle handle, const std::string& json) {
   return bach_generate_from_json(handle, json.data(), json.size());
 }
 
+std::string takeJson(BachEventData* data) {
+  if (data == nullptr) {
+    return {};
+  }
+  std::string json(data->json, data->length);
+  bach_free_events(data);
+  return json;
+}
+
 std::string validConfig(uint32_t seed) {
   return "{\"form\":\"fugue\",\"character\":\"severe\",\"instrument\":\"organ\","
          "\"scale\":\"short\",\"bpm\":100,\"seed\":" +
@@ -45,8 +54,15 @@ TEST(BachCApiTest, RejectsNullArgumentsWithoutThrowing) {
   EXPECT_EQ(bach_generate_from_json(nullptr, "{}", 2), BACH_ERROR_INVALID_PARAM);
   EXPECT_EQ(bach_generate_from_json(owner.get(), nullptr, 0), BACH_ERROR_INVALID_PARAM);
   EXPECT_EQ(bach_get_info(nullptr), nullptr);
+  EXPECT_EQ(bach_get_info(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info_json(nullptr), nullptr);
+  EXPECT_EQ(bach_get_info_json(owner.get()), nullptr);
   EXPECT_EQ(bach_get_diagnostic(nullptr), nullptr);
   EXPECT_EQ(bach_get_diagnostic(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_generated(nullptr), nullptr);
+  EXPECT_EQ(bach_get_generated(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_provenance(nullptr), nullptr);
+  EXPECT_EQ(bach_get_provenance(owner.get()), nullptr);
 }
 
 TEST(BachCApiTest, RejectsMalformedTruncatedNestedAndOversizedJson) {
@@ -68,27 +84,30 @@ TEST(BachCApiTest, RejectsMalformedTruncatedNestedAndOversizedJson) {
       "{\"x\":1e400}",
   };
   for (const auto& json : invalid) {
-    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_CONFIG) << json;
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_JSON) << json;
   }
 
   const std::string oversized(64 * 1024 + 1, ' ');
-  EXPECT_EQ(generate(owner.get(), oversized), BACH_ERROR_INVALID_CONFIG);
+  EXPECT_EQ(generate(owner.get(), oversized), BACH_ERROR_INVALID_JSON);
 }
 
 TEST(BachCApiTest, RejectsFractionalNegativeOverflowAndWrongTypedFields) {
   BachHandleOwner owner;
   ASSERT_NE(owner.get(), nullptr);
 
-  const std::vector<std::string> invalid_config = {
-      "{\"bpm\":100.5}",       "{\"bpm\":-1}",
-      "{\"bpm\":65536}",       "{\"seed\":-1}",
-      "{\"seed\":4294967296}", "{\"seed\":1.5}",
-      "{\"target_bars\":-1}",  "{\"target_bars\":65536}",
-      "{\"target_bars\":1.5}", "{\"num_voices\":2.5}",
-      "{\"is_minor\":1}",
-  };
-  for (const auto& json : invalid_config) {
-    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_CONFIG) << json;
+  for (const auto& json : {"{\"bpm\":100.5}", "{\"bpm\":-1}", "{\"bpm\":65536}"}) {
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_BPM) << json;
+  }
+  for (const auto& json : {"{\"seed\":-1}", "{\"seed\":4294967296}", "{\"seed\":1.5}"}) {
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_SEED) << json;
+  }
+  for (const auto& json :
+       {"{\"target_bars\":-1}", "{\"target_bars\":65536}", "{\"target_bars\":1.5}"}) {
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_TARGET_BARS) << json;
+  }
+  EXPECT_EQ(generate(owner.get(), "{\"is_minor\":1}"), BACH_ERROR_INVALID_IS_MINOR);
+  for (const auto& json : {"{\"num_voices\":2.5}", "{\"num_voices\":-1}", "{\"num_voices\":256}"}) {
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INVALID_NUM_VOICES) << json;
   }
 
   EXPECT_EQ(generate(owner.get(), "{\"form\":1.5}"), BACH_ERROR_INVALID_FORM);
@@ -97,6 +116,31 @@ TEST(BachCApiTest, RejectsFractionalNegativeOverflowAndWrongTypedFields) {
   EXPECT_EQ(generate(owner.get(), "{\"key\":12}"), BACH_ERROR_INVALID_KEY);
   EXPECT_EQ(generate(owner.get(), "{\"character\":4}"), BACH_ERROR_INVALID_CHARACTER);
   EXPECT_EQ(generate(owner.get(), "{\"instrument\":6}"), BACH_ERROR_INVALID_INSTRUMENT);
+  EXPECT_EQ(generate(owner.get(), "{\"form\":\"fugue\",\"instrument\":\"cello\",\"seed\":42}"),
+            BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM);
+  EXPECT_EQ(generate(owner.get(), "{\"scale\":\"not_a_scale\"}"), BACH_ERROR_INVALID_SCALE);
+}
+
+TEST(BachCApiTest, RejectsUnknownConfigurationFields) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  EXPECT_EQ(generate(owner.get(), "{\"tempo\":100}"), BACH_ERROR_UNKNOWN_CONFIG_FIELD);
+  EXPECT_EQ(generate(owner.get(), "{\"bars\":16}"), BACH_ERROR_UNKNOWN_CONFIG_FIELD);
+  EXPECT_EQ(generate(owner.get(), "{\"comment\":\"test\"}"), BACH_ERROR_UNKNOWN_CONFIG_FIELD);
+}
+
+TEST(BachCApiTest, EnumeratedKeyNamesRoundTripThroughGenerate) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  for (uint8_t key_id = 0; key_id < bach_key_count(); ++key_id) {
+    const std::string key_name = bach_key_name(key_id);
+    EXPECT_EQ(
+        generate(owner.get(), "{\"form\":\"fugue\",\"key\":\"" + key_name + "\",\"seed\":42}"),
+        BACH_OK)
+        << key_name;
+  }
 }
 
 TEST(BachCApiTest, DeterministicMalformedByteCorpusDoesNotEscapeTheAbi) {
@@ -128,16 +172,32 @@ TEST(BachCApiTest, FailedRegenerationClearsThePublicResultSnapshot) {
   EXPECT_GT(midi->size, 0u);
   bach_free_midi(midi);
   ASSERT_GT(bach_get_info(owner.get())->total_ticks, 0u);
+  BachEventData* info_json = bach_get_info_json(owner.get());
+  ASSERT_NE(info_json, nullptr);
+  const std::string info_text(info_json->json, info_json->length);
+  EXPECT_NE(info_text.find("\"totalBars\":"), std::string::npos);
+  EXPECT_NE(info_text.find("\"seedUsed\":101"), std::string::npos);
+  bach_free_events(info_json);
 
-  EXPECT_EQ(generate(owner.get(), "{\"seed\":-1}"), BACH_ERROR_INVALID_CONFIG);
+  EXPECT_EQ(generate(owner.get(), "{\"seed\":-1}"), BACH_ERROR_INVALID_SEED);
   EXPECT_EQ(bach_get_midi(owner.get()), nullptr);
   EXPECT_EQ(bach_get_events(owner.get()), nullptr);
-  const BachInfo* info = bach_get_info(owner.get());
-  ASSERT_NE(info, nullptr);
-  EXPECT_EQ(info->total_ticks, 0u);
-  EXPECT_EQ(info->total_bars, 0u);
-  EXPECT_EQ(info->track_count, 0u);
-  EXPECT_EQ(info->seed_used, 0u);
+  EXPECT_EQ(bach_get_generated(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_provenance(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info_json(owner.get()), nullptr);
+}
+
+TEST(BachCApiTest, ExposesGeneratedAndProvenanceJsonAfterSuccessfulGeneration) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+  ASSERT_EQ(generate(owner.get(), validConfig(333)), BACH_OK);
+
+  const std::string generated = takeJson(bach_get_generated(owner.get()));
+  const std::string provenance = takeJson(bach_get_provenance(owner.get()));
+  EXPECT_NE(generated.find("\"schema_version\":\"generated.v1\""), std::string::npos);
+  EXPECT_NE(provenance.find("\"schema_version\":\"provenance.v1\""), std::string::npos);
+  EXPECT_NE(provenance.find("\"satisfied_rules\":\""), std::string::npos);
 }
 
 TEST(BachCApiTest, InfoStorageIsStableAndIndependentForDistinctHandles) {
@@ -198,6 +258,18 @@ TEST(BachCApiTest, RequestedTonicAndModeReachMidiKeySignatureMetadata) {
   EXPECT_TRUE(reader.getParsedMidi().key_signature.is_minor);
 }
 
+TEST(BachCApiTest, EnumeratedCharacterNamesRoundTripThroughGenerate) {
+  for (uint8_t id = 0; id < bach_character_count(); ++id) {
+    BachHandleOwner owner;
+    ASSERT_NE(owner.get(), nullptr);
+    const std::string json = std::string("{\"form\":\"fugue\",\"character\":\"") +
+                             bach_character_name(id) +
+                             "\",\"instrument\":\"organ\",\"scale\":\"short\","
+                             "\"bpm\":100,\"seed\":303}";
+    EXPECT_EQ(generate(owner.get(), json), BACH_OK) << bach_character_name(id);
+  }
+}
+
 TEST(BachCApiTest, CAdapterMatchesSharedCompositionServiceBytes) {
   BachHandleOwner owner;
   ASSERT_NE(owner.get(), nullptr);
@@ -209,6 +281,10 @@ TEST(BachCApiTest, CAdapterMatchesSharedCompositionServiceBytes) {
   ASSERT_NE(midi, nullptr);
   const std::vector<uint8_t> c_bytes(midi->data, midi->data + midi->size);
   bach_free_midi(midi);
+  BachEventData* events = bach_get_events(owner.get());
+  ASSERT_NE(events, nullptr);
+  const std::string c_events(events->json, events->length);
+  bach_free_events(events);
 
   bach::application::CompositionRequest request;
   request.form = bach::FormType::Fugue;
@@ -222,6 +298,26 @@ TEST(BachCApiTest, CAdapterMatchesSharedCompositionServiceBytes) {
   bach::application::CompositionProduct direct;
   ASSERT_EQ(bach::application::compose(request, &direct), bach::application::CompositionStatus::Ok);
   EXPECT_EQ(c_bytes, direct.midi_bytes);
+  EXPECT_EQ(c_events, direct.homepage_events_json);
+}
+
+TEST(BachCApiTest, DefaultConfigurationMatchesSharedServiceDefaults) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+  ASSERT_EQ(generate(owner.get(), "{\"seed\":407}"), BACH_OK);
+  BachMidiData* midi = bach_get_midi(owner.get());
+  ASSERT_NE(midi, nullptr);
+  const std::vector<uint8_t> c_bytes(midi->data, midi->data + midi->size);
+  bach_free_midi(midi);
+
+  bach::application::CompositionRequest request;
+  request.seed = 407;
+  bach::application::CompositionProduct direct;
+  ASSERT_EQ(bach::application::compose(request, &direct), bach::application::CompositionStatus::Ok);
+  EXPECT_EQ(c_bytes, direct.midi_bytes);
+  EXPECT_EQ(direct.form, bach::FormType::Fugue);
+  EXPECT_EQ(direct.scale, bach::DurationScale::Short);
+  EXPECT_EQ(direct.bpm, 100);
 }
 
 }  // namespace

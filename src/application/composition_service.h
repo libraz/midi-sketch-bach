@@ -12,6 +12,8 @@
 
 namespace bach::application {
 
+constexpr std::uint16_t kDefaultBpm = 100;
+
 /// Surface-neutral request for the shipped form-composition product path.
 struct CompositionRequest {
   FormType form = FormType::Fugue;
@@ -21,7 +23,8 @@ struct CompositionRequest {
   bool instrument_specified = false;
   DurationScale scale = DurationScale::Short;
   std::uint16_t target_bars = 0;
-  std::uint16_t bpm = 100;
+  /// Zero is the surface-neutral "use the shared default" sentinel.
+  std::uint16_t bpm = 0;
   std::uint32_t seed = 0;
   bool enable_free_counterpoint = false;
 };
@@ -30,7 +33,9 @@ enum class CompositionStatus : std::uint8_t {
   Ok = 0,
   InvalidArgument,
   IncompatibleCharacter,
+  IncompatibleInstrument,
   InvalidForm,
+  FreeCounterpointUnavailable,
   GenerationFailed,
   FinalValidationFailed,
   MidiFailed,
@@ -43,6 +48,11 @@ struct PerformanceProfile {
 };
 
 PerformanceProfile resolvePerformanceProfile(FormType form, InstrumentType instrument);
+
+/// Apply the product-path defaults to fields whose zero value is an explicit
+/// surface-neutral sentinel. Adapters should forward sentinels rather than
+/// owning independent default tables.
+void resolveDefaults(CompositionRequest* request);
 
 /// Complete owning product result shared by CLI and C/WASM adapters.
 struct CompositionProduct {
@@ -59,6 +69,7 @@ struct CompositionProduct {
   std::uint16_t resolved_bars = 0;
   std::uint32_t total_ticks = 0;
   std::uint16_t total_bars = 0;
+  int output_octave_shift = 0;
   std::string form_display;
   PerformanceProfile performance_profile;
   std::vector<TempoEvent> tempo_events;

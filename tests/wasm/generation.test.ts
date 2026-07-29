@@ -16,6 +16,13 @@ describe('BachGenerator - Generation', () => {
     bach?.destroy();
   });
 
+  it('should reject generation info before a successful generation', () => {
+    bach = new BachGenerator();
+    expect(() => bach?.getInfo()).toThrow('Call generate() first');
+    expect(() => bach?.getGenerated()).toThrow('Call generate() first');
+    expect(() => bach?.getProvenance()).toThrow('Call generate() first');
+  });
+
   it('should generate with default config', () => {
     bach = new BachGenerator();
     bach.generate();
@@ -48,6 +55,28 @@ describe('BachGenerator - Generation', () => {
     expect(events.total_ticks).toBeGreaterThan(0);
     expect(events.tracks.length).toBeGreaterThan(0);
     expect(events.tracks[0].notes.length).toBeGreaterThan(0);
+  });
+
+  it('should expose meter, tempo, and control changes in event data', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'chaconne', seed: 42 });
+    const events = bach.getEvents();
+    expect(events.tempos[0]).toMatchObject({ tick: 0, bpm: 100 });
+    expect(events.time_signatures[0]).toMatchObject({ tick: 0, numerator: 3, denominator: 4 });
+    expect(events.tracks).toHaveLength(2);
+    expect(Array.isArray(events.tracks[0].control_changes)).toBe(true);
+  });
+
+  it('should return index-parallel generated and provenance documents', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'fugue', seed: 42 });
+    const generated = bach.getGenerated();
+    const provenance = bach.getProvenance();
+    expect(generated.schema_version).toBe('generated.v1');
+    expect(provenance.schema_version).toBe('provenance.v1');
+    expect(generated.notes.length).toBeGreaterThan(0);
+    expect(provenance.notes).toHaveLength(generated.notes.length);
+    expect(typeof provenance.notes[0].satisfied_rules).toBe('string');
   });
 
   it('should return generation info', () => {
@@ -134,10 +163,7 @@ describe('BachGenerator - Generation', () => {
 
   it('should throw on an invalid form string', () => {
     const generator = new BachGenerator();
-    // Invalid form is now a hard error rather than a silent fallback.
-    expect(() => {
-      generator.generate({ form: 'not_a_real_form' });
-    }).toThrow();
+    expect(() => generator.generate({ form: 'not_a_real_form' })).toThrow('getDiagnostic()');
     generator.destroy();
   });
 

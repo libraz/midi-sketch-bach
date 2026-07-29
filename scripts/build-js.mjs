@@ -67,7 +67,10 @@ await esbuild.build({
 console.log('Bundling type declarations...');
 
 // Read all .d.ts files and combine them
-const dtsFiles = ['types.d.ts', 'presets.d.ts', 'internal.d.ts', 'bach.d.ts'];
+// Only public modules belong in the package declaration surface. `internal`
+// contains WASM plumbing used by the implementation and is deliberately not
+// re-exported from index.ts.
+const dtsFiles = ['types.d.ts', 'presets.d.ts', 'bach.d.ts'];
 
 let combinedDts = `/**
  * midi-sketch-bach - Bach Instrumental MIDI Generator
@@ -88,6 +91,9 @@ for (const file of dtsFiles) {
     content = content.replace(/^import .+ from ['"]\.\/[^'"]+['"];?\n/gm, '');
     // Remove "export {}" lines that re-export from other files
     content = content.replace(/^export \{ .+ \} from ['"]\.\/[^'"]+['"];?\n/gm, '');
+    // Individual declaration maps are deleted below, so leave no dangling
+    // sourceMappingURL directive in the bundled declaration file.
+    content = content.replace(/^\/\/\# sourceMappingURL=.*\n?/gm, '');
     combinedDts += `// From ${file.replace('.d.ts', '.ts')}\n`;
     combinedDts += `${content}\n`;
   } catch {

@@ -9,6 +9,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "application/composition_service.h"
@@ -22,14 +23,18 @@
 
 namespace {
 
+constexpr int kExitUsage = 2;
+constexpr int kExitGeneration = 3;
+constexpr int kExitOutput = 4;
+
 /// @brief Command-line options parsed from argv.
 struct CliOptions {
   uint32_t seed = 0;
   bach::KeySignature key = {bach::Key::C, false};
-  bach::FormType form = bach::FormType::PreludeAndFugue;
+  bach::FormType form = bach::FormType::Fugue;
   bach::SubjectCharacter character = bach::SubjectCharacter::Severe;
   bach::InstrumentType instrument = bach::InstrumentType::Organ;
-  uint16_t bpm = 72;
+  uint16_t bpm = 0;
   std::string output = "output.mid";
   bool json_output = false;
   bool generated_json_output = false;
@@ -44,6 +49,7 @@ struct CliOptions {
   // (scripts/bachlib/mirror.py + predictors.py, driven by
   // `python3 scripts/bach_tools.py closure`).
   bool composer_mode = false;
+  bool composer_phase_product_option = false;
   bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::FugueExposition3v;
   // Opt-in: route accompanimental inner-voice spans through the scored
   // candidate search instead of replaying their designed counter-line. A
@@ -224,7 +230,7 @@ void printUsage() {
       "                   voice via the scored candidate search instead of its\n"
       "                   designed counter-line (off by default; lowers quality)\n");
   std::printf(
-      "  --composer-phase P  Run the closure harness layout with phase\n"
+      "  --composer-phase P  (internal) Run the closure harness layout with phase\n"
       "                   "
       "{FugueSubject2v|FugueSubject2vShort|FugueAnswer2v|FugueAnswerSuspension|FugueSubject3v|"
       "FugueExposition3v|FugueExpositionEpisode|\n"
@@ -256,6 +262,23 @@ void printUsage() {
 bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
   ok = true;
   for (int idx = 1; idx < argc; ++idx) {
+    const bool requires_value =
+        std::strcmp(argv[idx], "--seed") == 0 || std::strcmp(argv[idx], "--bpm") == 0 ||
+        std::strcmp(argv[idx], "-o") == 0 || std::strcmp(argv[idx], "--form") == 0 ||
+        std::strcmp(argv[idx], "--character") == 0 || std::strcmp(argv[idx], "--key") == 0 ||
+        std::strcmp(argv[idx], "--instrument") == 0 || std::strcmp(argv[idx], "--scale") == 0 ||
+        std::strcmp(argv[idx], "--bars") == 0 || std::strcmp(argv[idx], "--composer-phase") == 0;
+    if (requires_value && idx + 1 >= argc) {
+      std::fprintf(stderr, "Error: option '%s' requires a value\n", argv[idx]);
+      ok = false;
+      return false;
+    }
+    const bool product_only_option =
+        std::strcmp(argv[idx], "--form") == 0 || std::strcmp(argv[idx], "--character") == 0 ||
+        std::strcmp(argv[idx], "--instrument") == 0 || std::strcmp(argv[idx], "--bpm") == 0 ||
+        std::strcmp(argv[idx], "--scale") == 0 || std::strcmp(argv[idx], "--bars") == 0 ||
+        std::strcmp(argv[idx], "--free-counterpoint") == 0;
+    opts.composer_phase_product_option = opts.composer_phase_product_option || product_only_option;
     if (std::strcmp(argv[idx], "--help") == 0 || std::strcmp(argv[idx], "-h") == 0) {
       printUsage();
       return false;
@@ -376,6 +399,13 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
       return false;
     }
   }
+  if (opts.composer_mode && opts.composer_phase_product_option) {
+    std::fprintf(
+        stderr,
+        "Error: --composer-phase is internal and cannot be combined with product options\n");
+    ok = false;
+    return false;
+  }
   return true;
 }
 
@@ -439,6 +469,9 @@ const char* harnessPhaseToString(bach::composer::HarnessPhase p) {
   return "Phase?";
 }
 
+std::string deriveJsonPath(const std::string& output);
+std::string deriveSuffixedJsonPath(const std::string& output, const char* suffix);
+
 int runComposerMode(const CliOptions& opts) {
   // Composer mode: harness fixture catalog drives Material / HarmonicPlan /
   // VoicePlan. Output goes through the same MidiWriter as the legacy path so
@@ -456,13 +489,7 @@ int runComposerMode(const CliOptions& opts) {
   // Writes generated + provenance JSON next to opts.output. Also used on
   // validation failure so failing spans can be located from the note dump.
   const auto dump_json = [&result, &opts]() {
-    std::string json_path = opts.output;
-    auto dot_pos = json_path.rfind('.');
-    if (dot_pos != std::string::npos) {
-      json_path = json_path.substr(0, dot_pos) + ".json";
-    } else {
-      json_path += ".json";
-    }
+    const std::string json_path = deriveJsonPath(opts.output);
     const std::vector<bach::TempoEvent> tempo_events = {{0, opts.bpm}};
     const std::string generated =
         bach::composer::emitGeneratedJson(result.notes, result.validation, tempo_events);
@@ -475,13 +502,7 @@ int runComposerMode(const CliOptions& opts) {
     } else {
       std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
     }
-    std::string provenance_path = json_path;
-    const auto provenance_dot_pos = provenance_path.rfind('.');
-    if (provenance_dot_pos != std::string::npos) {
-      provenance_path = provenance_path.substr(0, provenance_dot_pos) + ".provenance.json";
-    } else {
-      provenance_path += ".provenance.json";
-    }
+    const std::string provenance_path = deriveSuffixedJsonPath(opts.output, ".provenance.json");
     std::ofstream pf(provenance_path);
     if (pf.is_open()) {
       pf << provenance;
@@ -492,13 +513,7 @@ int runComposerMode(const CliOptions& opts) {
     }
 
     if (result.validation.status != bach::composer::ValidationStatus::Ok) {
-      std::string diagnostic_path = json_path;
-      const auto diagnostic_dot_pos = diagnostic_path.rfind('.');
-      if (diagnostic_dot_pos != std::string::npos) {
-        diagnostic_path = diagnostic_path.substr(0, diagnostic_dot_pos) + ".diagnostic.json";
-      } else {
-        diagnostic_path += ".diagnostic.json";
-      }
+      const std::string diagnostic_path = deriveSuffixedJsonPath(opts.output, ".diagnostic.json");
       std::ofstream diagnostic_file(diagnostic_path);
       if (diagnostic_file.is_open()) {
         diagnostic_file << bach::composer::emitDiagnosticJson(result.notes, result.provenance,
@@ -521,7 +536,7 @@ int runComposerMode(const CliOptions& opts) {
     if (opts.json_output) {
       dump_json();
     }
-    return 1;
+    return kExitGeneration;
   }
 
   std::printf("Generated: Composer %s exposition\n", phase_name);
@@ -533,11 +548,11 @@ int runComposerMode(const CliOptions& opts) {
   bach::MidiWriter writer;
   if (writer.build(result.tracks, tempo_events, opts.key) != bach::MidiWriterStatus::Ok) {
     std::fprintf(stderr, "Invalid tempo or meter for MIDI output\n");
-    return 1;
+    return kExitGeneration;
   }
   if (!writer.writeToFile(opts.output)) {
     std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-    return 1;
+    return kExitOutput;
   }
   std::printf("Output:    %s\n", opts.output.c_str());
 
@@ -550,36 +565,49 @@ int runComposerMode(const CliOptions& opts) {
 /// @brief Derive the output JSON path from the MIDI output path.
 /// @param output The MIDI output path (e.g. "song.mid").
 /// @return The sibling JSON path (e.g. "song.json").
-std::string deriveJsonPath(const std::string& output) {
-  std::string json_path = output;
-  const auto dot_pos = json_path.rfind('.');
-  if (dot_pos != std::string::npos) {
-    json_path = json_path.substr(0, dot_pos) + ".json";
-  } else {
-    json_path += ".json";
+namespace {
+
+std::string replaceFilenameExtension(const std::string& output, const char* suffix) {
+  const std::size_t filename_start = output.find_last_of("/\\") + 1;
+  const std::size_t dot_pos = output.find_last_of('.');
+  if (dot_pos != std::string::npos && dot_pos > filename_start) {
+    return output.substr(0, dot_pos) + suffix;
   }
-  return json_path;
+  return output + suffix;
+}
+
+bool hasJsonExtension(const std::string& output) {
+  constexpr std::string_view kJsonExtension = ".json";
+  return output.size() >= kJsonExtension.size() &&
+         output.compare(output.size() - kJsonExtension.size(), kJsonExtension.size(),
+                        kJsonExtension) == 0;
+}
+
+}  // namespace
+
+std::string deriveJsonPath(const std::string& output) {
+  // `-o song.json --json` must not reopen the active MIDI path for JSON: keep
+  // the caller's requested output intact and make the event sidecar explicit.
+  if (hasJsonExtension(output)) {
+    return output + ".events.json";
+  }
+  return replaceFilenameExtension(output, ".json");
 }
 
 std::string deriveSuffixedJsonPath(const std::string& output, const char* suffix) {
-  std::string json_path = output;
-  const auto dot_pos = json_path.rfind('.');
-  if (dot_pos != std::string::npos) {
-    json_path = json_path.substr(0, dot_pos) + suffix;
-  } else {
-    json_path += suffix;
+  // As above, never let a generated/provenance sidecar collide with an output
+  // whose user-provided filename already ends in `.json`.
+  if (hasJsonExtension(output)) {
+    return output + suffix;
   }
-  return json_path;
+  return replaceFilenameExtension(output, suffix);
 }
 
 /// @brief Run the default composer pipeline (form director) and emit output.
 /// @param opts Parsed command-line options.
-/// @return 0 on success, 1 on any failure.
+/// @return 0 on success, 3 on generation failure, or 4 on output failure.
 int runDefaultMode(const CliOptions& opts) {
   bach::DurationScale scale = opts.scale;
-  if (!opts.scale_specified && opts.form == bach::FormType::Fugue) {
-    scale = bach::DurationScale::Medium;
-  }
 
   bach::application::CompositionRequest request;
   request.form = opts.form;
@@ -598,7 +626,19 @@ int runDefaultMode(const CliOptions& opts) {
   if (status == bach::application::CompositionStatus::IncompatibleCharacter) {
     std::fprintf(stderr, "Error: character '%s' is incompatible with form '%s'\n",
                  bach::subjectCharacterToString(opts.character), bach::formTypeToString(opts.form));
-    return 1;
+    return kExitGeneration;
+  }
+  if (status == bach::application::CompositionStatus::IncompatibleInstrument) {
+    std::fprintf(stderr, "Error: instrument '%s' is incompatible with form '%s'\n",
+                 bach::instrumentTypeToString(opts.instrument), bach::formTypeToString(opts.form));
+    return kExitGeneration;
+  }
+  if (status == bach::application::CompositionStatus::FreeCounterpointUnavailable) {
+    std::fprintf(
+        stderr,
+        "Error: free counterpoint is unavailable for form '%s' (no eligible secondary voice)\n",
+        bach::formTypeToString(opts.form));
+    return kExitGeneration;
   }
   if (status == bach::application::CompositionStatus::GenerationFailed ||
       status == bach::application::CompositionStatus::FinalValidationFailed) {
@@ -611,32 +651,20 @@ int runDefaultMode(const CliOptions& opts) {
       std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
                    static_cast<unsigned>(f.span_id));
     }
-    if (opts.generated_json_output) {
-      const std::string generated_path = deriveSuffixedJsonPath(opts.output, ".generated.json");
-      const std::string provenance_path = deriveSuffixedJsonPath(opts.output, ".provenance.json");
+    if (opts.generated_json_output && !product.diagnostic_json.empty()) {
       const std::string diagnostic_path = deriveSuffixedJsonPath(opts.output, ".diagnostic.json");
-      std::ofstream generated_file(generated_path);
-      if (generated_file.is_open()) {
-        generated_file << product.generated_json;
-        std::fprintf(stderr, "Generated JSON (failed run):%s\n", generated_path.c_str());
-      }
-      std::ofstream provenance_file(provenance_path);
-      if (provenance_file.is_open()) {
-        provenance_file << product.provenance_json;
-        std::fprintf(stderr, "Provenance (failed run):%s\n", provenance_path.c_str());
-      }
       std::ofstream diagnostic_file(diagnostic_path);
       if (diagnostic_file.is_open()) {
         diagnostic_file << product.diagnostic_json;
         std::fprintf(stderr, "Diagnostic (failed run):%s\n", diagnostic_path.c_str());
       }
     }
-    return 1;
+    return kExitGeneration;
   }
   if (status != bach::application::CompositionStatus::Ok) {
     std::fprintf(stderr, "Error: composition service failed (status %u)\n",
                  static_cast<unsigned>(status));
-    return 1;
+    return kExitGeneration;
   }
 
   std::printf("bach_cli v%s\n", BACH_VERSION);
@@ -663,16 +691,18 @@ int runDefaultMode(const CliOptions& opts) {
   std::ofstream midi_file(opts.output, std::ios::binary);
   if (!midi_file.is_open()) {
     std::fprintf(stderr, "Error: failed to write %s\n", opts.output.c_str());
-    return 1;
+    return kExitOutput;
   }
   midi_file.write(reinterpret_cast<const char*>(product.midi_bytes.data()),
                   static_cast<std::streamsize>(product.midi_bytes.size()));
   if (!midi_file.good()) {
     std::fprintf(stderr, "Error: failed to write complete MIDI file %s\n", opts.output.c_str());
-    return 1;
+    return kExitOutput;
   }
+  midi_file.close();
   std::printf("\nOutput:    %s\n", opts.output.c_str());
 
+  bool sidecar_ok = true;
   if (opts.json_output) {
     const std::string json_path = deriveJsonPath(opts.output);
     std::ofstream json_file(json_path);
@@ -680,7 +710,8 @@ int runDefaultMode(const CliOptions& opts) {
       json_file << product.homepage_events_json;
       std::printf("JSON:      %s\n", json_path.c_str());
     } else {
-      std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+      std::fprintf(stderr, "Error: failed to write %s\n", json_path.c_str());
+      sidecar_ok = false;
     }
   }
 
@@ -693,7 +724,8 @@ int runDefaultMode(const CliOptions& opts) {
       generated_file << product.generated_json;
       std::printf("Generated JSON:%s\n", generated_path.c_str());
     } else {
-      std::fprintf(stderr, "Warning: failed to write %s\n", generated_path.c_str());
+      std::fprintf(stderr, "Error: failed to write %s\n", generated_path.c_str());
+      sidecar_ok = false;
     }
 
     std::ofstream provenance_file(provenance_path);
@@ -701,11 +733,12 @@ int runDefaultMode(const CliOptions& opts) {
       provenance_file << product.provenance_json;
       std::printf("Provenance:%s\n", provenance_path.c_str());
     } else {
-      std::fprintf(stderr, "Warning: failed to write %s\n", provenance_path.c_str());
+      std::fprintf(stderr, "Error: failed to write %s\n", provenance_path.c_str());
+      sidecar_ok = false;
     }
   }
 
-  return 0;
+  return sidecar_ok ? 0 : kExitOutput;
 }
 
 }  // namespace
@@ -714,7 +747,7 @@ int main(int argc, char* argv[]) {
   CliOptions opts;
   bool ok = true;
   if (!parseArgs(argc, argv, opts, ok)) {
-    return ok ? 0 : 1;
+    return ok ? 0 : kExitUsage;
   }
 
   if (opts.composer_mode) {

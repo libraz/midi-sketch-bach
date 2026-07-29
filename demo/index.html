@@ -341,7 +341,10 @@
         if (!f) return this.characters;
         const incompatible = INCOMPATIBLE_CHARACTERS_BY_FORM[f.name];
         if (!incompatible) return this.characters;
-        return this.characters.filter(c => !incompatible.has(c.name));
+        // The C API exposes display names (for example "Playful") while the
+        // compatibility table uses parser tokens.  Compare the normalized
+        // token so an incompatible preset cannot remain selectable.
+        return this.characters.filter(c => !incompatible.has(c.name.toLowerCase()));
       },
       get isOrganForm() {
         const f = this.currentForm;
@@ -369,8 +372,47 @@
       },
 
       // Methods
-      ticksToSeconds(ticks, bpm) {
-        return (ticks / 480) * (60 / bpm);
+      secondsAtTick(tick, eventData) {
+        const tempos = [...(eventData.tempos || [{ tick: 0, bpm: eventData.bpm }])]
+          .sort((a, b) => a.tick - b.tick);
+        let seconds = 0;
+        let previousTick = 0;
+        let bpm = tempos[0]?.bpm || eventData.bpm;
+        for (const tempo of tempos) {
+          if (tempo.tick === 0) {
+            bpm = tempo.bpm;
+            continue;
+          }
+          if (tempo.tick >= tick) break;
+          seconds += ((tempo.tick - previousTick) / 480) * (60 / bpm);
+          previousTick = tempo.tick;
+          bpm = tempo.bpm;
+        }
+        return seconds + ((tick - previousTick) / 480) * (60 / bpm);
+      },
+      tickAtSeconds(seconds, eventData) {
+        const tempos = [...(eventData.tempos || [{ tick: 0, bpm: eventData.bpm }])]
+          .sort((a, b) => a.tick - b.tick);
+        let remaining = seconds;
+        let previousTick = 0;
+        let bpm = tempos[0]?.bpm || eventData.bpm;
+        for (let index = 1; index < tempos.length; index++) {
+          const next = tempos[index];
+          const segment = ((next.tick - previousTick) / 480) * (60 / bpm);
+          if (remaining < segment) return previousTick + remaining * bpm * 480 / 60;
+          remaining -= segment;
+          previousTick = next.tick;
+          bpm = next.bpm;
+        }
+        return previousTick + remaining * bpm * 480 / 60;
+      },
+      timeSignatureAtTick(tick, eventData) {
+        let active = (eventData.time_signatures || [])[0] || { tick: 0, numerator: 4, denominator: 4 };
+        for (const signature of eventData.time_signatures || []) {
+          if (signature.tick > tick) break;
+          active = signature;
+        }
+        return active;
       },
       formatTime(s) {
         return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
@@ -427,7 +469,7 @@
           this.eventData = this.bach.getEvents();
           const info = this.bach.getInfo();
 
-          this.totalDuration = this.ticksToSeconds(info.totalTicks, info.bpm);
+          this.totalDuration = this.secondsAtTick(info.totalTicks, this.eventData);
           this.totalBars = info.totalBars;
 
           // Build generation result for display
@@ -463,7 +505,7 @@
           };
 
           // Build note timeline for real-time voice tracking
-          this.buildNoteTimeline(this.eventData, info.bpm);
+          this.buildNoteTimeline(this.eventData);
         } catch (e) {
           this.generationResult = null;
           this.eventData = null;
@@ -482,15 +524,16 @@
         }
       },
 
-      buildNoteTimeline(eventData, bpm) {
+      buildNoteTimeline(eventData) {
         const timeline = [];
         const voiceNameSet = new Set();
         for (const track of eventData.tracks) {
           const name = track.name;
           voiceNameSet.add(name);
           for (const note of track.notes || []) {
-            const startSec = this.ticksToSeconds(note.start_tick, bpm);
-            const durSec = Math.max(0.05, this.ticksToSeconds(note.duration, bpm));
+            const startSec = this.secondsAtTick(note.start_tick, eventData);
+            const durSec = Math.max(0.05,
+              this.secondsAtTick(note.start_tick + note.duration, eventData) - startSec);
             timeline.push({ startSec, endSec: startSec + durSec, voice: name });
           }
         }
@@ -532,10 +575,12 @@
         }
 
         // Compute current bar and beat from elapsed time
-        const bpm = this.eventData?.bpm || this.config.bpm;
-        const beatsElapsed = this.playbackTime * bpm / 60;
-        this.currentBar = Math.min(Math.floor(beatsElapsed / 4) + 1, this.totalBars);
-        this.currentBeat = Math.floor(beatsElapsed % 4) + 1;
+        const tick = this.tickAtSeconds(this.playbackTime, this.eventData);
+        const signature = this.timeSignatureAtTick(tick, this.eventData);
+        const ticksPerBeat = 480 * 4 / signature.denominator;
+        const ticksPerBar = ticksPerBeat * signature.numerator;
+        this.currentBar = Math.min(Math.floor((tick - signature.tick) / ticksPerBar) + 1, this.totalBars);
+        this.currentBeat = Math.floor(((tick - signature.tick) % ticksPerBar) / ticksPerBeat) + 1;
 
         // Find active voices at current time using cursor
         const t = this.playbackTime;
@@ -601,7 +646,6 @@
           const ctx = this.audioContext;
           if (ctx.state === 'suspended') await ctx.resume();
 
-          const bpm = this.eventData.bpm;
           const now = ctx.currentTime + 0.1;
           this.playStartTime = now - offsetSec;
 
@@ -614,8 +658,9 @@
 
           for (const track of this.eventData.tracks) {
             for (const note of track.notes || []) {
-              const start = this.ticksToSeconds(note.start_tick, bpm);
-              const dur = Math.max(0.05, this.ticksToSeconds(note.duration, bpm));
+              const start = this.secondsAtTick(note.start_tick, this.eventData);
+              const dur = Math.max(0.05,
+                this.secondsAtTick(note.start_tick + note.duration, this.eventData) - start);
               const end = start + dur;
               if (end <= offsetSec) continue;
               const schedStart = Math.max(0, start - offsetSec);
@@ -625,7 +670,7 @@
           }
 
           this.isPlaying = true;
-          this.totalDuration = this.ticksToSeconds(this.eventData.total_ticks, bpm);
+          this.totalDuration = this.secondsAtTick(this.eventData.total_ticks, this.eventData);
           const remaining = this.totalDuration - offsetSec;
           this.stopTimeout = setTimeout(() => this.stop(), remaining * 1000 + 500);
           this.updateProgress();

@@ -28,6 +28,15 @@ typedef enum {
   BACH_ERROR_INVALID_INSTRUMENT = 6,
   BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM = 7,
   BACH_ERROR_INVALID_CONFIG = 8,
+  BACH_ERROR_INVALID_JSON = 9,
+  BACH_ERROR_UNKNOWN_CONFIG_FIELD = 10,
+  BACH_ERROR_INVALID_BPM = 11,
+  BACH_ERROR_INVALID_SEED = 12,
+  BACH_ERROR_INVALID_TARGET_BARS = 13,
+  BACH_ERROR_INVALID_SCALE = 14,
+  BACH_ERROR_INVALID_IS_MINOR = 15,
+  BACH_ERROR_INVALID_NUM_VOICES = 16,
+  BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM = 17,
 } BachError;
 
 // ============================================================================
@@ -80,12 +89,15 @@ void bach_destroy(BachHandle handle);
 ///   form: string ("fugue", "prelude_and_fugue", ...) or number (0-9).
 ///         Strict: an unknown name or out-of-range number is rejected with
 ///         BACH_ERROR_INVALID_FORM.
-///   key: number (0-11, pitch class). Out of range => BACH_ERROR_INVALID_KEY.
-///   is_minor: boolean (default false).
+///   key: canonical name returned by bach_key_name() or number (0-11, pitch
+///         class). Invalid values => BACH_ERROR_INVALID_KEY.
+///   is_minor: boolean (default false). Invalid type =>
+///         BACH_ERROR_INVALID_IS_MINOR.
 ///   num_voices: number. ACCEPTED AND IGNORED for backward compatibility; the
-///         form now decides the voice count. Never an error.
+///         form now decides the voice count. Its value must be an unsigned
+///         8-bit integer; otherwise BACH_ERROR_INVALID_NUM_VOICES.
 ///   bpm: number. 0 or absent => default 100. Otherwise must be in [40, 200],
-///         else BACH_ERROR_INVALID_CONFIG.
+///         else BACH_ERROR_INVALID_BPM.
 ///   seed: number. 0 or absent => a random non-zero seed is generated; the
 ///         resolved value is reported via BachInfo::seed_used.
 ///   character: string ("severe", "playful", "noble", "restless") or number
@@ -95,8 +107,9 @@ void bach_destroy(BachHandle handle);
 ///         Absent => default for the form. Strict: unknown name /
 ///         out-of-range number => BACH_ERROR_INVALID_INSTRUMENT.
 ///   scale: string ("short", "medium", "long", "full") or number (0-3).
-///         Strict: unknown => BACH_ERROR_INVALID_CONFIG. Default "short".
+///         Strict: unknown => BACH_ERROR_INVALID_SCALE. Default "short".
 ///   target_bars: number (0 = use scale, >0 = override scale).
+///   Unknown fields are rejected with BACH_ERROR_UNKNOWN_CONFIG_FIELD.
 ///
 /// @param handle Bach handle
 /// @param json JSON config string
@@ -126,6 +139,18 @@ BachEventData* bach_get_events(BachHandle handle);
 /// @param data Pointer returned by bach_get_events
 void bach_free_events(BachEventData* data);
 
+/// @brief Get generated.v1 JSON from the most recent successful generation.
+/// @param handle Bach handle.
+/// @return Generated JSON, or nullptr before a successful generation. Free
+///         with bach_free_events().
+BachEventData* bach_get_generated(BachHandle handle);
+
+/// @brief Get provenance.v1 JSON from the most recent successful generation.
+/// @param handle Bach handle.
+/// @return Provenance JSON, or nullptr before a successful generation. Free
+///         with bach_free_events().
+BachEventData* bach_get_provenance(BachHandle handle);
+
 /// @brief Get the diagnostic.v1 document from the most recent validation failure.
 /// @param handle Bach handle
 /// @return Diagnostic JSON, or nullptr when the last request did not reach a
@@ -135,10 +160,17 @@ BachEventData* bach_get_diagnostic(BachHandle handle);
 /// @brief Get generation info.
 /// @param handle Bach handle
 /// @return Per-handle snapshot valid until the next generation on that handle
-///         or bach_destroy(); nullptr for an invalid handle. Calls for distinct
+///         or bach_destroy(); nullptr for an invalid handle or before a
+///         successful generation. Calls for distinct
 ///         handles do not share storage. Concurrent access to the same handle
 ///         requires caller synchronization. Do not free the returned pointer.
 const BachInfo* bach_get_info(BachHandle handle);
+
+/// @brief Get generation info as a layout-independent JSON object.
+/// @param handle Bach handle.
+/// @return A camelCase BachInfo JSON object, or nullptr before a successful
+///         generation. Free with bach_free_events().
+BachEventData* bach_get_info_json(BachHandle handle);
 
 // ============================================================================
 // Form Enumeration

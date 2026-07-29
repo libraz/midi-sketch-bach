@@ -26,7 +26,7 @@ const incompatibleCharactersByForm = {
 
 function compatibleCharacterFor(formName, characters) {
   const incompatible = incompatibleCharactersByForm[formName] || new Set();
-  const character = characters.find((c) => !incompatible.has(c.name));
+  const character = characters.find((c) => !incompatible.has(c.name.toLowerCase()));
   if (!character) {
     throw new Error(`No compatible character found for ${formName}`);
   }
@@ -95,6 +95,20 @@ for (const form of forms) {
     }
     generated += 1;
   }
+}
+
+// Preset enumeration returns display names.  Every returned value must be
+// accepted as a character configuration, not just a hand-written token.
+for (const character of characters) {
+  const generator = new BachGenerator();
+  generator.generate({ form: 'fugue', character: character.name, seed: 20260729 + character.id });
+  const midi = generator.getMidi();
+  generator.destroy();
+
+  if (midi.length === 0) {
+    throw new Error(`Empty MIDI for enumerated character=${character.name}`);
+  }
+  generated += 1;
 }
 
 expectThrows({ form: 'chorale_prelude', character: 'playful', seed: 42 });

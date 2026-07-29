@@ -97,15 +97,18 @@ describe('Exhaustive Parameter Tests', () => {
     const charactersByForm: Record<string, string[]> = {
       fugue: ['severe', 'playful', 'noble', 'restless'],
       prelude_and_fugue: ['severe', 'playful', 'noble', 'restless'],
+      trio_sonata: ['severe', 'playful', 'noble', 'restless'],
       chorale_prelude: ['severe', 'noble'],
       toccata_and_fugue: ['severe', 'playful', 'restless'],
       passacaglia: ['severe', 'playful', 'noble', 'restless'],
       fantasia_and_fugue: ['severe', 'playful', 'noble', 'restless'],
+      cello_prelude: ['severe', 'playful', 'noble', 'restless'],
+      chaconne: ['severe', 'playful', 'noble', 'restless'],
+      goldberg_variations: ['severe', 'playful', 'noble', 'restless'],
     };
 
     const combinations = Array.from({ length: COMBINATION_COUNT }, (_, i) => {
       const form = pick(forms, rng);
-      const isOrgan = !['cello_prelude', 'chaconne'].includes(form);
       const compatibleCharacters = charactersByForm[form];
       return {
         index: i,
@@ -114,7 +117,7 @@ describe('Exhaustive Parameter Tests', () => {
         isMinor: rng() > 0.5,
         bpm: 40 + Math.floor(rng() * 161), // 40-200
         seed: Math.floor(rng() * 1000000),
-        ...(isOrgan && compatibleCharacters ? { character: pick(compatibleCharacters, rng) } : {}),
+        character: pick(compatibleCharacters, rng),
       };
     });
 

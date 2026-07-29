@@ -28,9 +28,12 @@ export interface Api {
   getMidi: (handle: number) => number;
   freeMidi: (ptr: number) => void;
   getEvents: (handle: number) => number;
+  getGenerated: (handle: number) => number;
+  getProvenance: (handle: number) => number;
   getDiagnostic: (handle: number) => number;
   freeEvents: (ptr: number) => void;
   getInfo: (handle: number) => number;
+  getInfoJson: (handle: number) => number;
   // Form enumeration
   formCount: () => number;
   formName: (id: number) => string;
@@ -61,6 +64,8 @@ export interface Api {
 
 let moduleInstance: EmscriptenModule | null = null;
 let api: Api | null = null;
+let initialization: Promise<void> | null = null;
+let initializationWasmPath: string | undefined;
 
 /**
  * Get the WASM module instance
@@ -98,65 +103,94 @@ export async function init(options?: { wasmPath?: string }): Promise<void> {
     return;
   }
 
-  const createModule = await import('../bach.js');
-  const moduleOpts: Record<string, unknown> = {};
-  if (options?.wasmPath) {
-    moduleOpts.locateFile = (path: string) => {
-      if (path.endsWith('.wasm')) {
-        return options.wasmPath;
-      }
-      return path;
+  if (initialization) {
+    if (options?.wasmPath !== initializationWasmPath) {
+      throw new Error('WASM initialization is already in progress with a different wasmPath');
+    }
+    return initialization;
+  }
+
+  initializationWasmPath = options?.wasmPath;
+  initialization = (async () => {
+    const createModule = await import('../bach.js');
+    const moduleOpts: Record<string, unknown> = {};
+    if (options?.wasmPath) {
+      moduleOpts.locateFile = (path: string) => {
+        if (path.endsWith('.wasm')) {
+          return options.wasmPath;
+        }
+        return path;
+      };
+    }
+    moduleInstance = await createModule.default(moduleOpts);
+
+    if (!moduleInstance) {
+      throw new Error('Failed to initialize WASM module');
+    }
+    const m = moduleInstance;
+
+    api = {
+      // Lifecycle
+      create: m.cwrap('bach_create', 'number', []) as () => number,
+      destroy: m.cwrap('bach_destroy', null, ['number']) as (handle: number) => void,
+      // Generation
+      generateFromJson: m.cwrap('bach_generate_from_json', 'number', [
+        'number',
+        'string',
+        'number',
+      ]) as (handle: number, json: string, length: number) => number,
+      // Output
+      getMidi: m.cwrap('bach_get_midi', 'number', ['number']) as (handle: number) => number,
+      freeMidi: m.cwrap('bach_free_midi', null, ['number']) as (ptr: number) => void,
+      getEvents: m.cwrap('bach_get_events', 'number', ['number']) as (handle: number) => number,
+      getGenerated: m.cwrap('bach_get_generated', 'number', ['number']) as (
+        handle: number,
+      ) => number,
+      getProvenance: m.cwrap('bach_get_provenance', 'number', ['number']) as (
+        handle: number,
+      ) => number,
+      getDiagnostic: m.cwrap('bach_get_diagnostic', 'number', ['number']) as (
+        handle: number,
+      ) => number,
+      freeEvents: m.cwrap('bach_free_events', null, ['number']) as (ptr: number) => void,
+      getInfo: m.cwrap('bach_get_info', 'number', ['number']) as (handle: number) => number,
+      getInfoJson: m.cwrap('bach_get_info_json', 'number', ['number']) as (
+        handle: number,
+      ) => number,
+      // Form enumeration
+      formCount: m.cwrap('bach_form_count', 'number', []) as () => number,
+      formName: m.cwrap('bach_form_name', 'string', ['number']) as (id: number) => string,
+      formDisplay: m.cwrap('bach_form_display', 'string', ['number']) as (id: number) => string,
+      // Instrument enumeration
+      instrumentCount: m.cwrap('bach_instrument_count', 'number', []) as () => number,
+      instrumentName: m.cwrap('bach_instrument_name', 'string', ['number']) as (
+        id: number,
+      ) => string,
+      // Character enumeration
+      characterCount: m.cwrap('bach_character_count', 'number', []) as () => number,
+      characterName: m.cwrap('bach_character_name', 'string', ['number']) as (id: number) => string,
+      // Key enumeration
+      keyCount: m.cwrap('bach_key_count', 'number', []) as () => number,
+      keyName: m.cwrap('bach_key_name', 'string', ['number']) as (id: number) => string,
+      // Scale enumeration
+      scaleCount: m.cwrap('bach_scale_count', 'number', []) as () => number,
+      scaleName: m.cwrap('bach_scale_name', 'string', ['number']) as (id: number) => string,
+      // Default instrument
+      defaultInstrumentForForm: m.cwrap('bach_default_instrument_for_form', 'number', [
+        'number',
+      ]) as (formId: number) => number,
+      // Error handling
+      errorString: m.cwrap('bach_error_string', 'string', ['number']) as (error: number) => string,
+      // Version
+      version: m.cwrap('bach_version', 'string', []) as () => string,
     };
-  }
-  moduleInstance = await createModule.default(moduleOpts);
+  })();
 
-  if (!moduleInstance) {
-    throw new Error('Failed to initialize WASM module');
+  try {
+    await initialization;
+  } catch (error) {
+    initialization = null;
+    initializationWasmPath = undefined;
+    throw error;
   }
-  const m = moduleInstance;
-
-  api = {
-    // Lifecycle
-    create: m.cwrap('bach_create', 'number', []) as () => number,
-    destroy: m.cwrap('bach_destroy', null, ['number']) as (handle: number) => void,
-    // Generation
-    generateFromJson: m.cwrap('bach_generate_from_json', 'number', [
-      'number',
-      'string',
-      'number',
-    ]) as (handle: number, json: string, length: number) => number,
-    // Output
-    getMidi: m.cwrap('bach_get_midi', 'number', ['number']) as (handle: number) => number,
-    freeMidi: m.cwrap('bach_free_midi', null, ['number']) as (ptr: number) => void,
-    getEvents: m.cwrap('bach_get_events', 'number', ['number']) as (handle: number) => number,
-    getDiagnostic: m.cwrap('bach_get_diagnostic', 'number', ['number']) as (
-      handle: number,
-    ) => number,
-    freeEvents: m.cwrap('bach_free_events', null, ['number']) as (ptr: number) => void,
-    getInfo: m.cwrap('bach_get_info', 'number', ['number']) as (handle: number) => number,
-    // Form enumeration
-    formCount: m.cwrap('bach_form_count', 'number', []) as () => number,
-    formName: m.cwrap('bach_form_name', 'string', ['number']) as (id: number) => string,
-    formDisplay: m.cwrap('bach_form_display', 'string', ['number']) as (id: number) => string,
-    // Instrument enumeration
-    instrumentCount: m.cwrap('bach_instrument_count', 'number', []) as () => number,
-    instrumentName: m.cwrap('bach_instrument_name', 'string', ['number']) as (id: number) => string,
-    // Character enumeration
-    characterCount: m.cwrap('bach_character_count', 'number', []) as () => number,
-    characterName: m.cwrap('bach_character_name', 'string', ['number']) as (id: number) => string,
-    // Key enumeration
-    keyCount: m.cwrap('bach_key_count', 'number', []) as () => number,
-    keyName: m.cwrap('bach_key_name', 'string', ['number']) as (id: number) => string,
-    // Scale enumeration
-    scaleCount: m.cwrap('bach_scale_count', 'number', []) as () => number,
-    scaleName: m.cwrap('bach_scale_name', 'string', ['number']) as (id: number) => string,
-    // Default instrument
-    defaultInstrumentForForm: m.cwrap('bach_default_instrument_for_form', 'number', ['number']) as (
-      formId: number,
-    ) => number,
-    // Error handling
-    errorString: m.cwrap('bach_error_string', 'string', ['number']) as (error: number) => string,
-    // Version
-    version: m.cwrap('bach_version', 'string', []) as () => string,
-  };
 }

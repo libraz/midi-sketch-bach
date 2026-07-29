@@ -7,6 +7,8 @@
 
 #include "bach_c.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -24,19 +26,12 @@
 
 namespace {
 
-// Display names for form types (human-readable). Indexed by FormType ordinal.
-const char* kFormDisplayNames[] = {
-    "Fugue",       "Prelude and Fugue",  "Trio Sonata",   "Chorale Prelude", "Toccata and Fugue",
-    "Passacaglia", "Fantasia and Fugue", "Cello Prelude", "Chaconne",        "Goldberg Variations",
-};
-
-constexpr uint8_t kFormCount = 10;
+constexpr uint8_t kFormCount = static_cast<uint8_t>(bach::FormType::GoldbergVariations) + 1;
 constexpr uint8_t kInstrumentCount = 6;
 constexpr uint8_t kCharacterCount = 4;
 constexpr uint8_t kKeyCount = 12;
 constexpr uint8_t kScaleCount = 4;
 
-constexpr uint16_t kDefaultBpm = 100;
 constexpr uint16_t kMinBpm = 40;
 constexpr uint16_t kMaxBpm = 200;
 
@@ -53,7 +48,7 @@ struct ParsedRequest {
   bach::InstrumentType instrument = bach::InstrumentType::Organ;
   bach::DurationScale scale = bach::DurationScale::Short;
   uint16_t target_bars = 0;
-  uint16_t bpm = kDefaultBpm;
+  uint16_t bpm = 0;
   uint32_t seed = 0;  // Resolved (non-zero) generation seed.
 };
 
@@ -61,10 +56,12 @@ struct ParsedRequest {
 struct BachInstance {
   std::vector<uint8_t> midi_bytes;
   std::string events_json;
+  std::string generated_json;
+  std::string provenance_json;
   std::string diagnostic_json;
   bach::FormType form = bach::FormType::Fugue;
   bach::KeySignature key;
-  uint16_t bpm = kDefaultBpm;
+  uint16_t bpm = 0;
   uint32_t seed_used = 0;
   uint32_t total_ticks = 0;
   uint16_t total_bars = 0;
@@ -81,6 +78,51 @@ bool readInteger(const bach::JsonValue& value, std::int64_t minimum, std::int64_
   }
   *out = parsed;
   return true;
+}
+
+bool isKnownRequestKey(const std::string& key) {
+  return key == "form" || key == "key" || key == "is_minor" || key == "num_voices" ||
+         key == "bpm" || key == "seed" || key == "character" || key == "instrument" ||
+         key == "scale" || key == "target_bars";
+}
+
+BachEventData* copyJsonData(const std::string& json) {
+  if (json.empty()) {
+    return nullptr;
+  }
+  auto* result = static_cast<BachEventData*>(malloc(sizeof(BachEventData)));
+  if (!result) {
+    return nullptr;
+  }
+  result->length = json.size();
+  result->json = static_cast<char*>(malloc(result->length + 1));
+  if (!result->json) {
+    free(result);
+    return nullptr;
+  }
+  memcpy(result->json, json.c_str(), result->length + 1);
+  return result;
+}
+
+BachError parseKey(const bach::JsonValue& value, bach::Key* out) {
+  if (value.type == bach::JsonValue::Number) {
+    std::int64_t key_id = 0;
+    if (!readInteger(value, 0, 11, &key_id)) {
+      return BACH_ERROR_INVALID_KEY;
+    }
+    *out = static_cast<bach::Key>(key_id);
+    return BACH_OK;
+  }
+  if (value.type == bach::JsonValue::String) {
+    for (uint8_t key_id = 0; key_id < 12; ++key_id) {
+      const auto key = static_cast<bach::Key>(key_id);
+      if (value.string_val == bach::keyToString(key)) {
+        *out = key;
+        return BACH_OK;
+      }
+    }
+  }
+  return BACH_ERROR_INVALID_KEY;
 }
 
 /// @brief Strict-parse the "form" field.
@@ -126,7 +168,9 @@ BachError parseCharacter(const std::map<std::string, bach::JsonValue>& kv,
     return BACH_OK;  // Default Severe.
   }
   if (iter->second.type == bach::JsonValue::String) {
-    const std::string& val = iter->second.string_val;
+    std::string val = iter->second.string_val;
+    std::transform(val.begin(), val.end(), val.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (val == "severe") {
       *out = bach::SubjectCharacter::Severe;
     } else if (val == "playful") {
@@ -200,7 +244,7 @@ BachError parseScale(const std::map<std::string, bach::JsonValue>& kv, bach::Dur
     // durationScaleFromString falls back to Short on unknown input; detect
     // via round-trip against the canonical name.
     if (bach::durationScaleToString(parsed) != name) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_SCALE;
     }
     *out = parsed;
     return BACH_OK;
@@ -208,12 +252,12 @@ BachError parseScale(const std::map<std::string, bach::JsonValue>& kv, bach::Dur
   if (iter->second.type == bach::JsonValue::Number) {
     std::int64_t scale_id = 0;
     if (!readInteger(iter->second, 0, 3, &scale_id)) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_SCALE;
     }
     *out = static_cast<bach::DurationScale>(scale_id);
     return BACH_OK;
   }
-  return BACH_ERROR_INVALID_CONFIG;
+  return BACH_ERROR_INVALID_SCALE;
 }
 
 /// @brief Parse and validate the JSON config into a ParsedRequest.
@@ -221,6 +265,13 @@ BachError parseScale(const std::map<std::string, bach::JsonValue>& kv, bach::Dur
 /// @param out Receives the resolved request on success.
 /// @return BACH_OK or the first violated field's error code.
 BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedRequest* out) {
+  for (const auto& [key, value] : kv) {
+    (void)value;
+    if (!isKnownRequestKey(key)) {
+      return BACH_ERROR_UNKNOWN_CONFIG_FIELD;
+    }
+  }
+
   BachError err = parseForm(kv, &out->form);
   if (err != BACH_OK) {
     return err;
@@ -228,17 +279,16 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
 
   auto iter = kv.find("key");
   if (iter != kv.end()) {
-    std::int64_t key_id = 0;
-    if (!readInteger(iter->second, 0, 11, &key_id)) {
-      return BACH_ERROR_INVALID_KEY;
+    err = parseKey(iter->second, &out->key_tonic);
+    if (err != BACH_OK) {
+      return err;
     }
-    out->key_tonic = static_cast<bach::Key>(key_id);
   }
 
   iter = kv.find("is_minor");
   if (iter != kv.end()) {
     if (iter->second.type != bach::JsonValue::Bool) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_IS_MINOR;
     }
     out->is_minor = iter->second.bool_val;
   }
@@ -249,7 +299,7 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
   if (iter != kv.end()) {
     std::int64_t ignored_voice_count = 0;
     if (!readInteger(iter->second, 0, UINT8_MAX, &ignored_voice_count)) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_NUM_VOICES;
     }
   }
 
@@ -257,12 +307,12 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
   if (iter != kv.end()) {
     std::int64_t bpm_val = 0;
     if (!readInteger(iter->second, 0, UINT16_MAX, &bpm_val)) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_BPM;
     }
     if (bpm_val == 0) {
-      out->bpm = kDefaultBpm;
+      out->bpm = 0;
     } else if (bpm_val < kMinBpm || bpm_val > kMaxBpm) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_BPM;
     } else {
       out->bpm = static_cast<uint16_t>(bpm_val);
     }
@@ -272,7 +322,7 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
   if (iter != kv.end()) {
     std::uint32_t seed = 0;
     if (!iter->second.asUint32(&seed)) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_SEED;
     }
     out->seed = seed;
   }
@@ -295,7 +345,7 @@ BachError parseRequest(const std::map<std::string, bach::JsonValue>& kv, ParsedR
   if (iter != kv.end()) {
     std::int64_t bars_val = 0;
     if (!readInteger(iter->second, 0, UINT16_MAX, &bars_val)) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_TARGET_BARS;
     }
     if (bars_val > 0) {
       out->target_bars = static_cast<uint16_t>(bars_val);
@@ -333,13 +383,17 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   auto* instance = static_cast<BachInstance*>(handle);
   instance->has_result = false;
   instance->info = {};
+  instance->midi_bytes.clear();
+  instance->events_json.clear();
+  instance->generated_json.clear();
+  instance->provenance_json.clear();
   instance->diagnostic_json.clear();
 
   try {
     // 1. Parse + validate the JSON config.
     std::map<std::string, bach::JsonValue> kv;
     if (bach::parseJsonObject(json, length, &kv) != bach::JsonParseStatus::Ok) {
-      return BACH_ERROR_INVALID_CONFIG;
+      return BACH_ERROR_INVALID_JSON;
     }
     ParsedRequest req;
     BachError err = parseRequest(kv, &req);
@@ -364,6 +418,9 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
     if (product_status == bach::application::CompositionStatus::IncompatibleCharacter) {
       return BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM;
     }
+    if (product_status == bach::application::CompositionStatus::IncompatibleInstrument) {
+      return BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM;
+    }
     if (product_status == bach::application::CompositionStatus::InvalidForm) {
       return BACH_ERROR_INVALID_FORM;
     }
@@ -373,6 +430,8 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 
     instance->midi_bytes = std::move(product.midi_bytes);
     instance->events_json = std::move(product.homepage_events_json);
+    instance->generated_json = std::move(product.generated_json);
+    instance->provenance_json = std::move(product.provenance_json);
     instance->form = product.form;
     instance->key = product.key;
     instance->bpm = product.bpm;
@@ -395,6 +454,8 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
     instance->info = {};
     instance->midi_bytes.clear();
     instance->events_json.clear();
+    instance->generated_json.clear();
+    instance->provenance_json.clear();
     instance->diagnostic_json.clear();
     return BACH_ERROR_GENERATION_FAILED;
   }
@@ -440,19 +501,25 @@ BachEventData* bach_get_events(BachHandle handle) {
   if (!instance->has_result)
     return nullptr;
 
-  auto* result = static_cast<BachEventData*>(malloc(sizeof(BachEventData)));
-  if (!result)
-    return nullptr;
+  return copyJsonData(instance->events_json);
+}
 
-  result->length = instance->events_json.size();
-  result->json = static_cast<char*>(malloc(result->length + 1));
-  if (!result->json) {
-    free(result);
+BachEventData* bach_get_generated(BachHandle handle) {
+  if (!handle)
     return nullptr;
-  }
+  auto* instance = static_cast<BachInstance*>(handle);
+  if (!instance->has_result)
+    return nullptr;
+  return copyJsonData(instance->generated_json);
+}
 
-  memcpy(result->json, instance->events_json.c_str(), result->length + 1);
-  return result;
+BachEventData* bach_get_provenance(BachHandle handle) {
+  if (!handle)
+    return nullptr;
+  auto* instance = static_cast<BachInstance*>(handle);
+  if (!instance->has_result)
+    return nullptr;
+  return copyJsonData(instance->provenance_json);
 }
 
 void bach_free_events(BachEventData* data) {
@@ -469,24 +536,28 @@ BachEventData* bach_get_diagnostic(BachHandle handle) {
   if (instance->diagnostic_json.empty())
     return nullptr;
 
-  auto* result = static_cast<BachEventData*>(malloc(sizeof(BachEventData)));
-  if (!result)
-    return nullptr;
-  result->length = instance->diagnostic_json.size();
-  result->json = static_cast<char*>(malloc(result->length + 1));
-  if (!result->json) {
-    free(result);
-    return nullptr;
-  }
-  memcpy(result->json, instance->diagnostic_json.c_str(), result->length + 1);
-  return result;
+  return copyJsonData(instance->diagnostic_json);
 }
 
 const BachInfo* bach_get_info(BachHandle handle) {
   if (!handle)
     return nullptr;
   auto* instance = static_cast<BachInstance*>(handle);
+  if (!instance->has_result)
+    return nullptr;
   return &instance->info;
+}
+
+BachEventData* bach_get_info_json(BachHandle handle) {
+  const BachInfo* info = bach_get_info(handle);
+  if (info == nullptr)
+    return nullptr;
+  const std::string json = "{\"totalBars\":" + std::to_string(info->total_bars) +
+                           ",\"totalTicks\":" + std::to_string(info->total_ticks) +
+                           ",\"bpm\":" + std::to_string(info->bpm) +
+                           ",\"trackCount\":" + std::to_string(info->track_count) +
+                           ",\"seedUsed\":" + std::to_string(info->seed_used) + "}";
+  return copyJsonData(json);
 }
 
 // ============================================================================
@@ -506,7 +577,7 @@ const char* bach_form_name(uint8_t id) {
 const char* bach_form_display(uint8_t id) {
   if (id >= kFormCount)
     return "";
-  return kFormDisplayNames[id];
+  return bach::formTypeToDisplayString(static_cast<bach::FormType>(id));
 }
 
 // ============================================================================
@@ -599,6 +670,24 @@ const char* bach_error_string(BachError error) {
       return "Incompatible character for this form";
     case BACH_ERROR_INVALID_CONFIG:
       return "Invalid configuration value";
+    case BACH_ERROR_INVALID_JSON:
+      return "Invalid JSON configuration";
+    case BACH_ERROR_UNKNOWN_CONFIG_FIELD:
+      return "Unknown configuration field";
+    case BACH_ERROR_INVALID_BPM:
+      return "Invalid BPM (must be 0 or 40-200)";
+    case BACH_ERROR_INVALID_SEED:
+      return "Invalid seed (must be an unsigned 32-bit integer)";
+    case BACH_ERROR_INVALID_TARGET_BARS:
+      return "Invalid target_bars (must be an unsigned 16-bit integer)";
+    case BACH_ERROR_INVALID_SCALE:
+      return "Invalid duration scale";
+    case BACH_ERROR_INVALID_IS_MINOR:
+      return "Invalid is_minor (must be boolean)";
+    case BACH_ERROR_INVALID_NUM_VOICES:
+      return "Invalid num_voices (must be an unsigned 8-bit integer)";
+    case BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM:
+      return "Incompatible instrument for this form";
   }
   return "Unknown error";
 }
