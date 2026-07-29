@@ -12,6 +12,7 @@
 #include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -39,11 +40,9 @@ struct BarChord {
   bool minor;
 };
 
-// C harmonic-minor scale membership (the scale the validator's melodic-leap
-// check uses for minor keys): {0, 2, 3, 5, 7, 8, 11}. The subtonic Bb (pc 10)
-// and the natural sixth A (pc 9) are NOT members, so a chord ROOT at those
-// pitch classes participating in an ic-3 melodic leap of the implicit bass
-// stream would read as an augmented second to the validator.
+// The cello's implicit-voice shapes need a dedicated migration before they can
+// safely admit every natural-minor root. Keep that form-local admissibility
+// guard while the shared validator now evaluates the real directional context.
 constexpr bool inHarmonicMinor(int pc) {
   const int p = ((pc % 12) + 12) % 12;
   return p == 0 || p == 2 || p == 3 || p == 5 || p == 7 || p == 8 || p == 11;
@@ -55,39 +54,28 @@ constexpr bool inHarmonicMinor(int pc) {
 // Each 4-bar block cycles a catalog pattern selected by (seed, block) so
 // successive blocks differ; the final two bars are overwritten with a half
 // cadence (V) then the tonic (I / i, or a Picardy I in minor on the elected
-// seeds), the perfect-authentic close every length lands on. When `hm_safe` is
-// set the minor pattern set is restricted to harmonic-minor-safe roots.
+// seeds), the perfect-authentic close every length lands on.
 //
 // @param bars Total bar count (>= 8).
 // @param seed Piece seed (selects which catalog pattern each block uses).
 // @param mode Major selects kHarmonyPatterns, Minor selects kHarmonyPatternsMinor.
-// @param hm_safe When true (minor only), skip catalog patterns containing an
-//        out-of-harmonic-minor root (the subtonic VII = Bb), so the cello's
-//        implicit bass stream never makes a forbidden ic-3 leap to/from Bb.
 // @return Per-bar chord list of length `bars`.
 std::vector<BarChord> buildProgression(int bars, std::uint32_t seed, Mode mode,
-                                       bool hm_safe = false) {
+                                       bool cello_implicit_safe = false) {
   const auto& catalog =
       (mode == Mode::Minor) ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
-  // Patterns admissible for this request: all of them, unless hm_safe filters
-  // out any pattern containing an out-of-harmonic-minor root.
   std::vector<std::size_t> admissible;
   for (std::size_t pat = 0; pat < catalog.size(); ++pat) {
-    bool ok = true;
-    if (hm_safe && mode == Mode::Minor) {
-      for (const ChordSpec& spec : catalog[pat]) {
-        if (!inHarmonicMinor(spec.root_pc)) {
-          ok = false;
-          break;
-        }
-      }
+    bool valid = true;
+    if (cello_implicit_safe && mode == Mode::Minor) {
+      for (const ChordSpec& spec : catalog[pat])
+        valid = valid && inHarmonicMinor(spec.root_pc);
     }
-    if (ok)
+    if (valid)
       admissible.push_back(pat);
   }
   if (admissible.empty())
     admissible.push_back(0);
-
   std::vector<BarChord> chords;
   chords.reserve(static_cast<std::size_t>(bars));
   for (int bar = 0; bar < bars; ++bar) {
@@ -154,48 +142,27 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   constexpr int kGroup = 4;             // four sixteenths per implicit cell.
   constexpr int kNotesPerBar = 16;      // sixteen sixteenths per bar.
 
-  // The cello's implicit bass stream is the wave's per-cell minimum; restrict
-  // the minor progression to harmonic-minor-safe roots so adjacent diatonic-root
-  // anchors never make a forbidden ic-3 leap to/from the out-of-scale subtonic.
-  const std::vector<BarChord> chords = buildProgression(bars, req.seed, mode, /*hm_safe=*/true);
+  const std::vector<BarChord> chords = buildProgression(bars, req.seed, mode,
+                                                        /*cello_implicit_safe=*/true);
   writeHarmony(out, chords, mode);
 
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);
 
   out.material.arpeggio_template.group_size = kGroup;
 
-  // Scale walker for the wave. MAJOR uses the shared C-major diatonic walk; MINOR
-  // uses the validator's EXACT C harmonic-minor scale {C D Eb F G Ab B}, so every
-  // wave tone is in-scale (the implicit-voice validator only flags an augmented
-  // second when a cell extreme lands on an out-of-scale tone or makes an adjacent
-  // ic-3 step, so keeping every tone in the validator's own scale removes the
-  // out-of-scale case entirely). The one adjacent augmented second the harmonic
-  // minor contains (Ab -> B, degrees 6-7) only matters BETWEEN consecutive cell
-  // extremes; the small per-bar arc plus the voice-led chord-tone anchors below
-  // keep the bass/top streams from ever spanning that Ab<->B step, so the
-  // implicit streams stay clean.
-  auto minorHarmonicWalkUp = [](int midi, int steps) {
-    static constexpr int kPcs[7] = {0, 2, 3, 5, 7, 8, 11};  // C D Eb F G Ab B.
+  // Walk under the same local dominant policy used by the other form builders:
+  // natural minor away from V, with the raised sixth/leading tone admitted only
+  // while the active harmony is the major dominant. This removes the former
+  // cello-only fixed harmonic-minor collection.
+  auto walk = [&](int midi, int steps, bool harmonic) {
+    const detail::ChordSpec local_chord =
+        harmonic ? detail::ChordSpec{7, false} : detail::ChordSpec{0, true};
     int cur = midi;
-    for (int s = 0; s < steps; ++s) {
-      for (int add = 1; add <= 12; ++add) {
-        const int pc = ((cur + add) % 12 + 12) % 12;
-        bool member = false;
-        for (int idx = 0; idx < 7; ++idx)
-          member |= (pc == kPcs[idx]);
-        if (member) {
-          cur += add;
-          break;
-        }
-      }
+    const int direction = steps < 0 ? -1 : 1;
+    for (int step = 0; step < std::abs(steps); ++step) {
+      cur = detail::melodicScaleStep(cur, direction, mode, &local_chord);
     }
     return cur;
-  };
-  auto walk = [&](int midi, int steps, bool /*harmonic*/) {
-    if (steps < 0)
-      return midi;
-    return (mode == Mode::Minor) ? minorHarmonicWalkUp(midi, steps)
-                                 : detail::scaleUp(midi, steps, Mode::Major);
   };
 
   // Each bar is a low-amplitude scalar OSCILLATION: the line repeatedly climbs
@@ -442,23 +409,21 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       int ph = prev_cell_hi;
       for (int cell = 0; cell < 4; ++cell) {
         if (pl >= 0) {
+          const Tick from_tick = cell == 0 ? static_cast<Tick>(bar - 1) * kTicksPerBar
+                                           : static_cast<Tick>(bar) * kTicksPerBar +
+                                                 static_cast<Tick>(cell - 1) * kTicksPerBeat;
+          const Tick to_tick =
+              static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(cell) * kTicksPerBeat;
           if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(pl),
-                                                   static_cast<std::uint8_t>(lo[cell]),
-                                                   out.harmony) ||
+                                                   static_cast<std::uint8_t>(lo[cell]), out.harmony,
+                                                   from_tick, to_tick) ||
               rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(ph),
-                                                   static_cast<std::uint8_t>(hi[cell]),
-                                                   out.harmony)) {
+                                                   static_cast<std::uint8_t>(hi[cell]), out.harmony,
+                                                   from_tick, to_tick)) {
             return false;
           }
-          const int prev_ic = std::abs(ph - pl) % 12;
-          const int cur_ic = std::abs(hi[cell] - lo[cell]) % 12;
-          if (prev_ic == cur_ic && (prev_ic == 0 || prev_ic == 7)) {
-            const int bass_motion = lo[cell] - pl;
-            const int top_motion = hi[cell] - ph;
-            if (bass_motion != 0 && top_motion != 0 && (bass_motion > 0) == (top_motion > 0)) {
-              return false;
-            }
-          }
+          if (isParallelPerfectMotion(ph, hi[cell], pl, lo[cell]))
+            return false;
         }
         pl = lo[cell];
         ph = hi[cell];
@@ -473,12 +438,14 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       // lead into them without a forbidden leap; from a C bass the out-of-scale
       // sixth turn note is an augmented second, exactly the seam this rejects.
       if (landing_lo >= 0) {
+        const Tick from_tick = static_cast<Tick>(bar) * kTicksPerBar + 3 * kTicksPerBeat;
+        const Tick to_tick = static_cast<Tick>(bar + 1) * kTicksPerBar;
         if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(lo[3]),
-                                                 static_cast<std::uint8_t>(landing_lo),
-                                                 out.harmony) ||
+                                                 static_cast<std::uint8_t>(landing_lo), out.harmony,
+                                                 from_tick, to_tick) ||
             rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(hi[3]),
-                                                 static_cast<std::uint8_t>(landing_hi),
-                                                 out.harmony)) {
+                                                 static_cast<std::uint8_t>(landing_hi), out.harmony,
+                                                 from_tick, to_tick)) {
           return false;
         }
       }
@@ -649,7 +616,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
                              int band_hi, int bar, int notes_per_beat, bool dotted, int shape,
                              int zig_dir, const std::vector<MaterialNote>* guard_line,
-                             int& prev_emitted) {
+                             const ThemeToneRegistry* guard_registry, int& prev_emitted) {
     const BarChord& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
@@ -667,6 +634,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // onset and now -- the exact pair the union-onset detector (and the ear)
     // samples.
     auto guard_sounding = [&](Tick t) -> int {
+      if (guard_registry != nullptr)
+        return guard_registry->soundingPitchInVoice(0, t);
       if (guard_line == nullptr)
         return -1;
       for (auto it = guard_line->rbegin(); it != guard_line->rend(); ++it) {
@@ -940,22 +909,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   v1.voice = 1;
   v1.manual = 1;  // Swell (LH, mid register).
 
-  // Per-voice running anchors and register bands. Each voice's bar-opening beat
-  // is voice-led from its own previous closing anchor, so the line evolves
-  // smoothly across bar boundaries (no remote register-reset leap); the band
-  // clamps the line to its octave so the two upper voices never cross and both
-  // stay above the pedal. V0 anchors in [A4, A5], V1 anchors in [G3, F#4]: V1's
-  // highest sounding note (anchor 66 + a 2-step neighbour = 68) stays below V0's
-  // lowest anchor (69), and V1's lowest (55) stays above the pedal's highest
-  // (53), so V2 < V1 < V0 holds everywhere.
-  constexpr int kV0BandLo = 69;  // A4.
-  constexpr int kV0BandHi = 79;  // G5.
-  constexpr int kV1BandLo = 55;  // G3.
-  constexpr int kV1BandHi = 64;  // E4 (anchor ceiling; a 2-degree neighbour stays < V0 floor).
+  // The manual registers deliberately overlap: V0's C4--C6 and V1's
+  // G3--E4 ranges make a short exchange possible without forcing either hand
+  // into an artificial, non-overlapping shelf. The form's explicit
+  // AllowTrioUpperMomentary policy (set below) still rejects a held inversion;
+  // the pedal remains below both manuals.
+  constexpr int kV0BandLo = 60;  // C4.
+  constexpr int kV0BandHi = 84;  // C6.
+  constexpr int kV1BandLo = 55;  // G3; remains above the pedal ceiling.
+  constexpr int kV1BandHi = 64;  // E4.
   int v0_anchor = 72;            // ~C5.
   int v1_anchor = 60;            // ~C4.
   int v0_prev_emitted = -1;
   int v1_prev_emitted = -1;
+  ThemeToneRegistry manual_registry;
 
   for (int bar = 0; bar < bars; ++bar) {
     const std::size_t cycle = static_cast<std::size_t>(bar / 4);
@@ -999,12 +966,23 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     if (arc.is_climax)
       (v0_dense ? v0_shape : v1_shape) = 0;
 
+    const std::size_t v0_begin = v0.notes.size();
     appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false,
-                    v0_shape, /*zig_dir=*/1, /*guard_line=*/nullptr, v0_prev_emitted);
-    // V1 is built after V0 within the bar, so it guards each tone against the
-    // already-emitted V0 line (the audible-grain parallel pair).
+                    v0_shape, /*zig_dir=*/1, /*guard_line=*/nullptr, /*guard_registry=*/nullptr,
+                    v0_prev_emitted);
+    // Replay V0's placed tones through the shared registry before building V1.
+    // This is intentionally span-local: the manual carrier spans cover the
+    // whole form, while each bar appends one immutable slice to the same
+    // registry. V1 therefore sees the actual sounding V0 tone at every
+    // sub-beat, rather than a coarse register-band approximation.
+    for (std::size_t i = v0_begin; i < v0.notes.size(); ++i) {
+      const MaterialNote& note = v0.notes[i];
+      manual_registry.record(note.start_tick, 0, note.pitch, note.duration);
+    }
+    // V1 is built after V0 within the bar, so it reads the registered V0 line
+    // at every onset to avoid audible perfect parallels.
     appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape,
-                    /*zig_dir=*/-1, /*guard_line=*/&v0.notes, v1_prev_emitted);
+                    /*zig_dir=*/-1, /*guard_line=*/nullptr, &manual_registry, v1_prev_emitted);
   }
 
   // Cadential landing on the top line: an eighth-note approach into a held
@@ -1012,8 +990,59 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // site), then a whole-note tonic. V0 owns the landing -- it is the highest
   // voice, so the cadence trill reads as the soprano close.
   constexpr int kV0Tonic = 72;  // C5: the tonic inside the V0 band.
+  // Thread the last pre-cadential figuration cell down into the landing's
+  // low approach tone. The bare landing begins on E4/Eb4; leaving the scalar
+  // wave's C6/B5 peak intact until that instant creates a 19-semitone cliff.
+  // Four descending, mode-aware degrees turn that seam into ordinary steps
+  // and small skips while retaining the E4/Eb4 meeting point where the two
+  // manuals exchange momentarily.
+  const Tick landing_start = static_cast<Tick>(bars - 2) * kTicksPerBar;
+  std::vector<std::size_t> pre_landing_indices;
+  for (std::size_t i = 0; i < v0.notes.size(); ++i) {
+    if (v0.notes[i].start_tick < landing_start) {
+      pre_landing_indices.push_back(i);
+    }
+  }
+  if (pre_landing_indices.size() >= 4) {
+    const int entry = detail::scaleDown(kV0Tonic - 1, 4, mode);
+    const int p3 = detail::scaleUp(entry, 4, mode);
+    const int p2 = detail::scaleUp(p3, 2, mode);
+    const int p1 = detail::scaleUp(p2, 1, mode);
+    const int p0 = detail::scaleUp(p1, 1, mode);
+    const std::size_t n = pre_landing_indices.size();
+    v0.notes[pre_landing_indices[n - 4]].pitch = static_cast<std::uint8_t>(p0);
+    v0.notes[pre_landing_indices[n - 3]].pitch = static_cast<std::uint8_t>(p1);
+    v0.notes[pre_landing_indices[n - 2]].pitch = static_cast<std::uint8_t>(p2);
+    v0.notes[pre_landing_indices[n - 1]].pitch = static_cast<std::uint8_t>(p3);
+  }
   appendCadentialLanding(v0.notes, static_cast<Tick>(bars - 2) * kTicksPerBar, kTicksPerBar,
                          kV0Tonic - 1, kV0Tonic, mode, kV0BandLo);
+
+  // One brief manual exchange near the cadence makes the overlapping manual
+  // tessitura audible without turning it into a sustained role inversion. The
+  // candidate is selected from already-written carrier notes: V1 meets V0 on
+  // one sub-beat, rises by a scale-neighbour semitone, and the following union
+  // onset restores V0 above it. If a particular length/seed has no such safe
+  // meeting, the form simply keeps its ordinary contrary-motion cadence.
+  const auto sounding_pitch = [](const std::vector<MaterialNote>& line, Tick tick) -> int {
+    for (auto it = line.rbegin(); it != line.rend(); ++it) {
+      if (it->start_tick <= tick && tick < it->start_tick + it->duration)
+        return static_cast<int>(it->pitch);
+    }
+    return -1;
+  };
+  const Tick coda_start = static_cast<Tick>(bars - 2) * kTicksPerBar;
+  const Tick final_bar_tick = static_cast<Tick>(bars - 1) * kTicksPerBar;
+  for (MaterialNote& note : v1.notes) {
+    if (note.start_tick < coda_start || note.start_tick + note.duration >= final_bar_tick)
+      continue;
+    const int v0_now = sounding_pitch(v0.notes, note.start_tick);
+    const int v0_next = sounding_pitch(v0.notes, note.start_tick + note.duration);
+    if (v0_now == static_cast<int>(note.pitch) && v0_next >= v0_now + 1 && note.pitch < 127) {
+      ++note.pitch;
+      break;
+    }
+  }
 
   // V1 joins the held final chord instead of running figuration through the
   // final bar: one whole-note third of the closing tonic triad (E, or Eb in
@@ -1022,7 +1051,6 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   {
     const bool picardy = (mode == Mode::Minor) && detail::usePicardy(req.seed);
     const int third = (mode == Mode::Minor && !picardy) ? 63 : 64;  // Eb4 / E4.
-    const Tick final_bar_tick = static_cast<Tick>(bars - 1) * kTicksPerBar;
     v1.notes.erase(
         std::remove_if(v1.notes.begin(), v1.notes.end(),
                        [&](const MaterialNote& note) { return note.start_tick >= final_bar_tick; }),
@@ -1203,9 +1231,27 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     }
     prev_root = root_midi;
   }
+  // The final cadence contract is structural V -> I.  The generic
+  // anti-parallel substitution above may replace the penultimate bar's last
+  // root with another chord tone; restore the dominant root on the exact
+  // approach beat (parallel motion into a declared cadence is evaluated under
+  // the cadence exception).
+  const Tick final_approach_tick = static_cast<Tick>(bars - 1) * kTicksPerBar - kTicksPerBeat;
+  for (MaterialNote& note : v2.notes) {
+    if (note.start_tick != final_approach_tick)
+      continue;
+    int dominant = static_cast<int>(note.pitch);
+    while (dominant % 12 != 7)
+      --dominant;
+    if (dominant < kPedalFloor)
+      dominant += 12;
+    note.pitch = static_cast<std::uint8_t>(std::clamp(dominant, kPedalFloor, kPedalCeil));
+    break;
+  }
   out.material.trio_voices.push_back(std::move(v2));
 
   // VoicePlan: one TrioVoiceCarrier span per voice over the whole piece.
+  out.harmony.voice_crossing_policy = VoiceCrossingPolicy::AllowTrioUpperMomentary;
   out.voice_plan.num_voices = 3;
   for (VoiceId voice = 0; voice < 3; ++voice) {
     Span span;
@@ -1216,6 +1262,68 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     span.intent = VoiceIntent::TrioVoiceCarrier;
     span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
     out.voice_plan.spans.push_back(span);
+  }
+
+  // Cadential suspension in the middle manual, prepared on the final beat
+  // before a closing-region downbeat and resolved on beat two before a
+  // one-beat rest. Search backward from the antepenultimate bar and derive the
+  // carrier from the actual outer voices so every seed/mode keeps the trio's
+  // register order.
+  {
+    const auto& upper = out.material.trio_voices[0].notes;
+    const auto& middle = out.material.trio_voices[1].notes;
+    auto& bass = out.material.trio_voices[2].notes;
+    bool installed = false;
+    for (int bar_offset : {3, 4, 5, 6, 7}) {
+      if (installed || bars <= bar_offset)
+        break;
+      const Tick suspension_tick = static_cast<Tick>(bars - bar_offset) * kTicksPerBar;
+      const Tick preparation_tick = suspension_tick - kTicksPerBeat;
+      const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+      const Tick carrier_resume_tick = resolution_tick + 2 * kTicksPerBeat;
+      const int held_bass = soundingMaterialPitch(bass, suspension_tick);
+      const int bass_prep = soundingMaterialPitch(bass, preparation_tick);
+      const int upper_prep = soundingMaterialPitch(upper, preparation_tick);
+      const int upper_sus = soundingMaterialPitch(upper, suspension_tick);
+      const int upper_res = soundingMaterialPitch(upper, resolution_tick);
+      const int middle_before =
+          soundingMaterialPitch(middle, preparation_tick > 0 ? preparation_tick - 1 : 0);
+      const int middle_after = soundingMaterialPitch(middle, carrier_resume_tick);
+      int upper_window_min = 127;
+      for (const MaterialNote& note : upper) {
+        if (note.start_tick < resolution_tick + kTicksPerBeat &&
+            note.start_tick + note.duration > preparation_tick)
+          upper_window_min = std::min(upper_window_min, static_cast<int>(note.pitch));
+      }
+      const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
+      for (SuspensionType type :
+           {SuspensionType::Sus7_6, SuspensionType::Sus4_3, SuspensionType::Sus9_8}) {
+        SuspensionPattern suspension;
+        if (!designUpperSuspension(
+                type, preparation_tick, suspension_tick, resolution_tick,
+                /*voice=*/1, static_cast<std::uint8_t>(bass_prep),
+                static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
+                static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
+                static_cast<std::uint8_t>(upper_res),
+                /*band_lo=*/std::max(bass_prep, held_bass) + 1, ceiling, mode, &suspension))
+          continue;
+        // The suspension replaces a short window inside an otherwise
+        // continuous manual line.  Keep both splice points within an octave;
+        // a valid 7-6/4-3/9-8 formula in the wrong register is still an
+        // audible remote leap when the original carrier resumes.
+        if (middle_before < 0 || middle_after < 0 ||
+            std::abs(static_cast<int>(suspension.preparation_pitch) - middle_before) > 12 ||
+            std::abs(static_cast<int>(suspension.resolution_pitch) - middle_after) > 12) {
+          continue;
+        }
+        for (MaterialNote& note : bass) {
+          if (note.start_tick == resolution_tick)
+            note.pitch = static_cast<std::uint8_t>(held_bass);
+        }
+        installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+        break;
+      }
+    }
   }
 
   return out;

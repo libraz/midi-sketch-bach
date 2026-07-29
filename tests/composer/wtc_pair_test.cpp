@@ -41,14 +41,6 @@
 namespace bach::composer {
 namespace {
 
-bool hasRule(const ValidationReport& r, const std::string& rule_id) {
-  for (const auto& f : r.failures) {
-    if (f.rule_id == rule_id)
-      return true;
-  }
-  return false;
-}
-
 constexpr RuleIdMask bit(RuleBit b) {
   return ruleBitMask(b);
 }

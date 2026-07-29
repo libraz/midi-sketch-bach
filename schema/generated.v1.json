@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://libraz.net/midi-sketch-bach/schema/generated.v1.json",
+  "title": "midi-sketch-bach generated score",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ticks_per_beat",
+    "duration_ticks",
+    "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "generated.v1"
+    },
+    "ticks_per_beat": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "duration_ticks": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tempos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "tick",
+          "bpm"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bpm": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "index",
+          "start_tick",
+          "duration",
+          "pitch",
+          "voice",
+          "velocity"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pitch": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "voice": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "velocity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 127
+          }
+        }
+      }
+    },
+    "info": {
+      "type": "object"
+    }
+  }
+}

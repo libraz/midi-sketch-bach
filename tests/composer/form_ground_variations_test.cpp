@@ -208,15 +208,24 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
       ASSERT_LT(bar, head.size());
       if (n.start_tick % kTicksPerBar34 == 0)
         head[bar] = n.pitch;
-      else
+      else if (!(c.form == FormType::Chaconne && bar + 2 >= head.size()))
         EXPECT_EQ(static_cast<int>(n.pitch), head[bar])
             << "ground note inside bar " << bar << " differs from its bar-head pitch";
     }
     const std::size_t period = static_cast<std::size_t>(cycle_bars);
     for (std::size_t bar = 0; bar < head.size(); ++bar) {
       ASSERT_NE(head[bar], -1) << "bar " << bar << " has no ground bar-head note";
-      EXPECT_EQ(head[bar], head[bar % period])
-          << "ground bar " << bar << " differs from cycle-0 bar " << (bar % period);
+      if (c.form == FormType::Chaconne && bar + 2 >= head.size()) {
+        ASSERT_EQ(fx.material.coda_extensions.size(), 1u);
+        ASSERT_EQ(fx.material.coda_extensions.front().notes.size(), 3u);
+        if (bar + 2 == head.size())
+          EXPECT_EQ(head[bar], fx.material.coda_extensions.front().notes.front().pitch);
+        else
+          EXPECT_EQ(head[bar], fx.material.coda_extensions.front().notes.back().pitch);
+      } else {
+        EXPECT_EQ(head[bar], head[bar % period])
+            << "ground bar " << bar << " differs from cycle-0 bar " << (bar % period);
+      }
     }
   }
 }
@@ -227,6 +236,44 @@ TEST(GroundVariationChaconne, GroundRepeatsEveryPeriod) {
 
 TEST(GroundVariationPassacaglia, GroundRepeatsEveryPeriod) {
   expectGroundImmutable(FormType::Passacaglia, 8);
+}
+
+TEST(GroundVariationChaconne, TerminalCadenceResolvesGroundToTonic) {
+  for (const Case& c : casesFor(FormType::Chaconne)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    const Tick final_bar =
+        static_cast<Tick>(resolvedBars(c.form, c.target_bars) - 1) * kTicksPerBar34;
+    ASSERT_EQ(fx.material.coda_extensions.size(), 1u);
+    ASSERT_EQ(fx.material.coda_extensions.front().notes.size(), 3u);
+    EXPECT_EQ(fx.material.coda_extensions.front().notes[1].pitch % 12u, 7u);
+    EXPECT_EQ(fx.material.coda_extensions.front().notes.back().pitch % 12u, 0u);
+    ASSERT_FALSE(fx.harmony.chords.empty());
+    EXPECT_EQ(fx.harmony.chords.back().root_pc, 0u);
+
+    const NoteEvent* bass = nullptr;
+    const NoteEvent* upper = nullptr;
+    for (const auto& note : r.notes) {
+      if (note.voice == 1 && note.start_tick == final_bar)
+        bass = &note;
+      if (note.voice == 0 && note.start_tick <= final_bar + kTicksPerBar34 / 2 &&
+          note.start_tick + note.duration > final_bar + kTicksPerBar34 / 2)
+        upper = &note;
+    }
+    ASSERT_NE(bass, nullptr);
+    ASSERT_NE(upper, nullptr);
+    EXPECT_EQ(bass->pitch % 12u, 0u);
+    bool coda_committed = false;
+    for (std::size_t idx = 0; idx < r.notes.size() && idx < r.provenance.size(); ++idx) {
+      if (r.notes[idx].voice == 1 && r.notes[idx].start_tick == final_bar)
+        coda_committed =
+            (r.provenance[idx].satisfied_rules & ruleBitMask(RuleBit::CodaCommitted)).any();
+    }
+    EXPECT_TRUE(coda_committed);
+    const int interval =
+        std::abs(static_cast<int>(upper->pitch) - static_cast<int>(bass->pitch)) % 12;
+    EXPECT_TRUE(interval == 0 || interval == 7) << "seed " << c.seed << " minor " << c.is_minor;
+  }
 }
 
 // --- 3b. Seed-selected ground variants ---------------------------------------
@@ -321,11 +368,7 @@ void expectClimaxAtArc(FormType form, int cycle_bars) {
 
     const std::uint16_t bars = resolvedBars(form, c.target_bars);
     const std::size_t cycle_count = static_cast<std::size_t>(bars) / cycle_bars;
-    // The arc places the single climax at ~80% (climax_idx = cycle_count*4/5,
-    // clamped to the last cycle).
-    std::size_t climax_idx = (cycle_count * 4) / 5;
-    if (climax_idx > cycle_count - 1)
-      climax_idx = cycle_count - 1;
+    const std::size_t climax_idx = cycle_count <= 1 ? 0 : ((cycle_count - 1) * 4) / 5;
     const Tick climax_start =
         static_cast<Tick>(climax_idx) * static_cast<Tick>(cycle_bars) * kTicksPerBar34;
     const Tick climax_end = climax_start + static_cast<Tick>(cycle_bars) * kTicksPerBar34;
@@ -366,9 +409,7 @@ void expectDensityRises(FormType form, int cycle_bars) {
     const std::uint16_t bars = resolvedBars(form, c.target_bars);
     const std::size_t cycle_count = static_cast<std::size_t>(bars) / cycle_bars;
     const Tick cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
-    std::size_t climax_idx = (cycle_count * 4) / 5;
-    if (climax_idx > cycle_count - 1)
-      climax_idx = cycle_count - 1;
+    const std::size_t climax_idx = cycle_count <= 1 ? 0 : ((cycle_count - 1) * 4) / 5;
 
     // Count V0 notes per cycle.
     std::vector<std::size_t> per_cycle(cycle_count, 0);
@@ -480,6 +521,11 @@ void expectBeatOnsetsConsonant(FormType form) {
     for (const auto& n : r.notes)
       end = std::max(end, n.start_tick + n.duration);
     for (Tick t = 0; t < end; t += kTicksPerBeat) {
+      const bool declared_suspension = std::any_of(
+          fx.material.suspension_patterns.begin(), fx.material.suspension_patterns.end(),
+          [&](const SuspensionPattern& pattern) { return pattern.suspension_tick == t; });
+      if (declared_suspension)
+        continue;  // the prepared accented dissonance is verified by Validator.
       std::vector<int> sounding;
       for (const auto& n : r.notes) {
         if (n.start_tick <= t && t < n.start_tick + n.duration)
@@ -503,6 +549,52 @@ TEST(GroundVariationChaconne, BeatOnsetsAreVerticallyConsonant) {
 
 TEST(GroundVariationPassacaglia, BeatOnsetsAreVerticallyConsonant) {
   expectBeatOnsetsConsonant(FormType::Passacaglia);
+}
+
+// The ground is immutable, so a parallel perfect at adjacent downbeats must be
+// repaired in V0.  Deliberately sample the two bar-head events rather than the
+// immediately preceding ornament: figuration may end a bar on a passing tone,
+// but it is the downbeat-to-downbeat move that exposes the structural parallel.
+void expectNoGroundBarHeadParallels(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+    const VoiceId ground_voice = groundVoice(c.form);
+    auto pitch_at = [&](VoiceId voice, Tick tick) {
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == voice && note.start_tick == tick)
+          return static_cast<int>(note.pitch);
+      }
+      return -1;
+    };
+    // The final bar is replaced by the form's explicit compact cadence, whose
+    // tonic resolution is covered independently by TerminalCadenceResolvesGroundToTonic.
+    for (std::uint16_t bar = 1; bar + 1 < bars; ++bar) {
+      const Tick prev_tick = static_cast<Tick>(bar - 1) * kTicksPerBar34;
+      const Tick tick = static_cast<Tick>(bar) * kTicksPerBar34;
+      const int previous_v0 = pitch_at(/*V0=*/0, prev_tick);
+      const int v0 = pitch_at(/*V0=*/0, tick);
+      // The passacaglia's ground-solo introduction has no V0 to compare.
+      if (previous_v0 < 0 || v0 < 0)
+        continue;
+      const int previous_ground = pitch_at(ground_voice, prev_tick);
+      const int ground = pitch_at(ground_voice, tick);
+      ASSERT_GE(previous_ground, 0);
+      ASSERT_GE(ground, 0);
+      EXPECT_FALSE(formsPerfectParallel(previous_v0, v0, previous_ground, ground))
+          << "form " << static_cast<int>(form) << " seed " << c.seed << " minor " << c.is_minor
+          << " bars " << c.target_bars << " bar " << bar;
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, HasNoGroundBarHeadParallelPerfects) {
+  expectNoGroundBarHeadParallels(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, HasNoGroundBarHeadParallelPerfects) {
+  expectNoGroundBarHeadParallels(FormType::Passacaglia);
 }
 
 // The 3-voice passacaglia uplift must NOT bleed into the chaconne: the chaconne
@@ -530,9 +622,7 @@ TEST(GroundVariationChaconne, StaysTwoVoiceWithGroundOnVoiceOne) {
 //
 // The 3-voice passacaglia derives its per-cycle voice-presence schedule purely
 // from the period (cycle) count:
-//   periods == 3: cycle 0 = V0 + ground (no intro), cycle 1 adds V1, the climax
-//                 cycle 2 is the full texture.
-//   periods >= 4: cycle 0 = ground-solo intro (V0 and V1 rest), one receding
+//   periods >= 3: cycle 0 = ground-solo intro (V0 and V1 rest), one receding
 //                 cycle rests V1, the climax cycle sounds all three.
 // The ground (V2) sounds in every cycle. This locks the design table directly
 // from the composed output (which 8-bar period each voice sounds in).
@@ -555,22 +645,22 @@ std::vector<std::array<bool, 3>> passacagliaPresence(std::uint32_t seed, std::ui
   return presence;
 }
 
-TEST(GroundVariationPassacaglia, ThreePeriodScheduleHasNoIntroAndTerracesV1) {
+TEST(GroundVariationPassacaglia, DefaultThreePeriodScheduleStartsWithGroundSoloIntro) {
   // Default 24-bar passacaglia = exactly 3 periods.
   std::size_t cycles = 0;
   const auto presence = passacagliaPresence(/*seed=*/3, /*bars=*/0, cycles);
   ASSERT_EQ(cycles, 3u);
-  // Cycle 0: V0 + ground, V1 rests (no intro terrace at 3 periods).
-  EXPECT_TRUE(presence[0][0]) << "3-period cycle 0 must carry V0";
-  EXPECT_FALSE(presence[0][1]) << "3-period cycle 0 must rest V1";
+  // Cycle 0: the defining ground-solo opening.
+  EXPECT_FALSE(presence[0][0]) << "3-period intro must rest V0";
+  EXPECT_FALSE(presence[0][1]) << "3-period intro must rest V1";
   EXPECT_TRUE(presence[0][2]) << "ground must sound in cycle 0";
-  // Cycle 1 adds V1.
+  // The arc climax at cycle 1 restores the full texture.
   EXPECT_TRUE(presence[1][0]);
-  EXPECT_TRUE(presence[1][1]) << "3-period cycle 1 must add V1";
+  EXPECT_TRUE(presence[1][1]) << "3-period climax must sound V1";
   EXPECT_TRUE(presence[1][2]);
-  // Climax cycle 2: full texture.
+  // The final resolve cycle keeps the full texture above the ground.
   EXPECT_TRUE(presence[2][0]);
-  EXPECT_TRUE(presence[2][1]) << "3-period climax must sound all three voices";
+  EXPECT_TRUE(presence[2][1]);
   EXPECT_TRUE(presence[2][2]);
 }
 
@@ -586,8 +676,8 @@ TEST(GroundVariationPassacaglia, LongScheduleHasGroundSoloIntroAndRecedingCycle)
   // The ground sounds in every cycle.
   for (std::size_t cyc = 0; cyc < cycles; ++cyc)
     EXPECT_TRUE(presence[cyc][2]) << "ground missing in cycle " << cyc;
-  // The climax cycle (~80% -> cycle 4) sounds all three voices.
-  const std::size_t climax_idx = 4;
+  // The climax is before the final resolve cycle (5 cycles -> cycle 3).
+  const std::size_t climax_idx = 3;
   EXPECT_TRUE(presence[climax_idx][0]);
   EXPECT_TRUE(presence[climax_idx][1]) << "climax must sound all three voices";
   EXPECT_TRUE(presence[climax_idx][2]);
@@ -804,9 +894,12 @@ int cycleBarsFor(FormType form) {
 // cycles the source shapes (climax at ~80%, swell at ~60% but >= 2 cycles below
 // the climax so the pre-climax receding cycle stays a dip).
 std::size_t climaxCycle(std::size_t cycles) {
-  std::size_t idx = (cycles * 4) / 5;
-  if (cycles > 0 && idx > cycles - 1)
-    idx = cycles - 1;
+  if (cycles <= 1)
+    return 0;
+  const std::size_t last = cycles - 1;
+  std::size_t idx = (last * 4) / 5;
+  if (idx >= last)
+    idx = last - 1;
   return idx;
 }
 std::size_t midWaveCycleForTest(std::size_t cycles, std::size_t climax_idx) {

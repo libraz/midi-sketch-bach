@@ -97,8 +97,9 @@ std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_tic
  * it at mid-phrase, so the dynamic line rises and falls with the phrasing
  * instead of holding flat between the (at most four) registration points. The
  * macro curve interpolates the same design values as buildRegistrationPlan
- * (opening 75 -> develop 85 -> climax 95 at ~75% -> settle 88), with the same
- * cycle_count tiers, so the two streams agree wherever they coincide.
+ * (opening 75 -> develop 85 -> climax 95 -> settle 88), with the same
+ * cycle_count tiers and optional form-declared climax tick, so the two streams
+ * agree wherever they coincide.
  *
  * Only CC#11 (Expression) is emitted: the phrase breath is a performance
  * inflection, not a registration change, so CC#7 (the registration level)
@@ -113,13 +114,17 @@ std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_tic
  *        outside [2, 8] are clamped into that range.
  * @param ticks_per_bar Ticks per bar for the piece's meter.
  * @param total_ticks Total length of the piece in ticks.
+ * @param climax_tick The form's real energy-peak tick. Zero retains the
+ *        historical ~75% placement; a non-zero value is normalized by the same
+ *        rule as buildRegistrationPlan.
  * @return CC#11 events in non-decreasing tick order: one phrase-start event at
  *         the macro value and one mid-phrase swell per phrase. Empty if
  *         total_ticks or ticks_per_bar is 0.
  * @note Pure function of its arguments: no RNG, identical output every call.
  */
 std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t phrase_bars,
-                                         Tick ticks_per_bar, std::uint32_t total_ticks);
+                                         Tick ticks_per_bar, std::uint32_t total_ticks,
+                                         Tick climax_tick = 0);
 
 /**
  * @brief Build a final ritardando as a short stream of tempo events.
@@ -143,7 +148,8 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
  */
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
                                              Tick ticks_per_bar,
-                                             RitardandoStyle style = RitardandoStyle::Rhetorical);
+                                             RitardandoStyle style = RitardandoStyle::Rhetorical,
+                                             std::uint8_t ts_numerator = 4);
 
 }  // namespace bach::composer
 

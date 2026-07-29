@@ -213,6 +213,117 @@ std::vector<CycleBar> planFromGround(const std::uint8_t* ground, std::size_t bar
   return plan;
 }
 
+/// @brief Displace V0 bar heads that form a moving-ground parallel perfect.
+///
+/// The variation palette emitters deliberately know nothing about the immutable
+/// ground. Apply this once after either form has emitted a cycle so passacaglia
+/// and chaconne share identical bar-head repair semantics.
+void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
+                          const std::vector<std::uint8_t>& ground_pitch,
+                          const std::vector<CycleBar>& cycle_bar_plan, const HarmonicPlan& harmony,
+                          int preceding_v0_bar_head = -1, int preceding_ground_pitch = -1) {
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  // Parallels in this form are a structural, bar-head issue.  Do not compare
+  // against the preceding ornament: its pitch may be a passing tone that has
+  // already left by the next downbeat.  Keep the actual prior V0 bar head so
+  // the repair and its audit test use the same musical event.
+  int prior_bar_head = preceding_v0_bar_head;
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    const Tick tick = notes[i].start_tick;
+    const int bar = static_cast<int>((tick - block_start) / kTicksPerBar34);
+    if (bar < 0 || bar >= cycle_bars ||
+        tick != block_start + static_cast<Tick>(bar) * kTicksPerBar34) {
+      continue;
+    }
+    const bool at_cycle_start = bar == 0;
+    if (at_cycle_start && (prior_bar_head < 0 || preceding_ground_pitch < 0)) {
+      prior_bar_head = static_cast<int>(notes[i].pitch);
+      continue;
+    }
+    const int ground_prev = at_cycle_start
+                                ? preceding_ground_pitch
+                                : static_cast<int>(ground_pitch[static_cast<std::size_t>(bar - 1)]);
+    const int ground_now = static_cast<int>(ground_pitch[static_cast<std::size_t>(bar)]);
+    const int prev_pitch = prior_bar_head;
+    const int pitch = static_cast<int>(notes[i].pitch);
+    if (!formsPerfectParallel(prev_pitch, pitch, ground_prev, ground_now)) {
+      prior_bar_head = pitch;
+      continue;
+    }
+
+    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+    const int chord_third = plan.minor ? 3 : 4;
+    const int triad_pc[3] = {plan.root_pc % 12, (plan.root_pc + chord_third) % 12,
+                             (plan.root_pc + 7) % 12};
+    const int melodic_prev = i > 0 ? static_cast<int>(notes[i - 1].pitch) : -1;
+    const int next_pitch = (i + 1 < notes.size()) ? static_cast<int>(notes[i + 1].pitch) : -1;
+    bool placed = false;
+    // A downbeat repair may need to change register by an octave: restricting
+    // it to the neighbouring ornament's stepwise contour leaves a large class
+    // of structural parallels untouched.  Search the established V0 compass
+    // in proximity order, retaining a consonant chord tone above the ground.
+    const auto createsMinorAugmentedSecond = [](int from, int to) {
+      const int from_pc = ((from % 12) + 12) % 12;
+      const int to_pc = ((to % 12) + 12) % 12;
+      return (from_pc == 8 && to_pc == 11) || (from_pc == 11 && to_pc == 8);
+    };
+    for (int dist = 1; dist <= 31 && !placed; ++dist) {
+      for (int cand : {pitch + dist, pitch - dist}) {
+        const int pc = ((cand % 12) + 12) % 12;
+        if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          continue;
+        }
+        if (cand < 60 || cand > 91 || cand == prev_pitch ||
+            !rule_helpers::isConsonantInterval(cand - ground_now)) {
+          continue;
+        }
+        if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+            (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
+          continue;
+        }
+        if (formsPerfectParallel(prev_pitch, cand, ground_prev, ground_now)) {
+          continue;
+        }
+        notes[i].pitch = static_cast<std::uint8_t>(cand);
+        prior_bar_head = cand;
+        placed = true;
+        break;
+      }
+    }
+    // At a leading-tone bass the structural triad is deliberately a dominant
+    // in first inversion.  If all of those tones would retain the parallel,
+    // use another contextual scale tone that is still consonant above the bass
+    // rather than leave the perfect motion in place.
+    for (int dist = 1; dist <= 31 && !placed; ++dist) {
+      for (int cand : {pitch + dist, pitch - dist}) {
+        if (cand < 60 || cand > 91 || cand == prev_pitch ||
+            !rule_helpers::isConsonantInterval(cand - ground_now) ||
+            !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony, tick,
+                                                  cand - pitch) ||
+            (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+            (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
+            formsPerfectParallel(prev_pitch, cand, ground_prev, ground_now)) {
+          continue;
+        }
+        notes[i].pitch = static_cast<std::uint8_t>(cand);
+        prior_bar_head = cand;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed)
+      prior_bar_head = pitch;
+  }
+}
+
+int pitchAtBarHead(const std::vector<MaterialNote>& notes, Tick tick) {
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick == tick)
+      return static_cast<int>(note.pitch);
+  }
+  return -1;
+}
+
 // ---------------------------------------------------------------------------
 // Passacaglia-only 3-voice machinery (BWV582 model). The chaconne path is left
 // byte-for-byte unchanged; everything below this banner is reached ONLY from the
@@ -456,11 +567,9 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
  * @brief Resolve the per-cycle voice-presence schedule for a passacaglia.
  *
  * BWV582-style terraced growth derived purely from the period (cycle) count:
- *   - periods >= 4: cycle 0 is a ground-solo intro (V0 and V1 rest); the middle
+ *   - periods >= 3: cycle 0 is a ground-solo intro (V0 and V1 rest); the middle
  *     cycles add V0 over the ground with ONE receding cycle where V1 rests; the
  *     climax cycle sounds all three voices.
- *   - periods == 3 (the default 24-bar / 3-period piece): NO intro -- cycle 0 is
- *     V0 + ground, cycle 1 adds V1, the climax cycle is the full texture.
  *   - periods <= 2: degenerate -- the first cycle is V0 + ground and every later
  *     cycle is the full texture (no room for an intro terrace).
  *
@@ -476,7 +585,7 @@ void resolveVoiceSchedule(std::size_t cycle_count, std::size_t climax_idx,
   if (cycle_count == 0)
     return;
 
-  if (cycle_count >= 4) {
+  if (cycle_count >= 3) {
     // Cycle 0: ground-solo intro (V0 and V1 silent).
     out_v0[0] = false;
     out_v1[0] = false;
@@ -489,11 +598,6 @@ void resolveVoiceSchedule(std::size_t cycle_count, std::size_t climax_idx,
     }
     out_v1[climax_idx] = true;  // climax always sounds all three.
     out_v0[climax_idx] = true;
-  } else if (cycle_count == 3) {
-    // No intro: cycle 0 = V0 + ground, cycle 1 adds V1, climax = full.
-    out_v1[0] = false;
-    out_v1[1] = true;
-    out_v1[2] = true;
   } else {
     // periods <= 2: first cycle V0 + ground, later cycles full.
     for (std::size_t cyc = 1; cyc < cycle_count; ++cyc)
@@ -570,11 +674,32 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     }
     out.harmony.chords.push_back(chord);
   }
+  if (total_bars >= 2) {
+    // The immutable passacaglia ground approaches the final tonic on D, the
+    // fifth of the dominant.  Spell that real sonority as V4/3 (second
+    // inversion) rather than pretending the bass is a root-position G.
+    ChordEvent& approach = out.harmony.chords[static_cast<std::size_t>(total_bars - 2)];
+    approach.root_pc = 7;
+    approach.quality = ChordQuality::Dominant7;
+    approach.degree = RomanNumeral::V;
+    const std::uint8_t approach_bass_pc =
+        static_cast<std::uint8_t>(ground_pitch[static_cast<std::size_t>(cycle_bars - 2)] % 12);
+    approach.inversion = approach_bass_pc == 2 ? ChordInversion::Second : ChordInversion::Root;
+    approach.function = HarmonicFunction::D;
+    approach.has_degree = true;
+  }
+  // The immutable ground's final dominant bass is D (the fifth of V), and the
+  // upper variation is free to approach the tonic from scale degree 2.  This
+  // is therefore an inverted/upper-voice IAC, not a root-position PAC.  Author
+  // the cadence explicitly so the director does not infer Perfect merely from
+  // the V-to-I harmonic roots.
+  out.harmony.cadences.push_back({bar_tick(total_bars - 1), CadenceType::ImperfectAuthentic});
 
   // --- Terraced growth schedule (period-count derived). ---
-  std::size_t climax_idx = (static_cast<std::size_t>(cycles) * 4) / 5;
-  if (cycles > 0 && climax_idx > static_cast<std::size_t>(cycles) - 1)
-    climax_idx = static_cast<std::size_t>(cycles) - 1;
+  const std::size_t cycle_count = static_cast<std::size_t>(cycles);
+  std::size_t climax_idx = cycle_count <= 1 ? 0 : ((cycle_count - 1) * 4) / 5;
+  if (cycle_count >= 2 && climax_idx >= cycle_count - 1)
+    climax_idx = cycle_count - 2;
   std::vector<bool> v0_present;
   std::vector<bool> v1_present;
   resolveVoiceSchedule(static_cast<std::size_t>(cycles), climax_idx, v0_present, v1_present);
@@ -610,6 +735,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   // gated per cycle by the schedule; V0 variation blocks accumulate per cycle.
   std::vector<MaterialNote> counter_notes;
   int prev_v0_last = -1;  // previous variation's closing pitch (seam voice-leading).
+  int prev_v0_bar_head = -1;
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
@@ -705,67 +831,14 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           }
         }
       }
-      // Audible-grain parallel scrub against the immutable ground. The pattern
-      // emitters are pure design lines that never read the ground, so a
-      // variation whose bar-opening tones track the ground's stepwise motion
-      // chains parallel octaves/fifths against it (the dense-character sweeps
-      // measured four in a row). The ground moves only at bar heads, so only a
-      // bar-opening note can face a moving ground -- every interior onset is
-      // oblique against the held ground tone and needs no check. A parallel
-      // bar-opening tone is displaced to the nearest other chord tone of the
-      // bar that clears the parallel and keeps both surrounding melodic
-      // intervals inside a fifth.
-      for (std::size_t i = 1; i < v0_notes.size(); ++i) {
-        const Tick t = v0_notes[i].start_tick;
-        const int bar = static_cast<int>((t - block_start) / kTicksPerBar34);
-        if (bar <= 0 || bar >= cycle_bars || t != block_start + bar_tick(bar))
-          continue;
-        const Tick t_prev = v0_notes[i - 1].start_tick;
-        const int prev_bar = static_cast<int>((t_prev - block_start) / kTicksPerBar34);
-        if (prev_bar == bar)
-          continue;
-        const int g_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(prev_bar)]);
-        const int g_now = static_cast<int>(ground_pitch[static_cast<std::size_t>(bar)]);
-        const int prev_pitch = static_cast<int>(v0_notes[i - 1].pitch);
-        const int pitch = static_cast<int>(v0_notes[i].pitch);
-        if (!formsPerfectParallel(prev_pitch, pitch, g_prev, g_now))
-          continue;
-        const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
-        const int chord_third = plan.minor ? 3 : 4;
-        const int triad0 = plan.root_pc % 12;
-        const int triad1 = (plan.root_pc + chord_third) % 12;
-        const int triad2 = (plan.root_pc + 7) % 12;
-        const int next_pitch =
-            (i + 1 < v0_notes.size()) ? static_cast<int>(v0_notes[i + 1].pitch) : -1;
-        bool placed = false;
-        for (int dist = 1; dist <= 7 && !placed; ++dist) {
-          for (int cand : {pitch + dist, pitch - dist}) {
-            const int pc = ((cand % 12) + 12) % 12;
-            if (pc != triad0 && pc != triad1 && pc != triad2)
-              continue;
-            if (cand == prev_pitch || std::abs(cand - prev_pitch) > 7)
-              continue;
-            if (next_pitch >= 0 && std::abs(next_pitch - cand) > 7)
-              continue;
-            // The displaced tone must keep both melodic joins scale-legal (no
-            // augmented second into or out of the substitute in minor).
-            if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(prev_pitch),
-                                                     static_cast<std::uint8_t>(cand),
-                                                     out.harmony) ||
-                (next_pitch >= 0 && rule_helpers::isForbiddenMelodicLeap(
-                                        static_cast<std::uint8_t>(cand),
-                                        static_cast<std::uint8_t>(next_pitch), out.harmony)))
-              continue;
-            if (formsPerfectParallel(prev_pitch, cand, g_prev, g_now))
-              continue;
-            v0_notes[i].pitch = static_cast<std::uint8_t>(cand);
-            placed = true;
-            break;
-          }
-        }
-      }
-      if (!v0_notes.empty())
+      scrubGroundParallels(v0_notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
+                           prev_v0_bar_head,
+                           cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1);
+      if (!v0_notes.empty()) {
         prev_v0_last = static_cast<int>(v0_notes.back().pitch);
+        prev_v0_bar_head = pitchAtBarHead(
+            v0_notes, block_start + static_cast<Tick>(cycle_bars - 1) * kTicksPerBar34);
+      }
 
       PassacagliaVariation var;
       var.voice = 0;
@@ -814,7 +887,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     if (last_var.end_tick == piece_end && !last_var.notes.empty()) {
       // The figuration keeps running through the penultimate bar's first half
       // (its stepwise sixteenths are the form's own language), then lands.
-      const Tick landing_tick = piece_end - 2 * kTicksPerBar34 + kTicksPerBar34 / 2;
+      const Tick landing_tick = piece_end - 2 * kTicksPerBar34 + kTicksPerBeat;
       int near = static_cast<int>(last_var.notes.back().pitch);
       for (const MaterialNote& note : last_var.notes) {
         if (note.start_tick < landing_tick)
@@ -843,7 +916,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           last_var.notes.end());
       MaterialNote held;
       held.start_tick = landing_tick;
-      held.duration = kTicksPerBar34 - kTicksPerBar34 / 2;
+      held.duration = kTicksPerBar34 - kTicksPerBeat;
       held.pitch = static_cast<std::uint8_t>(prefinal);
       last_var.notes.push_back(held);
       MaterialNote last;
@@ -854,8 +927,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     }
   }
   if (!counter_notes.empty()) {
-    const Tick landing_tick =
-        static_cast<Tick>(total_bars - 2) * kTicksPerBar34 + kTicksPerBar34 / 2;
+    const Tick landing_tick = static_cast<Tick>(total_bars - 2) * kTicksPerBar34 + kTicksPerBeat;
     bool sounds_landing = false;
     for (const MaterialNote& note : counter_notes)
       sounds_landing |= note.start_tick >= landing_tick;
@@ -986,9 +1058,10 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // (~80% of the cycle span, matching arcPoint's design climax) is the form's
   // real energy peak, so the ornament pass intensifies decoration across
   // exactly this ground cycle.
-  std::size_t climax_idx = (static_cast<std::size_t>(cycles) * 4) / 5;
-  if (cycles > 0 && climax_idx > static_cast<std::size_t>(cycles) - 1)
-    climax_idx = static_cast<std::size_t>(cycles) - 1;
+  const std::size_t cycle_count = static_cast<std::size_t>(cycles);
+  std::size_t climax_idx = cycle_count <= 1 ? 0 : ((cycle_count - 1) * 4) / 5;
+  if (cycle_count >= 2 && climax_idx >= cycle_count - 1)
+    climax_idx = cycle_count - 2;
   out.climax_start_tick = static_cast<Tick>(climax_idx) * period;
   out.climax_end_tick = out.climax_start_tick + period;
 
@@ -1050,6 +1123,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // figure orientation. The first cycle is a plain Ground-role statement
   // (quarter notes only, no sub-quarter ornaments) so the chaconne form's
   // variation_role_ornament_constraint stays satisfied. ---
+  int previous_v0_bar_head = -1;
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
     // Cycle 0 is the sparse Ground-role establishing statement (quarters).
@@ -1107,26 +1181,42 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         break;
     }
 
-    // Compact cadential landing on the piece's final bar. Every chaconne /
-    // ground cycle ends on the dominant, so the dominant arrives only in the
-    // final bar (whose harmony is overridden to the tonic above): the bar
-    // splits into a held supertonic D over its first half (the cadential
-    // trill site, a fifth over the immutable dominant ground) resolving to a
-    // held tonic over the second half.
+    scrubGroundParallels(notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
+                         previous_v0_bar_head,
+                         cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1);
+
+    // Compact cadential landing on the piece's final bar. The chaconne coda
+    // replaces the repeating dominant bass with a tonic, so its upper voice
+    // holds the consonant fifth G before resolving to C. The passacaglia keeps
+    // its existing supertonic-to-tonic close over its tonic-ending ground.
     if (cycle == cycles - 1 && !notes.empty()) {
       const int near = static_cast<int>(notes.back().pitch);
-      const int up = near + ((2 - (near % 12)) % 12 + 12) % 12;  // supertonic at/above.
+      const int prefinal_pc = passacaglia ? 2 : 7;
+      const int up = near + ((prefinal_pc - (near % 12)) % 12 + 12) % 12;
       int prefinal = (up - near <= near - (up - 12)) ? up : up - 12;
-      // Settle the close in the variation's home octave (D5 -> C5): below the
-      // organ ornament compass (the trill's upper neighbour must stay
-      // playable under the late-cycle register lift) and above the lower
-      // voices.
+      // Settle the close in the variation's home octave, above the lower
+      // voices and below the upper ornament compass.
       while (prefinal > 81)
         prefinal -= 12;
       while (prefinal < 67)
         prefinal += 12;
+      if (!passacaglia) {
+        const Tick approach_tick =
+            static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat;
+        for (MaterialNote& note : notes) {
+          if (note.start_tick == approach_tick) {
+            note.pitch = 67;  // G4 over G2: mode-neutral dominant approach.
+            break;
+          }
+        }
+      }
       appendCompactCadentialLanding(notes, static_cast<Tick>(total_bars - 1) * kTicksPerBar34,
-                                    kTicksPerBar34, prefinal, prefinal - 2);
+                                    kTicksPerBar34, prefinal, prefinal - (passacaglia ? 2 : 7), 3);
+    }
+
+    if (!notes.empty()) {
+      previous_v0_bar_head =
+          pitchAtBarHead(notes, block_start + static_cast<Tick>(cycle_bars - 1) * kTicksPerBar34);
     }
 
     if (passacaglia) {
@@ -1161,19 +1251,63 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     }
   }
 
-  // --- VoicePlan: V1 ground carrier over the whole piece; V0 variation carrier
-  // per cycle, windows matching each block exactly. V0 (C4-C5) stays above V1
-  // (C2-C3) so no voice crossing occurs. ---
+  // --- VoicePlan: V1 ground carrier and V0 variation carrier per cycle. The
+  // chaconne replaces the final ground bar with an explicitly declared coda;
+  // V0 (C4-C5) stays above V1 (C2-C3) so no voice crossing occurs. ---
   out.voice_plan.num_voices = 2;
 
   Span ground_span;
   ground_span.id = 0;
   ground_span.start_tick = 0;
-  ground_span.end_tick = static_cast<Tick>(total_bars) * kTicksPerBar34;
+  const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+  const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
+  ground_span.end_tick = passacaglia ? static_cast<Tick>(total_bars) * kTicksPerBar34
+                                     : final_bar_tick - kTicksPerBar34;
   ground_span.voice = 1;
   ground_span.intent = passacaglia ? VoiceIntent::PassacagliaGround : VoiceIntent::GroundCarrier;
   ground_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
   out.voice_plan.spans.push_back(ground_span);
+
+  if (!passacaglia) {
+    CodaDecl coda;
+    coda.voice = 1;
+    MaterialNote support;
+    support.start_tick = final_bar_tick - kTicksPerBar34;
+    support.duration = kTicksPerBar34 - kTicksPerBeat;
+    support.pitch = ground_pitch[static_cast<std::size_t>((total_bars - 2) %
+                                                          static_cast<int>(ground_pitch.size()))];
+    coda.notes.push_back(support);
+    MaterialNote dominant;
+    dominant.start_tick = final_approach_tick;
+    dominant.duration = kTicksPerBeat;
+    dominant.pitch = 43;  // G2.
+    coda.notes.push_back(dominant);
+    MaterialNote tonic;
+    tonic.start_tick = final_bar_tick;
+    tonic.duration = kTicksPerBar34;
+    tonic.pitch = ground_pitch.front();
+    coda.notes.push_back(tonic);
+    out.material.coda_extensions.push_back(std::move(coda));
+
+    Span coda_span;
+    coda_span.id = static_cast<SpanId>(1 + cycles);
+    coda_span.start_tick = support.start_tick;
+    coda_span.end_tick = tonic.start_tick + tonic.duration;
+    coda_span.voice = 1;
+    coda_span.intent = VoiceIntent::CodaCarrier;
+    coda_span.subdivision = Subdivision::Quarter;
+    out.voice_plan.spans.push_back(coda_span);
+
+    ChordEvent approach;
+    approach.start_tick = final_approach_tick;
+    approach.root_pc = 7;
+    approach.quality = ChordQuality::Dominant7;
+    approach.degree = RomanNumeral::V;
+    approach.function = HarmonicFunction::D;
+    approach.has_degree = true;
+    out.harmony.chords.insert(out.harmony.chords.end() - 1, approach);
+    out.harmony.cadences.push_back({final_bar_tick, CadenceType::ImperfectAuthentic});
+  }
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     Span var_span;
@@ -1283,7 +1417,139 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
   // bar for bar.
   const std::vector<CycleBar> plan = planFromGround(table.data(), table.size(), minor);
 
-  return buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
+  HarnessFixture out = buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
+
+  // Cadential 4-3 in the middle counter-line, with a one-beat preparation,
+  // one-beat resolution, and one-beat rest. The immutable ground supplies the bass at
+  // all three positions; the actual final variation bounds the upper register
+  // so the inserted carrier cannot cross either neighbour.
+  {
+    const int bars = static_cast<int>(req.bars);
+    const Tick suspension_tick = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+    const Tick preparation_tick = suspension_tick - kTicksPerBeat;
+    const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+    const Tick period = out.material.passacaglia_ground_period;
+    const auto groundPitchAt = [&](Tick tick) {
+      return soundingMaterialPitch(out.material.passacaglia_ground,
+                                   period == 0 ? tick : tick % period);
+    };
+    const auto upperPitchAt = [&](Tick tick) {
+      int pitch = -1;
+      for (const auto& variation : out.material.passacaglia_variations) {
+        const int candidate = soundingMaterialPitch(variation.notes, tick);
+        if (candidate >= 0)
+          pitch = candidate;
+      }
+      return pitch;
+    };
+    const int bass_prep = groundPitchAt(preparation_tick);
+    const int bass_sus = groundPitchAt(suspension_tick);
+    const int bass_res = groundPitchAt(resolution_tick);
+    const int upper_prep = upperPitchAt(preparation_tick);
+    const int original_upper_sus = upperPitchAt(suspension_tick);
+    const int upper_res = upperPitchAt(resolution_tick);
+    const int previous_upper_head = upperPitchAt(suspension_tick - kTicksPerBar34);
+    const int previous_ground = groundPitchAt(suspension_tick - kTicksPerBar34);
+    int upper_window_min = 127;
+    for (const auto& variation : out.material.passacaglia_variations) {
+      for (const MaterialNote& note : variation.notes) {
+        if (note.start_tick < resolution_tick + kTicksPerBeat &&
+            note.start_tick + note.duration > preparation_tick)
+          upper_window_min = std::min(upper_window_min, static_cast<int>(note.pitch));
+      }
+    }
+    const CycleBar& suspension_chord =
+        plan[static_cast<std::size_t>((bars - 2) % kPassacagliaCycleBars)];
+    const int chord_third = suspension_chord.minor ? 3 : 4;
+    const std::array<int, 3> chord_pcs = {suspension_chord.root_pc,
+                                          (suspension_chord.root_pc + chord_third) % 12,
+                                          (suspension_chord.root_pc + 7) % 12};
+    bool installed = false;
+    for (int distance = 0; distance <= 7 && !installed; ++distance) {
+      for (int direction : {1, -1}) {
+        if (distance == 0 && direction < 0)
+          continue;
+        const int upper_sus = original_upper_sus + direction * distance;
+        const int pc = ((upper_sus % 12) + 12) % 12;
+        if (upper_sus < 60 || upper_sus > 86 ||
+            (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
+          continue;
+        if (previous_upper_head >= 0 && previous_ground >= 0 &&
+            formsPerfectParallel(previous_upper_head, upper_sus, previous_ground, bass_sus))
+          continue;
+        bool creates_augmented_second = false;
+        if (req.mode == detail::Mode::Minor) {
+          const auto isAbBPair = [](int a, int b) {
+            const int a_pc = ((a % 12) + 12) % 12;
+            const int b_pc = ((b % 12) + 12) % 12;
+            return (a_pc == 8 && b_pc == 11) || (a_pc == 11 && b_pc == 8);
+          };
+          for (const auto& variation : out.material.passacaglia_variations) {
+            for (std::size_t i = 0; i < variation.notes.size(); ++i) {
+              const MaterialNote& note = variation.notes[i];
+              if (note.start_tick > suspension_tick ||
+                  suspension_tick >= note.start_tick + note.duration)
+                continue;
+              creates_augmented_second =
+                  (i > 0 && isAbBPair(variation.notes[i - 1].pitch, upper_sus)) ||
+                  (i + 1 < variation.notes.size() &&
+                   isAbBPair(upper_sus, variation.notes[i + 1].pitch));
+            }
+          }
+        }
+        if (creates_augmented_second)
+          continue;
+        const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
+        for (SuspensionType type :
+             {SuspensionType::Sus4_3, SuspensionType::Sus7_6, SuspensionType::Sus9_8}) {
+          SuspensionPattern suspension;
+          if (!designUpperSuspension(
+                  type, preparation_tick, suspension_tick, resolution_tick,
+                  /*voice=*/1, static_cast<std::uint8_t>(bass_prep),
+                  static_cast<std::uint8_t>(bass_sus), static_cast<std::uint8_t>(bass_res),
+                  static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
+                  static_cast<std::uint8_t>(upper_res),
+                  /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
+                  &suspension))
+            continue;
+          for (auto& variation : out.material.passacaglia_variations) {
+            std::vector<MaterialNote> rewritten;
+            rewritten.reserve(variation.notes.size() + 2);
+            for (const MaterialNote& note : variation.notes) {
+              const Tick note_end = note.start_tick + note.duration;
+              if (note.start_tick > suspension_tick || suspension_tick >= note_end) {
+                rewritten.push_back(note);
+                continue;
+              }
+              if (note.start_tick < suspension_tick) {
+                MaterialNote before = note;
+                before.duration = suspension_tick - note.start_tick;
+                rewritten.push_back(before);
+              }
+              MaterialNote accented = note;
+              accented.start_tick = suspension_tick;
+              accented.duration = std::min(note_end, resolution_tick) - suspension_tick;
+              accented.pitch = static_cast<std::uint8_t>(upper_sus);
+              rewritten.push_back(accented);
+              if (note_end > resolution_tick) {
+                MaterialNote after = note;
+                after.start_tick = resolution_tick;
+                after.duration = note_end - resolution_tick;
+                rewritten.push_back(after);
+              }
+            }
+            variation.notes.swap(rewritten);
+          }
+          installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+          break;
+        }
+        if (installed)
+          break;
+      }
+    }
+  }
+
+  return out;
 }
 
 }  // namespace bach::composer

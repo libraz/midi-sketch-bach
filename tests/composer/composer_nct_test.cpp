@@ -5,8 +5,8 @@
 // must fire, the four NCT post-pass bits must land on notes inside the
 // authored bar-12..15
 // voice-2 window, and a valid seed must produce no validator failures. A
-// regression test confirms the NCT post-pass is a pure no-op on a phase
-// (FugueDevelopment) that authors no NCT figures.
+// regression test confirms the NCT post-pass also recognizes figures in an
+// ordinary development phase that authors no dedicated NCT carrier.
 //
 // The NctCarrier verbatim-replay property (figure pitches + onsets survive
 // the pipeline unchanged with NoteSource::Material) is also pinned here, in
@@ -103,9 +103,9 @@ TEST(ComposerNctTest, AllFortySevenBitsFireForFugueComplete) {
   }
 }
 
-// The four NCT figures live in voice 2, bars 12-15. Each figure's NCT note
-// must receive its detector bit, and every NCT-stamped note must sit in
-// voice 2 within ticks [12*bar, 16*bar).
+// The four explicitly authored NCT figures live in voice 2, bars 12-15. Each
+// figure's NCT note must receive its detector bit. Ordinary lines may now carry
+// additional detector findings outside this window.
 TEST(ComposerNctTest, NctBitsLandOnExpectedFigureNotes) {
   const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/0);
   ASSERT_EQ(r.notes.size(), r.provenance.size());
@@ -124,10 +124,8 @@ TEST(ComposerNctTest, NctBitsLandOnExpectedFigureNotes) {
         hasBit(p, RuleBit::AnticipationDetected) || hasBit(p, RuleBit::NotaCambiataDetected);
     if (!any_nct)
       continue;
-    // Every NCT bit must be stamped on a voice-2 note inside the figure window.
-    EXPECT_EQ(r.notes[i].voice, 2) << "NCT bit on a non-V2 note at index " << i;
-    EXPECT_GE(r.notes[i].start_tick, lo);
-    EXPECT_LT(r.notes[i].start_tick, hi);
+    if (r.notes[i].voice != 2 || r.notes[i].start_tick < lo || r.notes[i].start_tick >= hi)
+      continue;
     cambiata += hasBit(p, RuleBit::CambiataDetected) ? 1 : 0;
     echappee += hasBit(p, RuleBit::EchappeeDetected) ? 1 : 0;
     anticipation += hasBit(p, RuleBit::AnticipationDetected) ? 1 : 0;
@@ -192,18 +190,17 @@ TEST(ComposerNctTest, FugueCompletePreviouslySaturatedSeedsValidateClean) {
   }
 }
 
-// Regression: the NCT post-pass must be a pure no-op when no NCT figures
-// exist. FugueDevelopment (development section, no nct_figures) must therefore carry
-// none of the four NCT bits on any note.
-TEST(ComposerNctTest, FugueDevelopmentProvenanceHasNoNctBits) {
+// The detector analyses ordinary carrier/search lines too; it does not require
+// the harness-only Material::nct_figures declaration.
+TEST(ComposerNctTest, FugueDevelopmentDetectsFiguresWithoutDedicatedCarrier) {
   const ComposeResult r = runPhase(HarnessPhase::FugueDevelopment, /*seed=*/0);
   ASSERT_FALSE(r.provenance.empty());
+  bool detected = false;
   for (const auto& p : r.provenance) {
-    EXPECT_FALSE(hasBit(p, RuleBit::CambiataDetected));
-    EXPECT_FALSE(hasBit(p, RuleBit::EchappeeDetected));
-    EXPECT_FALSE(hasBit(p, RuleBit::AnticipationDetected));
-    EXPECT_FALSE(hasBit(p, RuleBit::NotaCambiataDetected));
+    EXPECT_NE(p.voice_intent, VoiceIntent::NctCarrier);
+    detected = detected || hasAnyNctBit(p);
   }
+  EXPECT_TRUE(detected);
 }
 
 // T2 edge case: a NctCarrier span is planned but Material::nct_figures is

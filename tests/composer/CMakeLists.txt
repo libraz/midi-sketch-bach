@@ -10,6 +10,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   voice_intent_test.cpp
   intent_descriptor_test.cpp
   composer_two_voice_test.cpp
+  renderer_test.cpp
   material_test.cpp
   json_export_test.cpp
   schema_validation_test.cpp
@@ -74,4 +75,4 @@ target_compile_definitions(bach_composer_tests
     BACH_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
-gtest_discover_tests(bach_composer_tests)
+gtest_discover_tests(bach_composer_tests DISCOVERY_TIMEOUT 30)

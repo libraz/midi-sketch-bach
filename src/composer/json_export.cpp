@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <map>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <tuple>
 
 #include "core/json_helpers.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -99,10 +101,14 @@ void writeProvenanceObject(JsonWriter& w, const NoteProvenance& p, std::size_t i
     w.endObject();
   }
   w.key("satisfied_rules");
-  w.value(p.satisfied_rules.low64());
+  // Rule masks are uint64 values. JSON numbers are parsed as IEEE-754 doubles
+  // by JavaScript, which cannot preserve every bit above 2^53. Keep the wire
+  // representation decimal but encode it as a string so consumers can use
+  // BigInt without silent precision loss.
+  writeStr(w, std::to_string(p.satisfied_rules.low64()));
   if (p.satisfied_rules.high64() != 0) {
     w.key("satisfied_rules_high");
-    w.value(p.satisfied_rules.high64());
+    writeStr(w, std::to_string(p.satisfied_rules.high64()));
   }
   w.key("rejected_alternatives");
   w.value(static_cast<int>(p.rejected_alternatives));
@@ -375,6 +381,30 @@ std::string buildHomepageEventsJson(const ComposeResult& result, const HomepageM
   w.value(static_cast<int>(meta.total_bars));
   w.key("description");
   writeStr(w, meta.description);
+  w.key("tempos");
+  w.beginArray();
+  for (const TempoEvent& tempo : meta.tempo_events) {
+    w.beginObject();
+    w.key("tick");
+    w.value(static_cast<int>(tempo.tick));
+    w.key("bpm");
+    w.value(static_cast<int>(tempo.bpm));
+    w.endObject();
+  }
+  w.endArray();
+  w.key("time_signatures");
+  w.beginArray();
+  for (const TimeSignatureEvent& signature : meta.time_signature_events) {
+    w.beginObject();
+    w.key("tick");
+    w.value(static_cast<int>(signature.tick));
+    w.key("numerator");
+    w.value(static_cast<int>(signature.time_sig.numerator));
+    w.key("denominator");
+    w.value(static_cast<int>(signature.time_sig.denominator));
+    w.endObject();
+  }
+  w.endArray();
 
   w.key("tracks");
   w.beginArray();
@@ -388,6 +418,19 @@ std::string buildHomepageEventsJson(const ComposeResult& result, const HomepageM
     w.value(static_cast<int>(track.program));
     w.key("note_count");
     w.value(static_cast<int>(track.notes.size()));
+    w.key("control_changes");
+    w.beginArray();
+    for (const CcEvent& control : track.cc_events) {
+      w.beginObject();
+      w.key("tick");
+      w.value(static_cast<int>(control.tick));
+      w.key("controller");
+      w.value(static_cast<int>(control.controller));
+      w.key("value");
+      w.value(static_cast<int>(control.value));
+      w.endObject();
+    }
+    w.endArray();
     w.key("notes");
     w.beginArray();
     for (const NoteEvent& note : track.notes) {
@@ -404,7 +447,8 @@ std::string buildHomepageEventsJson(const ComposeResult& result, const HomepageM
 
       w.beginObject();
       w.key("pitch");
-      w.value(static_cast<int>(note.pitch));
+      w.value(static_cast<int>(transposePitchBySemitones(
+          note.pitch, keyTranspositionSemitones(meta.output_key) + meta.output_octave_shift)));
       w.key("velocity");
       w.value(static_cast<int>(note.velocity));
       w.key("start_tick");

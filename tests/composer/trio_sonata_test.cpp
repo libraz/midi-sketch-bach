@@ -88,14 +88,6 @@ bool hasRule(const ValidationReport& r, const std::string& rule_id) {
   return false;
 }
 
-bool hasRuleKind(const ValidationReport& r, const std::string& rule_id, FailKind kind) {
-  for (const auto& f : r.failures) {
-    if (f.rule_id == rule_id && f.kind == kind)
-      return true;
-  }
-  return false;
-}
-
 constexpr RuleIdMask bit(RuleBit b) {
   return ruleBitMask(b);
 }

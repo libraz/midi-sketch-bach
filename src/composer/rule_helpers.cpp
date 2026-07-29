@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "core/pitch_utils.h"
+
 namespace bach::composer::rule_helpers {
 
 std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
@@ -39,16 +41,17 @@ std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
 }
 
 const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
-  // chords assumed non-empty and sorted by start_tick.
-  const ChordEvent* current = &plan.chords.front();
-  for (const auto& chord : plan.chords) {
-    if (chord.start_tick <= at) {
-      current = &chord;
-    } else {
-      break;
-    }
-  }
-  return *current;
+  // Keep the reference-returning helper total: malformed/partial plans are
+  // rejected by their callers' validation, but must not dereference front().
+  // The neutral tonic fallback lets those callers report a normal validation
+  // failure rather than crashing across the C/WASM boundary.
+  static const ChordEvent kFallback{};
+  if (plan.chords.empty())
+    return kFallback;
+  const auto next =
+      std::upper_bound(plan.chords.begin(), plan.chords.end(), at,
+                       [](Tick tick, const ChordEvent& chord) { return tick < chord.start_tick; });
+  return next == plan.chords.begin() ? plan.chords.front() : *std::prev(next);
 }
 
 bool isStrongBeat(Tick tick, Tick ticks_per_bar) {
@@ -347,9 +350,13 @@ bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to) {
   return semis == 6 || semis == 11;
 }
 
-bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan) {
+bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan,
+                            Tick from_tick, Tick to_tick) {
   const int semis = std::abs(static_cast<int>(to) - static_cast<int>(from)) % 12;
-  return semis == 6 || isAugmentedMelodicInterval(from, to, plan) ||
+  // Do not reinterpret natural-minor descending b7/b6 through a fixed
+  // harmonic-minor collection. The contextual predicate preserves that line
+  // while still rejecting an actual augmented second.
+  return semis == 6 || isContextualAugmentedMelodicInterval(from, to, plan, from_tick, to_tick) ||
          isDiminishedMelodicInterval(from, to);
 }
 
@@ -448,20 +455,11 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
     const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
-    const bool both_moved = (candidate_pitch != prev_pitch) && (op_now != op_prev);
-    if (!both_moved)
-      continue;
-    int interval_now;
-    int interval_prev;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_prev = static_cast<int>(prev_pitch) - static_cast<int>(op_prev);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
-    }
-    if (isPerfectInterval(interval_now) && isPerfectInterval(interval_prev) &&
-        interval_now == interval_prev && interval_now != 0) {
+    const bool parallel =
+        candidate_voice < ov
+            ? isParallelPerfectMotion(prev_pitch, candidate_pitch, op_prev, op_now)
+            : isParallelPerfectMotion(op_prev, op_now, prev_pitch, candidate_pitch);
+    if (parallel) {
       return true;
     }
   }
@@ -500,23 +498,10 @@ bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
     const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
     if (op_now == 0 || op_mid == 0)
       continue;
-    // The candidate sustains prev_pitch across mid_tick (it has no onset there),
-    // so its motion into cur_tick is prev_pitch -> candidate_pitch. The other
-    // voice moves op_mid -> op_now. Both must move to form a parallel.
-    const bool both_moved = (candidate_pitch != prev_pitch) && (op_now != op_mid);
-    if (!both_moved)
-      continue;
-    int interval_now;
-    int interval_mid;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_mid = static_cast<int>(prev_pitch) - static_cast<int>(op_mid);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_mid = static_cast<int>(op_mid) - static_cast<int>(prev_pitch);
-    }
-    if (isPerfectInterval(interval_now) && isPerfectInterval(interval_mid) &&
-        interval_now == interval_mid && interval_now != 0) {
+    const bool parallel =
+        candidate_voice < ov ? isParallelPerfectMotion(prev_pitch, candidate_pitch, op_mid, op_now)
+                             : isParallelPerfectMotion(op_mid, op_now, prev_pitch, candidate_pitch);
+    if (parallel) {
       return true;
     }
   }
@@ -533,29 +518,10 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
     const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
-    const bool both_moved = (candidate_pitch != prev_pitch) && (op_now != op_prev);
-    if (!both_moved)
-      continue;
-    int interval_now;
-    int interval_prev;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_prev = static_cast<int>(prev_pitch) - static_cast<int>(op_prev);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
-    }
-    // Parallel OCTAVE only: both intervals reduce mod 12 to 0 (unison or
-    // octave or double octave...). Class equality is enough — the
-    // Validator's invertible_at_octave rule fails octave-class to
-    // octave-class motion even when the literal sizes differ (a double
-    // octave contracting to an octave is still a parallel octave), so the
-    // filter must match or candidates slip through to a validation fail.
-    // Parallel fifths are handled by createsParallelPerfect and are
-    // intentionally excluded here so cadence cells can bypass them.
-    const bool is_oct_now = std::abs(interval_now) % 12 == 0 && interval_now != 0;
-    const bool is_oct_prev = std::abs(interval_prev) % 12 == 0 && interval_prev != 0;
-    if (is_oct_now && is_oct_prev) {
+    const PerfectMotionKind kind =
+        candidate_voice < ov ? classifyPerfectMotion(prev_pitch, candidate_pitch, op_prev, op_now)
+                             : classifyPerfectMotion(op_prev, op_now, prev_pitch, candidate_pitch);
+    if (kind == PerfectMotionKind::ParallelOctave) {
       return true;
     }
   }
@@ -572,22 +538,10 @@ bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId 
     const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
-    const int this_motion = static_cast<int>(candidate_pitch) - static_cast<int>(prev_pitch);
-    const int other_motion = static_cast<int>(op_now) - static_cast<int>(op_prev);
-    if (this_motion == 0 || other_motion == 0)
-      continue;
-    if ((this_motion > 0) != (other_motion > 0))
-      continue;
-    int interval_now;
-    int interval_prev;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_prev = static_cast<int>(prev_pitch) - static_cast<int>(op_prev);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_prev = static_cast<int>(op_prev) - static_cast<int>(prev_pitch);
-    }
-    if (isPerfectInterval(interval_now) && !isPerfectInterval(interval_prev)) {
+    const PerfectMotionKind kind =
+        candidate_voice < ov ? classifyPerfectMotion(prev_pitch, candidate_pitch, op_prev, op_now)
+                             : classifyPerfectMotion(op_prev, op_now, prev_pitch, candidate_pitch);
+    if (kind == PerfectMotionKind::HiddenFifth || kind == PerfectMotionKind::HiddenOctave) {
       return true;
     }
   }
@@ -622,22 +576,10 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
     const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
     if (op_now == 0 || op_mid == 0)
       continue;
-    const int this_motion = static_cast<int>(candidate_pitch) - static_cast<int>(prev_pitch);
-    const int other_motion = static_cast<int>(op_now) - static_cast<int>(op_mid);
-    if (this_motion == 0 || other_motion == 0)
-      continue;
-    if ((this_motion > 0) != (other_motion > 0))
-      continue;
-    int interval_now;
-    int interval_mid;
-    if (candidate_voice < ov) {
-      interval_now = static_cast<int>(candidate_pitch) - static_cast<int>(op_now);
-      interval_mid = static_cast<int>(prev_pitch) - static_cast<int>(op_mid);
-    } else {
-      interval_now = static_cast<int>(op_now) - static_cast<int>(candidate_pitch);
-      interval_mid = static_cast<int>(op_mid) - static_cast<int>(prev_pitch);
-    }
-    if (isPerfectInterval(interval_now) && !isPerfectInterval(interval_mid)) {
+    const PerfectMotionKind kind =
+        candidate_voice < ov ? classifyPerfectMotion(prev_pitch, candidate_pitch, op_mid, op_now)
+                             : classifyPerfectMotion(op_mid, op_now, prev_pitch, candidate_pitch);
+    if (kind == PerfectMotionKind::HiddenFifth || kind == PerfectMotionKind::HiddenOctave) {
       return true;
     }
   }

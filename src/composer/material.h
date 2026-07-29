@@ -173,10 +173,21 @@ struct ImitationEntry {
 // `related_key_pc` is a related key of the home tonic (V/vi/IV/ii) and
 // that every note pitch class is diatonic to the major scale on
 // `related_key_pc`.
+struct MiddleEntryTransformRegion {
+  Tick start_tick = 0;
+  Tick end_tick = 0;
+  // motif_ops::EpisodeMotifTransform value. Kept byte-sized here so material.h
+  // does not depend on motif_ops.h (which itself consumes MaterialNote).
+  std::uint8_t transform = 0;
+};
+
 struct MiddleEntryDecl {
   VoiceId voice = 0;
   std::uint8_t related_key_pc = 7;  // tonal center; must be V/vi/IV/ii.
   std::vector<MaterialNote> notes;
+  // Non-original entry windows. CandidateSearch stamps
+  // SubjectVariantApplied on every note in these ranges.
+  std::vector<MiddleEntryTransformRegion> transform_regions;
 };
 
 // One stretto: a follower restatement that overlaps the leader's
@@ -398,11 +409,11 @@ struct ManualRouting {
   std::uint8_t manual = 0;
 };
 
-// Articulation applied to a voice over a tick window (documentary kind:
-// 0=legato, 1=detache, 2=staccato). The post-pass stamps
-// ArticulationApplied on notes whose voice + onset fall in the window.
-// Articulation does not mutate pitch or onset; only note-off timing would
-// change at render time, so the scored note content is unaffected.
+// Articulation applied to a voice over a tick window (0=legato, 1=detache,
+// 2=staccato). The post-pass stamps ArticulationApplied and shortens the
+// note's gate time deterministically. Pitch and onset stay unchanged, so
+// melodic and contrapuntal identity remain intact while MIDI note-off timing
+// expresses the declared articulation.
 struct ArticulationSpan {
   VoiceId voice = 0;
   Tick start_tick = 0;
@@ -462,6 +473,11 @@ struct ArpeggioTemplate {
 // aggregate initialisers; the fields are intentionally left flat for now.
 struct Material {
   std::vector<MaterialNote> subject;
+  // Number of notes in the canonical subject statement at the head of
+  // `subject`. Later SubjectCarrier restatements share the same replay vector
+  // but must not inflate subject analysis into a 32/48-note "theme".
+  // Zero preserves legacy fixtures where the whole vector is canonical.
+  std::size_t canonical_subject_note_count = 0;
   std::vector<MaterialNote> answer;
   // Tonal answer: subject mutated so the V-degree pitches map to I in
   // the answer (vs `answer` which is the literal real-answer = subject -
@@ -502,8 +518,7 @@ struct Material {
   // fixture. Replayed by an ArpeggioFlow span on a single voice.
   ArpeggioTemplate arpeggio_template;
   // Solo String Arch. The ground bass is immutable: GroundCarrier replays it
-  // tiled every `ground_bass_period`
-  // ticks. `variations` feed VariationCarrier.
+  // tiled every `ground_bass_period` ticks. `variations` feed VariationCarrier.
   std::vector<MaterialNote> ground_bass;
   Tick ground_bass_period = 0;
   std::vector<VariationDecl> variations;

@@ -249,6 +249,9 @@ enum class ReplayKind : std::uint8_t {
   kTransform = 2,
   kSequence = 3,
   kTriple = 4,
+  // Out-of-range/unknown intent. CandidateSearch treats every non-compose
+  // unhandled kind as an empty result, so invalid enum values fail closed.
+  kInvalid = 255,
 };
 
 // Single source of truth for the per-intent metadata that was previously
@@ -259,7 +262,8 @@ enum class ReplayKind : std::uint8_t {
 //   is_carrier     — true iff the intent replays Material verbatim and is
 //                    therefore NoteSource::Material (source of truth for
 //                    isCarrierIntent).
-//   replay         — how CandidateSearch dispatches the span.
+//   replay         — how CandidateSearch dispatches the span; unhandled
+//                    non-compose replay kinds fail closed to an empty result.
 //   provenance_bit — the primary provenance bit this intent stamps, where
 //                    one applies. `has_provenance_bit` gates its validity
 //                    (some carriers stamp a bit chosen at the call site, and

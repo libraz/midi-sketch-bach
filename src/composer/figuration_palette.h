@@ -372,8 +372,9 @@ void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::
  * @brief Append one 4/4 bar of figura corta figuration
  *        (PatternKind::kFiguraCorta, 4/4 bar form).
  *
- * Every beat carries the long-short-short figura corta cell (eighth + two
- * sixteenths). The four beat anchors are contour-indexed picks from the
+ * Every beat carries either the long-short-short figura corta cell (eighth +
+ * two sixteenths) or, when `dotted` is true, a dotted-eighth + sixteenth
+ * variant. The four beat anchors are contour-indexed picks from the
  * chord-tone ladder above `start` (`figure` 0 -- the default, byte-identical
  * for existing callers -- is the low-amplitude wave a0, a1, a2, a1; the other
  * contours widen or redirect the anchor windows so repeated corta bars do not
@@ -387,9 +388,11 @@ void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::
  * @param chord The bar's chord (supplies the anchor wave's triad tones).
  * @param mode Diatonic mode selecting the scale walker for the shorts.
  * @param figure Anchor-contour selector (mod 4; 0 = legacy wave).
+ * @param dotted Use the dotted-eighth + sixteenth cell.
  */
 void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
-                          const detail::ChordSpec& chord, detail::Mode mode, int figure = 0);
+                          const detail::ChordSpec& chord, detail::Mode mode, int figure = 0,
+                          bool dotted = false);
 
 /**
  * @brief Append one 4/4 bar opening gesture: a mordent onset followed by a

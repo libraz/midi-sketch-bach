@@ -109,10 +109,24 @@ TEST(FormSectionalTest, BothFormsValidateAndAreDeterministic) {
           ASSERT_EQ(status, FormDirectorStatus::Ok)
               << formName(form) << " seed " << seed << " bars " << bars << " director not Ok";
           const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          const Span* failed_span = nullptr;
+          if (!r.validation.failures.empty()) {
+            const SpanId failed_id = r.validation.failures.front().span_id;
+            const auto it = std::find_if(fx.voice_plan.spans.begin(), fx.voice_plan.spans.end(),
+                                         [&](const Span& span) { return span.id == failed_id; });
+            if (it != fx.voice_plan.spans.end())
+              failed_span = &*it;
+          }
           EXPECT_TRUE(r.validation.failures.empty())
               << formName(form) << " seed " << seed << (minor ? " minor" : " major") << " bars "
               << bars << " first failure="
-              << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+              << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id)
+              << " span="
+              << (r.validation.failures.empty() ? kInvalidSpanId
+                                                : r.validation.failures.front().span_id)
+              << " voice=" << (failed_span == nullptr ? 255 : failed_span->voice)
+              << " ticks=" << (failed_span == nullptr ? 0 : failed_span->start_tick) << ".."
+              << (failed_span == nullptr ? 0 : failed_span->end_tick);
           EXPECT_FALSE(hasRule(r.validation, "voice_crossing"))
               << formName(form) << " seed " << seed << " bars " << bars << " has voice crossing";
           ASSERT_FALSE(r.notes.empty());
@@ -159,6 +173,56 @@ TEST(FormSectionalTest, FantasiaDeclaresSectionCadenceAndRegistrationAtFreeBound
       // The declared cadence sits strictly inside the piece, before the fugue.
       EXPECT_GT(fx.section_cadence_ticks.front(), 0);
       EXPECT_LT(fx.section_cadence_ticks.front(), fx.registration_step_ticks.front());
+    }
+  }
+}
+
+TEST(FormSectionalTest, FreeCloseAndAnswerEntryDeclareFunctionalHarmony) {
+  for (FormType form : kForms) {
+    for (bool minor : {false, true}) {
+      const int bars = 32;
+      const int free_bars = freeBarsFor(bars);
+      const int answer_bar = free_bars + 4;
+      const HarnessFixture fx = buildFixture(form, 42, minor, bars);
+
+      const auto chord_at_bar = [&](int bar) -> const ChordEvent* {
+        const Tick tick = static_cast<Tick>(bar) * kBar;
+        const auto it =
+            std::find_if(fx.harmony.chords.begin(), fx.harmony.chords.end(),
+                         [&](const ChordEvent& chord) { return chord.start_tick == tick; });
+        return it == fx.harmony.chords.end() ? nullptr : &*it;
+      };
+      const ChordEvent* free_close = chord_at_bar(free_bars - 1);
+      const ChordEvent* secondary = chord_at_bar(answer_bar - 2);
+      const ChordEvent* target = chord_at_bar(answer_bar - 1);
+      ASSERT_NE(free_close, nullptr);
+      ASSERT_NE(secondary, nullptr);
+      ASSERT_NE(target, nullptr);
+      EXPECT_EQ(free_close->root_pc % 12, 7);
+      EXPECT_EQ(secondary->root_pc % 12, 2);
+      EXPECT_EQ(secondary->quality, ChordQuality::Major);
+      EXPECT_TRUE(secondary->has_secondary_of);
+      EXPECT_EQ(secondary->secondary_of, RomanNumeral::V);
+      EXPECT_EQ(target->root_pc % 12, 7);
+
+      const Tick half_tick = static_cast<Tick>(free_bars - 1) * kBar;
+      EXPECT_TRUE(std::any_of(
+          fx.harmony.cadences.begin(), fx.harmony.cadences.end(), [&](const CadenceEvent& cadence) {
+            return cadence.tick == half_tick && cadence.type == CadenceType::Half;
+          }));
+      const Tick pivot_tick = static_cast<Tick>(answer_bar) * kBar;
+      EXPECT_TRUE(std::any_of(fx.harmony.modulations.begin(), fx.harmony.modulations.end(),
+                              [&](const ModulationEvent& modulation) {
+                                return modulation.tick == pivot_tick &&
+                                       modulation.type == ModulationType::Pivot &&
+                                       modulation.to_tonic_pc == 7;
+                              }));
+      EXPECT_TRUE(std::any_of(fx.harmony.modulations.begin(), fx.harmony.modulations.end(),
+                              [&](const ModulationEvent& modulation) {
+                                return modulation.tick ==
+                                           static_cast<Tick>(answer_bar + 4) * kBar &&
+                                       modulation.to_tonic_pc == 0;
+                              }));
     }
   }
 }
@@ -253,11 +317,19 @@ TEST(FormSectionalTest, ExpositionEntryTranspositionsAreCorrect) {
       // The V1 answer is the subject - P4 (octave-shifted into the V1 band): each
       // answer note minus its subject note (modulo octaves) is -5 mod 12.
       ASSERT_GE(fx.material.answer.size(), 16u);
+      const int answer_total =
+          static_cast<int>(fx.material.answer[0].pitch) - static_cast<int>(expected[0]);
       for (int note = 0; note < 16; ++note) {
+        const int answer_pitch = static_cast<int>(fx.material.answer[note].pitch);
         const int diff = static_cast<int>(fx.material.answer[note].pitch) -
                          (static_cast<int>(expected[note]) + v0_off);
         EXPECT_EQ(((diff % 12) + 12) % 12, ((-5 % 12) + 12) % 12)
             << formName(form) << " answer note " << note << " not a -P4 transposition";
+        EXPECT_EQ(answer_pitch - static_cast<int>(expected[note]), answer_total)
+            << formName(form) << " answer note " << note
+            << " has a different octave placement than its entry";
+        EXPECT_GE(answer_pitch, 53) << formName(form) << " answer entered V2 register";
+        EXPECT_LE(answer_pitch, 71) << formName(form) << " answer exceeded V1 register";
       }
     }
   }
@@ -538,6 +610,10 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
         ASSERT_NE(last_chord, nullptr);
         EXPECT_EQ(last_chord->root_pc % 12, 0)
             << formName(form) << " seed " << seed << " final chord is not the tonic";
+        const bool picardy = minor && detail::usePicardy(seed);
+        EXPECT_EQ(last_chord->is_picardy, picardy);
+        EXPECT_EQ(last_chord->quality,
+                  (minor && !picardy) ? ChordQuality::Minor : ChordQuality::Major);
 
         // A perfect cadence is annotated at the last bar downbeat.
         bool has_final_cadence = false;
@@ -553,7 +629,7 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
         // even seed; the V1 inner voice holds the closing third (the V0
         // landing holds only the tonic), so the scan covers the figuration
         // sections.
-        if (minor && detail::usePicardy(seed)) {
+        if (picardy) {
           bool saw_major_third = false;
           for (const auto& section : fx.material.figuration_sections) {
             for (const auto& note : section.notes) {
@@ -1214,7 +1290,18 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
         } else if (!cascade && bar == 2) {
           expect_chord_block(by_voice, bar, ctx);
         } else if (bar == free_bars - 1) {
-          expect_chord_block(by_voice, bar, ctx);
+          // The top chord block retains its two half-note articulations, while
+          // V1/V2 make one whole-note dominant strike for the declared
+          // free-section half cadence.
+          ASSERT_EQ(by_voice[0].size(), 2u) << ctx;
+          for (const NoteEvent* n : by_voice[0])
+            EXPECT_EQ(n->duration, 2 * kTicksPerBeat) << ctx << " voice 0";
+          for (int voice : {1, 2}) {
+            ASSERT_EQ(by_voice[static_cast<std::size_t>(voice)].size(), 1u)
+                << ctx << " voice " << voice;
+            EXPECT_EQ(by_voice[static_cast<std::size_t>(voice)].front()->duration, kTicksPerBar)
+                << ctx << " voice " << voice;
+          }
         } else if (cascade && bar == flourish) {
           // Fermata breath: a single whole note struck in all three voices.
           for (int voice = 0; voice < 3; ++voice) {

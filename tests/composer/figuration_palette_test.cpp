@@ -493,6 +493,23 @@ TEST(FigurationPaletteFiguraCorta, LongShortShortCellFillsEveryBeat) {
   }
 }
 
+TEST(FigurationPaletteFiguraCorta, DottedCellFillsEveryBeat) {
+  std::vector<MaterialNote> notes;
+  const detail::ChordSpec chord{0, false};
+  appendFiguraCortaBar(notes, /*bar=*/0, /*start=*/60, chord, detail::Mode::Major,
+                       /*figure=*/0, /*dotted=*/true);
+
+  ASSERT_EQ(notes.size(), 8u);
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  for (std::size_t i = 0; i < notes.size(); i += 2) {
+    EXPECT_EQ(notes[i].duration, 3 * kSixteenth);
+    EXPECT_EQ(notes[i + 1].duration, kSixteenth);
+    EXPECT_EQ(notes[i].start_tick % kTicksPerBeat, 0u);
+    EXPECT_EQ(notes[i + 1].start_tick, notes[i].start_tick + 3 * kSixteenth);
+    EXPECT_EQ(notes[i + 1].start_tick + notes[i + 1].duration, notes[i].start_tick + kTicksPerBeat);
+  }
+}
+
 TEST(FigurationPaletteFiguraCorta, BeatOnsetsAreChordToneAnchorsAndCellsConjunct) {
   const std::vector<CycleBar> plan = majorCyclePlan();
   std::vector<MaterialNote> notes;

@@ -105,6 +105,61 @@ TEST(ValidatorTest, EmptyInputPasses) {
   EXPECT_TRUE(r.failures.empty());
 }
 
+TEST(ValidatorTest, TrioPolicyAllowsOneUpperVoiceExchangeOnly) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.voice_crossing_policy = VoiceCrossingPolicy::AllowTrioUpperMomentary;
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 72, 0),
+      makeNote(0, kTicksPerBeat, 60, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 1),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 72, 0),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 60, 1),
+  };
+  std::vector<NoteProvenance> provenance(
+      notes.size(), makeProvIntent(7, NoteSource::Material, VoiceIntent::TrioVoiceCarrier));
+
+  const ValidationReport report = Validator{}.validate(notes, provenance, plan);
+  EXPECT_FALSE(hasRule(report, "voice_crossing"));
+  EXPECT_FALSE(hasRule(report, "parallel_fifth"));
+  EXPECT_FALSE(hasRule(report, "parallel_octave"));
+}
+
+TEST(ValidatorTest, TrioPolicyRejectsSustainedOrNonTrioCrossing) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.voice_crossing_policy = VoiceCrossingPolicy::AllowTrioUpperMomentary;
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 72, 0),
+      makeNote(0, kTicksPerBeat, 60, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 1),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 61, 0),
+      makeNote(2 * kTicksPerBeat, kTicksPerBeat, 65, 1),
+  };
+  std::vector<NoteProvenance> provenance(
+      notes.size(), makeProvIntent(7, NoteSource::Material, VoiceIntent::TrioVoiceCarrier));
+  EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, plan), "voice_crossing"));
+
+  provenance[3].voice_intent = VoiceIntent::SequentialCounterline;
+  EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, plan), "voice_crossing"));
+}
+
+TEST(ValidatorTest, TrioPolicyRequiresOverlappingManualRegisters) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.voice_crossing_policy = VoiceCrossingPolicy::AllowTrioUpperMomentary;
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 84, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 83, 0),
+      makeNote(0, kTicksPerBeat, 60, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 59, 1),
+  };
+  std::vector<NoteProvenance> provenance(
+      notes.size(), makeProvIntent(7, NoteSource::Material, VoiceIntent::TrioVoiceCarrier));
+
+  EXPECT_TRUE(
+      hasRule(Validator{}.validate(notes, provenance, plan), "trio_upper_register_overlap"));
+}
+
 TEST(ValidatorTest, ReportsSubjectFeaturesAsInfoMetrics) {
   Material material;
   const std::uint8_t pitches[] = {60, 62, 64, 65, 67, 69, 71, 72};
@@ -535,6 +590,24 @@ TEST(ValidatorTest, FinalScoreAuditCatchesMaterialParallelFifth) {
   EXPECT_TRUE(hasRule(report, "parallel_fifth"));
 }
 
+TEST(ValidatorTest, FinalScoreReportsDeclaredMaterialParallelAsInformational) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  for (std::size_t i = 0; i < notes.size(); ++i)
+    bindAuthoredNote(notes[i], &prov[i]);
+
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::Ok);
+  EXPECT_TRUE(report.failures.empty());
+  EXPECT_TRUE(hasInformational(report, "parallel_fifth"));
+}
+
 TEST(ValidatorTest, FinalScoreAuditCatchesOrnamentParallelFifth) {
   std::vector<NoteEvent> notes = {
       makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),
@@ -585,6 +658,18 @@ TEST(ValidatorTest, FinalScoreAuditCatchesAccentedMaterialDissonance) {
       Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
   EXPECT_EQ(report.status, ValidationStatus::FailedSpan);
   EXPECT_TRUE(hasRule(report, "strong_beat_dissonance"));
+}
+
+TEST(ValidatorTest, FinalScoreReportsDeclaredAccentDissonanceAsInformational) {
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 66, 0)};
+  std::vector<NoteProvenance> prov = {makeProv(7, NoteSource::Material)};
+  bindAuthoredNote(notes.front(), &prov.front());
+
+  ValidationReport report =
+      Validator{}.validate(notes, prov, cMajorWhole(), Material{}, ValidationScope::FinalScore);
+  EXPECT_EQ(report.status, ValidationStatus::Ok);
+  EXPECT_TRUE(report.failures.empty());
+  EXPECT_TRUE(hasInformational(report, "strong_beat_dissonance"));
 }
 
 TEST(ValidatorTest, FinalScoreAuditCatchesMaterialMelodicLeap) {
@@ -867,8 +952,8 @@ TEST(ValidatorTest, HiddenParallelFifthFails) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 60, 0),
       makeNote(0, kTicksPerBeat, 52, 1),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 57, 1),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
@@ -879,8 +964,8 @@ TEST(ValidatorTest, HiddenParallelOctaveFails) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 60, 0),
       makeNote(0, kTicksPerBeat, 45, 1),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 50, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 52, 1),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
@@ -959,6 +1044,87 @@ TEST(ValidatorTest, CadenceVoiceLeadingAcceptsAllCadenceTypes) {
   }
 }
 
+TEST(ValidatorTest, HalfCadenceAcceptsDominantArrivalAfterBassRest) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::Half);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  const ValidationReport report = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, HalfCadenceStillRejectsNonDominantBassArrival) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::Half);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 48, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  const ValidationReport report = Validator{}.validate(notes, prov, plan);
+  EXPECT_TRUE(hasRule(report, "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, MinorDeceptiveCadenceResolvesBassToFlatSix) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::Deceptive);
+  plan.is_minor = true;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(0, kTicksPerBeat, 55, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 56, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  const ValidationReport report = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, MinorImperfectAuthenticAcceptsDeclaredPicardyThird) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::ImperfectAuthentic);
+  plan.is_minor = true;
+  ChordEvent final = plan.chords.front();
+  final.start_tick = kTicksPerBeat;
+  final.is_picardy = true;
+  plan.chords.push_back(final);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 72, 0),
+      makeNote(0, kTicksPerBeat, 55, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 76, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 48, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  const ValidationReport report = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, AuthenticCadenceAcceptsDeclaredSecondInversionDominantBass) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::ImperfectAuthentic);
+  plan.chords.front().root_pc = 7;
+  plan.chords.front().quality = ChordQuality::Dominant7;
+  plan.chords.front().degree = RomanNumeral::V;
+  plan.chords.front().inversion = ChordInversion::Second;
+  plan.chords.front().has_degree = true;
+  ChordEvent tonic = plan.chords.front();
+  tonic.start_tick = kTicksPerBeat;
+  tonic.root_pc = 0;
+  tonic.quality = ChordQuality::Major;
+  tonic.degree = RomanNumeral::I;
+  tonic.inversion = ChordInversion::Root;
+  plan.chords.push_back(tonic);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 74, 0),
+      makeNote(0, kTicksPerBeat, 62, 1),  // D: fifth of V, declared in the bass.
+      makeNote(kTicksPerBeat, kTicksPerBeat, 76, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  const ValidationReport report = Validator{}.validate(notes, prov, plan);
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+}
+
 TEST(ValidatorTest, CadenceVoiceLeadingFailsBrokenPac) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 69, 0),
@@ -972,15 +1138,37 @@ TEST(ValidatorTest, CadenceVoiceLeadingFailsBrokenPac) {
   EXPECT_TRUE(hasRule(r, "cadence_voice_leading"));
 }
 
-TEST(ValidatorTest, CadenceMissingVoicesClassifiedStructural) {
-  // Single-voice piece with a cadence event triggers the
-  // voices.size() < 2 precondition path, which is StructuralFail.
+TEST(ValidatorTest, CadenceMonophonicPerfectAcceptsLeadingToneResolution) {
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat, 72, 0),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 71, 0),
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWithCadence(CadenceType::Perfect));
+  EXPECT_FALSE(hasRule(r, "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, CadenceMonophonicBrokenResolutionClassifiedMusical) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 69, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWithCadence(CadenceType::Perfect));
+  EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
+  ASSERT_TRUE(hasRule(r, "cadence_voice_leading"));
+  for (const auto& f : r.failures) {
+    if (f.rule_id == "cadence_voice_leading")
+      EXPECT_EQ(f.kind, FailKind::MusicalFail);
+  }
+}
+
+TEST(ValidatorTest, CadenceBeforeOneBeatClassifiedStructural) {
+  HarmonicPlan plan = cMajorWithCadence(CadenceType::Perfect);
+  plan.cadences.front().tick = 0;
+  std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 72, 0)};
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  ValidationReport r = Validator{}.validate(notes, prov, plan);
   EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
   bool found_structural = false;
   for (const auto& f : r.failures) {
@@ -990,6 +1178,41 @@ TEST(ValidatorTest, CadenceMissingVoicesClassifiedStructural) {
     }
   }
   EXPECT_TRUE(found_structural);
+}
+
+TEST(ValidatorTest, ValidationNeverMutatesNotesOrProvenance) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> provenance = {
+      makeProv(0, NoteSource::Compose),
+      makeProv(1, NoteSource::Material),
+      makeProv(2, NoteSource::Compose),
+      makeProv(3, NoteSource::Material),
+  };
+  const std::vector<NoteEvent> notes_before = notes;
+  const std::vector<NoteProvenance> provenance_before = provenance;
+
+  static_cast<void>(Validator{}.validate(notes, provenance, cMajorWhole()));
+
+  ASSERT_EQ(notes.size(), notes_before.size());
+  ASSERT_EQ(provenance.size(), provenance_before.size());
+  for (std::size_t i = 0; i < notes.size(); ++i) {
+    EXPECT_EQ(notes[i].start_tick, notes_before[i].start_tick);
+    EXPECT_EQ(notes[i].duration, notes_before[i].duration);
+    EXPECT_EQ(notes[i].pitch, notes_before[i].pitch);
+    EXPECT_EQ(notes[i].velocity, notes_before[i].velocity);
+    EXPECT_EQ(notes[i].voice, notes_before[i].voice);
+    EXPECT_EQ(notes[i].source, notes_before[i].source);
+    EXPECT_EQ(provenance[i].span_id, provenance_before[i].span_id);
+    EXPECT_EQ(provenance[i].source, provenance_before[i].source);
+    EXPECT_EQ(provenance[i].voice_intent, provenance_before[i].voice_intent);
+    EXPECT_EQ(provenance[i].satisfied_rules, provenance_before[i].satisfied_rules);
+    EXPECT_EQ(provenance[i].rejected_alternatives, provenance_before[i].rejected_alternatives);
+  }
 }
 
 TEST(ValidatorTest, MusicalViolationClassifiedMusical) {
@@ -1080,7 +1303,92 @@ TEST(ValidatorTest, DeclaredPreparedFourThreeAllowsAccentedFourthAboveBass) {
   ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
   EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
   EXPECT_FALSE(hasRule(r, "suspension_preparation"));
+  EXPECT_FALSE(hasRule(r, "suspension_preparation_duration"));
+  EXPECT_FALSE(hasRule(r, "suspension_metrical_accent"));
+  EXPECT_FALSE(hasRule(r, "suspension_interval"));
   EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
+}
+
+TEST(ValidatorTest, SuspensionPreparationMustBeAtLeastAsLongAsSuspension) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat / 2, 67, 0),
+      makeNote(suspension_tick, kTicksPerBeat, 67, 0),
+      makeNote(resolution_tick, kTicksPerBeat, 65, 0),
+      makeNote(prep_tick, kTicksPerBeat, 48, 1),
+      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  Material material;
+  material.suspension_patterns.push_back(
+      {SuspensionType::Sus4_3, prep_tick, suspension_tick, resolution_tick, 67, 67, 65, 0});
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+  EXPECT_TRUE(hasRule(r, "suspension_preparation_duration"));
+}
+
+TEST(ValidatorTest, SuspensionMustLandOnStrongerMetricalPosition) {
+  const Tick prep_tick = 0;
+  const Tick suspension_tick = kTicksPerBeat;
+  const Tick resolution_tick = 2 * kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat, 67, 0),
+      makeNote(suspension_tick, kTicksPerBeat, 67, 0),
+      makeNote(resolution_tick, kTicksPerBeat, 65, 0),
+      makeNote(prep_tick, kTicksPerBeat, 48, 1),
+      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  Material material;
+  material.suspension_patterns.push_back(
+      {SuspensionType::Sus4_3, prep_tick, suspension_tick, resolution_tick, 67, 67, 65, 0});
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+  EXPECT_TRUE(hasRule(r, "suspension_metrical_accent"));
+}
+
+TEST(ValidatorTest, SuspensionIntervalTableAcceptsAllFourTypes) {
+  struct IntervalCase {
+    SuspensionType type;
+    std::uint8_t prep_pitch;
+    std::uint8_t suspension_pitch;
+    std::uint8_t resolution_pitch;
+    std::uint8_t other_at_prep;
+    std::uint8_t other_at_suspension;
+    std::uint8_t other_at_resolution;
+    VoiceId suspension_voice;
+  };
+  const IntervalCase cases[] = {
+      {SuspensionType::Sus4_3, 67, 67, 65, 48, 50, 50, 0},
+      {SuspensionType::Sus7_6, 70, 70, 69, 63, 60, 60, 0},
+      {SuspensionType::Sus9_8, 74, 74, 72, 67, 60, 60, 0},
+      {SuspensionType::Sus2_3, 59, 59, 60, 66, 60, 64, 1},
+  };
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  for (const IntervalCase& c : cases) {
+    const VoiceId other_voice = c.suspension_voice == 0 ? 1 : 0;
+    std::vector<NoteEvent> notes = {
+        makeNote(prep_tick, kTicksPerBeat, c.prep_pitch, c.suspension_voice),
+        makeNote(suspension_tick, kTicksPerBeat, c.suspension_pitch, c.suspension_voice),
+        makeNote(resolution_tick, kTicksPerBeat, c.resolution_pitch, c.suspension_voice),
+        makeNote(prep_tick, kTicksPerBeat, c.other_at_prep, other_voice),
+        makeNote(suspension_tick, kTicksPerBeat, c.other_at_suspension, other_voice),
+        makeNote(resolution_tick, kTicksPerBeat, c.other_at_resolution, other_voice),
+    };
+    std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+    Material material;
+    material.suspension_patterns.push_back({c.type, prep_tick, suspension_tick, resolution_tick,
+                                            c.prep_pitch, c.suspension_pitch, c.resolution_pitch,
+                                            c.suspension_voice});
+    const ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+    EXPECT_FALSE(hasRule(r, "suspension_preparation")) << static_cast<int>(c.type);
+    EXPECT_FALSE(hasRule(r, "suspension_preparation_duration")) << static_cast<int>(c.type);
+    EXPECT_FALSE(hasRule(r, "suspension_metrical_accent")) << static_cast<int>(c.type);
+    EXPECT_FALSE(hasRule(r, "suspension_interval")) << static_cast<int>(c.type);
+    EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down")) << static_cast<int>(c.type);
+  }
 }
 
 TEST(ValidatorTest, AccentedFourThreeWithoutDeclarationFails) {
@@ -1693,6 +2001,7 @@ HarmonicPlan gMajorDominantWithDegree() {
   HarmonicPlan plan;
   plan.tonic_pc = 0;
   plan.is_minor = false;
+  plan.enforce_chordal_upper_voice_spacing = true;
   ChordEvent v;
   v.start_tick = 0;
   v.root_pc = 7;
@@ -2572,9 +2881,16 @@ TEST(ValidatorTest, PhrasePeriodicityPassesForEightBarSpan) {
   EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
 }
 
-TEST(ValidatorTest, PhrasePeriodicityFailsForThreeBarPhrase) {
+TEST(ValidatorTest, PhrasePeriodicityAcceptsElidedAndExtendedPhrases) {
   Material m;
-  m.phrase_structure.phrase_start_ticks = {0, 3 * kTicksPerBar, 7 * kTicksPerBar};
+  m.phrase_structure.phrase_start_ticks = {0, 3 * kTicksPerBar, 8 * kTicksPerBar};
+  ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
+  EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
+}
+
+TEST(ValidatorTest, PhrasePeriodicityRejectsImplausiblyShortPhrase) {
+  Material m;
+  m.phrase_structure.phrase_start_ticks = {0, 2 * kTicksPerBar};
   ValidationReport r = Validator{}.validate({}, {}, cMajorWhole(), m);
   EXPECT_TRUE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
 }
@@ -2782,14 +3098,14 @@ TEST(ValidatorTest, ParallelFifthStaysSkippedWhenBothMaterial) {
 }
 
 TEST(ValidatorTest, HiddenParallelFifthFiresWhenUpperComposeLowerMaterial) {
-  // Similar motion into a perfect fifth: V0 (upper, Compose) C5 (60) -> D5
-  // (62); V1 (lower, Material) E4 (52) -> G4 (55). Prev interval 8 (m6, not
+  // Similar motion into a perfect fifth: V0 (upper, Compose) C5 (60) -> E5
+  // (64); V1 (lower, Material) E4 (52) -> A4 (57). Prev interval 8 (m6, not
   // perfect), current interval 7 (P5), both rise -> hidden parallel fifth.
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 60, 0),
       makeNote(0, kTicksPerBeat, 52, 1),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 57, 1),
   };
   std::vector<NoteProvenance> prov = {
       makeProv(0, NoteSource::Compose),
@@ -2805,8 +3121,8 @@ TEST(ValidatorTest, HiddenParallelFifthStaysSkippedWhenBothMaterial) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 60, 0),
       makeNote(0, kTicksPerBeat, 52, 1),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
-      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 57, 1),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());

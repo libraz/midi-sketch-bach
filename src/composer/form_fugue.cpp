@@ -10,6 +10,7 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/motif_ops.h"
 #include "composer/span.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
@@ -42,8 +43,6 @@ namespace bach::composer {
 namespace {
 
 using detail::ChordSpec;                    // NOLINT(build/namespaces)
-using detail::kHarmonyPatterns;             // NOLINT(build/namespaces)
-using detail::kHarmonyPatternsMinor;        // NOLINT(build/namespaces)
 using detail::Mode;                         // NOLINT(build/namespaces)
 using detail::scaleUp;                      // NOLINT(build/namespaces)
 using detail::subjectIndexFor;              // NOLINT(build/namespaces)
@@ -51,12 +50,6 @@ using tables::kSubjectCatalogMajor;         // NOLINT(build/namespaces)
 using tables::kSubjectCatalogMajorRhythms;  // NOLINT(build/namespaces)
 using tables::kSubjectCatalogMinor;         // NOLINT(build/namespaces)
 using tables::kSubjectCatalogMinorRhythms;  // NOLINT(build/namespaces)
-
-// Minor-mode middle entries restate the major catalog row at the same index
-// (the related keys are major), so every minor index must also be a valid
-// major index.
-static_assert(kSubjectCatalogMinor.size() <= kSubjectCatalogMajor.size(),
-              "minor catalog indices must be valid in the major catalog");
 
 constexpr Tick kQuarter = kTicksPerBeat;
 
@@ -72,8 +65,8 @@ constexpr int kSubjectBars = 4;
 // note stays at or below the band ceiling (octaveOffsetForBand is ceiling-first).
 // The V0 ceiling is the practical manual compass top used by the texture gate;
 // keeping it at C6 prevents the old D7-range fixture artifact from returning.
-constexpr int kBandLo[3] = {67, 51, 33};
-constexpr int kBandHi[3] = {84, 66, 50};
+constexpr std::array<int, 3> kBandLo = {67, 51, 33};
+constexpr std::array<int, 3> kBandHi = {84, 66, 50};
 
 /// @brief Append a single note to a material vector.
 void addNote(std::vector<MaterialNote>& dst, Tick tick, Tick dur, int pitch) {
@@ -89,41 +82,7 @@ Tick barTick(int bar) {
   return static_cast<Tick>(bar) * kTicksPerBar;
 }
 
-/// @brief Octave offset that fits a pre-transposed subject into a voice band.
-///
-/// Given a base semitone transposition already applied to the subject (0 for the
-/// V0 statement, -5 for the real answer, a diatonic offset for a middle entry),
-/// returns the additional whole-octave shift (a multiple of 12, preserving pitch
-/// classes) that places the line's full range inside the target voice band. Used
-/// to keep every statement strictly inside its voice's register band so the
-/// validator's voice_crossing rule never fires across the all-Material texture.
-///
-/// @param subject The 16-note subject pattern (V0-band pitches).
-/// @param base_semis Base transposition already applied (real-answer / key).
-/// @param voice Target voice index (0..2) selecting the band.
-/// @return The additional octave offset (a multiple of 12) to apply.
-int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int base_semis, int voice) {
-  int lo = 127;
-  int hi = 0;
-  for (std::uint8_t pitch : subject) {
-    lo = std::min(lo, static_cast<int>(pitch) + base_semis);
-    hi = std::max(hi, static_cast<int>(pitch) + base_semis);
-  }
-  int offset = 0;
-  // Ceiling-first: lower the line by whole octaves until its top fits under the
-  // band ceiling (never above it, so it cannot rise into the band above).
-  while (hi + offset > kBandHi[voice]) {
-    offset -= 12;
-  }
-  // Then raise it back toward the floor only while doing so keeps the top under
-  // the ceiling, so the top-fit invariant is never violated.
-  while (lo + offset < kBandLo[voice] && hi + offset + 12 <= kBandHi[voice]) {
-    offset += 12;
-  }
-  return offset;
-}
-
-/// @brief Mirror a C-major diatonic line around its ambit centre in degree space.
+/// @brief Mirror a mode-diatonic line around its ambit centre in degree space.
 ///
 /// Each note is reflected through the centre of the line's degree ambit
 /// (never raw semitones): with d_i the signed diatonic degree distance from
@@ -133,13 +92,15 @@ int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int base_se
 /// than the first note) keeps the inverted statement in the same register as
 /// the upright one: a first-note mirror hangs an ascending subject downward
 /// and sinks the entry to the bottom of its voice band. Because the walk is
-/// done with detail::scaleUp / detail::scaleDown in C major, the result stays
-/// C-major diatonic by construction; the downstream octaveOffsetForBand step
+/// done with detail::scaleUp / detail::scaleDown in the selected mode, the
+/// result stays in that modal collection; the downstream octaveOffsetForBand step
 /// then places it exactly where the upright line would sit.
 ///
-/// @param pat The 16-note C-major diatonic subject line.
+/// @param pat The 16-note mode-diatonic subject line.
+/// @param mode Subject mode.
 /// @return The diatonic melodic inversion of `pat`.
-std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 16>& pat) {
+std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 16>& pat,
+                                                Mode mode) {
   const int anchor = static_cast<int>(pat[0]);
   // Signed diatonic degree distance from the anchor to each note.
   std::array<int, 16> degrees{};
@@ -151,7 +112,7 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
     int walk = std::min(anchor, pitch);
     const int top = std::max(anchor, pitch);
     while (walk < top) {
-      walk = scaleUp(walk, 1, Mode::Major);
+      walk = scaleUp(walk, 1, mode);
       ++steps;
     }
     degrees[idx] = (pitch >= anchor) ? steps : -steps;
@@ -163,8 +124,8 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
   std::array<std::uint8_t, 16> inverted{};
   for (std::size_t idx = 0; idx < pat.size(); ++idx) {
     const int mirrored_degrees = mirror_sum - degrees[idx];
-    const int mirrored = mirrored_degrees >= 0 ? scaleUp(anchor, mirrored_degrees, Mode::Major)
-                                               : scaleDown(anchor, -mirrored_degrees, Mode::Major);
+    const int mirrored = mirrored_degrees >= 0 ? scaleUp(anchor, mirrored_degrees, mode)
+                                               : scaleDown(anchor, -mirrored_degrees, mode);
     inverted[idx] = static_cast<std::uint8_t>(std::clamp(mirrored, 0, 127));
   }
   return inverted;
@@ -256,41 +217,19 @@ bool strettoSustainsDissonance(const std::array<std::uint8_t, 16>& leader_pat, i
       .sustains_sharp;
 }
 
-bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint8_t tonic_pc) {
-  const std::uint8_t tonic = static_cast<std::uint8_t>(tonic_pc % 12);
-  const std::uint8_t dominant = static_cast<std::uint8_t>((tonic + 7) % 12);
-  const std::uint8_t first = static_cast<std::uint8_t>(subject[0] % 12);
-  if (first == dominant) {
-    return true;
-  }
-  if (first != tonic) {
-    return false;
-  }
-  for (int i = 1; i < 4; ++i) {
-    if (subject[static_cast<std::size_t>(i)] % 12 == dominant) {
-      return true;
-    }
-  }
-  return false;
-}
+// Major-mode middle entries rotate V / vi / IV. In minor, a degree shift of
+// the selected minor subject stays inside the home minor collection while its
+// declared stations rotate v / III / iv; this avoids importing the major
+// catalog's A/B/E naturals into a C-minor fugue.
+constexpr std::array<std::uint8_t, 3> kVoiceKeyPc = {7, 9, 5};       // V0->V, V1->vi, V2->IV.
+constexpr std::array<int, 3> kVoiceKeySemis = {7, 9, 5};             // diatonic offsets.
+constexpr std::array<std::uint8_t, 3> kMinorVoiceKeyPc = {7, 3, 5};  // V0->v, V1->III, V2->iv.
+constexpr std::array<int, 3> kMinorVoiceDegreeShift = {4, 2, 3};
 
-// Middle-entry related-key plan, keyed by the CARRYING VOICE (which rotates
-// V0 / V1 / V2 by cycle index, so the plan rotates across the development).
-// The keys are V / vi / IV (the validator's admissible related keys; the home
-// tonic I is NOT admissible). V and IV entries are REAL transpositions: +7 /
-// +5 maps a C-major subject onto the G / F major scales exactly, so every
-// note's pitch class is diatonic to the declared major key. The vi entry is
-// NOT a real transposition -- +9 would realize vi as A MAJOR (C#/F#/G#),
-// bi-tonal against the home-key texture -- it is a diatonic degree shift (up
-// five home-scale degrees), stating the subject in the relative NATURAL minor
-// whose pitch-class set equals the home major scale; the validator checks vi
-// entries against that natural-minor set. kVoiceKeySemis therefore feeds the
-// real-transposition voices only (the vi realization is built per note).
-// Keying by voice keeps every middle entry on a given voice in ONE key, so a
-// single per-voice MiddleEntryDecl (the carrier dispatch matches by voice) holds
-// notes that are all diatonic to that voice's declared key.
-constexpr std::array<std::uint8_t, 3> kVoiceKeyPc = {7, 9, 5};  // V0->V, V1->vi, V2->IV.
-constexpr std::array<int, 3> kVoiceKeySemis = {7, 9, 5};        // diatonic offsets.
+std::uint8_t middleEntryKeyPc(int voice, Mode mode) {
+  const std::size_t index = static_cast<std::size_t>(voice);
+  return mode == Mode::Minor ? kMinorVoiceKeyPc[index] : kVoiceKeyPc[index];
+}
 
 // Diatonic degree shift (never a raw semitone transposition) that restates the
 // canonical countersubject in a middle entry's related key, keyed by the
@@ -323,27 +262,45 @@ constexpr int kFixedCycleBars = kSubjectBars + (8 - kSubjectBars);
 // entry intervals are applied instead. There is no upper bar limit -- longer
 // developments only benefit more from non-uniform spacing.
 constexpr int kVariableScheduleMinEntries = 8;
+constexpr int kEntryDecileCount =
+    static_cast<int>(sizeof(kEntryIntervalDeciles) / sizeof(kEntryIntervalDeciles[0]));
+
+int adaptCorpusEntryInterval(int corpus_interval_bars) {
+  // The annotation corpus's principal subjects are about two bars long while
+  // this builder's subject is fixed at four. Map the corpus episode component
+  // (start gap minus mean subject length) into this builder's established
+  // four-to-six-bar development-episode band. This preserves lower/middle/
+  // upper corpus quantiles as 8/9/10-bar cycles without overcrowding the
+  // generated four-bar subjects.
+  const int corpus_subject_bars = std::clamp(static_cast<int>(kSubjectLengthMeanBars + 0.5), 1, 4);
+  const int corpus_episode_bars = std::max(0, corpus_interval_bars - corpus_subject_bars);
+  const int corpus_tail_episode_bars =
+      std::max(1, kEntryIntervalDeciles[kEntryDecileCount - 1] - corpus_subject_bars);
+  constexpr int kMappedMinEpisodeBars = 4;
+  constexpr int kMappedEpisodeRange = kMaxEpisodeBars - kMappedMinEpisodeBars;
+  const int mapped_episode =
+      kMappedMinEpisodeBars +
+      (std::min(corpus_episode_bars, corpus_tail_episode_bars) * kMappedEpisodeRange +
+       corpus_tail_episode_bars / 2) /
+          corpus_tail_episode_bars;
+  return kSubjectBars + mapped_episode;
+}
 
 int entryIntervalForCycle(std::uint32_t seed, int cycle) {
-  constexpr int kEntryDecileCount =
-      static_cast<int>(sizeof(kEntryIntervalDeciles) / sizeof(kEntryIntervalDeciles[0]));
-  const int raw = kEntryIntervalDeciles[(static_cast<int>(seed % kEntryDecileCount) + cycle * 2) %
-                                        kEntryDecileCount];
-  // Clamp into the band where the decile table's interquartile region overlaps
-  // the structurally admissible interval window. The structural window is
-  // [kSubjectBars + kMinEpisodeBars, kSubjectBars + kMaxEpisodeBars] (a cycle's
-  // episode must fit); the interquartile region is the table's central deciles
-  // [Q1, Q3]. Indexing the bounds from the table itself means they track any
-  // regeneration of entry_plan_stats.inc automatically.
-  constexpr int kQ1Index = kEntryDecileCount / 4;
-  constexpr int kQ3Index = (kEntryDecileCount * 3) / 4;
-  const int interval_lo = std::max(kEntryIntervalDeciles[kQ1Index], kSubjectBars + kMinEpisodeBars);
-  const int interval_hi = std::min(kEntryIntervalDeciles[kQ3Index], kSubjectBars + kMaxEpisodeBars);
-  return std::clamp(raw, interval_lo, interval_hi);
+  const int corpus_interval =
+      kEntryIntervalDeciles[(static_cast<int>(seed % kEntryDecileCount) + cycle * 2) %
+                            kEntryDecileCount];
+  const int raw = adaptCorpusEntryInterval(corpus_interval);
+  // Clamp only to the builder's structural episode window. The old additional
+  // Q1/Q3 clamp was applied to beat-valued constants and collapsed all nine
+  // deciles to two outcomes; after unit normalization it would erase the
+  // corpus tail again. The corrected table now produces 8-, 9-, and 10-bar
+  // cycles across a full seed/cycle rotation.
+  return std::clamp(raw, kSubjectBars + kMinEpisodeBars, kSubjectBars + kMaxEpisodeBars);
 }
 
 bool useVariableEntrySchedule(int fugue_bars) {
-  const bool short_form = fugue_bars <= 20;
+  const bool short_form = fugue_bars < 20;
   const int exposition_bars = short_form ? 8 : 12;
   constexpr int coda_bars = 4;
   const int development_bars = fugue_bars - exposition_bars - coda_bars;
@@ -465,23 +422,6 @@ void addFigurationSpan(FugueAssembly& asm_ctx, VoiceId voice, int first_bar, int
   pushSpan(asm_ctx, voice, first_bar, last_bar, VoiceIntent::FigurationCarrier);
 }
 
-/// @brief Build the per-bar chord plan for the whole fugue span.
-///
-/// Entry bars (subject / answer / middle-entry / coda) open on the home tonic;
-/// episode bars walk a short diatonic progression so the harmony moves. The
-/// plan is deterministic from (seed, mode); every chord is diatonic with at most
-/// one secondary-flavoured chord per episode (kept simple, all diatonic here).
-std::vector<ChordSpec> buildChordPlan(int total_bars, Mode mode, int harm_idx) {
-  const auto& patterns = (mode == Mode::Minor) ? kHarmonyPatternsMinor : kHarmonyPatterns;
-  std::vector<ChordSpec> plan;
-  plan.reserve(static_cast<std::size_t>(total_bars));
-  for (int bar = 0; bar < total_bars; ++bar) {
-    const auto& pattern = patterns[static_cast<std::size_t>((harm_idx + bar / 4) % 4)];
-    plan.push_back(pattern[static_cast<std::size_t>(bar % 4)]);
-  }
-  return plan;
-}
-
 // --- Fugue tonal plan --------------------------------------------------------
 // The fugue's harmony is a piece-level tonal design rather than a rotating
 // 4-bar loop: every region states the function the form assigns to it.
@@ -568,6 +508,13 @@ std::array<ChordSpec, 4> entryProgression(std::uint8_t key_pc, Mode mode) {
     switch (key_pc) {
       case 7:
         return {{{7, false}, {0, true}, {8, false}, {7, false}}};
+      case 3:
+        // The III-related subject is degree-shifted inside C minor rather
+        // than chromatically transposed. Support it with the home dominant:
+        // this preserves its shared pitch collection and gives the entry the
+        // same dominant arrival as the v station instead of falsely resetting
+        // the tonal plan to I.
+        return {{{7, false}, {0, true}, {7, false}, {7, false}}};
       case 9:
         return {{{7, false}, {0, true}, {7, false}, {7, false}}};
       case 5:
@@ -625,7 +572,7 @@ std::vector<ChordSpec> buildFugueTonalPlan(int bars, Mode mode, int exposition_b
     if (!window.has_entry) {
       continue;
     }
-    const std::uint8_t key_pc = kVoiceKeyPc[static_cast<std::size_t>(carry_voice_for(cycle))];
+    const std::uint8_t key_pc = middleEntryKeyPc(carry_voice_for(cycle), mode);
     // The pedal window prolongs the dominant by alternating V with the tonic
     // 6/4 colour over the held pedal (the textbook dominant-pedal harmony).
     // The alternation also keeps the counterline's admissible chord-tone set
@@ -680,6 +627,34 @@ void emitHarmony(HarnessFixture& out, const std::vector<ChordSpec>& plan, Mode m
   }
 }
 
+bool isPivotCapableRelatedKey(std::uint8_t key_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    return key_pc == 7 || key_pc == 5;
+  }
+  return key_pc == 7 || key_pc == 9 || key_pc == 5;
+}
+
+bool isRelatedKeyMinor(std::uint8_t key_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    return key_pc == 5;
+  }
+  return key_pc == 9;
+}
+
+RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    return key_pc == 5 ? RomanNumeral::IV : RomanNumeral::V;
+  }
+  switch (key_pc) {
+    case 9:
+      return RomanNumeral::VI;
+    case 5:
+      return RomanNumeral::IV;
+    default:
+      return RomanNumeral::V;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // appendFugueSection: assemble a complete fugue (exposition + development
 // cycles + coda) starting at `first_bar`, spanning `bars` bars. Reused by the
@@ -713,8 +688,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       minor_mode ? kSubjectCatalogMinorRhythms[slot] : kSubjectCatalogMajorRhythms[slot];
 
   // --- Length partition. ---
-  // Exposition: 12 bars normally, compressed to 8 for short fugues (N<=20).
-  const bool short_form = bars <= 20;
+  // Exposition: 12 bars normally, compressed to 8 only below the public
+  // 20-bar minimum. Every shipped fugue therefore contains all three entries.
+  const bool short_form = bars < 20;
   const int exposition_bars = short_form ? 8 : 12;
   constexpr int coda_bars = 4;
 
@@ -732,7 +708,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   }
 
   // Climax cycle: ~80% of the middle-entry span (matches arcPoint's climax).
-  const int climax_cycle =
+  int climax_cycle =
       development_windows.empty()
           ? -1
           : (variable_entry_schedule && !entry_cycles.empty()
@@ -754,6 +730,13 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                               : (variable_entry_schedule && !entry_cycles.empty()
                                      ? entry_cycles.back()
                                      : static_cast<int>(development_windows.size()) - 1);
+  // In the smallest two-entry development, the nominal 80% climax lands on
+  // the same final entry as the dominant pedal. The pedal owns that pre-coda
+  // slot; move the climax to the preceding entry so both devices remain
+  // present instead of silently suppressing the pedal branch below.
+  if (pedal_cycle >= 0 && climax_cycle == pedal_cycle && entry_cycles.size() >= 2) {
+    climax_cycle = entry_cycles[entry_cycles.size() - 2];
+  }
   // The second entry-carrying development cycle states the subject inverted --
   // one mirrored entry per fugue, and only when the development is long enough
   // to spare a canonical restatement (>= 3 entry cycles). The stretto climax
@@ -787,6 +770,27 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       break;
     }
   }
+  // Long fugues reserve two otherwise ordinary entry cycles for rhythmic
+  // subject variants. Augmentation states the first half of the subject at
+  // double values; diminution states the complete subject twice at half
+  // values. Special cycles (inversion, stretto climax/reprise, dominant pedal)
+  // retain their own rhetoric.
+  int augmentation_cycle = -1;
+  int diminution_cycle = -1;
+  if (bars >= 96) {
+    for (int cycle : entry_cycles) {
+      if (cycle == climax_cycle || cycle == pedal_cycle || cycle == inverted_cycle ||
+          cycle == second_stretto_cycle) {
+        continue;
+      }
+      if (augmentation_cycle < 0) {
+        augmentation_cycle = cycle;
+      } else {
+        diminution_cycle = cycle;
+        break;
+      }
+    }
+  }
 
   // --- Ornament/expression metadata (fixture fields only, never a note). ---
   // The exposition's final bar closes the fugue's first section: the ornament
@@ -811,16 +815,90 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // cadence_voice_leading rule reads a true V->I.
   std::vector<ChordSpec> plan =
       buildFugueTonalPlan(bars, mode, exposition_bars, coda_bars, development_windows, pedal_cycle);
-  plan[static_cast<std::size_t>(bars - 2)] = ChordSpec{7, false};                // V (G major).
-  plan[static_cast<std::size_t>(bars - 1)] = ChordSpec{0, mode == Mode::Minor};  // I.
+  // Prepare related-key entries with V/X -> X in the two bars immediately
+  // before their common-chord pivot. The target X is diatonic in the home key,
+  // so the shared pivot remains valid while the preceding secondary dominant
+  // gives the approach genuine directional harmonic force.
+  for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
+    const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
+    const std::uint8_t key_pc = middleEntryKeyPc(cycle % 3, mode);
+    if (!window.has_entry || cycle == pedal_cycle || !isPivotCapableRelatedKey(key_pc, mode) ||
+        window.entry_start < 2) {
+      continue;
+    }
+    plan[static_cast<std::size_t>(window.entry_start - 2)] =
+        ChordSpec{static_cast<std::uint8_t>((key_pc + 7) % 12), false};
+    plan[static_cast<std::size_t>(window.entry_start - 1)] =
+        ChordSpec{key_pc, isRelatedKeyMinor(key_pc, mode)};
+  }
+  const bool picardy = mode == Mode::Minor && detail::usePicardy(req.seed);
+  plan[static_cast<std::size_t>(bars - 2)] = ChordSpec{7, false};  // V (G major).
+  plan[static_cast<std::size_t>(bars - 1)] =
+      ChordSpec{0, mode == Mode::Minor && !picardy};  // I / Picardy I.
   emitHarmony(out, plan, mode, first_bar);
+  for (ChordEvent& chord : out.harmony.chords) {
+    if (chord.start_tick == barTick(first_bar + bars - 1)) {
+      chord.is_picardy = picardy;
+    }
+  }
+
+  for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
+    const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
+    const std::uint8_t key_pc = middleEntryKeyPc(cycle % 3, mode);
+    if (!window.has_entry || cycle == pedal_cycle || !isPivotCapableRelatedKey(key_pc, mode) ||
+        window.entry_start < 2) {
+      continue;
+    }
+    const Tick secondary_tick = barTick(first_bar + window.entry_start - 2);
+    const Tick target_tick = secondary_tick + kTicksPerBar;
+    for (ChordEvent& chord : out.harmony.chords) {
+      if (chord.start_tick == secondary_tick) {
+        chord.degree = RomanNumeral::V;
+        chord.function = HarmonicFunction::D;
+        chord.has_degree = true;
+        chord.has_secondary_of = true;
+        chord.secondary_of = relatedKeyDegree(key_pc, mode);
+      } else if (chord.start_tick == target_tick) {
+        chord.degree = relatedKeyDegree(key_pc, mode);
+        chord.has_degree = true;
+      }
+    }
+  }
+
+  // Related-key statements begin on a harmony shared by the home key and the
+  // local key (V/I for G, vi/i for A, IV/i for F). Declare that actual pivot
+  // and restore the home key when the four-bar entry closes, so downstream
+  // consumers such as OrnamentPass can select local-scale auxiliaries without
+  // leaking the temporary tonicization into the following episode.
+  for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
+    const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
+    if (!window.has_entry || cycle == pedal_cycle) {
+      continue;
+    }
+    const std::uint8_t key_pc = middleEntryKeyPc(cycle % 3, mode);
+    if (!isPivotCapableRelatedKey(key_pc, mode)) {
+      continue;
+    }
+    const Tick pivot_tick = barTick(first_bar + window.entry_start);
+    out.harmony.modulations.push_back({pivot_tick, 0, key_pc, mode == Mode::Minor,
+                                       isRelatedKeyMinor(key_pc, mode), ModulationType::Pivot});
+    const Tick return_tick = pivot_tick + 4 * kTicksPerBar;
+    if (return_tick < barTick(first_bar + bars)) {
+      out.harmony.modulations.push_back({return_tick, key_pc, 0, isRelatedKeyMinor(key_pc, mode),
+                                         mode == Mode::Minor, ModulationType::Phrase});
+    }
+  }
+  std::stable_sort(out.harmony.modulations.begin(), out.harmony.modulations.end(),
+                   [](const ModulationEvent& left, const ModulationEvent& right) {
+                     return left.tick < right.tick;
+                   });
 
   // === EXPOSITION ===========================================================
   // Each thematic statement carries the subject in ONE voice band; at most ONE
   // figuration accompaniment voice is added per bar window (the FigurationCarrier
   // dispatch matches sections by window only, so two sections sharing a window
   // would collide -- a single accompaniment voice per window avoids that).
-  const int v0_off = octaveOffsetForBand(subj_pat, 0, 0);
+  const int v0_off = octaveOffsetForBand(subj_pat, 0, 0, kBandLo, kBandHi);
   // Countersubject = a genuine counterline against the entry it accompanies,
   // NOT a parallel-octave doubling. Each note is chosen to be (1) consonant with
   // the source note it sounds against (so the vertical dissonance stays low) and
@@ -831,63 +909,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // fires. Diatonic, near the previous counterline pitch, so the line is smooth.
   auto append_countersubject_from = [&](const std::vector<MaterialNote>& source, int voice,
                                         Tick start, Tick end) {
-    const int center = (kBandLo[voice] + kBandHi[voice]) / 2;
-    int prev_cs = -1;
-    int prev_src = -1;
-    int repeat_run = 1;  // consecutive equal counterline pitches so far.
-    for (const auto& note : source) {
-      if (note.start_tick < start || note.start_tick >= end)
-        continue;
-      const int src = static_cast<int>(note.pitch);
-      const int src_dir = (prev_src < 0) ? 0 : (src > prev_src ? 1 : (src < prev_src ? -1 : 0));
-      const int target = (prev_cs < 0) ? center : prev_cs;
-      // Score every in-band diatonic tone: consonant against the source first,
-      // then contrary to the source's motion, then nearest the previous note,
-      // while refusing a long repeated-pitch run (texture gate caps runs at 4).
-      int best = -1;
-      int best_score = 1 << 30;
-      for (int pitch = kBandLo[voice]; pitch <= kBandHi[voice]; ++pitch) {
-        if (!inScale(pitch, mode)) {
-          continue;
-        }
-        const bool consonant = isConsonantIc(pitch - src);
-        const int cs_dir = (prev_cs < 0) ? 0 : (pitch > prev_cs ? 1 : (pitch < prev_cs ? -1 : 0));
-        // Similar (same-direction) motion onto a perfect 5th/8th is the parallel
-        // we must avoid; contrary or oblique motion is safe.
-        const bool similar = (src_dir != 0 && cs_dir == src_dir);
-        const int cur_ic = ((std::abs(pitch - src) % 12) + 12) % 12;
-        const bool perfect_arrival = (cur_ic == 0 || cur_ic == 7);
-        const bool repeats_prev = (pitch == prev_cs);
-        int score = std::abs(pitch - target);
-        if (!consonant) {
-          score += 10000;  // dissonance against the source is the worst.
-        }
-        if (similar && perfect_arrival) {
-          score += 4000;  // forbidden parallel arrival.
-        } else if (similar) {
-          score += 200;  // prefer genuine contrary motion.
-        }
-        // When the source moves, prefer the counterline to move too (contrary),
-        // and hard-bias away from extending a 4-long repeated run.
-        if (repeats_prev && src_dir != 0) {
-          score += 300;
-        }
-        if (repeats_prev && repeat_run >= 4) {
-          score += 100000;
-        }
-        if (score < best_score) {
-          best_score = score;
-          best = pitch;
-        }
-      }
-      const int pitch = (best >= 0) ? best : std::clamp(target, kBandLo[voice], kBandHi[voice]);
-      repeat_run = (pitch == prev_cs) ? repeat_run + 1 : 1;
-      addNote(out.material.countersubject, note.start_tick, note.duration, pitch);
-      asm_ctx.theme_tones.record(note.start_tick, static_cast<VoiceId>(voice), pitch,
-                                 note.duration);
-      prev_cs = pitch;
-      prev_src = src;
-    }
+    appendScoredCountersubject(source, static_cast<VoiceId>(voice), start, end, kBandLo[voice],
+                               kBandHi[voice], mode, out.material.countersubject,
+                               asm_ctx.theme_tones);
   };
   // The piece's ONE canonical countersubject, snapshotted from the exposition
   // (re-based to tick 0) once the answer counterline is derived. Every later
@@ -1060,10 +1084,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     }
   };
   stamp_subject(first_bar + 0, v0_off, 0);
+  out.material.canonical_subject_note_count = kSubjectNotes;
   pushSpan(asm_ctx, 0, first_bar + 0, first_bar + 3, VoiceIntent::SubjectCarrier);
 
   // Answer (V1, bars 4-7) = real answer (subject - P4) lowered into the V1 band.
-  const int answer_off = octaveOffsetForBand(subj_pat, -5, 1);
+  const int answer_off = octaveOffsetForBand(subj_pat, -5, 1, kBandLo, kBandHi);
   const int answer_total = -5 + answer_off;
   const bool use_tonal_answer = shouldUseTonalAnswer(subj_pat, out.harmony.tonic_pc);
   std::vector<MaterialNote> tonal_answer_seed;
@@ -1152,7 +1177,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
   if (!short_form) {
     // Third entry (V2, bars 8-11) = subject - P8 lowered into the V2 band.
-    const int third_off = octaveOffsetForBand(subj_pat, -12, 2);
+    const int third_off = octaveOffsetForBand(subj_pat, -12, 2, kBandLo, kBandHi);
     stamp_subject(first_bar + 8, -12 + third_off, 2);
     pushSpan(asm_ctx, 2, first_bar + 8, first_bar + 11, VoiceIntent::SubjectCarrier);
     // V1 countersubject plus V0 figuration makes the third entry a real 3-voice
@@ -1219,7 +1244,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         continue;  // no in-set fifth-up canon against the modal vi leader.
       }
       const int follower_semis = follower_key_semis + config.extra_semis;
-      const int follower_off = octaveOffsetForBand(subj_pat, follower_semis, follower_voice);
+      const int follower_off =
+          octaveOffsetForBand(subj_pat, follower_semis, follower_voice, kBandLo, kBandHi);
       const int follower_total = follower_semis + follower_off;
       if (strettoSustainsDissonance(leader_pat, leader_total, subj_pat, follower_total, subj_rhythm,
                                     config.delay_bars)) {
@@ -1296,52 +1322,68 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const int density = std::clamp<int>(1 + arc.density_tier, 1, 2);
 
     if (!half_cycle) {
-      // --- Middle entry (4 bars): the subject restated in the carrying voice in
-      //     a related key (V / vi / IV, keyed by the carrying voice so each
-      //     voice stays in one key). V and IV are REAL transpositions of the
-      //     MAJOR subject catalog (+7 / +5 maps the C-major line onto the G /
-      //     F major scales exactly). The vi entry is a DIATONIC degree shift
-      //     instead -- up five C-major scale degrees, which states the subject
-      //     in the relative (natural) minor: a real +9 transposition would
-      //     realize vi as A MAJOR, whose C#/F#/G# turn the development
-      //     bi-tonal against the C-major figuration around it. The realized
-      //     line is then octave-fit into the voice band. ---
+      // --- Middle entry (4 bars): the selected form subject restated in the
+      //     carrying voice. Major pieces retain the V / vi / IV realization;
+      //     minor pieces move the minor catalog by home-minor scale degrees to
+      //     v / III / iv, preserving the minor pitch collection. ---
       const int me_start = first_bar + window.entry_start;  // absolute.
       const int key_semis = kVoiceKeySemis[static_cast<std::size_t>(carry_voice)];
-      // The inverted development cycle mirrors the catalog line in degree space
-      // before any key realization; the inversion stays C-major diatonic, so the
-      // per-voice realization (V/IV real transposition, vi degree shift) and the
-      // octave fit below preserve the declared related key exactly as they do for
-      // the upright line.
-      std::array<std::uint8_t, 16> me_pat = kSubjectCatalogMajor[slot];
+      // The inverted development cycle mirrors the selected catalog line in
+      // degree space before its related-key realization.
+      std::array<std::uint8_t, 16> me_pat = subj_pat;
       const bool inverted_here = (cycle == inverted_cycle);
+      const bool augmented_here = (cycle == augmentation_cycle);
+      const bool diminished_here = (cycle == diminution_cycle);
       if (inverted_here) {
-        me_pat = invertDiatonicLine(me_pat);
+        me_pat = invertDiatonicLine(me_pat, mode);
       }
       std::array<std::uint8_t, 16> me_real;
       for (int note = 0; note < kSubjectNotes; ++note) {
         const int base = static_cast<int>(me_pat[static_cast<std::size_t>(note)]);
-        // The catalog line is C-major diatonic, so the degree walk stays on
-        // the home scale in both modes (minor pieces also restate the major
-        // catalog here; see the comment above).
-        me_real[static_cast<std::size_t>(note)] = static_cast<std::uint8_t>(
-            carry_voice == 1 ? detail::scaleUp(base, 5, Mode::Major) : base + key_semis);
+        const int realized =
+            mode == Mode::Minor
+                ? detail::scaleUp(base,
+                                  kMinorVoiceDegreeShift[static_cast<std::size_t>(carry_voice)],
+                                  Mode::Minor)
+                : (carry_voice == 1 ? detail::scaleUp(base, 5, Mode::Major) : base + key_semis);
+        me_real[static_cast<std::size_t>(note)] = static_cast<std::uint8_t>(realized);
       }
-      const int me_off = octaveOffsetForBand(me_real, 0, carry_voice);
+      const int me_off = octaveOffsetForBand(me_real, 0, carry_voice, kBandLo, kBandHi);
       MiddleEntryDecl& decl = middle_decls[static_cast<std::size_t>(carry_voice)];
       decl.voice = static_cast<VoiceId>(carry_voice);
-      decl.related_key_pc = kVoiceKeyPc[static_cast<std::size_t>(carry_voice)];
+      decl.related_key_pc = middleEntryKeyPc(carry_voice, mode);
       Tick me_cursor = barTick(me_start);
-      for (int note = 0; note < kSubjectNotes; ++note) {
+      const Tick me_end = barTick(me_start + kSubjectBars);
+      int note = 0;
+      while (me_cursor < me_end && (diminished_here || note < kSubjectNotes)) {
+        const int source_note = note % kSubjectNotes;
+        Tick duration = subj_rhythm[static_cast<std::size_t>(source_note)];
+        if (augmented_here)
+          duration *= 2;
+        if (diminished_here)
+          duration = std::max<Tick>(1, duration / 2);
+        duration = std::min(duration, me_end - me_cursor);
         MaterialNote mn;
         mn.start_tick = me_cursor;
-        mn.duration = subj_rhythm[static_cast<std::size_t>(note)];
-        mn.pitch = static_cast<std::uint8_t>(
-            std::clamp(static_cast<int>(me_real[static_cast<std::size_t>(note)]) + me_off, 0, 127));
+        mn.duration = duration;
+        mn.pitch = static_cast<std::uint8_t>(std::clamp(
+            static_cast<int>(me_real[static_cast<std::size_t>(source_note)]) + me_off, 0, 127));
         decl.notes.push_back(mn);
         asm_ctx.theme_tones.record(mn.start_tick, static_cast<VoiceId>(carry_voice),
                                    static_cast<int>(mn.pitch), mn.duration);
         me_cursor += mn.duration;
+        ++note;
+      }
+      std::uint8_t transform =
+          static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Original);
+      if (inverted_here)
+        transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Invert);
+      else if (augmented_here)
+        transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Augment);
+      else if (diminished_here)
+        transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Diminish);
+      if (transform != static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Original)) {
+        decl.transform_regions.push_back({barTick(me_start), me_end, transform});
       }
       middle_used[static_cast<std::size_t>(carry_voice)] = true;
       pushSpan(asm_ctx, static_cast<VoiceId>(carry_voice), me_start, me_start + 3,
@@ -1366,9 +1408,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         const int follower_voice = acc_voice;
         int first_delay = 0;
         int first_total = 0;
-        stretto_placed =
-            place_stretto_follower(me_real, me_off, carry_voice, follower_voice, me_start,
-                                   key_semis, density, &first_delay, &first_total);
+        stretto_placed = place_stretto_follower(me_real, me_off, carry_voice, follower_voice,
+                                                me_start, mode == Mode::Minor ? 0 : key_semis,
+                                                density, &first_delay, &first_total);
         if (stretto_placed) {
           // Three-voice stretto: pile a SECOND follower into the remaining voice
           // (neither the leader nor the first follower) so the climax states the
@@ -1408,7 +1450,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
               continue;  // no in-set fifth-up canon against the modal vi leader.
             }
             const int second_semis = second_key_semis + config.extra_semis;
-            const int second_off = octaveOffsetForBand(subj_pat, second_semis, third_voice);
+            const int second_off =
+                octaveOffsetForBand(subj_pat, second_semis, third_voice, kBandLo, kBandHi);
             const int second_total = second_semis + second_off;
             // The third statement is a FALSE ENTRY: the subject's one-bar head
             // only. A full third statement of this catalog's subjects against
@@ -1491,8 +1534,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         // keeps its recurring countersubject below.
         int delay = 0;
         int total = 0;
-        pre_coda_stretto_placed = place_stretto_follower(
-            me_real, me_off, carry_voice, acc_voice, me_start, key_semis, density, &delay, &total);
+        pre_coda_stretto_placed =
+            place_stretto_follower(me_real, me_off, carry_voice, acc_voice, me_start,
+                                   mode == Mode::Minor ? 0 : key_semis, density, &delay, &total);
       }
       if (stretto_placed || pre_coda_stretto_placed) {
         // A follower already occupies the accompaniment voice this cycle.
@@ -1552,8 +1596,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // stretto pile-up already owns every voice, so both accompaniment fills
       // are suppressed for that cycle (second_stretto_placed).
       const bool add_middle_bass_support =
-          (carry_voice != 2 && cycle != pedal_cycle && (fig_offset != 1 || cycle >= 2)) &&
-          !second_stretto_placed;
+          (carry_voice != 2 && cycle != pedal_cycle) && !second_stretto_placed;
       const bool fill_middle_voice =
           (carry_voice == 2 && cycle != pedal_cycle) && !second_stretto_placed;
       if (fill_middle_voice) {
@@ -1605,6 +1648,13 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         }
         head_deg[static_cast<std::size_t>(note)] = folded;
       }
+      // Keep the opening of every Fortspinnung model tied to the subject. It
+      // is the downbeat-facing part that the accompaniment is pre-voiced
+      // against; replacing it with a countersubject/inversion raised the
+      // score-level vertical-dissonance rate. The closing turn rotates among
+      // three contours instead, so episodes remain distinct without breaking
+      // their chord-tone-oriented opening.
+      const int episode_model = cycle % 3;
       // 2-bar Fortspinnung model: the head (the only leaps in the model --
       // they ARE the motif) in eighths, a sixteenth Spielfigur descent to the
       // model floor, a quarter-note arrival one step below it, and a rising
@@ -1655,6 +1705,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       model_dur[14] = kTicksPerBeat / 2;
       model_deg[15] = -2;
       model_dur[15] = 2 * kTicksPerBeat;
+      if (episode_model == 1) {
+        model_deg[15] = -1;
+      } else if (episode_model == 2) {
+        model_deg[15] = -3;
+      }
       // One SequenceTemplate per stride (num_steps = 1 each; the verbatim
       // step-0 check in sequence_pattern_consistency covers every emitted
       // note). Strides descend one degree per 2 bars in lockstep with the
@@ -1720,20 +1775,26 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         SequenceTemplate tmpl;
         tmpl.pattern = SequencePattern::DescendingStep;
         tmpl.target_start_tick = barTick(ep_start) + static_cast<Tick>(kstep) * stride;
-        tmpl.step_length_ticks = stride;
+        // A corpus-derived odd-length episode ends with a one-bar partial
+        // stride. Declare that actual window instead of advertising two bars
+        // and relying on span clipping, so sequence validation remains exact.
+        tmpl.step_length_ticks = std::min(stride, span_hi - tmpl.target_start_tick);
         tmpl.num_steps = 1;
         tmpl.voice = 0;
         Tick cursor = tmpl.target_start_tick;
         for (int slot = 0; slot < static_cast<int>(model_deg.size()); ++slot) {
+          if (cursor >= span_hi) {
+            break;
+          }
           const int deg = model_deg[static_cast<std::size_t>(slot)] + stride_shift(kstep);
           const int pitch = std::clamp(degree_shift(seed_base, deg), kBandLo[0], kBandHi[0]);
-          const Tick dur = model_dur[static_cast<std::size_t>(slot)];
+          const Tick dur = std::min(model_dur[static_cast<std::size_t>(slot)], span_hi - cursor);
           tmpl.seed_pitches.push_back(static_cast<std::uint8_t>(pitch));
           tmpl.seed_durations.push_back(dur);
           // Register the sounding tone (replicating the FortspinnungSpan
           // replay, which window-clips) so the V1/V2 accompaniment built
           // below avoids clashing with the V0 episode line.
-          if (cursor >= span_lo && cursor < span_hi) {
+          if (cursor >= span_lo) {
             asm_ctx.theme_tones.record(cursor, 0, pitch, dur);
           }
           cursor += dur;
@@ -1801,15 +1862,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // inter-voice parallel checks against the Material subject and alto above it.
   addFigurationSpan(asm_ctx, 2, coda_start, coda_start + 1, plan, first_bar, mode, 1, fig_offset);
 
-  // V0 cadence figure (CodaCarrier, bars coda_start+2 .. coda_start+3): the
-  // shared cadential landing. An eighth-note approach run rises into a held
-  // half-note leading tone B over the bar's second half (the cadential trill
-  // site the ornament pass decorates), then the final bar holds the tonic C as
-  // a whole note (the plain resolution). The cadence_voice_leading rule reads
-  // the SOUNDING pitch at the approach beat (penultimate-bar beat 3) and the
-  // final downbeat: the held B spans that approach beat and the whole-note C
-  // covers the downbeat, so upper_prev = B resolves to upper_now = C exactly
-  // as the 8-quarter figure did.
+  // V0 cadence figure (CodaCarrier, bars coda_start+2 .. coda_start+3): a
+  // cadential I6/4 -> V -> I. The opening C above the dominant pedal is the
+  // dissonant fourth of the second-inversion tonic; it resolves down to B for
+  // the dominant, then the final bar holds C. The ornament pass may decorate
+  // the B, but the structural pitches stay explicit in the material.
   {
     CodaDecl coda;
     coda.voice = 0;
@@ -1820,8 +1877,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     while (tonic % 12 != 0) {
       --tonic;
     }
-    appendCadentialLanding(coda.notes, barTick(coda_start + 2), kTicksPerBar, tonic - 1, tonic,
-                           mode, kBandLo[0]);
+    appendCadentialSixFourLanding(coda.notes, barTick(coda_start + 2), kTicksPerBar, tonic,
+                                  tonic - 1);
     out.material.coda_extensions.push_back(coda);
     pushSpan(asm_ctx, 0, coda_start + 2, coda_start + 3, VoiceIntent::CodaCarrier);
   }
@@ -1890,10 +1947,37 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
   // Final-cadence annotation: a perfect cadence on the final bar downbeat.
   {
+    const Tick six_four_tick = barTick(coda_start + 2);
+    for (ChordEvent& chord : out.harmony.chords) {
+      if (chord.start_tick == six_four_tick) {
+        chord.root_pc = 0;
+        chord.quality = ChordQuality::Major;
+        chord.degree = RomanNumeral::I;
+        chord.inversion = ChordInversion::Second;
+        chord.function = HarmonicFunction::T;
+        chord.has_degree = true;
+        break;
+      }
+    }
+    ChordEvent dominant;
+    dominant.start_tick = six_four_tick + kTicksPerBeat;
+    dominant.root_pc = 7;
+    dominant.quality = ChordQuality::Dominant7;
+    dominant.degree = RomanNumeral::V;
+    dominant.inversion = ChordInversion::Root;
+    dominant.function = HarmonicFunction::D;
+    dominant.has_degree = true;
+    out.harmony.chords.push_back(dominant);
+    std::stable_sort(out.harmony.chords.begin(), out.harmony.chords.end(),
+                     [](const ChordEvent& left, const ChordEvent& right) {
+                       return left.start_tick < right.start_tick;
+                     });
     CadenceEvent cadence;
     cadence.tick = barTick(coda_start + coda_bars - 1);
     cadence.type = CadenceType::Perfect;
     out.harmony.cadences.push_back(cadence);
+    out.harmony.cadential_six_fours.push_back(
+        {six_four_tick, six_four_tick + kTicksPerBeat, SixFourType::Cadential});
   }
 }
 
@@ -1916,11 +2000,11 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
 
   const int total = static_cast<int>(req.bars);
   // Prelude length = N/3 rounded to 4, clamped to [4, 32]; the rest is fugue
-  // (kept >= 16 so the fugue half always carries a full exposition + coda).
+  // (kept >= 20 so the fugue half always carries all three entries + coda).
   int prelude_bars = ((total / 3 + 2) / 4) * 4;
   prelude_bars = std::clamp(prelude_bars, 4, 32);
-  if (total - prelude_bars < 16) {
-    prelude_bars = total - 16;
+  if (total - prelude_bars < 20) {
+    prelude_bars = total - 20;
     prelude_bars = std::max(4, (prelude_bars / 4) * 4);
   }
   const int fugue_bars = total - prelude_bars;
@@ -1933,7 +2017,7 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   //     anchored sawtooth figuration (the proven WTC-pair construction: every
   //     beat restarts on a chord tone so the on-beat verticals stay consonant);
   //     V2 silent. Harmony cycles the diatonic pattern with 4-bar cadences. ---
-  const std::vector<ChordSpec> prelude_plan = buildChordPlan(prelude_bars, mode, harm_idx);
+  const std::vector<ChordSpec> prelude_plan = buildRepeatingChordPlan(prelude_bars, mode, harm_idx);
   emitHarmony(out, prelude_plan, mode, 0);
 
   // The prelude uses the same parallel-aware scalar-wave figuration as the
@@ -1962,6 +2046,12 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // whole prelude, so all three voices sound through the prelude instead of
   // leaving the bass register empty.
   addFigurationSpan(asm_ctx, 2, 0, prelude_bars - 1, prelude_plan, 0, mode, 1, fig_offset);
+
+  // The prelude closes before the fugue enters. Preserve that structural
+  // boundary for ornamentation, tempo segmentation, and organ/harpsichord
+  // registration terraces.
+  out.section_cadence_ticks.push_back(barTick(prelude_bars - 1));
+  out.registration_step_ticks.push_back(barTick(prelude_bars));
 
   // --- FUGUE (bars prelude_bars .. total-1). Reuse the full fugue assembly at
   //     a bar offset; span ids continue from the prelude (shared next_id). ---

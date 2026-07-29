@@ -38,6 +38,7 @@ struct FormSpec {
   std::uint16_t snap_bars;      // length granularity (ground period etc.)
   std::uint8_t ts_numerator;    // 3 for chaconne/passacaglia, else 4
   std::uint8_t ts_denominator;  // always 4 for now
+  MeterProfile meter_profile;   // beat hierarchy used by validation and ornaments
 };
 
 // Outcome of buildFormFixture. The composer reports failures via return codes,
@@ -50,6 +51,11 @@ enum class FormDirectorStatus : std::uint8_t {
   IncompatibleCharacter = 1,
   // The requested FormType is not a recognised enumerator.
   UnknownForm = 2,
+  // The requested form has no non-structural secondary voice that can safely
+  // be handed to the free-counterpoint search.  This is a configuration
+  // failure: the output fixture is left untouched rather than silently
+  // accepting a no-op toggle.
+  FreeCounterpointUnavailable = 3,
 };
 
 /**

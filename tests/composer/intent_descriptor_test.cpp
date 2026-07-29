@@ -99,6 +99,7 @@ TEST(IntentDescriptorTest, ReplayKindClassification) {
   EXPECT_EQ(describeIntent(VoiceIntent::Episode).replay, ReplayKind::kTransform);
   EXPECT_EQ(describeIntent(VoiceIntent::FortspinnungSpan).replay, ReplayKind::kSequence);
   EXPECT_EQ(describeIntent(VoiceIntent::SuspensionCarrier).replay, ReplayKind::kTriple);
+  EXPECT_EQ(describeIntent(static_cast<VoiceIntent>(255)).replay, ReplayKind::kInvalid);
 }
 
 }  // namespace

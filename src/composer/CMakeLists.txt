@@ -12,6 +12,7 @@
 
 set(BACH_COMPOSER_SOURCES
   composer.cpp
+  harmonic_plan.cpp
   material.cpp
   voice_intent.cpp
   candidate_search.cpp
@@ -68,4 +69,5 @@ target_compile_features(bach_composer_lib PUBLIC cxx_std_17)
 # bach_composer_lib so the legacy lib stays out.
 target_sources(bach_composer_lib PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/json_helpers.cpp
+  ${CMAKE_SOURCE_DIR}/src/core/perfect_motion.cpp
 )

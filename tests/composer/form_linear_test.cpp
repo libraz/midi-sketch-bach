@@ -59,6 +59,14 @@ std::string firstFailure(const ComposeResult& r) {
   return r.validation.failures.empty() ? std::string{} : r.validation.failures.front().rule_id;
 }
 
+bool hasRule(const ValidationReport& report, const std::string& rule_id) {
+  for (const ValidationFailure& failure : report.failures) {
+    if (failure.rule_id == rule_id)
+      return true;
+  }
+  return false;
+}
+
 // Resolve the realized bar count the director snapped a target to (the
 // HarmonicPlan carries one chord per bar).
 int realizedBars(const HarnessFixture& fx) {
@@ -258,6 +266,24 @@ TEST(FormLinearCello, MinorLandingSeamHasNoAugmentedSecond) {
   }
 }
 
+TEST(FormLinearCello, MinorFigurationRaisesLeadingToneOnlyOverDominant) {
+  const std::uint16_t bars = testLengths(FormType::CelloPrelude)[0];
+  for (std::uint32_t seed : {1u, 42u, 99u}) {
+    HarnessFixture fx;
+    const ComposeResult result = build(FormType::CelloPrelude, seed, /*is_minor=*/true, bars, &fx);
+    ASSERT_EQ(result.validation.status, ValidationStatus::Ok) << "seed=" << seed;
+    for (const MaterialNote& note : fx.material.arpeggio_template.notes) {
+      const std::size_t bar = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+      ASSERT_LT(bar, fx.harmony.chords.size());
+      const ChordEvent& chord = fx.harmony.chords[bar];
+      if (chord.root_pc != 7) {
+        EXPECT_NE(note.pitch % 12, 11)
+            << "seed=" << seed << " non-dominant bar=" << bar << " leaked leading tone";
+      }
+    }
+  }
+}
+
 // --- TrioSonata -------------------------------------------------------------
 
 TEST(FormLinearTrio, ValidatesCleanAcrossMatrix) {
@@ -337,29 +363,59 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalIsLowQuarters) {
   }
 }
 
-TEST(FormLinearTrio, UpperVoicesStayAbovePedal) {
-  // The three voices keep their register bands (V0 high, V1 mid, V2 low) so no
-  // voice crossing occurs: the pedal's highest note is below the mid voice's
-  // lowest, which is below the top voice's lowest.
+TEST(FormLinearTrio, ManualRegistersOverlapWhilePedalStaysBelowThem) {
+  // The manual bands intentionally overlap; only the pedal has a strict
+  // register separation from both hands. Momentary V0/V1 exchanges are
+  // governed by the form-level trio policy and are checked separately.
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : kMinorFlags) {
       const std::uint16_t bars = testLengths(FormType::TrioSonata)[0];
       const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, nullptr);
       std::uint8_t v2_max = 0;
       std::uint8_t v1_min = 255;
+      std::uint8_t v1_max = 0;
       std::uint8_t v0_min = 255;
       for (const NoteEvent& note : r.notes) {
         if (note.voice == 2)
           v2_max = std::max(v2_max, note.pitch);
-        else if (note.voice == 1)
+        else if (note.voice == 1) {
           v1_min = std::min(v1_min, note.pitch);
-        else if (note.voice == 0)
+          v1_max = std::max(v1_max, note.pitch);
+        } else if (note.voice == 0)
           v0_min = std::min(v0_min, note.pitch);
       }
       EXPECT_LT(v2_max, v1_min) << "pedal crosses mid; seed=" << seed << " minor=" << minor;
-      EXPECT_LT(v1_min, v0_min) << "mid floor below top floor; seed=" << seed;
+      EXPECT_LT(v2_max, v0_min) << "pedal crosses top; seed=" << seed << " minor=" << minor;
+      EXPECT_LE(v0_min, v1_max) << "manual ranges do not overlap; seed=" << seed
+                                << " minor=" << minor;
     }
   }
+}
+
+TEST(FormLinearTrio, CadenceHasMomentaryManualExchangeWithoutPerfectParallel) {
+  // This seed reaches the deliberately prepared cadence meeting. The exchange
+  // must last exactly one union onset; the ordinary validator then proves that
+  // no parallel fifth or octave was introduced by allowing it.
+  HarnessFixture fixture;
+  const ComposeResult result = build(FormType::TrioSonata, /*seed=*/99, /*is_minor=*/true,
+                                     /*bars=*/16, &fixture);
+  ASSERT_TRUE(result.validation.failures.empty()) << firstFailure(result);
+
+  bool saw_exchange = false;
+  for (const NoteEvent& lower : result.notes) {
+    if (lower.voice != 1)
+      continue;
+    for (const NoteEvent& upper : result.notes) {
+      if (upper.voice != 0 || upper.start_tick > lower.start_tick ||
+          lower.start_tick >= upper.start_tick + upper.duration) {
+        continue;
+      }
+      saw_exchange = saw_exchange || lower.pitch > upper.pitch;
+    }
+  }
+  EXPECT_TRUE(saw_exchange);
+  EXPECT_FALSE(hasRule(result.validation, "parallel_fifth"));
+  EXPECT_FALSE(hasRule(result.validation, "parallel_octave"));
 }
 
 TEST(FormLinearTrio, DensityRisesTowardClimaxCycle) {

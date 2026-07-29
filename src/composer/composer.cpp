@@ -153,6 +153,25 @@ void applyTextureExpression(std::vector<NoteEvent>& notes, std::vector<NoteProve
     for (const auto& art : plan.articulations) {
       if (art.voice == note.voice && note.start_tick >= art.start_tick &&
           note.start_tick < art.end_tick) {
+        // Gate time is an output-duration attribute, not a new scored event:
+        // retain at least one tick and never alter pitch/onset/order.  The
+        // percentages distinguish the declared articulations while keeping
+        // detached notes musically connected at ordinary rhythmic values.
+        int gate_percent = 100;
+        switch (art.kind) {
+          case 1:  // detache
+            gate_percent = 88;
+            break;
+          case 2:  // staccato
+            gate_percent = 55;
+            break;
+          default:  // legato and forward-compatible unknown values
+            break;
+        }
+        const std::uint64_t gated =
+            (static_cast<std::uint64_t>(note.duration) * static_cast<std::uint64_t>(gate_percent)) /
+            100;
+        note.duration = static_cast<Tick>(std::max<std::uint64_t>(1, gated));
         rules |= ruleBitMask(RuleBit::ArticulationApplied);
         break;
       }
@@ -226,14 +245,12 @@ void applyNctDetection(std::vector<NoteEvent>& notes, std::vector<NoteProvenance
             bit = RuleBit::NotaCambiataDetected;
             break;
         }
-        // The NCT bits document authored NctCarrier figures, not incidental
-        // melodic shapes in free counterpoint. Restrict the stamp to notes the
-        // planner declared as NCT carriers so the post-pass is a no-op on
-        // phases without NCT figures (surrounding non-carrier notes still
-        // supply the melodic window the detectors need).
+        // These are detector findings, not planner assertions: stamp any
+        // authored or searched line that actually realizes the figure.  The
+        // former NctCarrier-only gate made the detector unreachable from every
+        // shipped form even though their ordinary subject/figuration carriers
+        // contain the same analysable note shapes.
         const std::size_t gidx = index_map[hit.nct_index];
-        if (provenance[gidx].voice_intent != VoiceIntent::NctCarrier)
-          continue;
         provenance[gidx].satisfied_rules |= ruleBitMask(bit);
       }
     };
@@ -371,21 +388,20 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   result.notes = std::move(sorted_notes);
   result.provenance = std::move(sorted_prov);
 
-  // Post-passes run after sort and before validation, in this fixed order.
-  // Each obeys the PostPass contract (no count/order/pitch/onset change;
-  // velocity + provenance bits only), so provenance stays index-aligned with
-  // notes. Adding a future pass is one array entry.
-  //   [0] texture / instrument / expression (velocity curve + bits).
-  //   [1] non-chord-tone figure bit stamping on the sorted note list.
-  static constexpr PostPass kPostPasses[] = {applyTextureExpression, applyNctDetection};
+  // NCT analysis is a score-level pass: it must see the authored contiguous
+  // durations, before output articulation shortens note-off gates. It changes
+  // provenance only, so the following validation still sees the same score.
   const PostPassContext post_ctx{material, harmonic_plan};
-  for (PostPass pass : kPostPasses) {
-    pass(result.notes, result.provenance, post_ctx);
-  }
+  applyNctDetection(result.notes, result.provenance, post_ctx);
 
   Validator validator;
   result.validation = validator.validate(result.notes, result.provenance, harmonic_plan, material,
                                          ValidationScope::Generation);
+
+  // Performance-only articulation and Affekt shaping follow score validation.
+  // Their shorter output gate must not turn a valid notated cadence or NCT
+  // figure into a synthetic rest in the Validator's score analysis.
+  applyTextureExpression(result.notes, result.provenance, post_ctx);
 
   // Visibility surface for the no-fallback principle. A Compose position that
   // exhausted all candidates emitted no note (a rest) instead of a default

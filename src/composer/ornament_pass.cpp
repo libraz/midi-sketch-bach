@@ -7,18 +7,27 @@
 
 #include "composer/character_profile.h"
 #include "composer/renderer.h"
+#include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "composer/validator.h"
 
 namespace bach::composer {
 
-// Deterministic placement hash keyed by (seed, bar, voice). Pure: no RNG.
-// SplitMix64-style mix so adjacent (bar, voice) keys do not correlate.
+// Deterministic cadence-choice hash keyed by (seed, bar, voice). Pure: no RNG.
+// Generic note placement folds the onset into a second mix below.
 std::uint64_t placementHash(std::uint32_t seed, int bar, VoiceId voice) {
   std::uint64_t x = (static_cast<std::uint64_t>(seed) << 32) ^
                     (static_cast<std::uint64_t>(static_cast<std::uint32_t>(bar)) << 8) ^
                     static_cast<std::uint64_t>(voice);
   x += 0x9E3779B97F4A7C15ull;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+  return x ^ (x >> 31);
+}
+
+std::uint64_t notePlacementHash(std::uint32_t seed, int bar, VoiceId voice, Tick onset) {
+  const std::uint64_t base = placementHash(seed, bar, voice);
+  std::uint64_t x = base ^ (static_cast<std::uint64_t>(onset) * 0xD6E8FEB86659FD93ull);
   x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
   x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
   return x ^ (x >> 31);
@@ -50,12 +59,14 @@ constexpr int kMidiMax = 127;
 // half step) and the supertonic (D, upper auxiliary Eb = the diatonic third, a
 // half-step trill that is the idiomatic minor-cadence figure). The natural
 // minor membrane already yields both.
-int upperNeighbour(int pitch, Mode mode) {
+int upperNeighbour(int pitch, Mode mode, const HarmonicPlan* plan, Tick tick) {
   for (int add = 1; add <= 2; ++add) {
     const int cand = pitch + add;
     if (cand > kMidiMax)
       return -1;
-    if (inScale(cand, mode))
+    if ((plan != nullptr &&
+         rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), *plan, tick, 1)) ||
+        (plan == nullptr && inScale(cand, mode)))
       return cand;
   }
   return -1;
@@ -68,7 +79,8 @@ int upperNeighbour(int pitch, Mode mode) {
 // `cadence_context` selects that raised-leading-tone neighbour when the main
 // tone is a tonic-class pitch in minor mode. Returns -1 when no in-range
 // neighbour exists.
-int lowerNeighbour(int pitch, Mode mode, bool cadence_context) {
+int lowerNeighbour(int pitch, Mode mode, bool cadence_context, const HarmonicPlan* plan,
+                   Tick tick) {
   if (mode == Mode::Minor && cadence_context) {
     const int pc = pitch % 12;
     if (pc == 0) {
@@ -88,7 +100,9 @@ int lowerNeighbour(int pitch, Mode mode, bool cadence_context) {
     const int cand = pitch - sub;
     if (cand < kMidiMin)
       return -1;
-    if (inScale(cand, mode))
+    if ((plan != nullptr &&
+         rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), *plan, tick, -1)) ||
+        (plan == nullptr && inScale(cand, mode)))
       return cand;
   }
   return -1;
@@ -231,8 +245,11 @@ Expansion buildSlide(const NoteEvent& base, Mode mode) {
   const Tick sub = duration::kThirtySecondNote;
   if (base.duration < 4 * sub)
     return exp;
-  const int below1 = lowerNeighbour(base.pitch, mode, /*cadence_context=*/false);
-  const int below2 = below1 >= 0 ? lowerNeighbour(below1, mode, /*cadence_context=*/false) : -1;
+  const int below1 = lowerNeighbour(base.pitch, mode, /*cadence_context=*/false,
+                                    /*plan=*/nullptr, base.start_tick);
+  const int below2 = below1 >= 0 ? lowerNeighbour(below1, mode, /*cadence_context=*/false,
+                                                  /*plan=*/nullptr, base.start_tick)
+                                 : -1;
   if (below2 < 0)
     return exp;
 
@@ -314,22 +331,36 @@ int highestOtherSoundingPitch(const std::vector<NoteEvent>& notes, VoiceId voice
   return highest;
 }
 
-// Lowest pitch among the higher-than-`ref_voice` voices that sound at `tick`.
-// Used as a ceiling: an ornament tone must not cross above the next-higher
-// voice's concurrent pitch. Returns 256 when no higher voice sounds.
-int nextHigherVoiceCeiling(const std::vector<NoteEvent>& notes, VoiceId ref_voice,
-                           std::uint8_t ref_pitch, Tick tick) {
+// Lowest concurrent pitch in a higher-ranked voice. Ornament tones in a lower
+// voice must stay strictly below it even when the two base notes are already
+// close; selecting the ceiling by the candidate's current pitch misses exactly
+// the case where a lower neighbour reaches or crosses a higher voice.
+int nextHigherVoiceCeiling(const std::vector<NoteEvent>& notes, VoiceId ref_voice, Tick tick) {
   int ceiling = 256;
   for (const auto& note : notes) {
-    if (note.voice == ref_voice)
+    if (note.voice >= ref_voice)
       continue;
     if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
-      // A higher voice is one whose concurrent pitch sits above the candidate.
-      if (note.pitch > ref_pitch && note.pitch < ceiling)
+      if (note.pitch < ceiling)
         ceiling = note.pitch;
     }
   }
   return ceiling;
+}
+
+// Highest concurrent pitch in a lower-ranked voice. Ornament tones in a higher
+// voice must stay strictly above it even when both base notes initially share a
+// pitch; otherwise a lower-neighbour turn can create a new crossing.
+int nextLowerVoiceFloor(const std::vector<NoteEvent>& notes, VoiceId ref_voice, Tick tick) {
+  int floor = -1;
+  for (const auto& note : notes) {
+    if (note.voice <= ref_voice)
+      continue;
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration && note.pitch > floor) {
+      floor = note.pitch;
+    }
+  }
+  return floor;
 }
 
 bool isExempt(const std::vector<VoiceId>& exempt, VoiceId voice) {
@@ -378,6 +409,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return;  // index-parallel invariant broken upstream; refuse to corrupt it.
 
   const Tick tpb = params.ticks_per_bar > 0 ? params.ticks_per_bar : kTicksPerBar;
+  const std::uint8_t beats_per_bar = params.ts_numerator == 0 ? 4 : params.ts_numerator;
+  const Tick beat_ticks = tpb / beats_per_bar;
   const std::uint8_t density = effectiveOrnamentDensity(params.character, params.instrument);
   const int ornament_pitch_ceiling = (params.instrument == InstrumentType::Organ) ? 84 : kMidiMax;
   const int total_bars = static_cast<int>((longestEnd(result.notes) + tpb - 1) / tpb);
@@ -401,6 +434,13 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     }
   }
   std::sort(section_cadence_bars.begin(), section_cadence_bars.end());
+  std::vector<Tick> declared_cadence_ticks;
+  if (params.harmonic_plan != nullptr) {
+    declared_cadence_ticks.reserve(params.harmonic_plan->cadences.size());
+    for (const CadenceEvent& cadence : params.harmonic_plan->cadences)
+      declared_cadence_ticks.push_back(cadence.tick);
+    std::sort(declared_cadence_ticks.begin(), declared_cadence_ticks.end());
+  }
 
   // The designed mid-piece sub-cadence: the 4-bar phrase boundary nearest the
   // piece midpoint. Like the final cadence it bypasses the placement gate (a
@@ -655,25 +695,33 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     // Severe, whose plain-CF subtype keeps the whole line bare.
     const bool skeleton_voice = isExempt(params.skeleton_exempt_voices, note.voice);
     const bool skeleton_plain = skeleton_voice && params.character == SubjectCharacter::Severe;
+    const bool suspension_carrier = prov.voice_intent == VoiceIntent::SuspensionCarrier;
+    const bool cadence_resolution = std::binary_search(
+        declared_cadence_ticks.begin(), declared_cadence_ticks.end(), note.start_tick);
 
     // Eighth notes are admitted as mordent candidates at the phrase-boundary
     // sites only (the per-rule conditions below re-narrow longer figures to
     // quarter+); sixteenths and shorter are never ornamented.
-    if (!already_ornament && note.duration >= kEighth &&
-        !isExempt(params.exempt_voices, note.voice) && !skeleton_plain &&
-        note.start_tick != last_onset[note.voice]) {
+    if (!already_ornament && !suspension_carrier && !cadence_resolution &&
+        note.duration >= kEighth && !isExempt(params.exempt_voices, note.voice) &&
+        !skeleton_plain && note.start_tick != last_onset[note.voice]) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
       const bool in_cadence_window = bar >= cadence_window_start_bar;
       const bool in_section_cadence =
           std::binary_search(section_cadence_bars.begin(), section_cadence_bars.end(), bar);
-      // Strong beats fall on the half-bar grid (beat 1 and the mid-bar beat).
-      // The penultimate strong beat before the final cadence is the priority
-      // cadence-trill site; admitting every strong beat inside the last two
-      // bars keeps the rule robust to 3/4 vs 4/4 meter.
-      const Tick half_bar = tpb / 2 > 0 ? tpb / 2 : kQuarter;
-      const bool is_strong_beat = (pos_in_bar % half_bar) == 0;
+      // Strong-beat sites are derived from the real beat grid. A half-bar is
+      // not a beat in 3/4 (720 is between beats 2 and 3), and Sarabande alone
+      // promotes beat 2 to a secondary accent.
+      const bool on_beat = beat_ticks > 0 && (pos_in_bar % beat_ticks) == 0;
+      const Tick beat_index = beat_ticks > 0 ? pos_in_bar / beat_ticks : 0;
+      const bool is_strong_beat =
+          on_beat && (beat_index == 0 || (beats_per_bar == 4 && beat_index == 2) ||
+                      (beats_per_bar == 3 &&
+                       params.meter_profile == MeterProfile::SarabandeTriple && beat_index == 1));
+      const bool final_cadence_site = bar == total_bars - 2 && is_downbeat;
+      const bool section_cadence_site = in_section_cadence && is_downbeat;
 
       // Clean-bass guard: never ornament the lowest-sounding voice. A
       // single-voice piece has no bass to protect, so the guard is multi-voice
@@ -693,20 +741,23 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       const bool solo_now = highest_other < 0;
 
       // Neighbour availability.
-      const int upper = upperNeighbour(note.pitch, params.mode);
-      const int lower = lowerNeighbour(note.pitch, params.mode, in_cadence_window);
+      const int upper =
+          upperNeighbour(note.pitch, params.mode, params.harmonic_plan, note.start_tick);
+      const int lower = lowerNeighbour(note.pitch, params.mode, in_cadence_window,
+                                       params.harmonic_plan, note.start_tick);
 
       const bool neighbours_ok = upper >= 0 && upper <= ornament_pitch_ceiling && lower >= 0;
 
       // Ceiling guard: the upper neighbour must not cross above the next-higher
       // voice's concurrent pitch.
-      const int ceiling =
-          nextHigherVoiceCeiling(result.notes, note.voice, note.pitch, note.start_tick);
+      const int ceiling = nextHigherVoiceCeiling(result.notes, note.voice, note.start_tick);
       const bool upper_clears_ceiling = upper >= 0 && upper < ceiling;
+      const int floor = nextLowerVoiceFloor(result.notes, note.voice, note.start_tick);
+      const bool lower_clears_floor = lower >= 0 && lower > floor;
 
-      if (neighbours_ok && upper_clears_ceiling &&
+      if (neighbours_ok && upper_clears_ceiling && lower_clears_floor &&
           (is_top || (!in_cadence_window && !in_section_cadence))) {
-        const std::uint64_t roll = placementHash(params.seed, bar, note.voice);
+        const std::uint64_t roll = notePlacementHash(params.seed, bar, note.voice, note.start_tick);
 
         // Climax uplift window: decoration intensifies where the macro energy
         // arc peaks. Inside the window the density reads one tier higher
@@ -785,10 +836,10 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
             else
               want_turn = true;
           }
-        } else if (in_cadence_window && is_strong_beat && note.duration >= kQuarter) {
-          // Priority cadence trill: the strong beat in the last two bars.
+        } else if (final_cadence_site && note.duration >= kQuarter) {
+          // One priority cadence trill in the final approach window.
           want_trill = true;
-        } else if (in_section_cadence && is_strong_beat && note.duration >= kQuarter) {
+        } else if (section_cadence_site && note.duration >= kQuarter) {
           // Interior section cadence: every character marks the section close
           // with a short trill, the same rhetoric as the final cadence at
           // lower intensity.
@@ -892,7 +943,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         // carries its own quantile gate above) bypass the gate. Inside the
         // climax window a second hash bit joins the gate, so it opens for
         // ~3 in 4 sites instead of 1 in 2.
-        const bool mandatory = (in_cadence_window || in_section_cadence) && is_strong_beat;
+        const bool mandatory = final_cadence_site || section_cadence_site;
         const bool gate_open = mandatory || bar == mid_boundary_bar ||
                                (local_density == 0 && (want_mordent || want_appoggiatura)) ||
                                self_gated || (roll & 1ull) == 0ull ||
@@ -931,6 +982,20 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       }
     }
 
+    // The entry gate checks the immediate lower neighbour. Slides additionally
+    // introduce a second lower step, so verify every emitted sub-note at its
+    // actual onset before committing the expansion.
+    if (!exp.notes.empty()) {
+      for (const NoteEvent& ornament : exp.notes) {
+        const int ornament_floor =
+            nextLowerVoiceFloor(result.notes, note.voice, ornament.start_tick);
+        if (static_cast<int>(ornament.pitch) <= ornament_floor) {
+          exp.notes.clear();
+          break;
+        }
+      }
+    }
+
     if (!exp.notes.empty() &&
         (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx) ||
          expansion_sustains_dissonance(exp, note, idx)))
@@ -952,6 +1017,17 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       out_notes.push_back(sub);
       NoteProvenance sub_prov = prov;
       sub_prov.source = NoteSource::Ornament;
+      // A scored-search note is authored at candidate-selection time, not by
+      // replaying immutable Material.  Preserve that authored window through
+      // decoration so FinalScore can attribute a finding to the generated
+      // context while retaining the normal declaration-integrity check for
+      // Material-derived ornaments.
+      if (prov.source == NoteSource::Compose) {
+        sub_prov.has_authored_note = true;
+        sub_prov.authored_start_tick = note.start_tick;
+        sub_prov.authored_duration = note.duration;
+        sub_prov.authored_pitch = note.pitch;
+      }
       sub_prov.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
       out_prov.push_back(sub_prov);
     }

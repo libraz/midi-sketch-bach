@@ -359,6 +359,27 @@ Candidate emitMaterialNote(const MaterialNote& mnote, const HarmonicPlan& plan,
   return c;
 }
 
+// Return the portion of an authored note that actually belongs to `span`.
+//
+// Suspension installation replaces one carrier span with
+// before/suspension/after spans.  A long authored note can cross either cut:
+// replaying it untrimmed overlaps the suspension, while filtering only by
+// onset loses the suffix after the suspension.  Clipping preserves the
+// carrier on both sides without changing its pitch or inventing duration.
+bool clipMaterialNoteToSpan(const MaterialNote& source, const Span& span, MaterialNote* clipped) {
+  if (clipped == nullptr || source.duration == 0)
+    return false;
+  const Tick source_end = source.start_tick + source.duration;
+  const Tick clipped_start = std::max(source.start_tick, span.start_tick);
+  const Tick clipped_end = std::min(source_end, span.end_tick);
+  if (clipped_start >= clipped_end)
+    return false;
+  *clipped = source;
+  clipped->start_tick = clipped_start;
+  clipped->duration = clipped_end - clipped_start;
+  return true;
+}
+
 }  // namespace
 
 std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
@@ -519,11 +540,10 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (pattern.resolution_tick >= span.end_tick)
         continue;
-      // Note durations follow tick distances exactly so the held-over
-      // dissonance reads as a tied/sustained event under the validator's
-      // sounding-pitch lookup. Resolution duration falls back to one beat
-      // unless the next pattern occupies that slot (left to Material to
-      // arrange — Composer does not infer beyond the explicit ticks).
+      // Preparation and suspension durations follow tick distances exactly so
+      // the held-over dissonance reads as a tie. A one-beat resolution is
+      // followed by an explicit one-beat rest before the original carrier
+      // resumes; installSuspensionCarrier reserves that complete window.
       prep_duration = pattern.suspension_tick - pattern.preparation_tick;
       sus_duration = pattern.resolution_tick - pattern.suspension_tick;
       Candidate prep;
@@ -649,23 +669,36 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // development carrier is NoteSource::Material, the Validator's
     // vertical/parallel rules skip pairs where both notes are Material.
     const std::vector<MaterialNote>* source = nullptr;
+    const MiddleEntryDecl* middle_entry = nullptr;
     RuleBit bit = RuleBit::MiddleEntryCommitted;
     if (span.intent == VoiceIntent::MiddleEntryCarrier) {
       for (const auto& decl : material.middle_entries) {
         if (decl.voice == span.voice) {
+          middle_entry = &decl;
           source = &decl.notes;
           break;
         }
       }
       bit = RuleBit::MiddleEntryCommitted;
     } else if (span.intent == VoiceIntent::StrettoCarrier) {
+      // A follower voice may participate in more than one stretto moment.
+      // Each StrettoCarrier span is window-sliced, so replay every matching
+      // declaration rather than breaking at the first follower_voice match.
+      // The old first-match lookup made later declarations for the same voice
+      // silently emit no notes whenever their source lay outside that window.
       for (const auto& decl : material.stretto_entries) {
         if (decl.follower_voice == span.voice) {
-          source = &decl.follower_notes;
-          break;
+          for (const auto& mnote : decl.follower_notes) {
+            if (mnote.start_tick < span.start_tick)
+              continue;
+            if (mnote.start_tick >= span.end_tick)
+              break;
+            out.push_back(
+                emitMaterialNote(mnote, harmonic_plan, ruleBitMask(RuleBit::StrettoCommitted)));
+          }
         }
       }
-      bit = RuleBit::StrettoCommitted;
+      return out;
     } else if (span.intent == VoiceIntent::CodaCarrier) {
       for (const auto& decl : material.coda_extensions) {
         if (decl.voice == span.voice) {
@@ -691,7 +724,16 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, ruleBitMask(bit)));
+      RuleIdMask bits = ruleBitMask(bit);
+      if (middle_entry != nullptr &&
+          std::any_of(middle_entry->transform_regions.begin(),
+                      middle_entry->transform_regions.end(), [&](const auto& region) {
+                        return region.transform != 0 && mnote.start_tick >= region.start_tick &&
+                               mnote.start_tick < region.end_tick;
+                      })) {
+        bits |= ruleBitMask(RuleBit::SubjectVariantApplied);
+      }
+      out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
     }
     return out;
   }
@@ -820,17 +862,22 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     const RuleIdMask var_bits = (ruleBitMask(RuleBit::VariationRoleApplied));
     for (std::size_t var_idx = 0; var_idx < material.variations.size(); ++var_idx) {
       const auto& var = material.variations[var_idx];
-      if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
+      if (var.start_tick > span.start_tick || var.end_tick < span.end_tick)
         continue;
       const bool density_shift =
           (var_idx == 0) || (material.variations[var_idx - 1].density_level != var.density_level);
-      bool first = true;
+      bool first = span.start_tick == var.start_tick;
       for (const auto& mnote : var.notes) {
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (!clipMaterialNoteToSpan(mnote, span, &clipped))
+          continue;
         RuleIdMask bits = var_bits;
         if (first && density_shift)
           bits |= (ruleBitMask(RuleBit::TextureDensityShift));
         first = false;
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+        out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
       }
     }
     return out;
@@ -847,7 +894,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // pedal-preparation devices shipped. The on-beat chord-tone check is the
     // Validator's figuration_harmonic_consistency rule, not re-derived here.
     for (const auto& section : material.figuration_sections) {
-      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+      if (section.start_tick > span.start_tick || section.end_tick < span.end_tick)
         continue;
       // Match the section's voice too, so two voices may carry distinct
       // figuration over the same bar window (e.g. a fugue middle entry whose V0
@@ -861,7 +908,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (section.is_pedal_prep)
         fig_bits |= (ruleBitMask(RuleBit::PedalPreparation));
       for (const auto& mnote : section.notes) {
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, fig_bits));
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (clipMaterialNoteToSpan(mnote, span, &clipped))
+          out.push_back(emitMaterialNote(clipped, harmonic_plan, fig_bits));
       }
     }
     return out;
@@ -877,16 +928,23 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // sectional layout shipped). The (character, archetype) compatibility is the
     // Validator's toccata_archetype_compatible rule, not re-derived here.
     for (const auto& section : material.toccata_sections) {
-      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+      if (section.voice != span.voice)
+        continue;
+      if (section.start_tick > span.start_tick || section.end_tick < span.end_tick)
         continue;
       const RuleIdMask toc_bits = (ruleBitMask(RuleBit::ToccataArchetypeApplied));
-      bool first = true;
+      bool first = span.start_tick == section.start_tick;
       for (const auto& mnote : section.notes) {
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (!clipMaterialNoteToSpan(mnote, span, &clipped))
+          continue;
         RuleIdMask bits = toc_bits;
         if (first && section.is_section_head)
           bits |= (ruleBitMask(RuleBit::SectionTransition));
         first = false;
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+        out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
       }
     }
     return out;
@@ -1004,15 +1062,20 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
 
   if (span.intent == VoiceIntent::GoldbergVariationCarrier) {
     for (const auto& variation : material.goldberg_variations) {
-      if (variation.voice != span.voice || variation.start_tick != span.start_tick ||
-          variation.end_tick != span.end_tick) {
+      if (variation.voice != span.voice || variation.start_tick > span.start_tick ||
+          variation.end_tick < span.end_tick) {
         continue;
       }
       RuleIdMask bits = ruleBitMask(RuleBit::GoldbergVariationRealized);
       if (variation.is_climax)
         bits |= ruleBitMask(RuleBit::ClimaxPlaced);
-      for (const auto& note : variation.notes)
-        out.push_back(emitMaterialNote(note, harmonic_plan, bits));
+      for (const auto& note : variation.notes) {
+        if (note.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (clipMaterialNoteToSpan(note, span, &clipped))
+          out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
+      }
       break;
     }
     return out;
@@ -1042,13 +1105,17 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // logic.
     const RuleIdMask var_bits = (ruleBitMask(RuleBit::VariationApplied));
     for (const auto& var : material.passacaglia_variations) {
-      if (var.start_tick != span.start_tick || var.end_tick != span.end_tick)
+      if (var.start_tick > span.start_tick || var.end_tick < span.end_tick)
         continue;
       RuleIdMask bits = var_bits;
       if (var.is_climax)
         bits |= (ruleBitMask(RuleBit::ClimaxPlaced));
       for (const auto& mnote : var.notes) {
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (clipMaterialNoteToSpan(mnote, span, &clipped))
+          out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
       }
     }
     return out;
@@ -1067,11 +1134,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (line.voice != span.voice)
         continue;
       for (const auto& mnote : line.notes) {
-        if (mnote.start_tick < span.start_tick)
-          continue;
         if (mnote.start_tick >= span.end_tick)
           break;
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, trio_bits));
+        MaterialNote clipped;
+        if (clipMaterialNoteToSpan(mnote, span, &clipped))
+          out.push_back(emitMaterialNote(clipped, harmonic_plan, trio_bits));
       }
     }
     return out;
@@ -1088,12 +1155,25 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Clone of the ToccataCarrier branch (window-matched verbatim replay).
     const RuleIdMask fan_bits = (ruleBitMask(RuleBit::FantasiaSectionContrast));
     for (const auto& section : material.fantasia_sections) {
-      if (section.start_tick != span.start_tick || section.end_tick != span.end_tick)
+      if (section.voice != span.voice)
+        continue;
+      if (section.start_tick > span.start_tick || section.end_tick < span.end_tick)
         continue;
       for (const auto& mnote : section.notes) {
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, fan_bits));
+        if (mnote.start_tick >= span.end_tick)
+          break;
+        MaterialNote clipped;
+        if (clipMaterialNoteToSpan(mnote, span, &clipped))
+          out.push_back(emitMaterialNote(clipped, harmonic_plan, fan_bits));
       }
     }
+    return out;
+  }
+
+  // Every non-compose replay kind must have been consumed by an explicit
+  // carrier branch above.  This makes the descriptor table part of dispatch:
+  // adding a new replay intent cannot silently fall through to free generation.
+  if (describeIntent(span.intent).replay != ReplayKind::kCompose) {
     return out;
   }
 

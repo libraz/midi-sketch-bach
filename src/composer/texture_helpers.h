@@ -1,13 +1,33 @@
 #ifndef BACH_COMPOSER_TEXTURE_HELPERS_H
 #define BACH_COMPOSER_TEXTURE_HELPERS_H
 
+#include <array>
+#include <cstdint>
 #include <vector>
 
 #include "composer/figuration.h"
 #include "composer/material.h"
+#include "composer/voice_plan.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
+
+/// @brief Return the octave displacement that fits a transposed subject in a voice band.
+///
+/// `base_semis` is applied before fitting (for example, -5 for a real answer).
+/// The result is an additional multiple of twelve.  Fitting the actual,
+/// transposed range is essential: fitting the untransposed subject and then
+/// applying a real answer can drop its lowest notes into the bass band's range.
+/// The ceiling-first rule preserves the strict V0 >= V1 >= V2 register order.
+int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int base_semis, int voice,
+                        const std::array<int, 3>& band_lo, const std::array<int, 3>& band_hi);
+
+/// @brief Decide whether a subject that exposes tonic/dominant motion needs a tonal answer.
+bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint8_t tonic_pc);
+
+/// @brief Repeat the mode's four-bar harmony catalogue for a form section.
+std::vector<detail::ChordSpec> buildRepeatingChordPlan(int total_bars, detail::Mode mode,
+                                                       int harmony_index);
 
 // ---------------------------------------------------------------------------
 // Shared texture / parallel-avoidance machinery.
@@ -153,6 +173,43 @@ class ThemeToneRegistry {
   std::vector<ThemeTone> tones_;
 };
 
+/// @brief Derive and realize a shared two-pass countersubject.
+///
+/// Pass 1 scores one in-band diatonic anchor per source note, preferring
+/// consonance, contrary motion, and short repeat runs. Pass 2 realizes those
+/// anchors with a complementary quarter/run/arpeggio rhythm while the source
+/// pitch is held. Fugue and sectional fugue-tail builders share this exact
+/// path so pitch scoring and rhythmic realization cannot drift.
+void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
+                                Tick end, int band_lo, int band_hi, detail::Mode mode,
+                                std::vector<MaterialNote>& destination,
+                                ThemeToneRegistry& registry);
+
+/// @brief Replace part of one carrier span with an explicit suspension carrier.
+///
+/// The original carrier is split at preparation and after resolution, so its
+/// authored notes cannot overlap the three-note prep/suspension/resolution
+/// replay. Span ids remain unique and all unrelated spans are preserved.
+/// Returns false when no containing span exists or the declaration is invalid.
+bool installSuspensionCarrier(Material& material, VoicePlan& voice_plan,
+                              const SuspensionPattern& pattern);
+
+/// @brief Return the latest-onset material pitch sounding at a tick, or -1.
+int soundingMaterialPitch(const std::vector<MaterialNote>& notes, Tick tick);
+
+/// @brief Design a bass-verified upper-voice suspension inside a register band.
+///
+/// Supports 4-3, 7-6, and 9-8. The preparation pitch equals the suspended
+/// pitch, is consonant over `bass_at_preparation`, and resolves down one
+/// diatonic-sized semitone step to the type-specific consonance. Returns false
+/// when the supplied bass motion and band admit no valid pattern.
+bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick suspension_tick,
+                           Tick resolution_tick, VoiceId voice, std::uint8_t bass_at_preparation,
+                           std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
+                           std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
+                           std::uint8_t upper_at_resolution, int band_lo, int band_hi,
+                           detail::Mode mode, SuspensionPattern* pattern);
+
 /// @brief Pick the band chord tone that is consonant and parallel-free.
 ///
 /// Enumerates the chord tones of `chord` inside the [band_lo, band_hi] register
@@ -216,15 +273,13 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 /// running, a long penultimate tone takes the cadential trill, and the final
 /// tone is held plain. Erases every note of `line` at or after the
 /// penultimate bar (`penult_bar_start`) and appends:
-///   * an eighth-note approach run over the first half of the penultimate bar
-///     (four eighths in 4/4, three in 3/4) that walks diatonically INTO the
+///   * an eighth-note approach run through the cadence's first structural
+///     beat (four eighths in 4/4, two in 3/4) that walks diatonically INTO the
 ///     pre-final tone — ascending when the run fits the band (in minor the
 ///     ascent into the leading tone raises the sixth degree, melodic-minor
 ///     fashion), otherwise descending from above;
-///   * the held pre-final tone over the bar's second half (a half note in
-///     4/4, a dotted quarter in 3/4) — the trill site: it sits on the
-///     half-bar strong-beat grid inside the cadence window, so the ornament
-///     pass decorates it at every density;
+///   * the held pre-final tone from beat three in 4/4 or beat two in 3/4 — the
+///     trill site on the real beat grid inside the cadence window;
 ///   * a full-bar final tone — the held resolution (a voice's last attack is
 ///     never ornamented).
 ///
@@ -252,26 +307,39 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 ///        so every consonance relation against the other voices is
 ///        unchanged). The lift is skipped when it would carry the trill above
 ///        d''' (MIDI 86), the top of the Bach keyboard compass.
+/// @param ts_numerator Notated beats per bar; 3 selects the real second beat.
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord = nullptr,
-                            bool prefer_descending = false, bool lift_to_context = false);
+                            bool prefer_descending = false, bool lift_to_context = false,
+                            std::uint8_t ts_numerator = 4);
+
+/// @brief Emit an actual cadential I6/4 -> V -> I upper-voice cell.
+///
+/// The first beat holds the tonic above a dominant pedal (the dissonant fourth
+/// of I in second inversion); the next beat resolves down to the leading tone
+/// over the same dominant bass, then the following bar resolves to the tonic.
+void appendCadentialSixFourLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
+                                   Tick ticks_per_bar, int tonic, int leading_tone);
 
 /// @brief Replace a line's final bar with the compact cadential landing.
 ///
 /// The single-bar variant for forms whose penultimate-bar harmony cannot host
 /// a long pre-final tone (the chaconne: its immutable ground reaches the
 /// dominant only in the final bar). The final bar splits into a held
-/// pre-final tone on the first half (the trill site, on the half-bar
-/// strong-beat grid) and the held final tone on the second half.
+/// pre-final tone through the first strong beat (the trill site) and the held
+/// final tone for the remainder. In 3/4, that beat is beat two rather than the
+/// bar's arithmetic midpoint.
 ///
 /// @param line The voice's note list (modified in place).
 /// @param final_bar_start Tick of the final bar's downbeat.
 /// @param ticks_per_bar Bar length (1920 = 4/4, 1440 = 3/4).
 /// @param prefinal The held pre-final pitch (first half of the bar).
 /// @param final_pitch The held final pitch (second half of the bar).
+/// @param ts_numerator Notated beats per bar; controls the cadential beat.
 void appendCompactCadentialLanding(std::vector<MaterialNote>& line, Tick final_bar_start,
-                                   Tick ticks_per_bar, int prefinal, int final_pitch);
+                                   Tick ticks_per_bar, int prefinal, int final_pitch,
+                                   std::uint8_t ts_numerator = 4);
 
 }  // namespace bach::composer
 

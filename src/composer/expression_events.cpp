@@ -47,7 +47,30 @@ void addRegistrationPoint(std::vector<CcEvent>& events, Tick tick, std::uint8_t 
 /// @param tick Query position.
 /// @param total_ticks Piece length (> 0).
 /// @return Interpolated controller value in [kOpeningValue, kClimaxValue].
-std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick tick, std::uint32_t total_ticks) {
+Tick normalizedClimaxTick(std::size_t cycle_count, Tick ticks_per_bar, std::uint32_t total_ticks,
+                          Tick climax_tick) {
+  const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
+  Tick peak_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+  if (climax_tick == 0) {
+    return peak_tick;
+  }
+  const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 2);
+  const Tick establish_end = (cycle_count >= 3)
+                                 ? develop_tick
+                                 : static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 4);
+  const Tick ceiling = (ticks_per_bar > 0 && total_ticks > ticks_per_bar)
+                           ? total_ticks - ticks_per_bar
+                           : settle_tick;
+  Tick lo = establish_end + 1;
+  Tick hi = ceiling;
+  if (hi < lo) {
+    hi = lo;
+  }
+  return std::clamp<Tick>(climax_tick, lo, hi);
+}
+
+std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick tick,
+                             std::uint32_t total_ticks, Tick climax_tick) {
   struct Point {
     std::uint64_t tick;
     std::uint8_t value;
@@ -60,7 +83,8 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick tick, std::uint32_t t
     points[count++] = {total / 2, kDevelopValue};
   }
   if (cycle_count >= 2) {
-    points[count++] = {total * 3 / 4, kClimaxValue};
+    points[count++] = {normalizedClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick),
+                       kClimaxValue};
   }
   points[count++] = {total > 0 ? total - 1 : 0, kSettleValue};
 
@@ -103,26 +127,7 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   // and the settle near the very end.
   const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 1 / 2);
   const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
-  Tick peak_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
-
-  // Anchor the peak on the form's real climax when supplied. Clamp it to stay
-  // after the establish phase (the develop step on the 4-point arc, else the
-  // first quarter of the span) so the rise into it stays monotone, and at least
-  // one bar before the end so the settle still relaxes after it.
-  if (climax_tick > 0) {
-    const Tick establish_end = (cycle_count >= 3)
-                                   ? develop_tick
-                                   : static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 4);
-    const Tick ceiling = (ticks_per_bar > 0 && total_ticks > ticks_per_bar)
-                             ? total_ticks - ticks_per_bar
-                             : settle_tick;
-    Tick lo = establish_end + 1;
-    Tick hi = ceiling;
-    if (hi < lo) {
-      hi = lo;
-    }
-    peak_tick = std::clamp<Tick>(climax_tick, lo, hi);
-  }
+  const Tick peak_tick = normalizedClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick);
 
   events.reserve(4);
 
@@ -180,7 +185,8 @@ std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_tic
 }
 
 std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t phrase_bars,
-                                         Tick ticks_per_bar, std::uint32_t total_ticks) {
+                                         Tick ticks_per_bar, std::uint32_t total_ticks,
+                                         Tick climax_tick) {
   std::vector<CcEvent> events;
   if (total_ticks == 0 || ticks_per_bar == 0) {
     return events;
@@ -195,7 +201,8 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
 
   for (std::uint64_t start = 0; start < total_ticks; start += phrase_ticks) {
     // Phrase start: return to the macro-arc baseline for this position.
-    const std::uint8_t base = macroArcValueAt(cycle_count, static_cast<Tick>(start), total_ticks);
+    const std::uint8_t base = macroArcValueAt(cycle_count, ticks_per_bar, static_cast<Tick>(start),
+                                              total_ticks, climax_tick);
     events.push_back({static_cast<Tick>(start), kCcExpression, base});
 
     // Mid-phrase swell: a small designed step above the baseline. Skipped when
@@ -203,8 +210,9 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
     // settling baseline instead of swelling into the final cadence).
     const std::uint64_t mid = start + phrase_ticks / 2;
     if (mid < total_ticks) {
-      const int swelled =
-          macroArcValueAt(cycle_count, static_cast<Tick>(mid), total_ticks) + kPhraseSwell;
+      const int swelled = macroArcValueAt(cycle_count, ticks_per_bar, static_cast<Tick>(mid),
+                                          total_ticks, climax_tick) +
+                          kPhraseSwell;
       events.push_back({static_cast<Tick>(mid), kCcExpression,
                         static_cast<std::uint8_t>(std::min(swelled, 127))});
     }
@@ -214,7 +222,8 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
 }
 
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
-                                             Tick ticks_per_bar, RitardandoStyle style) {
+                                             Tick ticks_per_bar, RitardandoStyle style,
+                                             std::uint8_t ts_numerator) {
   std::vector<TempoEvent> events;
   if (total_ticks == 0 || style == RitardandoStyle::None) {
     return events;
@@ -242,19 +251,21 @@ std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks
     return events;
   }
 
-  const Tick half_bar = ticks_per_bar / 2;
+  // Common time retains the historical half-bar placement. In triple meter a
+  // half bar falls between beats; use the actual quarter-note beat instead.
+  const Tick step_within_bar = ts_numerator == 3 ? ticks_per_bar / 3 : ticks_per_bar / 2;
   const Tick penultimate_bar_tick = total_ticks - 2 * ticks_per_bar;
   const Tick final_bar_tick = total_ticks - ticks_per_bar;
   if (style == RitardandoStyle::Gentle) {
     events.push_back({penultimate_bar_tick, scale(98, 100)});
-    events.push_back({penultimate_bar_tick + half_bar, scale(96, 100)});
+    events.push_back({penultimate_bar_tick + step_within_bar, scale(96, 100)});
     events.push_back({final_bar_tick, scale(93, 100)});
-    events.push_back({final_bar_tick + half_bar, scale(90, 100)});
+    events.push_back({final_bar_tick + step_within_bar, scale(90, 100)});
   } else {
     events.push_back({penultimate_bar_tick, scale(94, 100)});
-    events.push_back({penultimate_bar_tick + half_bar, scale(90, 100)});
+    events.push_back({penultimate_bar_tick + step_within_bar, scale(90, 100)});
     events.push_back({final_bar_tick, scale(85, 100)});
-    events.push_back({final_bar_tick + half_bar, scale(78, 100)});
+    events.push_back({final_bar_tick + step_within_bar, scale(78, 100)});
   }
 
   // Integer rounding at low BPM can collapse adjacent percentages to the same

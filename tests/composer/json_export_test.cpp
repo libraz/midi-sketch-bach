@@ -220,7 +220,7 @@ TEST(JsonExportDiagnosticTest, CarriesValidationFailureAndIndexParallelProvenanc
   EXPECT_TRUE(contains(json, "\"span_id\":9"));
   EXPECT_TRUE(contains(json, "\"span_id\":null"));
   EXPECT_TRUE(contains(json, "\"provenance\":["));
-  EXPECT_TRUE(contains(json, "\"satisfied_rules_high\":1"));
+  EXPECT_TRUE(contains(json, "\"satisfied_rules_high\":\"1\""));
 }
 
 TEST(JsonExportDiagnosticTest, ReportsProvenanceMisalignmentFailClosed) {
@@ -257,30 +257,23 @@ TEST(JsonExportShadowFieldTest, ShadowFieldsEmittedOnlyForComposeNotes) {
   }
 }
 
-TEST(JsonExportHighBitTest, SatisfiedRulesAboveBit31SurviveSerialization) {
-  // Regression: satisfied_rules is a 64-bit RuleIdMask. P9/P10 use rule
-  // bits >= 32 (ImitationEntryMatched=32, InvertibleAt8va=33). A 32-bit
-  // cast on export would truncate those bits AND, because bit 31 is the
-  // sign bit, make downstream bitset masking sign-extend. The exporter
-  // must emit the full unsigned 64-bit integer verbatim.
+TEST(JsonExportHighBitTest, SatisfiedRulesUseLosslessDecimalStrings) {
+  // A JavaScript number cannot preserve bit 63. The decimal string keeps both
+  // the highest low-lane bit and bit 0 intact for BigInt consumers.
   std::vector<NoteProvenance> prov(1);
   prov[0].span_id = 0;
   prov[0].voice_intent = VoiceIntent::SubjectCarrier;
   prov[0].source = NoteSource::Compose;
-  // Set bit 33 (InvertibleAt8va) plus bit 0 (ChordTone). The decimal
-  // value is (1<<33)|1 = 8589934593, which a 32-bit cast would collapse
-  // to 1 (losing bit 33) — so we assert the full value is present.
-  prov[0].satisfied_rules = ruleBitMask(33) | ruleBitMask(0);
+  prov[0].satisfied_rules = ruleBitMask(63) | ruleBitMask(0);
   const std::string json = emitProvenanceJson(prov);
-  EXPECT_NE(json.find("\"satisfied_rules\":8589934593"), std::string::npos)
-      << "high bit (>=32) truncated in export: " << json;
+  EXPECT_NE(json.find("\"satisfied_rules\":\"9223372036854775809\""), std::string::npos)
+      << "64-bit mask was not serialized losslessly: " << json;
 }
 
 TEST(JsonExportHighBitTest, HighLaneBitEmitsSeparateSatisfiedRulesHighField) {
   // The low lane carries bit 2 (decimal 4); the high lane carries bit 64
   // (CountersubjectInvertible), which is bit 0 of lane 1 (decimal 1). The
-  // exporter emits the low lane verbatim and a separate satisfied_rules_high
-  // field for the nonzero high lane.
+  // exporter emits both lanes as decimal strings for BigInt consumers.
   RuleIdMask mask = ruleBitMask(64) | ruleBitMask(2);
   EXPECT_EQ(mask.low64(), 4u);
   EXPECT_EQ(mask.high64(), 1u);
@@ -288,8 +281,8 @@ TEST(JsonExportHighBitTest, HighLaneBitEmitsSeparateSatisfiedRulesHighField) {
   std::vector<NoteProvenance> prov(1);
   prov[0].satisfied_rules = mask;
   const std::string json = emitProvenanceJson(prov);
-  EXPECT_NE(json.find("\"satisfied_rules\":4"), std::string::npos);
-  EXPECT_NE(json.find("\"satisfied_rules_high\":1"), std::string::npos);
+  EXPECT_NE(json.find("\"satisfied_rules\":\"4\""), std::string::npos);
+  EXPECT_NE(json.find("\"satisfied_rules_high\":\"1\""), std::string::npos);
 }
 
 TEST(JsonExportHighBitTest, SatisfiedRulesHighOmittedWhenHighLaneZero) {
@@ -299,7 +292,7 @@ TEST(JsonExportHighBitTest, SatisfiedRulesHighOmittedWhenHighLaneZero) {
   prov[0].satisfied_rules = ruleBitMask(0) | ruleBitMask(33);
   EXPECT_EQ(prov[0].satisfied_rules.high64(), 0u);
   const std::string json = emitProvenanceJson(prov);
-  EXPECT_NE(json.find("\"satisfied_rules\":"), std::string::npos);
+  EXPECT_NE(json.find("\"satisfied_rules\":\""), std::string::npos);
   EXPECT_EQ(json.find("satisfied_rules_high"), std::string::npos);
 }
 
@@ -442,6 +435,47 @@ TEST(HomepageEventsJsonTest, OrnamentSourceMapsToLowercaseString) {
 
   // The voice-1 second note carries NoteSource::Ornament.
   EXPECT_TRUE(contains(json, "\"source\":\"ornament\""));
+}
+
+TEST(HomepageEventsJsonTest, TransposesEventPitchesWithoutChangingSourceLookup) {
+  const ComposeResult res = buildHomepageFixture();
+  HomepageMeta meta = buildHomepageMeta();
+  meta.output_key = Key::G;
+  const std::string json = buildHomepageEventsJson(res, meta);
+
+  EXPECT_TRUE(contains(json, "\"pitch\":55"));
+  EXPECT_TRUE(contains(json, "\"pitch\":59"));
+  EXPECT_TRUE(contains(json, "\"pitch\":55"));
+  EXPECT_TRUE(contains(json, "\"pitch\":45"));
+  EXPECT_TRUE(contains(json, "\"source\":\"material\""));
+  EXPECT_TRUE(contains(json, "\"source\":\"compose\""));
+  EXPECT_TRUE(contains(json, "\"source\":\"ornament\""));
+  EXPECT_EQ(res.notes[0].pitch, 60);
+  EXPECT_EQ(res.tracks[0].notes[0].pitch, 60);
+}
+
+TEST(HomepageEventsJsonTest, AppliesOutputOnlyOctaveAdjustment) {
+  const ComposeResult res = buildHomepageFixture();
+  HomepageMeta meta = buildHomepageMeta();
+  meta.output_key = Key::B;
+  meta.output_octave_shift = 12;
+
+  const std::string json = buildHomepageEventsJson(res, meta);
+  EXPECT_TRUE(contains(json, "\"pitch\":71"));  // C4 - 1 + 12
+  EXPECT_EQ(res.notes[0].pitch, 60);
+  EXPECT_EQ(res.tracks[0].notes[0].pitch, 60);
+}
+
+TEST(HomepageEventsJsonTest, ClampsTransposedEventPitchToMidiRange) {
+  ComposeResult res = buildHomepageFixture();
+  res.notes[0].pitch = 126;
+  res.tracks[0].notes[0].pitch = 126;
+  HomepageMeta meta = buildHomepageMeta();
+  meta.output_key = Key::Fs;
+
+  const std::string json = buildHomepageEventsJson(res, meta);
+  EXPECT_TRUE(contains(json, "\"pitch\":127"));
+  EXPECT_TRUE(contains(json, "\"source\":\"material\""));
 }
 
 TEST(HomepageEventsJsonTest, DeterministicAcrossCalls) {

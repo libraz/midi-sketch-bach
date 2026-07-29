@@ -97,7 +97,8 @@ void annotateCadenceCells(Material& material, const HarmonicPlan& harmonic_plan)
         cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 11) % 12);
         cell.soprano_cadence_pc = tonic;
         cell.bass_approach_pc = static_cast<std::uint8_t>((tonic + 7) % 12);
-        cell.bass_cadence_pc = static_cast<std::uint8_t>((tonic + 9) % 12);
+        cell.bass_cadence_pc =
+            static_cast<std::uint8_t>((tonic + (harmonic_plan.is_minor ? 8 : 9)) % 12);
         break;
       case CadenceType::Phrygian:
         cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 1) % 12);

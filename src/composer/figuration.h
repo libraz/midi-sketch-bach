@@ -156,6 +156,31 @@ inline int organPreludeScaleUp(int midi, int steps) {
 // Diatonic scale selector for the dispatch helpers below.
 enum class Mode : std::uint8_t { Major, Minor };
 
+// Walk one scale degree under the local harmonic context. In a minor-key
+// dominant span the raised leading tone (and ascending melodic sixth) are
+// available; elsewhere the line remains in natural minor. This prevents a
+// form-specific harmonic-minor table from leaking B natural into non-dominant
+// material while retaining a real leading tone over V.
+inline int melodicScaleStep(int midi, int direction, Mode mode, const ChordSpec* chord = nullptr) {
+  const int sign = direction < 0 ? -1 : 1;
+  const bool minor_dominant =
+      mode == Mode::Minor && chord != nullptr && chord->root_pc == 7 && !chord->minor;
+  for (int distance = 1; distance <= 12; ++distance) {
+    const int candidate = midi + sign * distance;
+    const int pc = ((candidate % 12) + 12) % 12;
+    if (mode == Mode::Major && organPreludeInScale(pc))
+      return candidate;
+    if (mode != Mode::Minor)
+      continue;
+    const bool natural_here =
+        chaconneInScale(pc) && (!minor_dominant || sign < 0 || (pc != 8 && pc != 10));
+    if (natural_here || (minor_dominant && pc == 11) || (minor_dominant && sign > 0 && pc == 9)) {
+      return candidate;
+    }
+  }
+  return midi;
+}
+
 /**
  * @brief Walk `steps` diatonic scale degrees upward from `midi`.
  * @param midi Starting MIDI pitch.
@@ -165,7 +190,10 @@ enum class Mode : std::uint8_t { Major, Minor };
  * @return The MIDI pitch `steps` scale degrees above `midi`.
  */
 inline int scaleUp(int midi, int steps, Mode mode) {
-  return mode == Mode::Major ? organPreludeScaleUp(midi, steps) : chaconneScaleUp(midi, steps);
+  int cur = midi;
+  for (int step = 0; step < steps; ++step)
+    cur = melodicScaleStep(cur, 1, mode);
+  return cur;
 }
 
 /**
@@ -195,14 +223,8 @@ inline bool inScale(int midi, Mode mode) {
  */
 inline int scaleDown(int midi, int steps, Mode mode) {
   int cur = midi;
-  for (int s = 0; s < steps; ++s) {
-    for (int sub = 1; sub <= 12; ++sub) {
-      if (inScale(cur - sub, mode)) {
-        cur -= sub;
-        break;
-      }
-    }
-  }
+  for (int step = 0; step < steps; ++step)
+    cur = melodicScaleStep(cur, -1, mode);
   return cur;
 }
 

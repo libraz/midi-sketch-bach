@@ -2,7 +2,191 @@
 
 #include <algorithm>
 
+#include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
+#include "core/pitch_utils.h"
+
 namespace bach::composer {
+
+int octaveOffsetForBand(const std::array<std::uint8_t, 16>& subject, int base_semis, int voice,
+                        const std::array<int, 3>& band_lo, const std::array<int, 3>& band_hi) {
+  if (voice < 0 || voice >= static_cast<int>(band_lo.size())) {
+    return 0;
+  }
+  int lo = 127;
+  int hi = 0;
+  for (std::uint8_t pitch : subject) {
+    lo = std::min(lo, static_cast<int>(pitch) + base_semis);
+    hi = std::max(hi, static_cast<int>(pitch) + base_semis);
+  }
+  int offset = 0;
+  while (hi + offset > band_hi[static_cast<std::size_t>(voice)]) {
+    offset -= 12;
+  }
+  while (lo + offset < band_lo[static_cast<std::size_t>(voice)] &&
+         hi + offset + 12 <= band_hi[static_cast<std::size_t>(voice)]) {
+    offset += 12;
+  }
+  return offset;
+}
+
+bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint8_t tonic_pc) {
+  const std::uint8_t tonic = static_cast<std::uint8_t>(tonic_pc % 12);
+  const std::uint8_t dominant = static_cast<std::uint8_t>((tonic + 7) % 12);
+  const std::uint8_t first = static_cast<std::uint8_t>(subject[0] % 12);
+  if (first == dominant) {
+    return true;
+  }
+  if (first != tonic) {
+    return false;
+  }
+  for (int i = 1; i < 4; ++i) {
+    if (subject[static_cast<std::size_t>(i)] % 12 == dominant) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<detail::ChordSpec> buildRepeatingChordPlan(int total_bars, detail::Mode mode,
+                                                       int harmony_index) {
+  const auto& patterns =
+      mode == detail::Mode::Minor ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
+  std::vector<detail::ChordSpec> plan;
+  plan.reserve(static_cast<std::size_t>(total_bars));
+  for (int bar = 0; bar < total_bars; ++bar) {
+    const auto& pattern = patterns[static_cast<std::size_t>((harmony_index + bar / 4) % 4)];
+    plan.push_back(pattern[static_cast<std::size_t>(bar % 4)]);
+  }
+  return plan;
+}
+
+bool installSuspensionCarrier(Material& material, VoicePlan& voice_plan,
+                              const SuspensionPattern& pattern) {
+  if (pattern.preparation_tick >= pattern.suspension_tick ||
+      pattern.suspension_tick >= pattern.resolution_tick)
+    return false;
+  // Resolution occupies one beat, then a one-beat rest completes the
+  // two-beat figure before the original carrier resumes.
+  const Tick carrier_end = pattern.resolution_tick + 2 * kTicksPerBeat;
+  std::size_t containing = voice_plan.spans.size();
+  SpanId next_id = 0;
+  for (std::size_t i = 0; i < voice_plan.spans.size(); ++i) {
+    const Span& span = voice_plan.spans[i];
+    if (span.id != kInvalidSpanId)
+      next_id = std::max(next_id, static_cast<SpanId>(span.id + 1));
+    if (span.voice == pattern.voice && span.start_tick <= pattern.preparation_tick &&
+        span.end_tick >= carrier_end && span.intent != VoiceIntent::SuspensionCarrier) {
+      containing = i;
+    }
+  }
+  if (containing == voice_plan.spans.size())
+    return false;
+
+  const Span original = voice_plan.spans[containing];
+  std::vector<Span> replacement;
+  replacement.reserve(3);
+  if (original.start_tick < pattern.preparation_tick) {
+    Span before = original;
+    before.end_tick = pattern.preparation_tick;
+    replacement.push_back(before);
+  }
+  Span suspension = original;
+  suspension.id = replacement.empty() ? original.id : next_id++;
+  suspension.start_tick = pattern.preparation_tick;
+  suspension.end_tick = carrier_end;
+  suspension.intent = VoiceIntent::SuspensionCarrier;
+  replacement.push_back(suspension);
+  if (carrier_end < original.end_tick) {
+    Span after = original;
+    after.id = next_id++;
+    after.start_tick = carrier_end;
+    replacement.push_back(after);
+  }
+
+  voice_plan.spans.erase(voice_plan.spans.begin() + static_cast<std::ptrdiff_t>(containing));
+  voice_plan.spans.insert(voice_plan.spans.begin() + static_cast<std::ptrdiff_t>(containing),
+                          replacement.begin(), replacement.end());
+  material.suspension_patterns.push_back(pattern);
+  return true;
+}
+
+int soundingMaterialPitch(const std::vector<MaterialNote>& notes, Tick tick) {
+  int pitch = -1;
+  Tick latest = 0;
+  bool found = false;
+  for (const auto& note : notes) {
+    if (tick < note.start_tick || tick >= note.start_tick + note.duration)
+      continue;
+    if (!found || note.start_tick >= latest) {
+      found = true;
+      latest = note.start_tick;
+      pitch = static_cast<int>(note.pitch);
+    }
+  }
+  return pitch;
+}
+
+bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick suspension_tick,
+                           Tick resolution_tick, VoiceId voice, std::uint8_t bass_at_preparation,
+                           std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
+                           std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
+                           std::uint8_t upper_at_resolution, int band_lo, int band_hi,
+                           detail::Mode mode, SuspensionPattern* pattern) {
+  if (pattern == nullptr || type == SuspensionType::Sus2_3 || preparation_tick >= suspension_tick ||
+      suspension_tick >= resolution_tick || bass_at_preparation == 0 || bass_at_suspension == 0 ||
+      bass_at_resolution == 0 || upper_at_preparation == 0 || upper_at_suspension == 0 ||
+      upper_at_resolution == 0 || bass_at_preparation > 127 || bass_at_suspension > 127 ||
+      bass_at_resolution > 127 || upper_at_preparation > 127 || upper_at_suspension > 127 ||
+      upper_at_resolution > 127)
+    return false;
+  auto intervalClass = [](int upper, int bass) { return ((upper - bass) % 12 + 12) % 12; };
+  for (int suspended = band_hi; suspended >= band_lo; --suspended) {
+    if (!detail::inScale(suspended, mode))
+      continue;
+    if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(suspended),
+                                            bass_at_preparation))
+      continue;
+    if (!isConsonantPair(suspended, upper_at_preparation) ||
+        !isConsonantPair(suspended, upper_at_suspension))
+      continue;
+    for (int step = 1; step <= 2; ++step) {
+      const int resolution = suspended - step;
+      if (resolution < band_lo || !detail::inScale(resolution, mode))
+        continue;
+      if (!isConsonantPair(resolution, upper_at_resolution))
+        continue;
+      const int sus_ic = intervalClass(suspended, bass_at_suspension);
+      const int res_ic = intervalClass(resolution, bass_at_resolution);
+      bool matches = false;
+      switch (type) {
+        case SuspensionType::Sus4_3:
+          matches = sus_ic == 5 && (res_ic == 3 || res_ic == 4);
+          break;
+        case SuspensionType::Sus7_6:
+          matches = (sus_ic == 10 || sus_ic == 11) && (res_ic == 8 || res_ic == 9);
+          break;
+        case SuspensionType::Sus9_8:
+          matches = (sus_ic == 1 || sus_ic == 2) && res_ic == 0;
+          break;
+        case SuspensionType::Sus2_3:
+          break;
+      }
+      if (!matches)
+        continue;
+      pattern->type = type;
+      pattern->preparation_tick = preparation_tick;
+      pattern->suspension_tick = suspension_tick;
+      pattern->resolution_tick = resolution_tick;
+      pattern->preparation_pitch = static_cast<std::uint8_t>(suspended);
+      pattern->suspension_pitch = static_cast<std::uint8_t>(suspended);
+      pattern->resolution_pitch = static_cast<std::uint8_t>(resolution);
+      pattern->voice = voice;
+      return true;
+    }
+  }
+  return false;
+}
 
 void ThemeToneRegistry::record(Tick tick, VoiceId voice, int pitch, Tick duration) {
   tones_.push_back(ThemeTone{tick, duration, voice, pitch});
@@ -56,53 +240,167 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
   }
 }
 
+void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
+                                Tick end, int band_lo, int band_hi, detail::Mode mode,
+                                std::vector<MaterialNote>& destination,
+                                ThemeToneRegistry& registry) {
+  struct Anchor {
+    Tick tick = 0;
+    Tick duration = 0;
+    int pitch = 0;
+  };
+
+  const int center = (band_lo + band_hi) / 2;
+  std::vector<Anchor> anchors;
+  int previous_counter = -1;
+  int previous_source = -1;
+  int repeat_run = 1;
+  for (const MaterialNote& note : source) {
+    if (note.start_tick < start || note.start_tick >= end) {
+      continue;
+    }
+    const int source_pitch = static_cast<int>(note.pitch);
+    const int source_direction =
+        previous_source < 0
+            ? 0
+            : (source_pitch > previous_source ? 1 : (source_pitch < previous_source ? -1 : 0));
+    const int target = previous_counter < 0 ? center : previous_counter;
+    int best_pitch = -1;
+    int best_score = 1 << 30;
+    for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
+      if (!detail::inScale(pitch, mode)) {
+        continue;
+      }
+      const bool consonant = isConsonantIc(pitch - source_pitch);
+      const int counter_direction =
+          previous_counter < 0
+              ? 0
+              : (pitch > previous_counter ? 1 : (pitch < previous_counter ? -1 : 0));
+      const bool similar = source_direction != 0 && counter_direction == source_direction;
+      const int interval_class = std::abs(pitch - source_pitch) % 12;
+      const bool perfect_arrival = interval_class == 0 || interval_class == 7;
+      const bool repeats_previous = pitch == previous_counter;
+      int score = std::abs(pitch - target);
+      if (!consonant) {
+        score += 10000;
+      }
+      if (similar && perfect_arrival) {
+        score += 4000;
+      } else if (similar) {
+        score += 200;
+      }
+      if (repeats_previous && source_direction != 0) {
+        score += 300;
+      }
+      if (repeats_previous && repeat_run >= 4) {
+        score += 100000;
+      }
+      if (score < best_score) {
+        best_score = score;
+        best_pitch = pitch;
+      }
+    }
+    const int pitch = best_pitch >= 0 ? best_pitch : std::clamp(target, band_lo, band_hi);
+    repeat_run = pitch == previous_counter ? repeat_run + 1 : 1;
+    anchors.push_back({note.start_tick, note.duration, pitch});
+    previous_counter = pitch;
+    previous_source = source_pitch;
+  }
+
+  int previous_emitted = -1;
+  Tick previous_tick = 0;
+  auto avoidTrueParallel = [&](int proposed, Tick tick) {
+    if (previous_emitted < 0)
+      return proposed;
+    std::vector<ConcurrentMotion> motions;
+    registry.concurrentMotions(previous_tick, tick, voice, /*num_voices=*/3, motions);
+    const auto has_parallel = [&](int candidate) {
+      return std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
+        return formsStrictPerfectParallel(previous_emitted, candidate, motion.prev, motion.curr);
+      });
+    };
+    if (!has_parallel(proposed))
+      return proposed;
+
+    std::vector<int> sounding;
+    registry.concurrentThemePitches(tick, voice, sounding);
+    for (int degrees = 1; degrees <= 4; ++degrees) {
+      for (int candidate :
+           {detail::scaleUp(proposed, degrees, mode), detail::scaleDown(proposed, degrees, mode)}) {
+        if (candidate < band_lo || candidate > band_hi || has_parallel(candidate))
+          continue;
+        if (std::all_of(sounding.begin(), sounding.end(),
+                        [&](int other) { return isConsonantIc(candidate - other); }))
+          return candidate;
+      }
+    }
+    return proposed;
+  };
+
+  for (std::size_t index = 0; index < anchors.size(); ++index) {
+    const Anchor& anchor = anchors[index];
+    const bool has_next = index + 1 < anchors.size();
+    const int figure = static_cast<int>((anchor.tick / kTicksPerBeat) % 3);
+    if (anchor.duration != kTicksPerBeat || !has_next || figure == 0) {
+      const int pitch = avoidTrueParallel(anchor.pitch, anchor.tick);
+      destination.push_back({anchor.tick, anchor.duration, static_cast<std::uint8_t>(pitch)});
+      registry.record(anchor.tick, voice, pitch, anchor.duration);
+      previous_emitted = pitch;
+      previous_tick = anchor.tick;
+      continue;
+    }
+
+    const Tick sixteenth = kTicksPerBeat / 4;
+    std::array<int, 4> pitches{anchor.pitch, anchor.pitch, anchor.pitch, anchor.pitch};
+    if (figure == 1) {
+      const int run_target = anchors[index + 1].pitch;
+      int direction = run_target > anchor.pitch ? 1 : -1;
+      int current = anchor.pitch;
+      for (int slot = 1; slot < 4; ++slot) {
+        current =
+            direction > 0 ? detail::scaleUp(current, 1, mode) : detail::scaleDown(current, 1, mode);
+        current = std::clamp(current, band_lo, band_hi);
+        if ((direction > 0 && current >= run_target) || (direction < 0 && current <= run_target)) {
+          direction = -direction;
+        }
+        pitches[static_cast<std::size_t>(slot)] = current;
+      }
+    } else {
+      const int direction = anchor.pitch + 7 <= band_hi ? 1 : -1;
+      const int third = direction > 0 ? detail::scaleUp(anchor.pitch, 2, mode)
+                                      : detail::scaleDown(anchor.pitch, 2, mode);
+      const int fifth = direction > 0 ? detail::scaleUp(anchor.pitch, 4, mode)
+                                      : detail::scaleDown(anchor.pitch, 4, mode);
+      pitches = {anchor.pitch, third, fifth, third};
+    }
+    for (int slot = 0; slot < 4; ++slot) {
+      const Tick tick = anchor.tick + static_cast<Tick>(slot) * sixteenth;
+      const int pitch = avoidTrueParallel(
+          std::clamp(pitches[static_cast<std::size_t>(slot)], band_lo, band_hi), tick);
+      destination.push_back({tick, sixteenth, static_cast<std::uint8_t>(pitch)});
+      registry.record(tick, voice, pitch, sixteenth);
+      previous_emitted = pitch;
+      previous_tick = tick;
+    }
+  }
+}
+
 bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.
   }
-  const int line_motion = cand - line_prev;
-  const int other_motion = other_curr - other_prev;
-  if (line_motion == 0 || other_motion == 0) {
-    return false;  // oblique motion is always allowed.
-  }
-  const bool same_dir =
-      (line_motion > 0 && other_motion > 0) || (line_motion < 0 && other_motion < 0);
-  if (!same_dir) {
-    return false;  // contrary motion is always allowed.
-  }
-  const int curr_ic = ((std::abs(cand - other_curr) % 12) + 12) % 12;
-  if (curr_ic != 0 && curr_ic != 7) {
-    return false;  // arrival is not a perfect fifth/octave.
-  }
-  const int prev_ic = ((std::abs(line_prev - other_prev) % 12) + 12) % 12;
-  return prev_ic == curr_ic;  // same perfect interval at both onsets: parallel.
+  if (cand >= other_curr)
+    return isParallelPerfectMotion(line_prev, cand, other_prev, other_curr);
+  return isParallelPerfectMotion(other_prev, other_curr, line_prev, cand);
 }
 
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
-  if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr)) {
-    return true;
-  }
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.
   }
-  const int line_motion = cand - line_prev;
-  const int other_motion = other_curr - other_prev;
-  if (line_motion == 0 || other_motion == 0) {
-    return false;  // oblique motion is always allowed.
-  }
-  const bool same_dir =
-      (line_motion > 0 && other_motion > 0) || (line_motion < 0 && other_motion < 0);
-  if (!same_dir) {
-    return false;  // contrary motion is always allowed.
-  }
-  const int curr_ic = ((std::abs(cand - other_curr) % 12) + 12) % 12;
-  if (curr_ic != 0 && curr_ic != 7) {
-    return false;  // arrival is not a perfect fifth/octave.
-  }
-  // Hidden perfect: same-direction arrival on a perfect from another interval,
-  // judged forbidden when the upper of the two voices leaps (> 2 semitones).
-  const int upper_motion = (cand >= other_curr) ? line_motion : other_motion;
-  return std::abs(upper_motion) > 2;
+  if (cand >= other_curr)
+    return isForbiddenPerfectMotion(line_prev, cand, other_prev, other_curr);
+  return isForbiddenPerfectMotion(other_prev, other_curr, line_prev, cand);
 }
 
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
@@ -275,10 +573,12 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord,
-                            bool prefer_descending, bool lift_to_context) {
+                            bool prefer_descending, bool lift_to_context,
+                            std::uint8_t ts_numerator) {
   const Tick eighth = duration::kEighthNote;
-  const Tick half_bar = ticks_per_bar / 2;
-  const int run_len = static_cast<int>(half_bar / eighth);  // 4 in 4/4, 3 in 3/4.
+  const Tick prefinal_tick =
+      ts_numerator == 3 ? ticks_per_bar / static_cast<Tick>(3) : ticks_per_bar / 2;
+  const int run_len = static_cast<int>(prefinal_tick / eighth);  // 4 in 4/4, 2 in 3/4.
 
   if (lift_to_context) {
     // The formula's register is the caller's design value, but the line it
@@ -367,10 +667,10 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
     line.push_back(note);
   }
 
-  // Held pre-final tone over the bar's second half (the trill site).
+  // Held pre-final tone from the cadence's structural beat (the trill site).
   MaterialNote held;
-  held.start_tick = penult_bar_start + half_bar;
-  held.duration = ticks_per_bar - half_bar;
+  held.start_tick = penult_bar_start + prefinal_tick;
+  held.duration = ticks_per_bar - prefinal_tick;
   held.pitch = static_cast<std::uint8_t>(std::clamp(prefinal, 0, 127));
   line.push_back(held);
 
@@ -382,21 +682,50 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
   line.push_back(last);
 }
 
+void appendCadentialSixFourLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
+                                   Tick ticks_per_bar, int tonic, int leading_tone) {
+  line.erase(
+      std::remove_if(line.begin(), line.end(),
+                     [&](const MaterialNote& note) { return note.start_tick >= penult_bar_start; }),
+      line.end());
+  const Tick resolution = kTicksPerBeat;
+  MaterialNote six_four;
+  six_four.start_tick = penult_bar_start;
+  six_four.duration = resolution;
+  six_four.pitch = static_cast<std::uint8_t>(std::clamp(tonic, 0, 127));
+  line.push_back(six_four);
+  MaterialNote dominant;
+  dominant.start_tick = penult_bar_start + resolution;
+  dominant.duration = ticks_per_bar - resolution;
+  dominant.pitch = static_cast<std::uint8_t>(std::clamp(leading_tone, 0, 127));
+  line.push_back(dominant);
+  MaterialNote final_tonic;
+  final_tonic.start_tick = penult_bar_start + ticks_per_bar;
+  final_tonic.duration = ticks_per_bar;
+  final_tonic.pitch = static_cast<std::uint8_t>(std::clamp(tonic, 0, 127));
+  line.push_back(final_tonic);
+}
+
 void appendCompactCadentialLanding(std::vector<MaterialNote>& line, Tick final_bar_start,
-                                   Tick ticks_per_bar, int prefinal, int final_pitch) {
+                                   Tick ticks_per_bar, int prefinal, int final_pitch,
+                                   std::uint8_t ts_numerator) {
   line.erase(
       std::remove_if(line.begin(), line.end(),
                      [&](const MaterialNote& note) { return note.start_tick >= final_bar_start; }),
       line.end());
-  const Tick half_bar = ticks_per_bar / 2;
+  // Four-four cadences turn on beat three, retaining the historic half-bar
+  // split. In triple metre, the dominant/trill occupies beat one only and
+  // resolves on the real second beat, not the 3/2-beat arithmetic midpoint.
+  const Tick resolution_tick =
+      ts_numerator == 3 ? ticks_per_bar / static_cast<Tick>(3) : ticks_per_bar / 2;
   MaterialNote held;
   held.start_tick = final_bar_start;
-  held.duration = half_bar;
+  held.duration = resolution_tick;
   held.pitch = static_cast<std::uint8_t>(std::clamp(prefinal, 0, 127));
   line.push_back(held);
   MaterialNote last;
-  last.start_tick = final_bar_start + half_bar;
-  last.duration = ticks_per_bar - half_bar;
+  last.start_tick = final_bar_start + resolution_tick;
+  last.duration = ticks_per_bar - resolution_tick;
   last.pitch = static_cast<std::uint8_t>(std::clamp(final_pitch, 0, 127));
   line.push_back(last);
 }

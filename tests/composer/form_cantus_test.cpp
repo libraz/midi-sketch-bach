@@ -183,6 +183,37 @@ TEST(FormCantusChorale, FinalCantusFirmusToneIsTonic) {
   }
 }
 
+TEST(FormCantusChorale, FinalCadenceContainsTheDeclaredTonicThird) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx =
+          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
+      const Tick final_bar = 15 * kTicksPerBar;
+      const bool picardy = minor && detail::usePicardy(seed);
+      const std::uint8_t expected_third = static_cast<std::uint8_t>(minor && !picardy ? 3 : 4);
+      ASSERT_FALSE(fx.harmony.chords.empty());
+      EXPECT_EQ(fx.harmony.chords.back().root_pc, 0u);
+      EXPECT_EQ(fx.harmony.chords.back().is_picardy, picardy);
+
+      const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(result.validation.status, ValidationStatus::Ok)
+          << "minor=" << minor << " seed=" << seed << " first_failure="
+          << (result.validation.failures.empty() ? "none"
+                                                 : result.validation.failures.front().rule_id);
+      bool saw_tonic = false;
+      bool saw_third = false;
+      for (const NoteEvent& note : result.notes) {
+        if (note.start_tick != final_bar)
+          continue;
+        saw_tonic |= note.pitch % 12u == 0u;
+        saw_third |= note.pitch % 12u == expected_third;
+      }
+      EXPECT_TRUE(saw_tonic) << "minor=" << minor << " seed=" << seed;
+      EXPECT_TRUE(saw_third) << "minor=" << minor << " seed=" << seed;
+    }
+  }
+}
+
 // Phrase cadence degrees: each 4-bar phrase ends on an authentic (tonic, pc 0)
 // or half (dominant, pc 7) cadence, alternating authentic on even phrases and
 // half on odd phrases, with the final phrase always authentic.
@@ -222,6 +253,20 @@ TEST(FormCantusChorale, FigurationStaysAboveCantusFirmus) {
     if (it == v1_downbeat.end())
       continue;
     EXPECT_GT(hi, it->second) << "figuration not above cantus firmus at tick " << tick;
+  }
+}
+
+TEST(FormCantusChorale, NobleFigurationShipsWrittenDottedCells) {
+  constexpr Tick kDottedEighth = 3 * kTicksPerBeat / 4;
+  for (std::uint32_t seed : {1u, 5u, 42u}) {
+    const HarnessFixture fx =
+        build(FormType::ChoralePrelude, false, SubjectCharacter::Noble, 16, seed);
+    ASSERT_FALSE(fx.material.figuration_sections.empty()) << "seed " << seed;
+    EXPECT_TRUE(
+        std::any_of(fx.material.figuration_sections.front().notes.begin(),
+                    fx.material.figuration_sections.front().notes.end(),
+                    [](const MaterialNote& note) { return note.duration == kDottedEighth; }))
+        << "seed " << seed;
   }
 }
 
@@ -421,7 +466,8 @@ TEST(FormCantusChorale, EmbellishedCantusFirmusRepeatedRunBounded) {
 
 // --- Goldberg structural contracts ------------------------------------------
 
-// The 32-tone aria bass tiles exactly with a four-bar period on V2.
+// The 32-tone aria bass tiles exactly with a four-bar period on V2 until the
+// explicit final-bar tonic coda.
 TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
   for (bool minor : {false, true}) {
     for (std::uint32_t seed : kSeeds) {
@@ -435,18 +481,61 @@ TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
           if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed))
             ground[r.notes[i].start_tick] = r.notes[i].pitch;
         }
-        ASSERT_EQ(static_cast<int>(ground.size()), bars * 8)
+        ASSERT_EQ(static_cast<int>(ground.size()), (bars - 1) * 8 - 2)
             << "minor=" << minor << " seed=" << seed << " bars=" << bars;
-        // The canonical period is the first 4 ground tones; every bar must match
-        // its period-4 counterpart.
+        // The canonical period is the first 4 ground tones; every non-coda bar
+        // must match its period-4 counterpart.
         ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
-        for (int bar = 0; bar < bars; ++bar) {
+        for (int bar = 0; bar < bars - 1; ++bar) {
           const auto it = ground.find(static_cast<Tick>(bar) * kTicksPerBar);
           ASSERT_NE(it, ground.end()) << "bar " << bar;
           EXPECT_EQ(it->second,
                     fx.material.goldberg_aria_bass[static_cast<std::size_t>(bar % 4) * 8].pitch)
               << "minor=" << minor << " seed=" << seed << " bar " << bar;
         }
+        ASSERT_EQ(fx.material.coda_extensions.size(), 1u);
+        ASSERT_EQ(fx.material.coda_extensions.front().notes.size(), 2u);
+        EXPECT_EQ(fx.material.coda_extensions.front().notes.front().start_tick,
+                  static_cast<Tick>(bars - 1) * kTicksPerBar - kTicksPerBeat);
+        EXPECT_EQ(fx.material.coda_extensions.front().notes.front().pitch % 12u, 7u);
+        EXPECT_EQ(fx.material.coda_extensions.front().notes.back().start_tick,
+                  static_cast<Tick>(bars - 1) * kTicksPerBar);
+        EXPECT_EQ(fx.material.coda_extensions.front().notes.back().pitch % 12u, 0u);
+      }
+    }
+  }
+}
+
+TEST(FormCantusGoldberg, TerminalCadenceResolvesAllActiveVoicesToTonic) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      for (std::uint16_t bars : sweepBars(FormType::GoldbergVariations)) {
+        const HarnessFixture fx =
+            build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, bars, seed);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        const Tick final_bar = static_cast<Tick>(bars - 1) * kTicksPerBar;
+        ASSERT_FALSE(fx.harmony.chords.empty());
+        EXPECT_EQ(fx.harmony.chords.back().root_pc, 0u);
+
+        const NoteEvent* bass = nullptr;
+        const NoteEvent* upper = nullptr;
+        bool coda_committed = false;
+        for (std::size_t i = 0; i < r.notes.size(); ++i) {
+          const NoteEvent& note = r.notes[i];
+          if (note.voice == 2 && note.start_tick == final_bar) {
+            bass = &note;
+            coda_committed = (r.provenance[i].satisfied_rules & bit(RuleBit::CodaCommitted)).any();
+          }
+          if (note.voice == 0 &&
+              note.start_tick + note.duration == static_cast<Tick>(bars) * kTicksPerBar) {
+            upper = &note;
+          }
+        }
+        ASSERT_NE(bass, nullptr);
+        ASSERT_NE(upper, nullptr);
+        EXPECT_TRUE(coda_committed);
+        EXPECT_EQ(bass->pitch % 12u, 0u);
+        EXPECT_EQ(upper->pitch % 12u, 0u);
       }
     }
   }
@@ -677,8 +766,9 @@ TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
   // set of figuration-block duration histograms is not uniform: the figura
   // corta cell (eighth + two sixteenths per beat) is rhythmically distinct
   // from the anchored scalar wave. The aria (block 0, half notes) and the
-  // canons (uniform eighths) keep their own layouts; the climax block stays
-  // the design peak (uniform sixteenths).
+  // canons (uniform eighths) keep their own layouts; a climax that lands on a
+  // figuration block is the design peak (uniform sixteenths), while a climax
+  // that coincides with a numbered canon preserves its independent imitation.
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : {false, true}) {
       const HarnessFixture fx =
@@ -694,10 +784,13 @@ TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
       for (std::size_t blk = 1; blk < vars.size(); ++blk) {
         const auto& var = vars[blk];
         if (var.is_climax) {
-          EXPECT_TRUE(
-              std::all_of(var.notes.begin(), var.notes.end(),
-                          [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 4; }))
-              << "seed " << seed << ": climax block must stay uniform sixteenths";
+          const std::size_t variation_number = blk;  // aria is block 0.
+          if (variation_number % 3 != 0 || variation_number == 30) {
+            EXPECT_TRUE(
+                std::all_of(var.notes.begin(), var.notes.end(),
+                            [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 4; }))
+                << "seed " << seed << ": figuration climax must stay uniform sixteenths";
+          }
           continue;
         }
         const std::size_t variation_number = blk;  // 1-based ordinal (aria = block 0).

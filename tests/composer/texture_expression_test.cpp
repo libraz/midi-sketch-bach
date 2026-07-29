@@ -58,6 +58,29 @@ TEST(TextureExpressionTest, AffektCurveProducesNonFlatVelocity) {
   EXPECT_GT(velocities.size(), 1u);
 }
 
+TEST(TextureExpressionTest, ArticulationSpanChangesGateTime) {
+  HarnessFixture fixture = buildHarnessFixture(HarnessPhase::FugueTextured, /*seed=*/0);
+  const ComposeResult articulated =
+      Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+
+  fixture.material.texture_plan.articulations.clear();
+  const ComposeResult ungated =
+      Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+
+  ASSERT_EQ(articulated.notes.size(), ungated.notes.size());
+  ASSERT_EQ(articulated.provenance.size(), articulated.notes.size());
+  bool saw_shortened_note = false;
+  for (std::size_t i = 0; i < articulated.notes.size(); ++i) {
+    EXPECT_EQ(articulated.notes[i].pitch, ungated.notes[i].pitch);
+    EXPECT_EQ(articulated.notes[i].start_tick, ungated.notes[i].start_tick);
+    EXPECT_LE(articulated.notes[i].duration, ungated.notes[i].duration);
+    saw_shortened_note =
+        saw_shortened_note || articulated.notes[i].duration < ungated.notes[i].duration;
+    EXPECT_TRUE(hasBit(articulated.provenance[i], RuleBit::ArticulationApplied));
+  }
+  EXPECT_TRUE(saw_shortened_note);
+}
+
 TEST(TextureExpressionTest, VoiceDensityVariesOverTime) {
   const ComposeResult r = runPhase(HarnessPhase::FugueTextured, /*seed=*/0);
   ASSERT_FALSE(r.notes.empty());

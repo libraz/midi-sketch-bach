@@ -137,18 +137,4 @@ std::vector<MaterialNote> applyTransform(const std::vector<MaterialNote>& source
   return {};
 }
 
-EpisodeMotifTransform characterToTransform(SubjectCharacter character) {
-  switch (character) {
-    case SubjectCharacter::Severe:
-      return EpisodeMotifTransform::Original;
-    case SubjectCharacter::Playful:
-      return EpisodeMotifTransform::Invert;
-    case SubjectCharacter::Noble:
-      return EpisodeMotifTransform::Augment;
-    case SubjectCharacter::Restless:
-      return EpisodeMotifTransform::Diminish;
-  }
-  return EpisodeMotifTransform::Original;
-}
-
 }  // namespace bach::composer::motif_ops

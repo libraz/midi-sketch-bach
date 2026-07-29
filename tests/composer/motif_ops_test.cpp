@@ -180,11 +180,4 @@ TEST(MotifOpsTest, ApplyTransformDiminishUsesFactor) {
   EXPECT_EQ(out[1].start_tick, kQuarter);
 }
 
-TEST(MotifOpsTest, CharacterToTransformRoutingMatchesPlan) {
-  EXPECT_EQ(characterToTransform(SubjectCharacter::Severe), EpisodeMotifTransform::Original);
-  EXPECT_EQ(characterToTransform(SubjectCharacter::Playful), EpisodeMotifTransform::Invert);
-  EXPECT_EQ(characterToTransform(SubjectCharacter::Noble), EpisodeMotifTransform::Augment);
-  EXPECT_EQ(characterToTransform(SubjectCharacter::Restless), EpisodeMotifTransform::Diminish);
-}
-
 }  // namespace bach::composer::motif_ops

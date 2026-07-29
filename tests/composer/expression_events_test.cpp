@@ -272,6 +272,24 @@ TEST(PhraseDynamicsTest, BaselineFollowsMacroArcShape) {
   EXPECT_LT(closing, near_climax);
 }
 
+TEST(PhraseDynamicsTest, FormClimaxTickMovesMacroPeak) {
+  const Tick total = 32 * kTicksPerBar;
+  const Tick form_climax = 20 * kTicksPerBar;
+  const auto events = buildPhraseDynamics(8, 4, kTicksPerBar, total, form_climax);
+  std::uint8_t at_form_climax = 0;
+  std::uint8_t at_legacy_climax = 0;
+  for (const auto& event : events) {
+    if (event.tick == form_climax) {
+      at_form_climax = event.value;
+    }
+    if (event.tick == 24 * kTicksPerBar) {
+      at_legacy_climax = event.value;
+    }
+  }
+  EXPECT_EQ(at_form_climax, 95u);
+  EXPECT_LT(at_legacy_climax, at_form_climax);
+}
+
 TEST(PhraseDynamicsTest, TicksSortedAndWithinPiece) {
   const Tick total = 24 * kTicksPerBar;
   const auto events = buildPhraseDynamics(6, 4, kTicksPerBar, total);
@@ -365,6 +383,18 @@ TEST(ExpressionEventsTest, RitardandoLastEventBeforeTotalTicks) {
   // The steps span the final two bars on the half-bar grid.
   EXPECT_EQ(events.front().tick, total - 2 * kTicksPerBar);
   EXPECT_EQ(events.back().tick, total - kTicksPerBar / 2);
+}
+
+TEST(ExpressionEventsTest, TripleMeterRitardandoUsesBeatGrid) {
+  constexpr Tick kTripleBar = 3 * kTicksPerBeat;
+  const auto events =
+      buildFinalRitardando(100, 12 * kTripleBar, kTripleBar, RitardandoStyle::Rhetorical, 3);
+  ASSERT_EQ(events.size(), 4u);
+  for (const auto& event : events) {
+    EXPECT_EQ(event.tick % kTicksPerBeat, 0u);
+  }
+  EXPECT_EQ(events[1].tick - events[0].tick, kTicksPerBeat);
+  EXPECT_EQ(events[3].tick - events[2].tick, kTicksPerBeat);
 }
 
 TEST(ExpressionEventsTest, RitardandoCollapsesEqualStepsAtLowBpm) {

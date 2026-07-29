@@ -22,8 +22,8 @@ namespace rule_helpers {
 std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord);
 
 // Returns the chord active at `at`: the last ChordEvent whose start_tick
-// is <= at. The plan's chord list is assumed non-empty and sorted by
-// start_tick.
+// is <= at. Empty plans return a neutral C-major fallback so callers can
+// report validation failure without dereferencing an empty vector.
 const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at);
 
 // Beat / pitch primitives.
@@ -111,7 +111,8 @@ bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to);
 // Callers that need the secondary-dominant exemption must apply it before
 // calling (the Validator skips the rule when a has_secondary_of chord is
 // active at either endpoint).
-bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan);
+bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan,
+                            Tick from_tick = 0, Tick to_tick = 0);
 
 // Pitch-at-time queries over the composer's incremental commit log.
 // `notes` is voice-grouped: spans for one voice are contiguous, but

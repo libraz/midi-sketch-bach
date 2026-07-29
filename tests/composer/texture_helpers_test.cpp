@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "composer/figuration.h"
+#include "composer/subject_catalog.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -43,6 +44,137 @@ TEST(TextureHelpersTest, IsConsonantIcFoldsLargeAndNegativeIntervals) {
   }
 }
 
+TEST(TextureHelpersTest, OctaveFitUsesTheActualRealAnswerTransposition) {
+  const std::array<std::uint8_t, 16> subject = {
+      70, 72, 74, 75, 77, 79, 81, 82, 81, 79, 77, 75, 74, 72, 70, 72,
+  };
+  constexpr std::array<int, 3> band_lo = {70, 53, 33};
+  constexpr std::array<int, 3> band_hi = {88, 71, 52};
+
+  const int answer_offset = octaveOffsetForBand(subject, -5, /*voice=*/1, band_lo, band_hi);
+  EXPECT_EQ(answer_offset, -12);
+  for (std::uint8_t pitch : subject) {
+    const int realized = static_cast<int>(pitch) - 5 + answer_offset;
+    EXPECT_GE(realized, band_lo[1]);
+    EXPECT_LE(realized, band_hi[1]);
+  }
+}
+
+TEST(TextureHelpersTest, SectionalBandsFitEveryQualifiedSubjectAndRealAnswer) {
+  constexpr std::array<int, 3> band_lo = {70, 53, 33};
+  constexpr std::array<int, 3> band_hi = {88, 71, 52};
+  const auto assert_fits = [&](const std::array<std::uint8_t, 16>& subject, int base_semis,
+                               int voice) {
+    const int offset = octaveOffsetForBand(subject, base_semis, voice, band_lo, band_hi);
+    for (std::uint8_t pitch : subject) {
+      const int realized = static_cast<int>(pitch) + base_semis + offset;
+      EXPECT_GE(realized, band_lo[static_cast<std::size_t>(voice)]);
+      EXPECT_LE(realized, band_hi[static_cast<std::size_t>(voice)]);
+    }
+  };
+  for (const auto& subject : tables::kSubjectCatalogMajor) {
+    assert_fits(subject, /*base_semis=*/0, /*voice=*/0);
+    assert_fits(subject, /*base_semis=*/-5, /*voice=*/1);
+    assert_fits(subject, /*base_semis=*/0, /*voice=*/2);
+  }
+  for (const auto& subject : tables::kSubjectCatalogMinor) {
+    assert_fits(subject, /*base_semis=*/0, /*voice=*/0);
+    assert_fits(subject, /*base_semis=*/-5, /*voice=*/1);
+    assert_fits(subject, /*base_semis=*/0, /*voice=*/2);
+  }
+}
+
+TEST(TextureHelpersTest, TonalAnswerAndRepeatingHarmonyAreSharedFormPrimitives) {
+  const std::array<std::uint8_t, 16> tonic_to_dominant = {
+      60, 62, 67, 69, 67, 65, 64, 62, 60, 62, 64, 65, 67, 69, 71, 72,
+  };
+  const std::array<std::uint8_t, 16> mediant_subject = {
+      64, 65, 67, 69, 67, 65, 64, 62, 60, 62, 64, 65, 67, 69, 71, 72,
+  };
+  EXPECT_TRUE(shouldUseTonalAnswer(tonic_to_dominant, /*tonic_pc=*/0));
+  EXPECT_FALSE(shouldUseTonalAnswer(mediant_subject, /*tonic_pc=*/0));
+
+  const auto major = buildRepeatingChordPlan(/*total_bars=*/5, detail::Mode::Major,
+                                             /*harmony_index=*/1);
+  ASSERT_EQ(major.size(), 5u);
+  EXPECT_EQ(major[0].root_pc, 0u);
+  EXPECT_TRUE(major[1].minor);
+  EXPECT_EQ(major[1].root_pc, 9u);
+  EXPECT_EQ(major[4].root_pc, 0u) << "the next four-bar block selects the next catalog row";
+
+  const auto minor = buildRepeatingChordPlan(/*total_bars=*/4, detail::Mode::Minor,
+                                             /*harmony_index=*/0);
+  ASSERT_EQ(minor.size(), 4u);
+  EXPECT_TRUE(minor[0].minor);
+  EXPECT_TRUE(minor[1].minor);
+  EXPECT_FALSE(minor[2].minor) << "minor mode retains its harmonic dominant";
+  EXPECT_EQ(minor[2].root_pc, 7u);
+}
+
+TEST(TextureHelpersTest, SharedCountersubjectUsesScoredAnchorsAndPassTwoRhythm) {
+  const std::vector<MaterialNote> source = {
+      {0, kTicksPerBeat, 67},
+      {kTicksPerBeat, kTicksPerBeat, 69},
+      {2 * kTicksPerBeat, kTicksPerBeat, 71},
+      {3 * kTicksPerBeat, kTicksPerBeat, 72},
+  };
+  std::vector<MaterialNote> countersubject;
+  ThemeToneRegistry registry;
+  appendScoredCountersubject(source, /*voice=*/0, /*start=*/0,
+                             /*end=*/4 * kTicksPerBeat, /*band_lo=*/60,
+                             /*band_hi=*/84, detail::Mode::Major, countersubject, registry);
+
+  ASSERT_GT(countersubject.size(), source.size())
+      << "pass-two realization merely copied the source rhythm";
+  Tick total_duration = 0;
+  for (const MaterialNote& note : countersubject) {
+    total_duration += note.duration;
+    EXPECT_GE(note.pitch, 60);
+    EXPECT_LE(note.pitch, 84);
+  }
+  EXPECT_EQ(total_duration, 4 * kTicksPerBeat);
+  for (const MaterialNote& note : source) {
+    const int counter_pitch = registry.soundingPitchInVoice(0, note.start_tick);
+    ASSERT_GE(counter_pitch, 0);
+    EXPECT_TRUE(isConsonantPair(counter_pitch, note.pitch));
+  }
+}
+
+TEST(TextureHelpersTest, CompactCadentialLandingInTripleMeterResolvesOnSecondBeat) {
+  constexpr Tick kThreeFourBar = 3 * kTicksPerBeat;
+  std::vector<MaterialNote> line = {
+      MaterialNote{0, kTicksPerBeat, 60},
+      MaterialNote{kThreeFourBar, kTicksPerBeat, 62},
+  };
+  appendCompactCadentialLanding(line, kThreeFourBar, kThreeFourBar, /*prefinal=*/67,
+                                /*final_pitch=*/60, /*ts_numerator=*/3);
+
+  ASSERT_EQ(line.size(), 3u);
+  EXPECT_EQ(line[0].start_tick, 0);
+  EXPECT_EQ(line[1].start_tick, kThreeFourBar);
+  EXPECT_EQ(line[1].duration, kTicksPerBeat);
+  EXPECT_EQ(line[1].pitch, 67);
+  EXPECT_EQ(line[2].start_tick, kThreeFourBar + kTicksPerBeat);
+  EXPECT_EQ(line[2].duration, 2 * kTicksPerBeat);
+  EXPECT_EQ(line[2].pitch, 60);
+}
+
+TEST(TextureHelpersTest, CadentialLandingInTripleMeterUsesOnlyFirstBeatForApproach) {
+  constexpr Tick kThreeFourBar = 3 * kTicksPerBeat;
+  std::vector<MaterialNote> line;
+  appendCadentialLanding(line, /*penult_bar_start=*/0, kThreeFourBar, /*prefinal=*/71,
+                         /*final_pitch=*/72, detail::Mode::Major, /*band_lo=*/60,
+                         /*downbeat_chord=*/nullptr, /*prefer_descending=*/false,
+                         /*lift_to_context=*/false, /*ts_numerator=*/3);
+
+  ASSERT_EQ(line.size(), 4u);
+  EXPECT_EQ(line[0].start_tick, 0);
+  EXPECT_EQ(line[1].start_tick, duration::kEighthNote);
+  EXPECT_EQ(line[2].start_tick, kTicksPerBeat);
+  EXPECT_EQ(line[2].duration, 2 * kTicksPerBeat);
+  EXPECT_EQ(line[3].start_tick, kThreeFourBar);
+}
+
 TEST(TextureHelpersTest, ScaleDownWalksDiatonicDegrees) {
   // C major descent from C5: C-B-A-G-F-E-D-C, one degree per step.
   const int expected_major[] = {72, 71, 69, 67, 65, 64, 62, 60};
@@ -56,6 +188,16 @@ TEST(TextureHelpersTest, ScaleDownWalksDiatonicDegrees) {
   for (int i = 0; i + 1 < 8; ++i) {
     EXPECT_EQ(detail::scaleDown(expected_minor[i], 1, detail::Mode::Minor), expected_minor[i + 1]);
   }
+}
+
+TEST(TextureHelpersTest, MelodicScaleStepRaisesLeadingToneOnlyOverMinorDominant) {
+  const detail::ChordSpec tonic{0, true};
+  const detail::ChordSpec dominant{7, false};
+  // In C minor, natural minor remains in force away from V.
+  EXPECT_EQ(detail::melodicScaleStep(68, 1, detail::Mode::Minor, &tonic), 70);
+  // Over V, the same upper tetrachord uses A natural then B natural.
+  EXPECT_EQ(detail::melodicScaleStep(68, 1, detail::Mode::Minor, &dominant), 69);
+  EXPECT_EQ(detail::melodicScaleStep(69, 1, detail::Mode::Minor, &dominant), 71);
 }
 
 TEST(TextureHelpersTest, ScaleDownIsNotNegatedScaleUp) {

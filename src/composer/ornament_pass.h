@@ -6,6 +6,7 @@
 
 #include "composer/composer.h"
 #include "composer/figuration.h"
+#include "composer/harmonic_plan.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -106,13 +107,16 @@ struct OrnamentParams {
   detail::Mode mode = detail::Mode::Major;                // scale for neighbour tones.
   std::uint32_t seed = 0;                                 // deterministic placement.
   Tick ticks_per_bar = kTicksPerBar;                      // meter (3/4 forms pass 1440).
-  std::uint16_t bpm = 72;                                 // trill pacing (32nds <= 100 < 16ths).
-  std::vector<VoiceId> exempt_voices;                     // ground carriers: never ornamented.
-  std::vector<VoiceId> skeleton_exempt_voices;            // CF: bar heads immutable, body free.
-  Tick aria_end_tick = 0;                                 // Goldberg aria uplift (0 = none).
-  Tick climax_start_tick = 0;                             // climax uplift window start.
-  Tick climax_end_tick = 0;                               // window end, exclusive (0 = none).
-  std::vector<Tick> section_cadence_ticks;  // interior section-cadence bar starts (0 = none).
+  std::uint8_t ts_numerator = 4;                          // actual beat grid for strong-beat sites.
+  MeterProfile meter_profile = MeterProfile::StandardTriple;
+  const HarmonicPlan* harmonic_plan = nullptr;  // non-owning local tonal context.
+  std::uint16_t bpm = 72;                       // trill pacing (32nds <= 100 < 16ths).
+  std::vector<VoiceId> exempt_voices;           // ground carriers: never ornamented.
+  std::vector<VoiceId> skeleton_exempt_voices;  // CF: bar heads immutable, body free.
+  Tick aria_end_tick = 0;                       // Goldberg aria uplift (0 = none).
+  Tick climax_start_tick = 0;                   // climax uplift window start.
+  Tick climax_end_tick = 0;                     // window end, exclusive (0 = none).
+  std::vector<Tick> section_cadence_ticks;      // interior section-cadence bar starts (0 = none).
 };
 
 /**

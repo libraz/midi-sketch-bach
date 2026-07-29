@@ -115,7 +115,7 @@ constexpr std::size_t kIntentCount =
 static_assert(sizeof(kIntentTable) / sizeof(kIntentTable[0]) == kIntentCount,
               "kIntentTable must have one entry per VoiceIntent enumerator");
 
-const IntentDescriptor kUnknownDescriptor = {"Unknown", false, ReplayKind::kCompose, ChordTone,
+const IntentDescriptor kUnknownDescriptor = {"Unknown", false, ReplayKind::kInvalid, ChordTone,
                                              false};
 
 }  // namespace

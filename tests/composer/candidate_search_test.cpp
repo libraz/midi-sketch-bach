@@ -1161,6 +1161,29 @@ TEST(CandidateSearchTest, CountersubjectCarrierReplaysMaterial) {
   EXPECT_NE(cands[1].satisfied_rules & (ruleBitMask(RuleBit::CountersubjectActive)), 0u);
 }
 
+TEST(CandidateSearchTest, SplitFigurationCarrierReplaysClippedSustainedSuffix) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  Material material;
+  FigurationSection section;
+  section.voice = 0;
+  section.start_tick = 0;
+  section.end_tick = 4 * kTicksPerBeat;
+  section.notes.push_back(
+      MaterialNote{2 * kTicksPerBeat, 2 * kTicksPerBeat, static_cast<std::uint8_t>(72)});
+  material.figuration_sections.push_back(section);
+
+  // Models the carrier span after an inserted suspension: the authored note
+  // began one beat before this span and must resume as a clipped suffix.
+  const Span after =
+      makeCarrierSpan(3 * kTicksPerBeat, 4 * kTicksPerBeat, 0, VoiceIntent::FigurationCarrier);
+  const auto cands = search.enumerate(after, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands[0].start_tick, 3 * kTicksPerBeat);
+  EXPECT_EQ(cands[0].duration, kTicksPerBeat);
+  EXPECT_EQ(cands[0].pitch, 72);
+}
+
 TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
   CandidateSearch search;
   CandidateContext ctx;
@@ -1334,6 +1357,35 @@ TEST(CandidateSearchTest, StrettoCarrierReplaysFollowerWithBit) {
   const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
   ASSERT_EQ(cands.size(), 2u);
   EXPECT_EQ(cands[0].pitch, 48);
+  EXPECT_TRUE(candHasBit(cands[0], RuleBit::StrettoCommitted));
+  EXPECT_TRUE(candHasBit(cands[1], RuleBit::StrettoCommitted));
+}
+
+TEST(CandidateSearchTest, StrettoCarrierReplaysLaterDeclarationForSameFollowerVoice) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 48;
+  ctx.placed_notes = nullptr;
+
+  Material material;
+  StrettoDecl first;
+  first.leader_voice = 0;
+  first.follower_voice = 2;
+  first.follower_notes = {{0, kTicksPerBeat, 48}, {kTicksPerBeat, kTicksPerBeat, 50}};
+  StrettoDecl later;
+  later.leader_voice = 1;
+  later.follower_voice = 2;
+  later.follower_notes = {{4 * kTicksPerBeat, kTicksPerBeat, 55},
+                          {5 * kTicksPerBeat, kTicksPerBeat, 57}};
+  material.stretto_entries = {first, later};
+
+  // A first-match lookup by follower voice would select `first`, find none of
+  // its notes in this later carrier window, and emit nothing.
+  Span span = makeCarrierSpan(4 * kTicksPerBeat, 6 * kTicksPerBeat, 2, VoiceIntent::StrettoCarrier);
+  const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].pitch, 55);
+  EXPECT_EQ(cands[1].pitch, 57);
   EXPECT_TRUE(candHasBit(cands[0], RuleBit::StrettoCommitted));
   EXPECT_TRUE(candHasBit(cands[1], RuleBit::StrettoCommitted));
 }
@@ -1535,6 +1587,14 @@ TEST(CandidateSearchTest, EnumerateReportsZeroSaturationOnNormalSpan) {
 
   EXPECT_FALSE(cands.empty());
   EXPECT_EQ(saturated, 0u) << "a fully fillable span must report no silent holes";
+}
+
+TEST(CandidateSearchTest, UnknownIntentFailsClosedInsteadOfFreeGenerating) {
+  CandidateSearch search;
+  CandidateContext ctx;
+  ctx.voice_center = 60;
+  Span span = makeCarrierSpan(0, kTicksPerBeat, 0, static_cast<VoiceIntent>(255));
+  EXPECT_TRUE(search.enumerate(span, singleCMajor(), Material{}, ctx).empty());
 }
 
 // Forces a real saturated position. Voice 1's previous pitch is the

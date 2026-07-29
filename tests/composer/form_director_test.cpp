@@ -14,11 +14,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
 #include "composer/arc.h"
 #include "composer/composer.h"
+#include "composer/rule_helpers.h"
+#include "composer/validator.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -59,6 +62,24 @@ TEST(FormDirectorSpec, TripleMeterFormsAreChaconneAndPassacaglia) {
   EXPECT_EQ(formSpec(FormType::Chaconne).ts_numerator, 3);
   EXPECT_EQ(formSpec(FormType::Fugue).ts_numerator, 4);
   EXPECT_EQ(formSpec(FormType::TrioSonata).ts_numerator, 4);
+  EXPECT_EQ(formSpec(FormType::Passacaglia).meter_profile, MeterProfile::StandardTriple);
+  EXPECT_EQ(formSpec(FormType::Chaconne).meter_profile, MeterProfile::SarabandeTriple);
+}
+
+TEST(FormDirectorHarmony, ShippedFormsDeclareDiatonicChordMetadata) {
+  for (FormType form : kAllForms) {
+    ComposeRequest request;
+    request.form = form;
+    request.character = SubjectCharacter::Severe;
+    request.target_bars = resolveBars(form, DurationScale::Short, 0);
+    request.seed = 1;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(request, &fixture), FormDirectorStatus::Ok);
+    ASSERT_FALSE(fixture.harmony.chords.empty()) << static_cast<int>(form);
+    for (const ChordEvent& chord : fixture.harmony.chords) {
+      EXPECT_TRUE(chord.has_degree) << static_cast<int>(form) << " tick=" << chord.start_tick;
+    }
+  }
 }
 
 TEST(FormDirectorSpec, VoiceCountsMatchDesign) {
@@ -113,7 +134,7 @@ TEST(FormDirectorResolveBars, TargetBarsOverridesScaleButStillSnapsAndClamps) {
   // target_bars > 0 ignores the scale entirely.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Full, 32), 32);
   // Override below min clamps up to min.
-  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 4), 16);
+  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 4), 20);
   // Override above max clamps to max.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 999), 128);
   // Override snaps: Fugue snap 4, target 30 -> 32.
@@ -170,10 +191,11 @@ void checkArc(std::size_t cycle_count) {
     running = pt.density_tier;
   }
 
-  // Climax sits in the back portion of the span (>= ~60%).
+  // Discrete short arcs round the 80% target down (4 cycles -> index 2),
+  // while longer arcs still sit in the back portion of the span.
   if (cycle_count > 1) {
-    EXPECT_GE(climax_idx * 100, cycle_count * 60) << "cc=" << cycle_count;
-    EXPECT_LE(climax_idx, cycle_count - 1) << "cc=" << cycle_count;
+    EXPECT_GE(climax_idx * 100, cycle_count * 50) << "cc=" << cycle_count;
+    EXPECT_LT(climax_idx, cycle_count - 1) << "cc=" << cycle_count;
   }
 }
 
@@ -205,12 +227,12 @@ TEST(FormDirectorArc, Deterministic) {
 }
 
 TEST(FormDirectorArc, RegisterReturnsToBaselineAtEnd) {
-  // Cycle counts whose climax sits strictly before the final cycle, so a
-  // resolve limb exists and register falls back to the baseline. (For very
-  // short spans the climax can coincide with the final cycle, which keeps the
-  // peak register on purpose.)
-  for (std::size_t cc : {8u, 16u, 30u}) {
+  // Every multi-cycle arc reserves a final resolve cycle. Only a one-cycle
+  // piece necessarily combines the climax and close.
+  for (std::size_t cc : {2u, 3u, 4u, 5u, 8u, 16u, 30u}) {
     const ArcPoint last = arcPoint(cc - 1, cc);
+    EXPECT_EQ(last.stage, ArcStage::Resolve) << "cc=" << cc;
+    EXPECT_FALSE(last.is_climax) << "cc=" << cc;
     EXPECT_EQ(last.register_shift, 0) << "cc=" << cc;
   }
 }
@@ -234,6 +256,78 @@ TEST(FormDirectorBuild, AllFormsRunThroughComposerCleanly) {
   }
 }
 
+TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
+  bool saw_four_three = false;
+  bool saw_seven_six = false;
+  for (FormType form : {FormType::ChoralePrelude, FormType::TrioSonata, FormType::Passacaglia}) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed : {1u, 42u}) {
+        ComposeRequest req;
+        req.form = form;
+        req.is_minor = minor;
+        req.seed = seed;
+        HarnessFixture fixture;
+        ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok)
+            << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed;
+        ASSERT_EQ(fixture.material.suspension_patterns.size(), 1u)
+            << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed;
+        const SuspensionPattern& pattern = fixture.material.suspension_patterns.front();
+        EXPECT_NE(pattern.type, SuspensionType::Sus2_3);
+        saw_four_three = saw_four_three || pattern.type == SuspensionType::Sus4_3;
+        saw_seven_six = saw_seven_six || pattern.type == SuspensionType::Sus7_6;
+        EXPECT_LT(static_cast<int>(
+                      rule_helpers::metricalStrengthAt(fixture.harmony, pattern.suspension_tick)),
+                  static_cast<int>(
+                      rule_helpers::metricalStrengthAt(fixture.harmony, pattern.preparation_tick)));
+        EXPECT_TRUE(std::any_of(fixture.voice_plan.spans.begin(), fixture.voice_plan.spans.end(),
+                                [&](const Span& span) {
+                                  return span.intent == VoiceIntent::SuspensionCarrier &&
+                                         span.voice == pattern.voice &&
+                                         span.start_tick == pattern.preparation_tick;
+                                }));
+
+        ComposeResult result =
+            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+        ASSERT_EQ(result.validation.status, ValidationStatus::Ok)
+            << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed
+            << " first="
+            << (result.validation.failures.empty() ? ""
+                                                   : result.validation.failures.front().rule_id);
+        bool prepared = false;
+        bool resolved = false;
+        std::size_t resolution_index = result.notes.size();
+        for (std::size_t i = 0; i < result.notes.size(); ++i) {
+          if (result.notes[i].voice != pattern.voice)
+            continue;
+          if (result.notes[i].start_tick == pattern.preparation_tick)
+            prepared = (result.provenance[i].satisfied_rules &
+                        ruleBitMask(RuleBit::SuspensionPrepared)) != 0;
+          if (result.notes[i].start_tick == pattern.resolution_tick) {
+            resolved = (result.provenance[i].satisfied_rules &
+                        ruleBitMask(RuleBit::SuspensionResolved)) != 0;
+            resolution_index = i;
+          }
+        }
+        EXPECT_TRUE(prepared);
+        EXPECT_TRUE(resolved);
+
+        ASSERT_LT(resolution_index, result.notes.size());
+        result.notes[resolution_index].pitch =
+            static_cast<std::uint8_t>(result.notes[resolution_index].pitch + 3);
+        const ValidationReport mutated = Validator{}.validate(result.notes, result.provenance,
+                                                              fixture.harmony, fixture.material);
+        EXPECT_TRUE(std::any_of(mutated.failures.begin(), mutated.failures.end(),
+                                [](const ValidationFailure& failure) {
+                                  return failure.rule_id == "suspension_interval" ||
+                                         failure.rule_id == "suspension_resolution_step_down";
+                                }));
+      }
+    }
+  }
+  EXPECT_TRUE(saw_four_three);
+  EXPECT_TRUE(saw_seven_six);
+}
+
 TEST(FormDirectorBuild, MeterStampedFromFormSpec) {
   ComposeRequest req;
   req.form = FormType::Passacaglia;
@@ -242,6 +336,14 @@ TEST(FormDirectorBuild, MeterStampedFromFormSpec) {
   ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
   EXPECT_EQ(fixture.ts_numerator, 3);
   EXPECT_EQ(fixture.ts_denominator, 4);
+  EXPECT_EQ(fixture.harmony.meter_profile, MeterProfile::StandardTriple);
+
+  ComposeRequest chaconne_request;
+  chaconne_request.form = FormType::Chaconne;
+  chaconne_request.seed = 1;
+  HarnessFixture chaconne_fixture;
+  ASSERT_EQ(buildFormFixture(chaconne_request, &chaconne_fixture), FormDirectorStatus::Ok);
+  EXPECT_EQ(chaconne_fixture.harmony.meter_profile, MeterProfile::SarabandeTriple);
 
   ComposeRequest req4;
   req4.form = FormType::Fugue;
@@ -314,7 +416,7 @@ TEST(FormDirectorFreeCounterpoint, OnReroutesInnerVoiceToSearch) {
   for (std::size_t i = 0; i < off_fx.voice_plan.spans.size(); ++i) {
     const VoiceIntent before = off_fx.voice_plan.spans[i].intent;
     const VoiceIntent after = on_fx.voice_plan.spans[i].intent;
-    if (before == VoiceIntent::TrioVoiceCarrier) {
+    if (before == VoiceIntent::TrioVoiceCarrier && off_fx.voice_plan.spans[i].voice == 1) {
       EXPECT_EQ(after, VoiceIntent::SequentialCounterline);
       ++rerouted;
     } else {
@@ -322,6 +424,22 @@ TEST(FormDirectorFreeCounterpoint, OnReroutesInnerVoiceToSearch) {
     }
   }
   EXPECT_GT(rerouted, 0u);
+}
+
+TEST(FormDirectorFreeCounterpoint, FormsWithoutAnEligibleSecondaryVoiceAreRejected) {
+  for (FormType form : kAllForms) {
+    if (form == FormType::Passacaglia)
+      continue;
+    ComposeRequest req;
+    req.form = form;
+    req.seed = 1;
+    req.enable_free_counterpoint = true;
+    HarnessFixture fixture;
+    fixture.ts_numerator = 7;  // Failure must not publish a partial fixture.
+    EXPECT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::FreeCounterpointUnavailable)
+        << "form " << static_cast<int>(form);
+    EXPECT_EQ(fixture.ts_numerator, 7);
+  }
 }
 
 }  // namespace

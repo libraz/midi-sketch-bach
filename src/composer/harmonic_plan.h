@@ -86,6 +86,16 @@ enum class ModulationType : std::uint8_t {
   CommonTone = 2,
 };
 
+// Register-order policy for a form. Most textures keep the conventional
+// soprano-to-bass ordering at every onset. Organ trio sonatas may exchange the
+// two manual voices briefly, but only at one onset boundary: a held crossing is
+// still a voice-leading error. The Validator additionally requires both notes
+// to originate in TrioVoiceCarrier spans before applying this exception.
+enum class VoiceCrossingPolicy : std::uint8_t {
+  Strict = 0,
+  AllowTrioUpperMomentary = 1,
+};
+
 // Single source of truth for cadence taxonomy: harmony::CadenceType.
 // Re-exported here so composer code keeps the bach::composer::CadenceType
 // spelling without maintaining a parallel enum.
@@ -189,6 +199,14 @@ struct HarmonicPlan {
   std::uint8_t ts_numerator = 4;
   std::uint8_t ts_denominator = 4;
   MeterProfile meter_profile = MeterProfile::StandardTriple;
+  // Form-level register policy. This belongs to the immutable harmonic/form
+  // plan rather than a global validator switch, so a chorale cannot silently
+  // inherit the trio-sonata exception.
+  VoiceCrossingPolicy voice_crossing_policy = VoiceCrossingPolicy::Strict;
+  // Textbook upper-voice spacing is a homophonic/chordal-writing constraint.
+  // Fugue and trio voices are independent contrapuntal lines and may be more
+  // widely separated without becoming an invalid sonority.
+  bool enforce_chordal_upper_voice_spacing = false;
 
   /**
    * @brief Ticks per bar implied by the plan's time signature.
@@ -204,6 +222,12 @@ struct HarmonicPlan {
     return beat * ts_numerator;
   }
 };
+
+/// Fill the diatonic Roman-numeral metadata for every chord whose root belongs
+/// to this plan's home major or minor collection. Existing explicit metadata
+/// is preserved. Returns false when a chromatic chord needs a form-specific
+/// secondary/borrowed declaration rather than a fabricated degree.
+bool annotateDiatonicChordMetadata(HarmonicPlan* plan);
 
 }  // namespace bach::composer
 

@@ -246,10 +246,10 @@ HarnessFixture buildFugueCompleteFixture(int seed) {
   }
 
   // --- Suspension. One genuine 7-6 in V1 across bars 12-13: prep F#5
-  // (78) on the bar-12 downbeat, suspended F#5 (78) held to the bar-13
+  // (78) on the final beat of bar 12, suspended F#5 (78) held to the bar-13
   // downbeat, resolving down a step to E5 (76) on bar-13 beat 2. F#5 (pc 6)
   // is a chord tone of bar-12 V/V (D F# A) and consonant (M6) against the
-  // lowest sounding voice at prep (the V2 NCT A4 = 69), so the preparation
+  // lowest sounding voice at prep (the V2 preparation bass A4 = 69), so the preparation
   // ties cleanly into the dissonance.
   //
   // The figure forms a REAL 7-6 against the bass at bar 13 (V = G major):
@@ -265,7 +265,7 @@ HarnessFixture buildFugueCompleteFixture(int seed) {
   {
     SuspensionPattern sus;
     sus.type = SuspensionType::Sus7_6;
-    sus.preparation_tick = bar_tick(12);
+    sus.preparation_tick = bar_tick(13) - kTicksPerBeat;
     sus.suspension_tick = bar_tick(13);
     sus.resolution_tick = sus.suspension_tick + kTicksPerBeat;
     sus.preparation_pitch = 78;
@@ -286,6 +286,10 @@ HarnessFixture buildFugueCompleteFixture(int seed) {
     add_note(out.material.nct_figures, bar_tick(12) + 480, d8, 62);
     add_note(out.material.nct_figures, bar_tick(12) + 720, d8, 64);
     add_note(out.material.nct_figures, bar_tick(12) + 960, d8, 66);
+    // Final-beat chord tone under the prepared suspension. Besides completing
+    // the bar, this makes the weak-beat preparation an actual consonance
+    // against the lowest sounding voice before the strong-beat dissonance.
+    add_note(out.material.nct_figures, bar_tick(12) + 1440, kTicksPerBeat, 69);
     // Bar 13 (V = G B D). Beats 1-2 sustain the chord ROOT G3 (55) as the
     // bass under the V1 7-6 suspension above (the validator's
     // suspension_seventh_sixth rule measures the lowest sounding voice at the
@@ -3686,7 +3690,7 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     // resolution to A5 (81) on beat 2.
     SuspensionPattern sp;
     sp.type = SuspensionType::Sus7_6;
-    sp.preparation_tick = static_cast<Tick>(subject_bars) * kTicksPerBar;
+    sp.preparation_tick = static_cast<Tick>(subject_bars + 1) * kTicksPerBar - kTicksPerBeat;
     sp.suspension_tick = static_cast<Tick>(subject_bars + 1) * kTicksPerBar;
     sp.resolution_tick = sp.suspension_tick + kTicksPerBeat;
     sp.preparation_pitch = 83;

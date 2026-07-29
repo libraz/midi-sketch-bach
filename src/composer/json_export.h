@@ -69,24 +69,30 @@ std::string_view noteSourceToWire(NoteSource source);
 struct HomepageMeta {
   std::string form_name;          ///< e.g. "fugue" (formTypeToString).
   std::string key_name;           ///< e.g. "G minor" (caller-rendered).
+  Key output_key = Key::C;        ///< Transposition applied only to emitted event pitches.
+  int output_octave_shift = 0;    ///< Output-only whole-octave instrument adjustment.
   std::uint16_t bpm = 0;          ///< Tempo in beats per minute.
   std::uint32_t seed = 0;         ///< Generation seed.
   std::uint32_t total_ticks = 0;  ///< Total length in ticks.
   std::uint16_t total_bars = 0;   ///< Total length in bars.
-  std::string description;        ///< Human-readable, e.g. "Fugue in G minor".
+  std::vector<TempoEvent> tempo_events;
+  std::vector<TimeSignatureEvent> time_signature_events;
+  std::string description;  ///< Human-readable, e.g. "Fugue in G minor".
 };
 
 /// @brief Emit the homepage-facing events JSON consumed by the web SPA.
 ///
 /// The output schema is a frozen contract: top-level form/key/bpm/seed/
-/// total_ticks/total_bars/description, then a "tracks" array of
-/// {name, channel, program, note_count, notes[]} objects. Each note carries
+/// total_ticks/total_bars/description plus tempo and time-signature maps, then a "tracks" array of
+/// {name, channel, program, note_count, notes, control_changes[]} objects. Each note carries
 /// {pitch, velocity, start_tick, duration, voice, source}. Tracks are taken
 /// from result.tracks verbatim (the caller fills name/program via
-/// applyInstrument beforehand). The per-note "source" is resolved by matching
-/// each track note back to result.notes (and its index-parallel
-/// result.provenance) on (voice, start_tick, pitch, duration); duplicate
-/// tuples are consumed in order. An unmatched note defaults to "compose".
+/// applyInstrument beforehand). Event pitches are transposed from the internal
+/// C-major representation to HomepageMeta::output_key. The per-note "source"
+/// is resolved before transposition by matching each track note back to
+/// result.notes (and its index-parallel result.provenance) on
+/// (voice, start_tick, pitch, duration); duplicate tuples are consumed in
+/// order. An unmatched note defaults to "compose".
 ///
 /// @param result Finished compose result (tracks, notes, provenance).
 /// @param meta Caller-rendered metadata.

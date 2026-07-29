@@ -12,6 +12,7 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/motif_ops.h"
 #include "composer/span.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
@@ -54,16 +55,16 @@ MaterialNote materialNote(Tick start, Tick dur, int pitch) {
 }
 
 // Map an arc density tier (0..3) plus a character density bias to a
-// notes-per-beat subdivision for a figuration / variation bar. Tier 0 = eighths
-// (a CF counterpoint never sits on bare quarters under the figuration), tiers
-// 1..3 climb to sixteenths. Clamped into [eighths, sixteenths].
+// notes-per-beat subdivision for a figuration / variation bar. Tier 0 =
+// quarters, tier 1 = eighths, and tiers 2..3 = sixteenths.
 int notesPerBeatFor(const ArcPoint& point, std::int8_t density_bias) {
   int tier = static_cast<int>(point.density_tier) + density_bias;
   if (tier < 0)
     tier = 0;
   if (tier > 3)
     tier = 3;
-  // tier 0 -> 2 (eighths), tier 1 -> 2, tier 2 -> 4, tier 3 -> 4 (sixteenths).
+  if (tier == 0)
+    return 1;
   return tier >= 2 ? 4 : 2;
 }
 
@@ -694,13 +695,21 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   out.harmony.is_minor = (mode == Mode::Minor);
   std::vector<BarChord> bar_chords;
   bar_chords.reserve(static_cast<std::size_t>(bars));
+  const bool picardy = mode == Mode::Minor && detail::usePicardy(req.seed);
   for (int bar = 0; bar < bars; ++bar) {
-    const BarChord chord = chordForCfTone(skeleton[static_cast<std::size_t>(bar)].pitch, mode);
+    BarChord chord = chordForCfTone(skeleton[static_cast<std::size_t>(bar)].pitch, mode);
+    if (bar == bars - 1) {
+      // The structural cantus and bass both resolve to C.  Make the cadence
+      // an actual tonic triad by declaring its quality explicitly; minor
+      // pieces use the deterministic Picardy policy shared by other forms.
+      chord = {0, mode == Mode::Minor && !picardy};
+    }
     bar_chords.push_back(chord);
     ChordEvent ce;
     ce.start_tick = barTick(bar);
     ce.root_pc = chord.root_pc;
     ce.quality = chord.minor ? ChordQuality::Minor : ChordQuality::Major;
+    ce.is_picardy = bar == bars - 1 && picardy;
     out.harmony.chords.push_back(ce);
   }
 
@@ -779,7 +788,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       appendFiguraCortaBar(fig.notes, bar,
                            snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
                                              chord.root_pc, chord.minor),
-                           detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure);
+                           detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure,
+                           profile.prefer_dotted);
     } else {
       // Anchor-contour rotation, phased by the seed so the same section plan
       // lays the contours over different bars across seeds. The phase folds in
@@ -799,7 +809,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
 
   // Cadential landing on the figuration: the running line stops with an
   // eighth-note approach into a held pre-final tone (the cadential trill
-  // site), then a whole-note tonic over the CF's closing tonic. The CF's
+  // site), then a whole-note third over the CF's closing tonic. The CF's
   // penultimate-bar chord harmonizes whatever degree the tune walks there, so
   // the pre-final tone is chosen for consonance: the step above the tonic (the
   // 2nd-degree trill) when the penultimate chord supports it, else the leading
@@ -807,6 +817,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   // to a chord tone (the figuration downbeat rule reads the bar head).
   {
     constexpr int kFigTonic = 72;  // C5: the figuration's closing register.
+    const int closing_third = kFigTonic + ((mode == Mode::Minor && !picardy) ? 3 : 4);
     const BarChord& penult = bar_chords[static_cast<std::size_t>(bars - 2)];
     const detail::ChordSpec penult_spec{penult.root_pc, penult.minor};
     const int third = penult.minor ? 3 : 4;
@@ -826,7 +837,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     } else if (consonant_with_penult(kFigTonic - 1)) {
       prefinal = kFigTonic - 1;  // raised leading tone (B natural in minor too).
     }
-    appendCadentialLanding(fig.notes, barTick(bars - 2), kTicksPerBar, prefinal, kFigTonic, mode,
+    appendCadentialLanding(fig.notes, barTick(bars - 2), kTicksPerBar, prefinal, closing_third,
+                           mode,
                            /*band_lo=*/62, &penult_spec, /*prefer_descending=*/false,
                            /*lift_to_context=*/true);
   }
@@ -1060,10 +1072,17 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   std::vector<MaterialNote> bass_notes;
   bass_notes.reserve(static_cast<std::size_t>(bars) * 4);
   appendWalkingBass(bass_notes, bass_registry, bar_chords, mode);
+  const Tick final_bar_tick = barTick(bars - 1);
+  const Tick final_approach_tick = final_bar_tick - kQuarterDur;
+  for (MaterialNote& note : bass_notes) {
+    if (note.start_tick == final_approach_tick) {
+      note.pitch = 43;  // G2: explicit V-to-I bass motion into the tonic coda.
+      break;
+    }
+  }
   // The bass joins the held final chord: its final bar collapses to one
   // whole-note tonic root instead of walking quarters through the close.
   {
-    const Tick final_bar_tick = barTick(bars - 1);
     int final_root = -1;
     for (const MaterialNote& note : bass_notes) {
       if (note.start_tick == final_bar_tick)
@@ -1078,6 +1097,15 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       bass_notes.push_back(materialNote(final_bar_tick, kTicksPerBar, final_root));
     }
   }
+  ChordEvent approach;
+  approach.start_tick = final_approach_tick;
+  approach.root_pc = 7;
+  approach.quality = ChordQuality::Dominant7;
+  approach.degree = RomanNumeral::V;
+  approach.function = HarmonicFunction::D;
+  approach.has_degree = true;
+  out.harmony.chords.insert(out.harmony.chords.end() - 1, approach);
+  out.harmony.cadences.push_back({final_bar_tick, CadenceType::ImperfectAuthentic});
   TrioVoiceLine bass_line;
   bass_line.voice = 2;
   bass_line.manual = 3;  // documentary (Pedal): V2 = lowest line.
@@ -1116,6 +1144,69 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   bass_span.intent = VoiceIntent::TrioVoiceCarrier;
   bass_span.subdivision = Subdivision::Quarter;
   out.voice_plan.spans.push_back(bass_span);
+
+  // Cadential suspension in the ornamenting top voice. Search the closing
+  // cadence region from the penultimate bar backward; the preceding final beat
+  // prepares the held pitch, which resolves on beat two before a one-beat rest.
+  // The cantus remains immutable while its actual pitches constrain the
+  // inserted top line above V1 and keep every non-bass vertical pair consonant.
+  {
+    auto& bass = out.material.trio_voices.front().notes;
+    const auto& cantus = out.material.cf_embellished;
+    const auto& top = out.material.figuration_sections.front().notes;
+    bool installed = false;
+    for (int bar_offset : {2, 3, 4, 5}) {
+      if (installed || bars <= bar_offset)
+        break;
+      const Tick suspension_tick = barTick(bars - bar_offset);
+      const Tick preparation_tick = suspension_tick - kTicksPerBeat;
+      const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+      const int original_bass_prep = soundingMaterialPitch(bass, preparation_tick);
+      const int held_bass = soundingMaterialPitch(bass, suspension_tick);
+      const int cantus_prep = soundingMaterialPitch(cantus, preparation_tick);
+      const int cantus_sus = soundingMaterialPitch(cantus, suspension_tick);
+      const int cantus_res = soundingMaterialPitch(cantus, resolution_tick);
+      const int top_prep = soundingMaterialPitch(top, preparation_tick);
+      const int top_sus = soundingMaterialPitch(top, suspension_tick);
+      const int top_res = soundingMaterialPitch(top, resolution_tick);
+      const int band_hi = std::min(86, std::max({top_prep, top_sus, top_res}) + 5);
+      for (int distance = 0; distance <= 7 && !installed; ++distance) {
+        for (int direction : {1, -1}) {
+          if (distance == 0 && direction < 0)
+            continue;
+          const int bass_prep = original_bass_prep + direction * distance;
+          if (bass_prep < 30 || bass_prep >= cantus_prep || !detail::inScale(bass_prep, mode) ||
+              !isConsonantPair(cantus_prep, bass_prep))
+            continue;
+          for (SuspensionType type :
+               {SuspensionType::Sus7_6, SuspensionType::Sus4_3, SuspensionType::Sus9_8}) {
+            SuspensionPattern suspension;
+            if (!designUpperSuspension(
+                    type, preparation_tick, suspension_tick, resolution_tick,
+                    /*voice=*/0, static_cast<std::uint8_t>(bass_prep),
+                    static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
+                    static_cast<std::uint8_t>(cantus_prep), static_cast<std::uint8_t>(cantus_sus),
+                    static_cast<std::uint8_t>(cantus_res),
+                    /*band_lo=*/
+                    std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
+                    band_hi, mode, &suspension))
+              continue;
+            for (MaterialNote& note : bass) {
+              if (note.start_tick <= preparation_tick &&
+                  preparation_tick < note.start_tick + note.duration)
+                note.pitch = static_cast<std::uint8_t>(bass_prep);
+              if (note.start_tick == resolution_tick)
+                note.pitch = static_cast<std::uint8_t>(held_bass);
+            }
+            installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+            break;
+          }
+          if (installed)
+            break;
+        }
+      }
+    }
+  }
 
   return out;
 }
@@ -1167,16 +1258,6 @@ BarChord goldbergBarChord(std::uint8_t ground_pitch, Mode mode) {
 // unison). Octave membership is preserved because scaleUp walks the scale.
 int transposeUp(int pitch, int degrees, Mode mode) {
   return degrees <= 0 ? pitch : detail::scaleUp(pitch, degrees, mode);
-}
-
-// Drop a pitch DOWN by whole octaves until it sits at or below `ceiling` (an
-// octave shift preserves the pitch class, so the line stays diatonic). Used to
-// fold a transposed canon-follower line down into the V1 band beneath the V0
-// leader.
-int dropIntoBand(int pitch, int ceiling) {
-  while (pitch > ceiling)
-    pitch -= 12;
-  return pitch;
 }
 
 // Append an aria bar (the m=2 two-half-notes SPECIAL layout from GoldbergVariations): a
@@ -1232,43 +1313,57 @@ void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chor
   });
 }
 
-// Canon leader register anchor. The leader runs near the figuration band so the
-// block-to-block boundary motion stays small (no remote leap), yet the follower
-// -- the leader transposed UP by the canon's imitation degrees and then folded
-// DOWN an octave into the V1 band -- still lands cleanly below the leader (no
-// voice crossing) and above the C2 ground.
+// Canon register anchor. Narrow canons place the dux in this upper band and
+// imitate below; canons at the fifth and wider place the dux one octave lower
+// and imitate above, matching the rising-interval layout without crossing the
+// physical V0/V1 register order.
 constexpr int kCanonLeaderBase = 72;  // C5: aligned with the figuration band.
-// The follower is folded down so it never rises above this ceiling, keeping V1
-// strictly below the C5-region V0 leader AT EVERY TICK: the leader's lowest
-// off-beat is the lower neighbour of its C5 tone (B4 = 71), and the follower's
-// highest off-beat is the upper neighbour of its folded tone, so the ceiling
-// sits a third below B4 (G4 -> upper neighbour at most A4 = 69 < 71).
-constexpr int kCanonFollowerCeiling = 67;  // G4.
 
 // Choose the per-bar leader chord tone for a canon so that the canon stays
 // consonant by construction. The follower at bar b is the leader of bar b-1
 // transposed UP by `imitation_degrees` diatonic degrees; it sounds against the
 // leader of bar b and against the ground of bar b. Because the per-beat scorer
 // samples chord tones, we pick, per bar, a chord tone of that bar's ground chord
-// that minimises the number of dissonant simultaneities (leader-vs-follower and
-// follower-vs-ground), solved exactly with a tiny DP over the (at most three)
+// that minimises the number of dissonant simultaneities (dux-vs-comes and
+// comes-vs-ground), solved exactly with a tiny DP over the (at most three)
 // chord tones per bar. The result is a smooth per-bar leader-tone contour whose
-// 1-bar-delayed transposed echo is consonant -- the consonance is designed INTO
-// the leader, since the follower is a fixed transform of it.
+// 1-bar-delayed, constant-semitone echo is consonant -- the consonance is
+// designed into the dux, since the comes is a fixed transform of it.
 //
 // Returns one MIDI pitch per cycle bar (size 4), all chord tones of the bar's
 // ground chord, in the leader register band.
-std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode,
+std::array<int, 4> designCanonLeader(int imitation_semitones, int pitch_ceiling, Mode mode,
                                      const std::array<std::uint8_t, 4>& ground) {
-  // Three ascending chord tones per cycle bar, in the leader band.
+  // Up to three chord tones per cycle bar in the narrow middle register. Keep
+  // the design in one bounded band so later block-level octave placement can
+  // guarantee V0 > V1 > ground without changing the imitation interval.
   std::array<std::array<int, 3>, 4> tones{};
   for (int bar = 0; bar < 4; ++bar) {
     const BarChord chord = goldbergBarChord(ground[static_cast<std::size_t>(bar)], mode);
-    int cur = snapUpToChordTone(kCanonLeaderBase, chord.root_pc, chord.minor);
-    tones[static_cast<std::size_t>(bar)][0] = cur;
-    tones[static_cast<std::size_t>(bar)][1] = chordToneAbove(cur, chord.root_pc, chord.minor);
-    tones[static_cast<std::size_t>(bar)][2] =
-        chordToneAbove(tones[static_cast<std::size_t>(bar)][1], chord.root_pc, chord.minor);
+    const int third = chord.minor ? 3 : 4;
+    const std::array<int, 3> chord_pcs = {static_cast<int>(chord.root_pc),
+                                          (static_cast<int>(chord.root_pc) + third) % 12,
+                                          (static_cast<int>(chord.root_pc) + 7) % 12};
+    int count = 0;
+    for (int pitch = pitch_ceiling; pitch >= 67 && count < 3; --pitch) {
+      const int pc = pitch % 12;
+      if (pc == chord_pcs[0] || pc == chord_pcs[1] || pc == chord_pcs[2])
+        tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(count++)] = pitch;
+    }
+    // Every diatonic triad has a chord tone in 67..70, but fail closed to the
+    // snapped chord tone if a future ground table violates that design bound.
+    if (count == 0) {
+      int fallback = snapUpToChordTone(67, chord.root_pc, chord.minor);
+      while (fallback > pitch_ceiling)
+        fallback -= 12;
+      tones[static_cast<std::size_t>(bar)][0] = fallback;
+      count = 1;
+    }
+    while (count < 3) {
+      tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(count)] =
+          tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(count - 1)];
+      ++count;
+    }
   }
   // Dissonance cost of a bar's leader-tone choice given the previous bar's choice.
   auto isDiss = [](int pitch_a, int pitch_b) -> bool {
@@ -1283,7 +1378,7 @@ std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode,
     if (isDiss(lead_pitch, ground))
       ++cost;  // (never triggers: a chord tone is consonant with its own root).
     if (has_prev) {
-      const int follower = transposeUp(prev_pitch, imitation_degrees, mode);
+      const int follower = prev_pitch + imitation_semitones;
       if (isDiss(follower, lead_pitch))
         ++cost;
       if (isDiss(follower, ground))
@@ -1340,58 +1435,75 @@ std::array<int, 4> designCanonLeader(int imitation_degrees, Mode mode,
   return chosen;
 }
 
-// Build one canonic variation block (a 4-bar window). The leader holds the
-// DP-chosen consonant chord tone for each cycle bar, articulated as eighths
-// (canons cap at eighths so the two lines stay legible), appended to `leader`.
-// The follower is the SAME line transposed UP by `imitation_degrees` diatonic
-// scale degrees, folded down an octave into the V1 band, DELAYED by one bar, and
-// truncated at the block end (so it sounds during bars 1..3 of the leader's
-// 4-bar window). Because the leader holds one chord tone per bar and the per-bar
-// tones were chosen so the 1-bar-delayed transposed echo is consonant, every
-// sampled beat in the block stays consonant by construction.
-void buildCanonBlock(PassacagliaVariation& leader, std::vector<MaterialNote>& follower_notes,
+// Build one canonic variation block (a 4-bar window). The dux is an identifiable
+// six-note soggetto with an eighth-eighth-quarter rhythm in each half-bar:
+// chord-tone beat onsets are connected by contrary neighbours. motif_ops
+// re-anchors the same source cell in each bar. The comes is an exact
+// constant-semitone copy of that material, delayed one bar and truncated at the
+// block end.
+//
+// Unison through fourth canons imitate below: physical V0 is the dux and V1 the
+// comes. Fifth and wider canons imitate above: physical V1 is the lower dux and
+// V0 the comes. This preserves the validator's V0 > V1 register convention
+// while making the wide canon's musical direction genuinely upward.
+void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
                      int block_start_bar, int imitation_degrees, Mode mode,
                      const std::array<std::uint8_t, 4>& ground) {
-  const std::array<int, 4> leader_tone = designCanonLeader(imitation_degrees, mode, ground);
-  // Articulate one canon bar as eighth pairs: the DP-chosen chord tone on every
-  // BEAT ONSET (the sampled positions, so the consonance designed into the
-  // leader still holds), with each off-beat eighth bending to a diatonic
-  // neighbour. A bar that hammers its tone on all eight eighths reads as a
-  // stalled repeated-note line (the reference corpus repeats a pitch on only
-  // ~3% of transitions). The bend direction alternates with the bar's parity
-  // INSIDE the leader's line; because the follower restates the leader's
-  // previous bar (one-bar delay), the two voices always bend in OPPOSITE
-  // directions at any simultaneous off-beat -- contrary motion by
-  // construction, so the eighth-level motion can never form parallel perfect
-  // intervals (a same-direction figure at a perfect transposition interval
-  // turns the whole bar into parallel fifths/octaves).
-  auto emit_bar = [&](std::vector<MaterialNote>& dst, int bar, int tone, bool bend_up) {
-    const int neighbour =
-        bend_up ? detail::scaleUp(tone, 1, mode) : detail::scaleDown(tone, 1, mode);
-    for (int beat = 0; beat < 4; ++beat) {
-      const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
-      dst.push_back(materialNote(beat_tick, kEighth, tone));
-      dst.push_back(materialNote(beat_tick + kEighth, kEighth, neighbour));
-    }
+  const int imitation_semitones =
+      transposeUp(kCanonLeaderBase, imitation_degrees, mode) - kCanonLeaderBase;
+  const bool imitate_above = imitation_degrees >= 4;
+  const int source_register_shift = imitate_above ? -12 : 12;
+  const int comes_shift = imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
+  const int design_ceiling = imitation_degrees >= 8 ? 70 : 72;
+  const std::array<int, 4> designed =
+      designCanonLeader(imitation_semitones, design_ceiling, mode, ground);
+
+  auto make_soggetto = [&](int tone, bool rising) {
+    const int direction = rising ? 1 : -1;
+    const int first_neighbour =
+        direction > 0 ? detail::scaleUp(tone, 1, mode) : detail::scaleDown(tone, 1, mode);
+    const int second_neighbour =
+        direction > 0 ? detail::scaleDown(tone, 1, mode) : detail::scaleUp(tone, 1, mode);
+    std::vector<MaterialNote> soggetto;
+    soggetto.reserve(6);
+    soggetto.push_back(materialNote(0, kEighth, tone));
+    soggetto.push_back(materialNote(kEighth, kEighth, first_neighbour));
+    soggetto.push_back(materialNote(kTicksPerBeat, kTicksPerBeat, tone));
+    soggetto.push_back(materialNote(kHalf, kEighth, tone));
+    soggetto.push_back(materialNote(kHalf + kEighth, kEighth, second_neighbour));
+    soggetto.push_back(materialNote(kHalf + kTicksPerBeat, kTicksPerBeat, tone));
+    return soggetto;
   };
+
+  std::vector<MaterialNote> dux;
+  dux.reserve(24);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
-    emit_bar(leader.notes, bar, leader_tone[static_cast<std::size_t>(bar % 4)],
-             /*bend_up=*/(local % 2) == 0);
+    const int tone = designed[static_cast<std::size_t>(bar % 4)] + source_register_shift;
+    const auto source = make_soggetto(tone, /*rising=*/(local % 2) == 0);
+    auto anchored = motif_ops::reanchorMelody(source, barTick(bar));
+    dux.insert(dux.end(), anchored.begin(), anchored.end());
   }
-  // Follower: the per-bar leader tone transposed up `imitation_degrees` degrees,
-  // folded into the V1 band ONCE PER BAR (folding per note would split a tone
-  // from its neighbour across the octave seam), delayed by one bar, truncated
-  // at the block end (so it sounds during bars 1..3 of the leader's window).
-  // The bend direction copies the SOURCE bar (a strict canon restates the
-  // leader's figure exactly), which is what makes it opposite to the leader's
-  // concurrent bar.
-  for (int local = 0; local < 3; ++local) {
-    const int src_bar = block_start_bar + local;
-    const int transposed =
-        transposeUp(leader_tone[static_cast<std::size_t>(src_bar % 4)], imitation_degrees, mode);
-    const int folded = dropIntoBand(transposed, kCanonFollowerCeiling);
-    emit_bar(follower_notes, src_bar + 1, folded, /*bend_up=*/(local % 2) == 0);
+
+  std::vector<MaterialNote> comes;
+  comes.reserve(18);
+  const Tick block_end = barTick(block_start_bar + 4);
+  for (const auto& note : dux) {
+    const Tick delayed = note.start_tick + kTicksPerBar;
+    if (delayed >= block_end)
+      continue;
+    MaterialNote copy = note;
+    copy.start_tick = delayed;
+    copy.pitch = static_cast<std::uint8_t>(static_cast<int>(copy.pitch) + comes_shift);
+    comes.push_back(copy);
+  }
+
+  if (imitate_above) {
+    principal.notes.insert(principal.notes.end(), comes.begin(), comes.end());
+    inner_notes.insert(inner_notes.end(), dux.begin(), dux.end());
+  } else {
+    principal.notes.insert(principal.notes.end(), dux.begin(), dux.end());
+    inner_notes.insert(inner_notes.end(), comes.begin(), comes.end());
   }
 }
 
@@ -1447,11 +1559,17 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   std::vector<int> inner_blocks;
 
   // Per-bar harmony (ground cycle, tiled). Drives the variation downbeat anchor.
+  // The final bar is an explicit tonic arrival rather than one more aria-bass
+  // repetition: the latter may end on V or vi depending on the selected ground
+  // variant. Minor-mode cadences retain the deterministic Picardy policy.
+  const BarChord final_cadence_chord = {0, mode == Mode::Minor && !detail::usePicardy(req.seed)};
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = (mode == Mode::Minor);
   for (int bar = 0; bar < bars; ++bar) {
     const BarChord chord =
-        goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
+        bar == bars - 1
+            ? final_cadence_chord
+            : goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
     ChordEvent ce;
     ce.start_tick = barTick(bar);
     ce.root_pc = chord.root_pc;
@@ -1502,6 +1620,13 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         appendAriaBar(var, bar,
                       goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
                       mode, kVarRegisterBase, offset);
+      }
+      if (blk == num_blocks - 1) {
+        // Keep the aria's m=2 rhythm at the da-capo, but turn its final bar
+        // into a dominant-to-tonic upper-voice arrival over the coda bass.
+        // These two notes are both consonant with the final tonic harmony.
+        var.notes[var.notes.size() - 2].pitch = kVarRegisterBase + 7;
+        var.notes.back().pitch = kVarRegisterBase;
       }
       out.material.goldberg_variations.push_back(var);
       continue;
@@ -1567,7 +1692,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           notes_per_beat = 4;
         if (profile.prefer_dotted && notes_per_beat < 4)
           notes_per_beat = 2;  // Noble keeps a moderate, dignified subdivision.
-        var.density_level = notes_per_beat == 4 ? 2 : 1;
+        var.density_level = notes_per_beat == 1 ? 0 : (notes_per_beat == 4 ? 2 : 1);
         const int register_base = kVarRegisterBase + static_cast<int>(point.register_shift);
         // Pattern selection: the climax block and variation 30 are design
         // values (the densest anchored scalar wave); other figuration blocks
@@ -1603,8 +1728,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     // pre-final tone is its diatonic upper step when the penultimate chord
     // supports it, else the step below, else an anticipation.
     if (blk == num_blocks - 1 && !is_aria && !var.notes.empty()) {
-      const BarChord final_chord =
-          goldbergBarChord(ground[static_cast<std::size_t>((bars - 1) % kCycleBars)], mode);
+      const BarChord final_chord = final_cadence_chord;
       const BarChord penult_chord =
           goldbergBarChord(ground[static_cast<std::size_t>((bars - 2) % kCycleBars)], mode);
       auto consonant_with = [&](int pitch, const BarChord& chord) {
@@ -1650,11 +1774,40 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   Span ground_span;
   ground_span.id = next_span_id++;
   ground_span.start_tick = 0;
-  ground_span.end_tick = barTick(bars);
+  const Tick final_bar_tick = barTick(bars - 1);
+  const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
+  ground_span.end_tick = final_approach_tick;
   ground_span.voice = 2;
   ground_span.intent = VoiceIntent::GoldbergBassCarrier;
   ground_span.subdivision = Subdivision::Quarter;
   out.voice_plan.spans.push_back(ground_span);
+
+  // The immutable four-bar aria bass deliberately stops before the final bar.
+  // Its explicit tonic coda resolves the otherwise open V/vi terminal ground.
+  CodaDecl coda;
+  coda.voice = 2;
+  coda.notes.push_back(materialNote(final_approach_tick, kTicksPerBeat, 43));
+  coda.notes.push_back(materialNote(final_bar_tick, kTicksPerBar, ground.front()));
+  out.material.coda_extensions.push_back(std::move(coda));
+
+  Span coda_span;
+  coda_span.id = next_span_id++;
+  coda_span.start_tick = final_approach_tick;
+  coda_span.end_tick = barTick(bars);
+  coda_span.voice = 2;
+  coda_span.intent = VoiceIntent::CodaCarrier;
+  coda_span.subdivision = Subdivision::Quarter;
+  out.voice_plan.spans.push_back(coda_span);
+
+  ChordEvent approach;
+  approach.start_tick = final_approach_tick;
+  approach.root_pc = 7;
+  approach.quality = ChordQuality::Dominant7;
+  approach.degree = RomanNumeral::V;
+  approach.function = HarmonicFunction::D;
+  approach.has_degree = true;
+  out.harmony.chords.insert(out.harmony.chords.end() - 1, approach);
+  out.harmony.cadences.push_back({final_bar_tick, CadenceType::ImperfectAuthentic});
 
   // V0 principal line: one dedicated variation span per block.
   for (int blk = 0; blk < num_blocks; ++blk) {

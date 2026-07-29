@@ -1185,7 +1185,8 @@ void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::
 }
 
 void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
-                          const detail::ChordSpec& chord, detail::Mode mode, int figure) {
+                          const detail::ChordSpec& chord, detail::Mode mode, int figure,
+                          bool dotted) {
   // Chord-tone ladder above the start; the four per-beat anchors are
   // contour-indexed picks from it (see the header note). Contour 0 is the
   // legacy low-amplitude wave (rise two chord tones, fall back one), so the
@@ -1242,6 +1243,14 @@ void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
       // Anchors a third apart: passing tone, then an echappee one step beyond
       // the next anchor, resolving onto it by step at the next attack.
       w2 = (dir > 0) ? detail::scaleUp(to, 1, mode) : detail::scaleDown(to, 1, mode);
+    }
+    if (dotted) {
+      // A written dotted cell, not merely a "dotted feel": the held anchor
+      // occupies three sixteenths and the approach tone completes the beat.
+      addNote(notes, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, 3 * kSixteenth, from);
+      addNote(notes, barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat + 3 * kSixteenth,
+              kSixteenth, w2);
+      continue;
     }
     const int cell[3] = {from, w1, w2};
     for (int sub = 0; sub < 3; ++sub) {

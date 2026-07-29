@@ -148,6 +148,53 @@ TEST(OrnamentPassTest, ExemptVoiceIsNeverOrnamented) {
   }
 }
 
+TEST(OrnamentPassTest, SuspensionCarrierIsNeverOrnamented) {
+  ComposeResult r = twoVoiceFixture(8);
+  std::vector<NoteEvent> before;
+  for (std::size_t i = 0; i < r.notes.size(); ++i) {
+    if (r.notes[i].voice != 0)
+      continue;
+    r.provenance[i].voice_intent = VoiceIntent::SuspensionCarrier;
+    before.push_back(r.notes[i]);
+  }
+
+  applyOrnamentPass(r, baseParams());
+
+  std::vector<NoteEvent> after;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 0)
+      after.push_back(note);
+  }
+  ASSERT_EQ(after.size(), before.size());
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    EXPECT_EQ(after[i].start_tick, before[i].start_tick);
+    EXPECT_EQ(after[i].duration, before[i].duration);
+    EXPECT_EQ(after[i].pitch, before[i].pitch);
+    EXPECT_NE(after[i].source, BachNoteSource::Ornament);
+  }
+}
+
+TEST(OrnamentPassTest, DeclaredCadenceResolutionOnsetStaysPlain) {
+  ComposeResult result = twoVoiceFixture(8);
+  HarmonicPlan plan;
+  plan.cadences.push_back({barToTick(6), CadenceType::ImperfectAuthentic});
+  OrnamentParams params = baseParams();
+  params.harmonic_plan = &plan;
+
+  applyOrnamentPass(result, params);
+
+  std::vector<std::size_t> resolution_notes;
+  for (std::size_t i = 0; i < result.notes.size(); ++i) {
+    if (result.notes[i].voice == 0 && result.notes[i].start_tick == barToTick(6))
+      resolution_notes.push_back(i);
+  }
+  ASSERT_EQ(resolution_notes.size(), 1u);
+  const std::size_t index = resolution_notes.front();
+  EXPECT_EQ(result.notes[index].pitch, 72);
+  EXPECT_EQ(result.notes[index].duration, kTicksPerBeat);
+  EXPECT_EQ(result.provenance[index].source, NoteSource::Compose);
+}
+
 // --- Non-candidate notes (bass) --------------------------------------------
 
 TEST(OrnamentPassTest, LowestVoiceStaysClean) {
@@ -729,6 +776,23 @@ TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {
     EXPECT_EQ(bar, 3) << "density-0 ornament outside cadence window and mid boundary";
   }
   EXPECT_TRUE(cadence_ornament) << "mandatory cadence trill missing";
+}
+
+TEST(OrnamentPassTest, FinalCadenceWindowContainsOneOrnamentGroup) {
+  ComposeResult result = longCadenceNoteFixture();
+  applyOrnamentPass(result, baseParams());
+  std::vector<Tick> authored_onsets;
+  for (std::size_t index = 0; index < result.notes.size(); ++index) {
+    if (result.notes[index].source != BachNoteSource::Ornament ||
+        result.notes[index].start_tick < barToTick(6)) {
+      continue;
+    }
+    authored_onsets.push_back(result.provenance[index].authored_start_tick);
+  }
+  std::sort(authored_onsets.begin(), authored_onsets.end());
+  authored_onsets.erase(std::unique(authored_onsets.begin(), authored_onsets.end()),
+                        authored_onsets.end());
+  EXPECT_EQ(authored_onsets.size(), 1u);
 }
 
 TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {

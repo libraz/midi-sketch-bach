@@ -44,6 +44,30 @@ TEST(RuleHelpersTest, IsStrongBeatDetectsBarDownbeats) {
   EXPECT_FALSE(isStrongBeat(kTicksPerBeat * 2));
 }
 
+TEST(RuleHelpersTest, ActiveChordUsesSafeFallbackForEmptyPlan) {
+  HarmonicPlan plan;
+  const ChordEvent& chord = activeChord(plan, 0);
+  EXPECT_EQ(chord.start_tick, 0u);
+  EXPECT_EQ(chord.root_pc, 0u);
+  EXPECT_EQ(chord.quality, ChordQuality::Major);
+}
+
+TEST(RuleHelpersTest, ActiveChordSelectsLatestChordAtEveryBoundary) {
+  HarmonicPlan plan = cMajor();
+  plan.chords = {
+      {0, 0, ChordQuality::Major},
+      {kTicksPerBeat, 7, ChordQuality::Major},
+      {2 * kTicksPerBeat, 9, ChordQuality::Minor},
+  };
+
+  EXPECT_EQ(activeChord(plan, 0).root_pc, 0u);
+  EXPECT_EQ(activeChord(plan, kTicksPerBeat - 1).root_pc, 0u);
+  EXPECT_EQ(activeChord(plan, kTicksPerBeat).root_pc, 7u);
+  EXPECT_EQ(activeChord(plan, 2 * kTicksPerBeat - 1).root_pc, 7u);
+  EXPECT_EQ(activeChord(plan, 2 * kTicksPerBeat).root_pc, 9u);
+  EXPECT_EQ(activeChord(plan, 3 * kTicksPerBeat).root_pc, 9u);
+}
+
 TEST(RuleHelpersTest, MetricalStrengthRecognizesCommonTimeSecondaryAccent) {
   HarmonicPlan plan = cMajor();
   plan.ts_numerator = 4;
@@ -243,20 +267,34 @@ TEST(RuleHelpersTest, CreatesParallelPerfectDetectsP5InOuterVoices) {
 }
 
 TEST(RuleHelpersTest, CreatesHiddenParallelDetectsSimilarMotionToFifth) {
-  // Hidden P5: both voices move upward; the resulting interval is a
-  // perfect fifth (mod 12 = 7) while the previous interval was not
-  // perfect. P4 is NOT treated as perfect here (only unison/octave/P5).
+  // Hidden P5: both voices move upward, the upper voice leaps, and the
+  // resulting interval is a perfect fifth while the previous interval was
+  // not perfect. P4 is NOT treated as perfect here (only unison/octave/P5).
   //
-  // Upper (voice 0): F5 (77) → G5 (79).
+  // Upper (voice 0): D#5 (75) → G5 (79).
   // Lower (voice 1): A3 (57) → C4 (60).
-  // Prev interval (upper - lower) = 77-57 = 20 → mod 12 = 8 (m6, not perfect).
+  // Prev interval (upper - lower) = 75-57 = 18 → mod 12 = 6 (not perfect).
   // Now interval = 79-60 = 19 → mod 12 = 7 (P5, perfect). Similar motion.
   std::vector<NoteEvent> placed = {
-      makeNote(0, kTicksPerBeat, 77, 0),
+      makeNote(0, kTicksPerBeat, 75, 0),
       makeNote(kTicksPerBeat, kTicksPerBeat, 79, 0),
       makeNote(0, kTicksPerBeat, 57, 1),
   };
   EXPECT_TRUE(createsHiddenParallelPerfect(placed, 1, 60, kTicksPerBeat, 57, 0));
+}
+
+TEST(RuleHelpersTest, CreatesHiddenOctaveWhenPreviousIntervalWasPerfectFifth) {
+  // The shared perfect-motion classifier treats P5 -> P8 by similar motion
+  // with an upper-voice leap as a direct (hidden) octave.  The candidate
+  // pre-filter must use the same definition as the final Validator.
+  std::vector<NoteEvent> placed = {
+      makeNote(0, kTicksPerBeat, 65, 2),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 2),
+  };
+  EXPECT_TRUE(createsHiddenParallelPerfect(placed, /*candidate_voice=*/1,
+                                           /*candidate_pitch=*/79,
+                                           /*cur_tick=*/kTicksPerBeat,
+                                           /*prev_pitch=*/72, /*prev_tick=*/0));
 }
 
 TEST(RuleHelpersTest, CreatesParallelOctaveDetectsLockstepOctaves) {
@@ -322,6 +360,17 @@ TEST(RuleHelpersTest, ForbiddenMelodicLeapAllowsConsonantSteps) {
   EXPECT_FALSE(isForbiddenMelodicLeap(67, 72, plan));  // P4 G->C
   EXPECT_FALSE(isForbiddenMelodicLeap(60, 67, plan));  // P5 C->G
   EXPECT_FALSE(isForbiddenMelodicLeap(60, 72, plan));  // octave
+}
+
+TEST(RuleHelpersTest, ForbiddenMelodicLeapKeepsNaturalMinorDescendingSubtonicLegal) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  // Bb4 -> G4 is a natural-minor descending third. The old fixed
+  // harmonic-minor scale rejected its Bb endpoint as an augmented interval.
+  EXPECT_FALSE(isForbiddenMelodicLeap(70, 67, plan));
+  // Ab4 -> B4 remains the actual harmonic-minor augmented second.
+  EXPECT_TRUE(isForbiddenMelodicLeap(68, 71, plan));
 }
 
 }  // namespace bach::composer::rule_helpers

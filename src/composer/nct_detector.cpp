@@ -3,9 +3,13 @@
 #include <array>
 #include <cstdlib>
 
+#include "composer/rule_helpers.h"
+
 namespace bach::composer::nct_detector {
 
 namespace {
+
+using rule_helpers::activeChord;
 
 std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
   std::uint8_t third_offset = 4;
@@ -38,18 +42,6 @@ std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord) {
       static_cast<std::uint8_t>((chord.root_pc + third_offset) % 12),
       static_cast<std::uint8_t>((chord.root_pc + fifth_offset) % 12),
   };
-}
-
-const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at) {
-  const ChordEvent* current = &plan.chords.front();
-  for (const auto& chord : plan.chords) {
-    if (chord.start_tick <= at) {
-      current = &chord;
-    } else {
-      break;
-    }
-  }
-  return *current;
 }
 
 bool isChordTone(std::uint8_t pitch, const ChordEvent& chord) {
