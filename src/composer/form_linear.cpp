@@ -324,8 +324,12 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       // exactly the pendulum concentration the corpus bigram surface (top
       // entry only ~2.6%) never reaches.
       for (int cell = 0; cell < 4; ++cell) {
-        const int* shape =
-            kCellShapes[(static_cast<int>(req.seed) + static_cast<int>(cycle) + cell) % 3];
+        // The rotation stays in unsigned space: casting the seed to int first
+        // makes every seed at or above 2^31 negative, and a negative remainder
+        // indexes outside the shape table.
+        const int* shape = kCellShapes[(req.seed + static_cast<std::uint32_t>(cycle) +
+                                        static_cast<std::uint32_t>(cell)) %
+                                       3u];
         for (int idx = 0; idx < 4; ++idx) {
           const int degree = shape[idx] < 0 ? reach : shape[idx];
           p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degree, harmonic);
@@ -457,7 +461,10 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // is 4-periodic and would hand every cycle's first bar (the 4-bar grid)
     // the same figure, freezing the cycle-opening contour the rotation
     // exists to vary.
-    const int pref = (static_cast<int>(req.seed) + bar + static_cast<int>(cycle)) % 4;
+    // Unsigned remainder for the same reason as the cell rotation above: a
+    // negative preference would leave every figure branch unmatched.
+    const int pref = static_cast<int>(
+        (req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)) % 4u);
     auto try_figures = [&]() {
       for (int attempt = 0; attempt < 4; ++attempt) {
         switch ((pref + attempt) % 4) {

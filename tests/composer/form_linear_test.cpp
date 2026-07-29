@@ -93,6 +93,29 @@ TEST(FormLinearCello, ValidatesCleanAcrossMatrix) {
   }
 }
 
+// Seeds at or above 2^31 are ordinary input: the WASM and CLI surfaces both
+// draw a full 32-bit random seed when the caller passes 0. Rotations selected
+// from the seed must therefore stay in unsigned space, or the figure and cell
+// tables get indexed with a negative remainder.
+TEST(FormLinearCello, ValidatesCleanForSeedsAboveSignedRange) {
+  constexpr std::array<std::uint32_t, 4> kHighSeeds = {
+      {2147483648u, 2147483651u, 3684138832u, 4294967295u}};
+  for (std::uint32_t seed : kHighSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+        const ComposeResult r = build(FormType::CelloPrelude, seed, minor, bars, nullptr);
+        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_TRUE(r.validation.failures.empty())
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars
+            << " first=" << firstFailure(r);
+        EXPECT_FALSE(r.notes.empty());
+      }
+    }
+  }
+}
+
 TEST(FormLinearCello, IsDeterministic) {
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : kMinorFlags) {
