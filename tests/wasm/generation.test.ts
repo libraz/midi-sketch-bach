@@ -255,4 +255,15 @@ describe('BachGenerator - Generation', () => {
       }
     }
   });
+
+  it('note source should be one of the events.v1 wire values', () => {
+    bach = new BachGenerator();
+    bach.generate({ form: 'fugue', seed: 42 });
+    const events = bach.getEvents();
+    for (const track of events.tracks) {
+      for (const note of track.notes) {
+        expect(['material', 'compose', 'ornament']).toContain(note.source);
+      }
+    }
+  });
 });

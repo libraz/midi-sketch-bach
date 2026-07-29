@@ -70,40 +70,8 @@ export interface NoteEvent {
   source?: NoteSource;
 }
 
-export type NoteSource =
-  | 'unknown'
-  | 'fugue_subject'
-  | 'subject_core'
-  | 'fugue_answer'
-  | 'countersubject'
-  | 'episode_material'
-  | 'free_counterpoint'
-  | 'cantus_fixed'
-  | 'ornament'
-  | 'pedal_point'
-  | 'arpeggio_flow'
-  | 'texture_note'
-  | 'ground_bass'
-  | 'collision_avoid'
-  | 'post_process'
-  | 'chromatic_passing'
-  | 'false_entry'
-  | 'coda'
-  | 'sequence_note'
-  | 'canon_dux'
-  | 'canon_comes'
-  | 'canon_free_bass'
-  | 'goldberg_aria'
-  | 'goldberg_bass'
-  | 'goldberg_figura'
-  | 'goldberg_soggetto'
-  | 'quodlibet_melody'
-  | 'chaconne_bass'
-  | 'prelude_figuration'
-  | 'toccata_gesture'
-  | 'toccata_figure'
-  | 'grand_pause'
-  | 'cadence_approach';
+/** Per-note provenance tag as emitted in the `events` JSON's `source` field. */
+export type NoteSource = 'material' | 'compose' | 'ornament';
 
 /** A track from the event data (JSON keys match C API snake_case). */
 export interface TrackData {
