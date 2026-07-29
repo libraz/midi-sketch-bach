@@ -221,9 +221,9 @@ void printUsage() {
   std::printf("  --form FORM      Form type\n");
   std::printf("  --character CH   Subject character: severe, playful, noble, restless\n");
   std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello, guitar\n");
-  std::printf("  --bpm N          BPM (40-200, default 72)\n");
+  std::printf("  --bpm N          BPM (40-200, default 100)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
-  std::printf("                   Default: medium for fugue, short otherwise\n");
+  std::printf("                   Default: short for every form\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf(
       "  --free-counterpoint  Experimental: generate the inner accompaniment\n"
@@ -486,11 +486,16 @@ int runComposerMode(const CliOptions& opts) {
       bach::composer::buildHarnessFixture(opts.composer_phase, static_cast<int>(opts.seed));
   const auto result = bach::composer::Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
+  // --bpm is a product-only option (rejected alongside --composer-phase), so
+  // opts.bpm is always the surface-neutral zero sentinel here; resolve it to
+  // the shared default rather than handing MidiWriter a rejected tempo of 0.
+  const std::uint16_t effective_bpm = opts.bpm != 0 ? opts.bpm : bach::application::kDefaultBpm;
+
   // Writes generated + provenance JSON next to opts.output. Also used on
   // validation failure so failing spans can be located from the note dump.
-  const auto dump_json = [&result, &opts]() {
+  const auto dump_json = [&result, &opts, effective_bpm]() {
     const std::string json_path = deriveJsonPath(opts.output);
-    const std::vector<bach::TempoEvent> tempo_events = {{0, opts.bpm}};
+    const std::vector<bach::TempoEvent> tempo_events = {{0, effective_bpm}};
     const std::string generated =
         bach::composer::emitGeneratedJson(result.notes, result.validation, tempo_events);
     const std::string provenance = bach::composer::emitProvenanceJson(result.provenance);
@@ -543,7 +548,7 @@ int runComposerMode(const CliOptions& opts) {
   std::printf("Notes:     %zu  Tracks: %zu\n", result.notes.size(), result.tracks.size());
 
   std::vector<bach::TempoEvent> tempo_events;
-  tempo_events.push_back({0, opts.bpm});
+  tempo_events.push_back({0, effective_bpm});
 
   bach::MidiWriter writer;
   if (writer.build(result.tracks, tempo_events, opts.key) != bach::MidiWriterStatus::Ok) {

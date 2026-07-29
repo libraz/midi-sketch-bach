@@ -460,6 +460,24 @@ TEST(CompositionServiceTest, CliDefaultsMatchSharedServiceDefaults) {
   EXPECT_EQ(direct.bpm, 100);
 }
 
+TEST(CompositionServiceTest, ComposerHarnessModeResolvesBpmSentinelToSharedDefault) {
+  // --composer-phase is internal-only and rejects --bpm, so runComposerMode()
+  // must resolve the same zero sentinel that resolveDefaults() handles on the
+  // product path; regression coverage for a bug where it fed 0 straight to
+  // MidiWriter and every seed failed with "Invalid tempo or meter".
+  const std::string path = "/tmp/bach-application-service-composer-mode.mid";
+  std::remove(path.c_str());
+  const std::string command = std::string("\"") + BACH_CLI_PATH +
+                              "\" --composer-phase FugueExposition3v --seed 1 -o " + path +
+                              " >/dev/null 2>/dev/null";
+  ASSERT_EQ(std::system(command.c_str()), 0);
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(path)) << reader.getError();
+  EXPECT_EQ(reader.getParsedMidi().bpm, kDefaultBpm);
+  std::remove(path.c_str());
+}
+
 TEST(CompositionServiceTest, CliJsonSidecarsNeverOverwriteMidiOutput) {
   struct Case {
     const char* output;
