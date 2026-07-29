@@ -41,10 +41,11 @@
         </div>
         <div class="form-group">
           <label>Instrument</label>
-          <select v-model.number="config.instrumentId" :disabled="!ready">
-            <option v-for="inst in instruments" :value="inst.id">{{ inst.name }}</option>
+          <select v-model.number="config.instrumentId"
+            :disabled="!ready || compatibleInstruments.length < 2">
+            <option v-for="inst in compatibleInstruments" :value="inst.id">{{ inst.name }}</option>
           </select>
-          <div v-if="instrumentAutoDetected" class="hint">Auto-detected for this form</div>
+          <div class="hint">{{ instrumentHint }}</div>
         </div>
       </div>
 
@@ -146,6 +147,21 @@
       </div>
     </div>
 
+    <!-- Generation failure -->
+    <div v-if="generationError" class="section">
+      <h2>Generation Failed</h2>
+      <div class="error-panel">
+        <div class="error-message">{{ generationError.message }}</div>
+        <div v-if="generationError.failures.length" class="failure-list">
+          <div class="separator">Validation failures</div>
+          <span v-for="failure in generationError.failures" class="failure-item">
+            {{ failure.kind }} · {{ failure.rule_id }}<span
+              v-if="failure.span_id !== null"> · span {{ failure.span_id }}</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <!-- Result -->
     <div v-if="generationResult" class="section">
       <h2>Result</h2>
@@ -179,6 +195,19 @@
           :class="['track-item', trackBadgeClass]">
           {{ track.name }} ({{ track.note_count }} notes)
         </span>
+      </div>
+      <div v-if="provenanceSummary" class="track-list">
+        <div class="separator">Provenance</div>
+        <span v-for="source in provenanceSummary.sources" :class="['track-item', source.cls]">
+          {{ source.label }} {{ source.count }}
+          <span class="chip-pct">{{ source.pct }}%</span>
+        </span>
+        <div class="meta-line">
+          generated.v1 · {{ provenanceSummary.noteCount }} notes ·
+          {{ provenanceSummary.ticksPerBeat }} ticks/beat ·
+          {{ provenanceSummary.durationTicks }} ticks ·
+          {{ provenanceSummary.ccCount }} expression events
+        </div>
       </div>
     </div>
   </div>
@@ -229,6 +258,29 @@
     const INCOMPATIBLE_CHARACTERS_BY_FORM = {
       'chorale_prelude': new Set(['playful', 'restless']),
       'toccata_and_fugue': new Set(['noble']),
+    };
+
+    // The library rejects an instrument that a form cannot idiomatically carry,
+    // so the selector offers only the compatible set. Mirrors
+    // isInstrumentCompatibleWithForm in the core library.
+    const FORM_INSTRUMENTS = {
+      'fugue': ['organ'],
+      'prelude_and_fugue': ['organ'],
+      'trio_sonata': ['organ'],
+      'chorale_prelude': ['organ'],
+      'toccata_and_fugue': ['organ'],
+      'passacaglia': ['organ'],
+      'fantasia_and_fugue': ['organ'],
+      'cello_prelude': ['cello'],
+      'chaconne': ['violin'],
+      'goldberg_variations': ['harpsichord', 'piano'],
+    };
+
+    // provenance.v1 source tags, in the order they read best on screen.
+    const PROVENANCE_SOURCE_CLASS = {
+      Material: 'track-organ',
+      Compose: 'track-keyboard',
+      Ornament: 'track-solo',
     };
 
     // Instrument name to GM SoundFont mapping
@@ -300,8 +352,10 @@
       bach: null,
       midiData: null,
       eventData: null,
+      generatedData: null,
+      provenanceData: null,
       generationResult: null,
-      instrumentAutoDetected: true,
+      generationError: null,
 
       // Playback
       audioContext: null,
@@ -346,6 +400,17 @@
         // token so an incompatible preset cannot remain selectable.
         return this.characters.filter(c => !incompatible.has(c.name.toLowerCase()));
       },
+      get compatibleInstruments() {
+        const f = this.currentForm;
+        if (!f) return this.instruments;
+        const allowed = FORM_INSTRUMENTS[f.name];
+        if (!allowed) return this.instruments;
+        return this.instruments.filter(inst => allowed.includes(inst.name));
+      },
+      get instrumentHint() {
+        return this.compatibleInstruments.length < 2
+          ? 'Fixed by form' : 'Compatible instruments for this form';
+      },
       get isOrganForm() {
         const f = this.currentForm;
         return f ? ORGAN_FORM_NAMES.has(f.name) : true;
@@ -369,6 +434,31 @@
       },
       get playbackProgress() {
         return this.totalDuration > 0 ? (this.playbackTime / this.totalDuration) * 100 : 0;
+      },
+      get provenanceSummary() {
+        if (!this.provenanceData || !this.generatedData) return null;
+        const counts = new Map();
+        for (const note of this.provenanceData.notes) {
+          counts.set(note.source, (counts.get(note.source) || 0) + 1);
+        }
+        const total = this.provenanceData.notes.length || 1;
+        const sources = [...counts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([label, count]) => ({
+            label,
+            count,
+            pct: ((count / total) * 100).toFixed(1),
+            cls: PROVENANCE_SOURCE_CLASS[label] || 'track-solo',
+          }));
+        const ccCount = (this.eventData?.tracks || [])
+          .reduce((sum, track) => sum + (track.control_changes?.length || 0), 0);
+        return {
+          sources,
+          noteCount: this.generatedData.notes.length,
+          ticksPerBeat: this.generatedData.ticks_per_beat,
+          durationTicks: this.generatedData.duration_ticks,
+          ccCount,
+        };
       },
 
       // Methods
@@ -419,10 +509,17 @@
       },
 
       onFormChange() {
-        const defaultInst = bach.getDefaultInstrumentForForm(this.config.formId);
-        this.config.instrumentId = defaultInst;
-        this.instrumentAutoDetected = true;
+        this.config.instrumentId = bach.getDefaultInstrumentForForm(this.config.formId);
+        this.ensureCompatibleInstrument();
         this.ensureCompatibleCharacter();
+      },
+
+      ensureCompatibleInstrument() {
+        const compatible = this.compatibleInstruments;
+        if (compatible.length === 0) return;
+        if (!compatible.some(inst => inst.id === this.config.instrumentId)) {
+          this.config.instrumentId = compatible[0].id;
+        }
       },
 
       ensureCompatibleCharacter() {
@@ -436,6 +533,7 @@
       generate() {
         try {
           this.generating = true;
+          this.generationError = null;
           this.stop();
           if (this.bach) {
             this.bach.destroy();
@@ -467,6 +565,8 @@
           this.bach.generate(cfg);
           this.midiData = this.bach.getMidi();
           this.eventData = this.bach.getEvents();
+          this.generatedData = this.bach.getGenerated();
+          this.provenanceData = this.bach.getProvenance();
           const info = this.bach.getInfo();
 
           this.totalDuration = this.secondsAtTick(info.totalTicks, this.eventData);
@@ -510,15 +610,18 @@
           this.generationResult = null;
           this.eventData = null;
           this.midiData = null;
+          this.generatedData = null;
+          this.provenanceData = null;
           console.error(e);
-          // Show error inline
-          this.generationResult = {
-            form: 'Error', showVoicesAndCharacter: false,
-            systemBadge: 'badge-solo', systemLabel: 'Error',
-            key: e.message, voices: 0, character: '', instrument: '',
-            bpm: 0, scale: '', seed: 0, bars: 0, duration: '0:00',
-            midiSize: '0 KB', description: '',
-          };
+          // A composer validation failure carries diagnostic.v1; a config
+          // rejection (incompatible character or instrument) has none.
+          let failures = [];
+          try {
+            failures = this.bach?.getDiagnostic()?.validation?.failures || [];
+          } catch (diagError) {
+            console.error(diagError);
+          }
+          this.generationError = { message: e.message, failures };
         } finally {
           this.generating = false;
         }
@@ -697,7 +800,7 @@
       async init() {
         try {
           await bach.init({ wasmPath: '../dist/bach.wasm' });
-          this.version = bach.getVersion ? bach.getVersion() : '0.3.2';
+          this.version = bach.getVersion();
 
           this.forms = bach.getForms();
           this.instruments = bach.getInstruments();

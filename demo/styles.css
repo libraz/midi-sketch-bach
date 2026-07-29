@@ -819,6 +819,44 @@ button:disabled {
 }
 
 /* =========================================================================
+   Generation failure
+   ========================================================================= */
+
+/* The failure plate mirrors the result plate, with the gilt hairline swapped
+   for a crimson one so a rejected request reads at a glance. */
+.error-panel {
+  background:
+    linear-gradient(180deg, rgba(198, 101, 90, 0.05), transparent 90px),
+    var(--ink-750);
+  padding: 18px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-faint);
+  border-top-color: rgba(198, 101, 90, 0.34);
+}
+
+.error-message {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--crimson);
+}
+
+.failure-list {
+  margin-top: 16px;
+}
+.failure-item {
+  display: inline-block;
+  padding: 4px 11px;
+  margin: 3px 5px 3px 0;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-family: var(--font-mono);
+  background: rgba(198, 101, 90, 0.1);
+  color: var(--crimson);
+  border: 1px solid rgba(198, 101, 90, 0.24);
+}
+
+/* =========================================================================
    Badges & tracks
    ========================================================================= */
 
@@ -884,6 +922,21 @@ button:disabled {
   background: rgba(130, 179, 154, 0.1);
   color: var(--solo);
   border-color: rgba(130, 179, 154, 0.24);
+}
+
+/* Share proportion inside a provenance chip — secondary to the count. */
+.chip-pct {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  margin-left: 3px;
+}
+
+.meta-line {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 
 /* =========================================================================
