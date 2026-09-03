@@ -115,14 +115,23 @@ def provenance_rule_counts(
             return False
         lane_key = "satisfied_rules" if bit_index < 64 else "satisfied_rules_high"
         lane = note.get(lane_key)
-        if (
-            not isinstance(lane, int)
-            or isinstance(lane, bool)
-            or lane < 0
-            or lane > (1 << 64) - 1
-        ):
+        # The producer emits each 64-bit lane as a base-10 string (a JSON
+        # number cannot represent the full uint64 range without precision
+        # loss), so accept both the wire string form and a plain int.
+        if isinstance(lane, bool):
             return False
-        return (lane & (1 << (bit_index % 64))) != 0
+        if isinstance(lane, str):
+            try:
+                value = int(lane, 10)
+            except ValueError:
+                return False
+        elif isinstance(lane, int):
+            value = lane
+        else:
+            return False
+        if value < 0 or value > (1 << 64) - 1:
+            return False
+        return (value & (1 << (bit_index % 64))) != 0
 
     out: dict[str, bool] = {}
     for name, bit in required_bits:

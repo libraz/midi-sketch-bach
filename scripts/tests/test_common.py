@@ -51,8 +51,27 @@ class ProvenanceRuleCountsTest(unittest.TestCase):
         payload = {"notes": [{"satisfied_rules": 1}]}
         self.assertEqual(self.counts(payload, [("bit64", 64)]), {"bit64": False})
 
+    def test_accepts_wire_format_string_lanes(self) -> None:
+        # The shipped producer (json_export.cpp) encodes each 64-bit lane as
+        # a base-10 string so JSON consumers do not lose precision above
+        # 2**53; this is the production wire format, not a fallback.
+        payload = {"notes": [{"satisfied_rules": "1"}]}
+        self.assertEqual(self.counts(payload, [("bit0", 0)]), {"bit0": True})
+
+    def test_accepts_high_lane_bit_as_string(self) -> None:
+        payload = {"notes": [{"satisfied_rules_high": str(1 << 63)}]}
+        self.assertEqual(self.counts(payload, [("bit127", 127)]), {"bit127": True})
+
     def test_rejects_malformed_lane_values(self) -> None:
-        malformed_values: tuple[object, ...] = (True, -1, 1 << 64, "1", 1.0, None)
+        malformed_values: tuple[object, ...] = (
+            True,
+            -1,
+            1 << 64,
+            "-1",
+            "not-a-number",
+            1.0,
+            None,
+        )
         for value in malformed_values:
             with self.subTest(value=value):
                 payload = {"notes": [{"satisfied_rules_high": value}]}
