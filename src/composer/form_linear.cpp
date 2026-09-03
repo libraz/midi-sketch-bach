@@ -1002,6 +1002,12 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       pre_landing_indices.push_back(i);
     }
   }
+  // Everything from here to the end of the piece is rewritten after the middle
+  // voice was built against it, so the closing-region repair at the end of this
+  // builder re-judges V1 from this tick on. The landing alone already replaces
+  // V0 from the penultimate bar; the thread below reaches four notes further
+  // back, so the window opens at whichever of the two starts earlier.
+  Tick v1_repair_start = landing_start;
   if (pre_landing_indices.size() >= 4) {
     const int entry = detail::scaleDown(kV0Tonic - 1, 4, mode);
     const int p3 = detail::scaleUp(entry, 4, mode);
@@ -1013,6 +1019,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     v0.notes[pre_landing_indices[n - 3]].pitch = static_cast<std::uint8_t>(p1);
     v0.notes[pre_landing_indices[n - 2]].pitch = static_cast<std::uint8_t>(p2);
     v0.notes[pre_landing_indices[n - 1]].pitch = static_cast<std::uint8_t>(p3);
+    v1_repair_start = v0.notes[pre_landing_indices[n - 4]].start_tick;
   }
   appendCadentialLanding(v0.notes, static_cast<Tick>(bars - 2) * kTicksPerBar, kTicksPerBar,
                          kV0Tonic - 1, kV0Tonic, mode, kV0BandLo);
@@ -1233,8 +1240,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // The final cadence contract is structural V -> I.  The generic
   // anti-parallel substitution above may replace the penultimate bar's last
   // root with another chord tone; restore the dominant root on the exact
-  // approach beat (parallel motion into a declared cadence is evaluated under
-  // the cadence exception).
+  // approach beat. The restoration answers the cadence contract only -- it is
+  // not a licence for perfect motion here, which is heard at a cadence exactly
+  // as it is anywhere else. Any parallel this restoration re-opens is repaired
+  // in the middle voice by the closing-region pass at the end of this builder,
+  // the one voice of the three that is free to move at the cadence.
   const Tick final_approach_tick = static_cast<Tick>(bars - 1) * kTicksPerBar - kTicksPerBeat;
   for (MaterialNote& note : v2.notes) {
     if (note.start_tick != final_approach_tick)
@@ -1333,6 +1343,108 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
         break;
       }
+    }
+  }
+
+  // Closing-region parallel repair on the middle manual. Inside the bar loop V1
+  // is judged against the V0 line as it stood then, but two later passes rewrite
+  // exactly what it was judged against: the pre-landing thread plus
+  // appendCadentialLanding replace V0 from `v1_repair_start` to the end of the
+  // piece, and the cadence contract restores the pedal's dominant root on the
+  // approach beat after that voice's own guard had chosen another chord tone.
+  // Nothing re-reads the result, so the earlier verdicts no longer describe the
+  // shipped notes. Re-judge V1 against the FINAL content of both outer voices
+  // over that window and move it off any surviving perfect parallel: the
+  // soprano's cadential close and the bass's structural V -> I are fixed, so the
+  // middle voice is the one that can travel.
+  {
+    const std::vector<MaterialNote>& upper = out.material.trio_voices[0].notes;
+    const std::vector<MaterialNote>& pedal = out.material.trio_voices[2].notes;
+    std::vector<MaterialNote>& middle = out.material.trio_voices[1].notes;
+    // Same sampling as the in-loop guard: the outer voice just before this
+    // onset and at it, which is the pair the union-onset reading (and the ear)
+    // takes. An outer voice that does not move between the two samples is
+    // oblique and can never be in a parallel.
+    const auto forms_outer_parallel = [&](int line_prev, int cand, Tick tick) {
+      if (line_prev < 0)
+        return false;
+      for (const std::vector<MaterialNote>* outer : {&upper, &pedal}) {
+        const int other_prev = sounding_pitch(*outer, tick > 0 ? tick - 1 : 0);
+        const int other_curr = sounding_pitch(*outer, tick);
+        if (other_prev >= 0 && other_curr >= 0 &&
+            formsPerfectParallel(line_prev, cand, other_prev, other_curr))
+          return true;
+      }
+      return false;
+    };
+    // The cadential suspension installed above hands its three tones to a
+    // SuspensionCarrier span, which replays them from the material pattern; the
+    // authored middle-voice notes inside that window are not what ships, and
+    // the tone the resumed carrier is heard to follow is the pattern's
+    // resolution. Step over the window and continue the chain from that
+    // resolution, so the first repaired note after the splice is judged against
+    // what actually sounds.
+    const auto suspension_at = [&](Tick tick) -> const SuspensionPattern* {
+      for (const SuspensionPattern& pattern : out.material.suspension_patterns) {
+        if (pattern.voice != 1)
+          continue;
+        if (tick >= pattern.preparation_tick && tick < pattern.resolution_tick + 2 * kTicksPerBeat)
+          return &pattern;
+      }
+      return nullptr;
+    };
+    int prev_pitch = -1;  // the middle voice's previous SHIPPED pitch.
+    for (std::size_t idx = 0; idx < middle.size(); ++idx) {
+      MaterialNote& note = middle[idx];
+      const SuspensionPattern* suspended = suspension_at(note.start_tick);
+      if (suspended != nullptr) {
+        prev_pitch = static_cast<int>(suspended->resolution_pitch);
+        continue;
+      }
+      const int design = static_cast<int>(note.pitch);
+      if (note.start_tick < v1_repair_start ||
+          !forms_outer_parallel(prev_pitch, design, note.start_tick)) {
+        prev_pitch = design;
+        continue;
+      }
+      const std::size_t bar_index =
+          std::min(static_cast<std::size_t>(note.start_tick / kTicksPerBar), chords.size() - 1);
+      const BarChord& bar_chord = chords[bar_index];
+      const int root_pc = bar_chord.root_pc % 12;
+      const int third_semi = bar_chord.minor ? 3 : 4;
+      const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
+      const int next_pitch =
+          (idx + 1 < middle.size()) ? static_cast<int>(middle[idx + 1].pitch) : -1;
+      const Tick next_tick = (idx + 1 < middle.size()) ? middle[idx + 1].start_tick : 0;
+      const int upper_now = sounding_pitch(upper, note.start_tick);
+      const int pedal_now = sounding_pitch(pedal, note.start_tick);
+      // Nearest in-band triad tone that clears BOTH outer voices on the way in
+      // AND on the way out (a repair that hands the parallel to the following
+      // onset has repaired nothing), keeping the pedal < middle < upper order
+      // the trio is read in at this onset. When nothing clears, the design tone
+      // stands: one consonant parallel beats a non-chord tone in the middle of
+      // a cadence.
+      int best = design;
+      int best_dist = 1 << 20;
+      for (int tone = 0; tone < 3; ++tone) {
+        const int low = kV1BandLo + (((triad_pc[tone] - kV1BandLo) % 12) + 12) % 12;
+        for (int cand = low; cand <= kV1BandHi; cand += 12) {
+          if (cand == design || (upper_now >= 0 && cand >= upper_now) ||
+              (pedal_now >= 0 && cand <= pedal_now))
+            continue;
+          if (forms_outer_parallel(prev_pitch, cand, note.start_tick))
+            continue;
+          if (next_pitch >= 0 && forms_outer_parallel(cand, next_pitch, next_tick))
+            continue;
+          const int dist = std::abs(cand - design);
+          if (dist < best_dist) {
+            best_dist = dist;
+            best = cand;
+          }
+        }
+      }
+      note.pitch = static_cast<std::uint8_t>(best);
+      prev_pitch = best;
     }
   }
 

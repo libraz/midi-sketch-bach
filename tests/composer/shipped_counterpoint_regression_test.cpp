@@ -338,7 +338,7 @@ struct FormCeiling {
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     {FormType::Fugue, 16, 9},
     {FormType::PreludeAndFugue, 8, 3},
-    {FormType::TrioSonata, 127, 97},
+    {FormType::TrioSonata, 87, 97},
     {FormType::ChoralePrelude, 44, 77},
     {FormType::ToccataAndFugue, 73, 35},
     {FormType::Passacaglia, 77, 28},
