@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 
 #include "composer/chord_voicing.h"
 #include "composer/motif_ops.h"
@@ -82,6 +85,72 @@ bool resolvesLeadingTone(std::uint8_t leading_pitch, std::uint8_t resolution_pit
 bool isPerfectFifth(int semitones) {
   return std::abs(semitones) % 12 == 7;
 }
+
+struct RuleGeometryEntry {
+  std::string_view rule_id;
+  RuleGeometry geometry;
+};
+
+// Geometry of every counterpoint rule routed through the finding recorder.
+//
+// A LINEAR rule describes one voice's own melodic succession. When every note
+// in the finding is replayed verbatim from declared material, the composer
+// chose none of those intervals and cannot repair them without editing the
+// material itself, so exempting the finding is sound.
+//
+// A VERTICAL rule describes a relation between voices sounding together, or
+// between a voice and the harmonic plan it was placed against. The composer
+// chose that alignment even when it chose none of the pitches, so immutability
+// of the operands never exempts it. strong_beat_dissonance and
+// unprepared_dissonance report single-voice operands yet are judged against the
+// harmonic plan the material was aligned to, which makes them vertical too.
+//
+// Written out per rule on purpose: the number of operands a call site passes
+// says nothing about the geometry, because two notes of one voice and two notes
+// of two voices look identical there. Kept in rule_id order so the static
+// assertions below can reject a duplicate or a misplaced entry.
+constexpr RuleGeometryEntry kRuleGeometryTable[] = {
+    {"augmented_melodic", RuleGeometry::Linear},
+    {"consecutive_leaps", RuleGeometry::Linear},
+    {"cross_relation", RuleGeometry::Vertical},
+    {"diminished_melodic", RuleGeometry::Linear},
+    {"doubling_no_leading_tone", RuleGeometry::Vertical},
+    {"doubling_no_seventh", RuleGeometry::Vertical},
+    {"hidden_parallel_fifth", RuleGeometry::Vertical},
+    {"hidden_parallel_octave", RuleGeometry::Vertical},
+    {"invertible_at_octave", RuleGeometry::Vertical},
+    {"leading_tone_resolution", RuleGeometry::Linear},
+    {"parallel_fifth", RuleGeometry::Vertical},
+    {"parallel_octave", RuleGeometry::Vertical},
+    {"strong_beat_dissonance", RuleGeometry::Vertical},
+    {"tritone_melodic", RuleGeometry::Linear},
+    {"unprepared_dissonance", RuleGeometry::Vertical},
+    {"vertical_dissonance", RuleGeometry::Vertical},
+};
+
+constexpr std::size_t kRuleGeometryCount =
+    sizeof(kRuleGeometryTable) / sizeof(kRuleGeometryTable[0]);
+
+constexpr bool ruleGeometryTableIsOrdered() {
+  for (std::size_t idx = 1; idx < kRuleGeometryCount; ++idx) {
+    if (!(kRuleGeometryTable[idx - 1].rule_id < kRuleGeometryTable[idx].rule_id))
+      return false;
+  }
+  return true;
+}
+
+constexpr bool ruleGeometryTableIsClassified() {
+  for (std::size_t idx = 0; idx < kRuleGeometryCount; ++idx) {
+    if (kRuleGeometryTable[idx].geometry == RuleGeometry::Unclassified)
+      return false;
+  }
+  return true;
+}
+
+static_assert(ruleGeometryTableIsOrdered(),
+              "kRuleGeometryTable must be sorted by rule_id and free of duplicates");
+static_assert(ruleGeometryTableIsClassified(),
+              "every kRuleGeometryTable entry must name a real geometry");
 
 class VoiceOnsetIndex {
  public:
@@ -319,6 +388,14 @@ SubjectFeatures computeSubjectFeatures(const std::vector<MaterialNote>& subject)
 
 }  // namespace
 
+RuleGeometry counterpointRuleGeometry(const std::string& rule_id) {
+  for (const RuleGeometryEntry& entry : kRuleGeometryTable) {
+    if (entry.rule_id == rule_id)
+      return entry.geometry;
+  }
+  return RuleGeometry::Unclassified;
+}
+
 TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   TextureMetrics metrics;
   if (notes.empty()) {
@@ -528,6 +605,19 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
   }
+  // Per-rule tally of every counterpoint match. At most one entry per rule, so
+  // the linear probe stays cheaper than a map node allocation on a path that
+  // runs only when a rule actually matched.
+  const auto observationFor = [&report](const std::string& rule_id) -> RuleObservation& {
+    for (RuleObservation& entry : report.observations) {
+      if (entry.rule_id == rule_id)
+        return entry;
+    }
+    RuleObservation created;
+    created.rule_id = rule_id;
+    report.observations.push_back(created);
+    return report.observations.back();
+  };
   // Final-score audits always evaluate fixed authored material. A violation
   // owned entirely by immutable declarations is diagnostic information (the
   // composer cannot repair it in this pass); any generated/ornamented side
@@ -542,15 +632,26 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                    provenance[index].source == NoteSource::Ornament);
       all_authored = all_authored && index < authored_context.size() && authored_context[index];
     }
-    // Candidate generation cannot repair an immutable carrier pair. Keep that
-    // exemption confined to Generation; FinalScore still evaluates the rule
+    // Count the match before any routing decision, so a finding that never
+    // reaches `failures` is still visible to whoever reads the report.
+    RuleObservation& observation = observationFor(finding.rule_id);
+    ++observation.total;
+    // Candidate generation cannot repair an immutable carrier pair, and
+    // Material and Ornament are both fixed inputs from the composer's point of
+    // view: Material is replayed verbatim, and Ornament sub-notes decorate a
+    // Material tone in a pass that runs after validation, so a re-run must not
+    // turn a suppressed Material finding into a failure just because the tone
+    // now carries trill sub-notes. This is the ONLY spelling of that exemption;
+    // it stays confined to Generation, and FinalScore still evaluates the rule
     // and records fully authored findings as informational evidence.
     if (!audit_final_score && all_fixed) {
+      ++observation.exempted;
       return;
     }
     if (all_authored) {
       report.informational.push_back(finding);
     } else {
+      ++observation.gated;
       report.failures.push_back(finding);
     }
   };
@@ -784,7 +885,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         std::uint8_t pa = onset_index.pitchAt(voices[va], t);
         std::uint8_t pb = onset_index.pitchAt(voices[vb], t);
         if (pa == 0 || pb == 0) {
+          // A rest in either voice breaks the succession: the pitches before
+          // the gap and after it are not consecutive motion, so carrying
+          // prev_pa/prev_pb across would report a parallel that nobody hears.
           prev_interval = INT32_MIN;
+          prev_pa = 0;
+          prev_pb = 0;
           continue;
         }
         int interval = static_cast<int>(pa) - static_cast<int>(pb);
@@ -807,16 +913,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
               harmonic_plan.voice_crossing_policy == VoiceCrossingPolicy::AllowTrioUpperMomentary &&
               is_trio_upper_pair && prev_interval >= 0;
           if (!allow_momentary_trio_exchange) {
-            SpanId fail_span = kInvalidSpanId;
-            for (std::size_t k = 0; k < notes.size(); ++k) {
-              if (notes[k].voice == voices[va] && notes[k].start_tick == t) {
-                if (k < provenance.size())
-                  fail_span = provenance[k].span_id;
-                break;
-              }
-            }
+            // Blame the span of the note that sounds at t in the crossing
+            // voice; a voice sustaining across t has no onset there, so
+            // requiring one would report an invalid span.
             ValidationFailure failure;
-            failure.span_id = fail_span;
+            failure.span_id =
+                upper_index < provenance.size() ? provenance[upper_index].span_id : kInvalidSpanId;
             failure.rule_id = "voice_crossing";
             report.failures.push_back(failure);
           }
@@ -831,55 +933,24 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const std::size_t current_upper_index = onset_index.soundingAt(voices[va], t);
         const bool current_is_cadence =
             hasRuleBit(provenance, current_lower_index, RuleBit::CadenceCellCommitted);
-        // Material and Ornament sources are both fixed inputs from the
-        // composer's point of view: Material is replayed verbatim, and
-        // Ornament sub-notes are post-pass decoration of a Material tone (the
-        // pass runs after validation; a re-run must not turn a suppressed
-        // Material parallel into a failure just because the tone now carries
-        // trill sub-notes).
-        auto is_fixed_source = [&](std::size_t idx) {
-          return idx < provenance.size() && (provenance[idx].source == NoteSource::Material ||
-                                             provenance[idx].source == NoteSource::Ornament);
-        };
-        const bool current_is_material = is_fixed_source(current_lower_index);
-        const bool upper_is_material = is_fixed_source(current_upper_index);
-        // Suppress the parallel only when BOTH voices are fixed sources: the
-        // composer cannot edit fixed inputs (mirrors the P10 invertible and
-        // vertical-dissonance both_material gates). When a Compose upper
-        // voice runs parallels against a Material lower voice (or vice
-        // versa) the violation is real and composer-fixable, so it fires.
-        const bool both_material = upper_is_material && current_is_material;
-        const bool parallel_context_exempt = !audit_final_score && both_material;
-        if (strict_parallel && !current_is_cadence && !parallel_context_exempt) {
-          // Find the span id of voices[vb]'s note starting at t (failing
-          // span is the lower voice by convention).
-          SpanId fail_span = kInvalidSpanId;
-          for (std::size_t k = 0; k < notes.size(); ++k) {
-            if (notes[k].voice == voices[vb] && notes[k].start_tick == t) {
-              if (k < provenance.size())
-                fail_span = provenance[k].span_id;
-              break;
-            }
-          }
+        // The failing span is the lower voice by convention. Take it from the
+        // note that actually SOUNDS at t: a voice sustaining across t has no
+        // onset there, and looking for one would blame an invalid span.
+        const SpanId lower_span = current_lower_index < provenance.size()
+                                      ? provenance[current_lower_index].span_id
+                                      : kInvalidSpanId;
+        if (strict_parallel && !current_is_cadence) {
           ValidationFailure failure;
-          failure.span_id = fail_span;
+          failure.span_id = lower_span;
           failure.rule_id = perfect_motion == PerfectMotionKind::ParallelFifth ? "parallel_fifth"
                                                                                : "parallel_octave";
           recordCounterpointFinding(failure, {current_lower_index, current_upper_index});
         }
         const bool hidden_parallel = perfect_motion == PerfectMotionKind::HiddenFifth ||
                                      perfect_motion == PerfectMotionKind::HiddenOctave;
-        if (hidden_parallel && !current_is_cadence && !parallel_context_exempt) {
-          SpanId fail_span = kInvalidSpanId;
-          for (std::size_t k = 0; k < notes.size(); ++k) {
-            if (notes[k].voice == voices[vb] && notes[k].start_tick == t) {
-              if (k < provenance.size())
-                fail_span = provenance[k].span_id;
-              break;
-            }
-          }
+        if (hidden_parallel && !current_is_cadence) {
           ValidationFailure failure;
-          failure.span_id = fail_span;
+          failure.span_id = lower_span;
           failure.rule_id = perfect_motion == PerfectMotionKind::HiddenFifth
                                 ? "hidden_parallel_fifth"
                                 : "hidden_parallel_octave";
@@ -2848,6 +2919,14 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
   }
+
+  // Observations are accumulated in first-match order, which depends on the
+  // rule evaluation order above. Sort by rule id so the exported tally is a
+  // function of the piece alone.
+  std::sort(report.observations.begin(), report.observations.end(),
+            [](const RuleObservation& lhs, const RuleObservation& rhs) {
+              return lhs.rule_id < rhs.rule_id;
+            });
 
   if (!report.failures.empty()) {
     report.status = ValidationStatus::FailedSpan;

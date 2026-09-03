@@ -1,6 +1,7 @@
 #ifndef BACH_COMPOSER_VALIDATOR_H
 #define BACH_COMPOSER_VALIDATOR_H
 
+#include <string>
 #include <vector>
 
 #include "composer/harmonic_plan.h"
@@ -48,6 +49,20 @@ class Validator {
                             const Material& material = Material{},
                             ValidationScope scope = ValidationScope::Generation) const;
 };
+
+/**
+ * @brief Look up the geometry of a counterpoint rule.
+ *
+ * The classification lives in one hand-written table in validator.cpp; the
+ * number of operands a rule reports is not a usable proxy for it (two notes of
+ * one voice and two notes of two voices are indistinguishable at the call
+ * site).
+ *
+ * @param rule_id Stable rule token as carried by ValidationFailure::rule_id.
+ * @return The rule's geometry, or RuleGeometry::Unclassified when the table
+ *         has no entry for `rule_id`.
+ */
+RuleGeometry counterpointRuleGeometry(const std::string& rule_id);
 
 /**
  * @brief Compute the piece-level texture metrics over a note list.

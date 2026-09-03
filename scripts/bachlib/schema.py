@@ -7,7 +7,7 @@ actually used by ``bach-mcp/schema/generated.v1.json``:
     - object: type, required, additionalProperties=false, properties
     - array : type, items
     - integer: type, minimum, maximum
-    - string : type, const
+    - string : type, const, enum
 
 External ``jsonschema`` package is intentionally NOT required so this
 script stays usable from CI without extra pip installs.
@@ -85,6 +85,10 @@ def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) ->
     if "const" in schema:
         if node != schema["const"]:
             errors.append(f"{path}: expected const {schema['const']!r}, got {node!r}")
+
+    if "enum" in schema:
+        if node not in schema["enum"]:
+            errors.append(f"{path}: {node!r} is not one of {schema['enum']!r}")
 
 
 def _add_arguments(parser) -> None:

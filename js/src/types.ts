@@ -121,6 +121,30 @@ export interface DiagnosticData {
   provenance: ProvenanceNote[];
 }
 
+/**
+ * One counterpoint rule's tally for a generated piece.
+ *
+ * Counted before the validator decides how to route a finding, so a rule that
+ * never produced a failure is still visible. `total - gated - exempted` is the
+ * number of findings recorded as informational.
+ */
+export interface CounterpointObservation {
+  /** Stable rule token, e.g. "parallel_fifth". */
+  rule_id: string;
+  /**
+   * `vertical` for a relation between voices sounding together (or between a
+   * voice and the harmonic plan), `linear` for one voice's own melodic
+   * succession. `unclassified` means the producer has no entry for the rule.
+   */
+  geometry: 'linear' | 'vertical' | 'unclassified';
+  /** Times the rule matched, before any routing decision. */
+  total: number;
+  /** Findings routed to validation failures. */
+  gated: number;
+  /** Findings suppressed because every operand is an immutable input. */
+  exempted: number;
+}
+
 /** generated.v1 document from a successful generation. */
 export interface GeneratedData {
   schema_version: 'generated.v1';
@@ -134,6 +158,8 @@ export interface GeneratedData {
     voice: number;
     velocity: number;
   }>;
+  /** Always present; empty when no counterpoint rule matched. */
+  counterpoint_observations: CounterpointObservation[];
 }
 
 /** provenance.v1 document from a successful generation. */

@@ -75,6 +75,37 @@ struct TextureMetrics {
   std::vector<VoiceTextureMetrics> voices;
 };
 
+// Which musical relation a counterpoint rule constrains.
+//
+// A LINEAR rule describes one voice's own melodic succession. When every note
+// in a finding is replayed verbatim from declared material, the composer chose
+// none of those intervals and cannot repair them without editing the material
+// itself, so exempting the finding is sound.
+//
+// A VERTICAL rule describes a relation between voices sounding together, or
+// between a voice and the harmonic plan it was placed against. The composer
+// chose that alignment even when it chose none of the pitches, so immutability
+// of the operands never exempts it.
+enum class RuleGeometry : std::uint8_t {
+  // Not a musical classification: a rule id reached the finding recorder
+  // without an entry in the rule-geometry table.
+  Unclassified = 0,
+  Linear = 1,
+  Vertical = 2,
+};
+
+// Per-rule tally of counterpoint findings for one validation pass.
+//
+// The counts are taken before any routing decision, so a finding that never
+// becomes a failure is still countable. `total - gated - exempted` is the
+// number of findings recorded as informational.
+struct RuleObservation {
+  std::string rule_id;
+  int total = 0;     // times the rule matched, before any routing decision
+  int gated = 0;     // routed to failures
+  int exempted = 0;  // suppressed because every operand is an immutable input
+};
+
 // Validator report for one pipeline pass over one piece.
 //
 // `status == Ok` && `failures.empty()` is the only valid success shape.
@@ -89,6 +120,13 @@ struct ValidationReport {
   // strict octave-invertibility of a countersubject), so they can be reported
   // for provenance/audit without spuriously failing established pieces.
   std::vector<ValidationFailure> informational;
+  // Counterpoint rule tallies. Unlike `informational`, which is recorded only
+  // for fully authored findings and never leaves the process, this channel is
+  // always populated and always exported (generated.v1
+  // `counterpoint_observations`), so a rule that is exempted from `failures`
+  // stays countable outside the composer. One entry per rule that matched at
+  // least once, sorted by `rule_id`.
+  std::vector<RuleObservation> observations;
   std::vector<SubjectFeatures> subject_features;
   std::vector<StreamSegregationSpan> stream_segregation;
   std::vector<TextureMetrics> texture_metrics;

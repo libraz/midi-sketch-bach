@@ -34,6 +34,7 @@ export type {
   BachInfo,
   CharacterId,
   CharacterName,
+  CounterpointObservation,
   DiagnosticData,
   DiagnosticFailure,
   DurationScaleId,

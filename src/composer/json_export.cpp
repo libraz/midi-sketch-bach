@@ -7,6 +7,7 @@
 #include <string_view>
 #include <tuple>
 
+#include "composer/validator.h"
 #include "core/json_helpers.h"
 #include "core/pitch_utils.h"
 
@@ -42,6 +43,18 @@ std::string_view validationStatusToWire(ValidationStatus status) {
       return "failed_seed";
   }
   return "failed_span";
+}
+
+std::string_view ruleGeometryToWire(RuleGeometry geometry) {
+  switch (geometry) {
+    case RuleGeometry::Linear:
+      return "linear";
+    case RuleGeometry::Vertical:
+      return "vertical";
+    case RuleGeometry::Unclassified:
+      return "unclassified";
+  }
+  return "unclassified";
 }
 
 std::string_view failKindToWire(FailKind kind) {
@@ -167,6 +180,26 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
     w.value(static_cast<int>(notes[i].voice));
     w.key("velocity");
     w.value(static_cast<int>(notes[i].velocity));
+    w.endObject();
+  }
+  w.endArray();
+  // Counterpoint tallies ride on the root rather than inside "info": they are
+  // emitted unconditionally, as an empty array when no rule matched, so a
+  // consumer can tell "measured, nothing found" from "producer did not measure".
+  w.key("counterpoint_observations");
+  w.beginArray();
+  for (const auto& observation : validation.observations) {
+    w.beginObject();
+    w.key("rule_id");
+    w.value(std::string_view(observation.rule_id));
+    w.key("geometry");
+    writeStr(w, ruleGeometryToWire(counterpointRuleGeometry(observation.rule_id)));
+    w.key("total");
+    w.value(observation.total);
+    w.key("gated");
+    w.value(observation.gated);
+    w.key("exempted");
+    w.value(observation.exempted);
     w.endObject();
   }
   w.endArray();
