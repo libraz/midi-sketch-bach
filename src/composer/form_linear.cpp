@@ -622,8 +622,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // intervals from chaining into parallel fifths/octaves.
   auto appendScalarBar = [&](std::vector<MaterialNote>& dst, int& prev_anchor, int band_lo,
                              int band_hi, int bar, int notes_per_beat, bool dotted, int shape,
-                             int zig_dir, const std::vector<MaterialNote>* guard_line,
-                             const ThemeToneRegistry* guard_registry, int& prev_emitted) {
+                             int zig_dir, const ThemeToneRegistry* guard_registry,
+                             int& prev_emitted) {
     const BarChord& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
@@ -637,25 +637,18 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // centres an octave apart (C5 / C4), two same-direction cells chain
     // parallel octaves at every shared sub-beat onset (the dense-character
     // sweeps surfaced up to 19 per piece). Each candidate tone is re-judged
-    // against the guard line's sounding pitches at this voice's last emitted
-    // onset and now -- the exact pair the union-onset detector (and the ear)
-    // samples.
-    auto guard_sounding = [&](Tick t) -> int {
-      if (guard_registry != nullptr)
-        return guard_registry->soundingPitchInVoice(0, t);
-      if (guard_line == nullptr)
-        return -1;
-      for (auto it = guard_line->rbegin(); it != guard_line->rend(); ++it) {
-        if (it->start_tick <= t && t < it->start_tick + it->duration)
-          return static_cast<int>(it->pitch);
-      }
-      return -1;
+    // against the guard voice's registered sounding pitches at this voice's
+    // last emitted onset and now -- the exact pair the union-onset detector
+    // (and the ear) samples. The guard is inactive for the voice built first
+    // in the bar, which has nothing to be judged against yet.
+    auto guard_sounding = [&](Tick tick) -> int {
+      return guard_registry->soundingPitchInVoice(0, tick);
     };
     // The union-onset pair at our onset `tick` is (guard just before tick ->
     // guard at tick): when the guard does not onset at `tick` the two samples
     // are equal, its motion is zero, and oblique motion is always allowed.
     auto forms_guard_parallel = [&](int cand, Tick tick) {
-      if (guard_line == nullptr || prev_emitted < 0)
+      if (guard_registry == nullptr || prev_emitted < 0)
         return false;
       const int other_curr = guard_sounding(tick);
       const int other_prev = guard_sounding(tick - 1);
@@ -975,8 +968,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
 
     const std::size_t v0_begin = v0.notes.size();
     appendScalarBar(v0.notes, v0_anchor, kV0BandLo, kV0BandHi, bar, v0_notes, /*dotted=*/false,
-                    v0_shape, /*zig_dir=*/1, /*guard_line=*/nullptr, /*guard_registry=*/nullptr,
-                    v0_prev_emitted);
+                    v0_shape, /*zig_dir=*/1, /*guard_registry=*/nullptr, v0_prev_emitted);
     // Replay V0's placed tones through the shared registry before building V1.
     // This is intentionally span-local: the manual carrier spans cover the
     // whole form, while each bar appends one immutable slice to the same
@@ -989,7 +981,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // V1 is built after V0 within the bar, so it reads the registered V0 line
     // at every onset to avoid audible perfect parallels.
     appendScalarBar(v1.notes, v1_anchor, kV1BandLo, kV1BandHi, bar, v1_notes, v1_dotted, v1_shape,
-                    /*zig_dir=*/-1, /*guard_line=*/nullptr, &manual_registry, v1_prev_emitted);
+                    /*zig_dir=*/-1, &manual_registry, v1_prev_emitted);
   }
 
   // Cadential landing on the top line: an eighth-note approach into a held
@@ -1303,6 +1295,19 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           upper_window_min = std::min(upper_window_min, static_cast<int>(note.pitch));
       }
       const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
+      if (middle_before < 0 || middle_after < 0)
+        continue;
+      // The suspension replaces a short window inside an otherwise continuous
+      // manual line, so it must be designed in the register the middle voice
+      // actually occupies at the two splice points. Without this the design
+      // search -- which walks the band downward and takes the highest formula
+      // that fits -- returns a valid 7-6/4-3/9-8 an octave above the resuming
+      // carrier, which is still an audible remote leap and is discarded, losing
+      // the cadential suspension entirely.
+      const int splice_lo = std::max(middle_before, middle_after) - 12;
+      const int splice_hi = std::min(middle_before, middle_after) + 12;
+      const int design_lo = std::max(std::max(bass_prep, held_bass) + 1, splice_lo);
+      const int design_hi = std::min(ceiling, splice_hi);
       for (SuspensionType type :
            {SuspensionType::Sus7_6, SuspensionType::Sus4_3, SuspensionType::Sus9_8}) {
         SuspensionPattern suspension;
@@ -1312,14 +1317,12 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                 static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
                 static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                 static_cast<std::uint8_t>(upper_res),
-                /*band_lo=*/std::max(bass_prep, held_bass) + 1, ceiling, mode, &suspension))
+                /*band_lo=*/design_lo, design_hi, mode, &suspension))
           continue;
-        // The suspension replaces a short window inside an otherwise
-        // continuous manual line.  Keep both splice points within an octave;
-        // a valid 7-6/4-3/9-8 formula in the wrong register is still an
-        // audible remote leap when the original carrier resumes.
-        if (middle_before < 0 || middle_after < 0 ||
-            std::abs(static_cast<int>(suspension.preparation_pitch) - middle_before) > 12 ||
+        // Safety net for the register clamp above: the resolution steps one or
+        // two semitones below the suspended tone, so it can still fall just
+        // under the clamped floor.
+        if (std::abs(static_cast<int>(suspension.preparation_pitch) - middle_before) > 12 ||
             std::abs(static_cast<int>(suspension.resolution_pitch) - middle_after) > 12) {
           continue;
         }
