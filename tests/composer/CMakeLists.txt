@@ -50,6 +50,8 @@ set(BACH_COMPOSER_TEST_SOURCES
   meter_test.cpp
   expression_events_test.cpp
   ornament_pass_test.cpp
+  shipped_counterpoint_regression_test.cpp
+  counterpoint_observation_test.cpp
 )
 
 add_executable(bach_composer_tests ${BACH_COMPOSER_TEST_SOURCES})

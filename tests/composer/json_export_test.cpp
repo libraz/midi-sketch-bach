@@ -102,6 +102,37 @@ TEST_F(JsonExportTest, GeneratedJsonCarriesInfoMetricsWhenAvailable) {
   EXPECT_TRUE(contains(generated_, "\"range_semitones\":6"));
 }
 
+TEST(JsonExportObservationTest, GeneratedJsonAlwaysCarriesCounterpointObservations) {
+  // An empty array is a positive statement ("measured, nothing found"); an
+  // absent key would be indistinguishable from a producer that never measured.
+  const std::string json = emitGeneratedJson({}, ValidationReport{});
+  EXPECT_TRUE(contains(json, "\"counterpoint_observations\":[]"));
+}
+
+TEST(JsonExportObservationTest, GeneratedJsonCarriesObservationCountsAndGeometry) {
+  ValidationReport report;
+  RuleObservation vertical;
+  vertical.rule_id = "parallel_fifth";
+  vertical.total = 12;
+  vertical.gated = 2;
+  vertical.exempted = 9;
+  report.observations.push_back(vertical);
+  RuleObservation linear;
+  linear.rule_id = "tritone_melodic";
+  linear.total = 3;
+  linear.gated = 0;
+  linear.exempted = 3;
+  report.observations.push_back(linear);
+
+  const std::string json = emitGeneratedJson({}, report);
+  EXPECT_TRUE(contains(json,
+                       "\"counterpoint_observations\":["
+                       "{\"rule_id\":\"parallel_fifth\",\"geometry\":\"vertical\","
+                       "\"total\":12,\"gated\":2,\"exempted\":9},"
+                       "{\"rule_id\":\"tritone_melodic\",\"geometry\":\"linear\","
+                       "\"total\":3,\"gated\":0,\"exempted\":3}]"));
+}
+
 TEST(JsonExportInfoTest, GeneratedJsonCarriesStreamCellDivergenceMetrics) {
   ValidationReport report;
   StreamSegregationSpan span;
