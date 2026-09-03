@@ -77,6 +77,7 @@ gtest_discover_tests(bach_c_api_tests DISCOVERY_TIMEOUT 30)
 
 add_executable(bach_application_tests
   application/composition_service_test.cpp
+  application/counterpoint_budget_test.cpp
 )
 target_link_libraries(bach_application_tests
   PRIVATE

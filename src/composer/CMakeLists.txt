@@ -24,6 +24,7 @@ set(BACH_COMPOSER_SOURCES
   tonal_answer.cpp
   chord_voicing.cpp
   validator.cpp
+  counterpoint_budget.cpp
   renderer.cpp
   json_export.cpp
   ornament_pass.cpp

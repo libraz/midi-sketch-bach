@@ -5,6 +5,7 @@
 #include <initializer_list>
 #include <utility>
 
+#include "composer/counterpoint_budget.h"
 #include "composer/expression_events.h"
 #include "composer/form_director.h"
 #include "composer/harness_fixture.h"
@@ -243,6 +244,15 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   out->final_validation = composer::Validator{}.validate(
       out->composition.notes, out->composition.provenance, fixture.harmony, fixture.material,
       composer::ValidationScope::FinalScore);
+  // Vertical counterpoint findings are exempted from `failures` at the recorder
+  // whenever every operand is an immutable carrier, which is every note the
+  // shipped forms emit. Gating the per-rule totals is what lets those findings
+  // stop a piece again: a rule this form no longer breaks anywhere fails on the
+  // first match, while one it still breaks stays measured until it is repaired.
+  composer::applyCounterpointBudget(effective.form, &out->final_validation);
+  if (!out->final_validation.failures.empty()) {
+    out->final_validation.status = composer::ValidationStatus::FailedSpan;
+  }
   if (out->final_validation.status != composer::ValidationStatus::Ok) {
     out->generated_json =
         composer::emitGeneratedJson(out->composition.notes, out->final_validation);
