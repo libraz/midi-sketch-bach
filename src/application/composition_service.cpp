@@ -340,8 +340,12 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   meta.time_signature_events = out->time_signature_events;
   meta.description = out->form_display + " in " + meta.key_name;
   out->homepage_events_json = composer::buildHomepageEventsJson(out->composition, meta);
-  out->generated_json = composer::emitGeneratedJson(out->composition.notes,
-                                                    out->composition.validation, out->tempo_events);
+  // The exported report must describe the notes exported beside it. The
+  // ornament pass rewrote `composition.notes` after `composition.validation`
+  // was produced, so only `final_validation` was measured on the note array
+  // this document carries; the failure path above already uses it.
+  out->generated_json =
+      composer::emitGeneratedJson(out->composition.notes, out->final_validation, out->tempo_events);
   out->provenance_json = composer::emitProvenanceJson(out->composition.provenance);
   out->status = CompositionStatus::Ok;
   return out->status;
