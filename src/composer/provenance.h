@@ -61,7 +61,6 @@ struct RuleIdMask {
   [[nodiscard]] constexpr bool any() const { return lanes[0] != 0 || lanes[1] != 0; }
 
   explicit constexpr operator bool() const { return any(); }
-  explicit constexpr operator std::uint64_t() const { return low64(); }
 };
 
 constexpr RuleIdMask operator|(RuleIdMask lhs, RuleIdMask rhs) {
