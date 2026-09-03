@@ -35,8 +35,17 @@ InstrumentPitchRange pitchRangeFor(InstrumentType instrument);
 /// @brief Select a single octave displacement for a complete C-major score.
 ///
 /// The result is added after key transposition. It is either zero or a
-/// whole-octave multiple; individual notes are never clamped. `nullopt`
-/// means the complete score cannot fit the requested instrument's compass.
+/// whole-octave multiple; individual notes are never clamped.
+///
+/// The compass is a preference, not a precondition. Only whole octaves are
+/// available to compensate for key transposition, so a score whose ambitus
+/// comes within a few semitones of the compass fits in some keys and not in
+/// others; refusing those keys would withhold the piece entirely rather than
+/// place it a little outside the ideal range. When no displacement fits, the
+/// one that leaves the fewest semitones outside the compass is returned.
+///
+/// `nullopt` means no displacement keeps the score inside MIDI's own 0-127
+/// range, which requires an ambitus wider than MIDI itself.
 std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
                                            InstrumentType instrument);
 

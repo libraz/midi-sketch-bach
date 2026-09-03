@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "composer/form_director.h"
+#include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 #include "midi/midi_reader.h"
 
@@ -517,6 +518,59 @@ TEST(CompositionServiceTest, CliJsonSidecarsNeverOverwriteMidiOutput) {
     std::remove(test_case.events);
   }
   EXPECT_EQ(std::remove("/tmp/bach-cli.v1.2"), 0);
+}
+
+// Semitones the rendered score falls outside its instrument compass.
+int compassExcess(const CompositionProduct& product) {
+  const InstrumentPitchRange range = pitchRangeFor(product.instrument);
+  const int base = keyTranspositionSemitones(product.key.tonic) + product.output_octave_shift;
+  int excess = 0;
+  for (const NoteEvent& note : product.composition.notes) {
+    const int rendered = static_cast<int>(note.pitch) + base;
+    excess += std::max(0, static_cast<int>(range.low) - rendered);
+    excess += std::max(0, rendered - static_cast<int>(range.high));
+  }
+  return excess;
+}
+
+TEST(CompositionServiceTest, ChaconneInGMinorAtFullLengthShipsOnEverySeed) {
+  // The score comes within a few semitones of the violin output compass, so
+  // whether a whole octave can absorb the key transposition depends on the key.
+  // These seeds have no fitting octave in G minor and must still ship, placed
+  // at the displacement that leaves the least outside the compass.
+  bool needed_nearest_placement = false;
+  constexpr std::uint32_t seeds[] = {2, 4, 5, 8, 10, 11};
+  constexpr SubjectCharacter characters[] = {
+      SubjectCharacter::Severe,
+      SubjectCharacter::Playful,
+      SubjectCharacter::Noble,
+      SubjectCharacter::Restless,
+  };
+  for (SubjectCharacter character : characters) {
+    if (!composer::isFormCharacterCompatible(FormType::Chaconne, character)) {
+      continue;
+    }
+    for (std::uint32_t seed : seeds) {
+      SCOPED_TRACE(subjectCharacterToString(character));
+      SCOPED_TRACE(seed);
+      CompositionRequest request;
+      request.form = FormType::Chaconne;
+      request.key = {Key::G, true};
+      request.character = character;
+      request.target_bars = 128;
+      request.seed = seed;
+      request.bpm = 100;
+      CompositionProduct product;
+      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+      EXPECT_EQ(product.status, CompositionStatus::Ok);
+      EXPECT_FALSE(product.midi_bytes.empty());
+      EXPECT_FALSE(product.composition.notes.empty());
+      needed_nearest_placement = needed_nearest_placement || compassExcess(product) > 0;
+    }
+  }
+  // At least one of these placements sits outside the compass, which is the
+  // shape that used to be refused outright instead of shipped.
+  EXPECT_TRUE(needed_nearest_placement);
 }
 
 }  // namespace

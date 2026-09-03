@@ -69,20 +69,40 @@ std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, 
     high = std::max(high, transposed);
   }
 
+  // Prefer the smallest displacement that fits the compass exactly; the
+  // nearest-fitting displacement is only consulted when nothing fits, so a
+  // score that already had a placement keeps the one it had.
+  const auto closer = [](int candidate, int incumbent) {
+    return std::abs(candidate) < std::abs(incumbent) ||
+           (std::abs(candidate) == std::abs(incumbent) && candidate < incumbent);
+  };
+
   std::optional<int> best_shift;
+  std::optional<int> nearest_shift;
+  int nearest_excess = 0;
   // MIDI itself spans fewer than eleven octaves, so this covers every
   // feasible displacement while retaining a fixed, deterministic bound.
   for (int octaves = -10; octaves <= 10; ++octaves) {
     const int shift = octaves * interval::kOctave;
-    if (low + shift < static_cast<int>(range.low) || high + shift > static_cast<int>(range.high)) {
+    if (low + shift < 0 || high + shift > 127) {
       continue;
     }
-    if (!best_shift || std::abs(shift) < std::abs(*best_shift) ||
-        (std::abs(shift) == std::abs(*best_shift) && shift < *best_shift)) {
-      best_shift = shift;
+    const int below = std::max(0, static_cast<int>(range.low) - (low + shift));
+    const int above = std::max(0, (high + shift) - static_cast<int>(range.high));
+    const int excess = below + above;
+    if (excess == 0) {
+      if (!best_shift || closer(shift, *best_shift)) {
+        best_shift = shift;
+      }
+      continue;
+    }
+    if (!nearest_shift || excess < nearest_excess ||
+        (excess == nearest_excess && closer(shift, *nearest_shift))) {
+      nearest_shift = shift;
+      nearest_excess = excess;
     }
   }
-  return best_shift;
+  return best_shift ? best_shift : nearest_shift;
 }
 
 void applyInstrument(std::vector<Track>& tracks, InstrumentType instrument) {
