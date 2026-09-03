@@ -341,10 +341,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     {FormType::TrioSonata, 127, 97},
     {FormType::ChoralePrelude, 44, 77},
     {FormType::ToccataAndFugue, 73, 35},
-    {FormType::Passacaglia, 111, 63},
+    {FormType::Passacaglia, 77, 28},
     {FormType::FantasiaAndFugue, 71, 77},
     {FormType::CelloPrelude, 0, 0},
-    {FormType::Chaconne, 22, 29},
+    {FormType::Chaconne, 2, 11},
     {FormType::GoldbergVariations, 35, 48},
 }};
 

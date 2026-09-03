@@ -33,6 +33,47 @@ Tick barTick(int bar) {
   return static_cast<Tick>(bar) * kTicksPerBar;
 }
 
+/// @brief Direction of the ground's motion from one cycle bar to the next.
+///
+/// The cycle plan carries the ground as a pitch class, so its motion is read as
+/// the shortest signed interval between the two classes; ground lines step or
+/// leap by less than a fifth, never by a compound interval, so the shortest
+/// reading is the sounding one.
+/// @return -1 when the ground falls, +1 when it rises, 0 when it repeats.
+int groundStepDirection(int prev_ground_pc, int curr_ground_pc) {
+  int delta = ((curr_ground_pc - prev_ground_pc) % 12 + 12) % 12;
+  if (delta > 6)
+    delta -= 12;
+  if (delta > 0)
+    return 1;
+  return delta < 0 ? -1 : 0;
+}
+
+/// @brief True when an anchor lands on a perfect interval over the ground while
+///        moving in the ground's own direction.
+///
+/// A consonance filter that admits interval classes 0 and 7 without a companion
+/// motion test is a device for selecting parallel material: over a moving ground
+/// every bar then offers the octave and the fifth as "consonant" landing points,
+/// and a line that keeps taking them while travelling with the bass writes a
+/// chain of parallel perfects. Consonance decides what may sound together; only
+/// the motion into it decides whether the two voices are still independent.
+///
+/// @param previous_pitch Realized pitch the line arrives from, or < 0 if none.
+/// @param arrival_pitch Realized pitch of the anchor under test.
+/// @param ground_pc Pitch class of the ground tone held under the arrival.
+/// @param ground_dir Direction of the ground's motion into this bar.
+bool arrivesOnPerfectWithGround(int previous_pitch, int arrival_pitch, int ground_pc,
+                                int ground_dir) {
+  if (previous_pitch < 0 || ground_dir == 0)
+    return false;
+  const int line_dir = (arrival_pitch > previous_pitch) - (arrival_pitch < previous_pitch);
+  if (line_dir != ground_dir)
+    return false;
+  const int interval_class = ((arrival_pitch - ground_pc) % 12 + 12) % 12;
+  return interval_class == 0 || interval_class == 7;
+}
+
 /// @brief Resolve a ground cycle's per-beat chord-tone anchor-degree chain.
 ///
 /// Each anchor takes the octave of its chord tone NEAREST the previous anchor,
@@ -42,40 +83,79 @@ Tick barTick(int bar) {
 /// that does not move the anchor by more than a tritone from the running pitch
 /// -- so the line cannot drift an octave away over the cycle's descending chord
 /// roots, yet a re-center never itself introduces a leap.
+///
+/// The rotation offers the bar's anchor classes in a fixed order that does not
+/// change from bar to bar, so one metrical position carries the chord root in
+/// every bar of the cycle. Since the chord root tracks the ground, that position
+/// would trace the ground an octave (or a fifth) higher for the whole cycle. The
+/// chain a beat traces across bars is therefore judged against the previous
+/// bar's REALIZED anchor at the same beat and the ground's own motion, and an
+/// anchor arriving on a perfect interval in the ground's direction yields to the
+/// next class in the rotation.
 std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_plan, int center,
                                       int anchor_rotation, detail::Mode mode) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   std::vector<int> anchor_deg;
   anchor_deg.reserve(static_cast<std::size_t>(cycle_bars) * 3);
   int running = center;
+  // Realized anchor pitch per beat: the previous bar's (the chain reference) and
+  // this bar's. The ground is held inside a bar and moves only at the bar line,
+  // so the bar-to-bar step at one beat is the only motion it can parallel.
+  int prior_beat_pitch[3] = {-1, -1, -1};
+  int beat_pitch[3] = {-1, -1, -1};
   for (int bar = 0; bar < cycle_bars; ++bar) {
-    const std::vector<int> pcs =
-        barAnchorPitchClasses(cycle_bar_plan[static_cast<std::size_t>(bar)], mode);
+    const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+    const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
+    const int ground_dir =
+        bar > 0 ? groundStepDirection(cycle_bar_plan[static_cast<std::size_t>(bar - 1)].ground_pc,
+                                      plan.ground_pc)
+                : 0;
+    const int choices = static_cast<int>(pcs.size());
     for (int beat = 0; beat < 3; ++beat) {
-      const int anchor_pc =
-          pcs[static_cast<std::size_t>((anchor_rotation + beat) % static_cast<int>(pcs.size()))];
-      int fit = fitPitchClass(anchor_pc, running);
-      if (beat == 0) {
-        // Bar downbeat: prefer the octave nearer `center` when it is within a
-        // tritone of the running pitch (gentle re-centering, never a leap).
-        const int recentered = fitPitchClass(anchor_pc, center);
-        if (std::abs(recentered - running) <= 7)
-          fit = recentered;
+      // Realize one anchor class against the running pitch. All candidates for a
+      // beat are fitted from the SAME running pitch, so the choice below cannot
+      // depend on the order they are tried in.
+      const auto realizeAnchor = [&](int anchor_pc) {
+        int fit = fitPitchClass(anchor_pc, running);
+        if (beat == 0) {
+          // Bar downbeat: prefer the octave nearer `center` when it is within a
+          // tritone of the running pitch (gentle re-centering, never a leap).
+          const int recentered = fitPitchClass(anchor_pc, center);
+          if (std::abs(recentered - running) <= 7)
+            fit = recentered;
+        }
+        // Hard register band: nearest-octave fitting can ratchet monotonically
+        // when consecutive chord tones keep resolving upward (or downward), and
+        // once the line drifts more than a tritone from `center` the gentle
+        // re-centering above can never engage again. Folding the anchor back by
+        // whole octaves keeps it a chord tone (consonance preserved) while
+        // pinning the tessitura to the variation band -- and keeps the realized
+        // pitch inside the MIDI range.
+        while (fit > center + 12)
+          fit -= 12;
+        while (fit < center - 12)
+          fit += 12;
+        return fit;
+      };
+      int fit = 0;
+      for (int offset = 0; offset < choices; ++offset) {
+        const int anchor_pc =
+            pcs[static_cast<std::size_t>((anchor_rotation + beat + offset) % choices)];
+        const int candidate = realizeAnchor(anchor_pc);
+        if (offset == 0)
+          fit = candidate;  // the rotation's own class, kept when no alternative is clean.
+        if (!arrivesOnPerfectWithGround(prior_beat_pitch[beat], candidate, plan.ground_pc,
+                                        ground_dir)) {
+          fit = candidate;
+          break;
+        }
       }
-      // Hard register band: nearest-octave fitting can ratchet monotonically
-      // when consecutive chord tones keep resolving upward (or downward), and
-      // once the line drifts more than a tritone from `center` the gentle
-      // re-centering above can never engage again. Folding the anchor back by
-      // whole octaves keeps it a chord tone (consonance preserved) while
-      // pinning the tessitura to the variation band -- and keeps the realized
-      // pitch inside the MIDI range.
-      while (fit > center + 12)
-        fit -= 12;
-      while (fit < center - 12)
-        fit += 12;
       anchor_deg.push_back(midiToDegree(fit, mode));
+      beat_pitch[beat] = fit;
       running = fit;
     }
+    for (int beat = 0; beat < 3; ++beat)
+      prior_beat_pitch[beat] = beat_pitch[beat];
   }
   return anchor_deg;
 }
