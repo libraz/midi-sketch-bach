@@ -401,11 +401,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
     {FormType::Chaconne, 0, 23, 0},
-    // What is left is the bar head, where the aria bass states the chord root in
-    // the one octave its band allows and the variation is anchored three octaves
-    // above that same class: neither end of the arrival can move, so the fault
-    // stands. Every other beat has a free tone on one side or the other.
-    {FormType::GoldbergVariations, 16, 8, 35},
+    // Nothing here is repaired after the fact: the aria bass is immutable by
+    // contract and a canon's two lines cannot be re-aimed one end at a time. The
+    // strict column reaches zero because the imitative blocks are instead
+    // assembled and read while their one free choice is still open -- a canon's
+    // leader tones, the quodlibet tune's rotation -- and the free figuration
+    // between them is relieved arrival by arrival. Hidden approaches are what
+    // that choice pays with: the leader window of a wide canon is about a fifth
+    // deep, so an arrival it can reach cleanly is often still approached by leap.
+    {FormType::GoldbergVariations, 0, 8, 3},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale

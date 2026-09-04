@@ -456,12 +456,12 @@ void forEachUnionMotion(const ComposeResult& result, Visit visit) {
 // Assert that no true parallel perfect fifth survives anywhere in a composed
 // result, at any pair of voices and any union onset. `where` names the case.
 //
-// Octaves are deliberately NOT asserted to zero. Some arrivals are genuinely
-// boxed in -- fixed voices in narrow bands admit positions where no candidate
-// lowers the fault -- and their count is held by the shipped-counterpoint
-// ratchet instead, which can record a bounded number without pretending it is
-// none. Fifths have somewhere to go in both of these forms, so zero is the
-// honest bar for them.
+// Octaves are deliberately NOT asserted to zero here. Some arrivals are
+// genuinely boxed in -- fixed voices in narrow bands admit positions where no
+// candidate lowers the fault -- and their count is held by the
+// shipped-counterpoint ratchet instead, which can record a bounded number
+// without pretending it is none. Fifths always have somewhere to go, so zero is
+// the honest bar for them.
 void expectNoParallelFifth(const ComposeResult& result, const std::string& where) {
   forEachUnionMotion(result, [&](Tick curr, VoiceId upper, VoiceId lower, int up_prev, int up_curr,
                                  int lo_prev, int lo_curr) {
@@ -500,27 +500,39 @@ TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelFifths) {
   }
 }
 
-// The Goldberg texture is NOT asserted fifth-free everywhere, and the reason is
-// worth stating: its variation line is the only voice that may move at all. The
-// aria bass is immutable by contract, the canon follower is a strict imitation
-// of a leader it cannot leave, and the variation is anchored three octaves above
-// the pitch class the bass states -- so the two outer voices arrive congruently
-// by construction rather than by accident. Where the variation's own candidates
-// are exhausted there is no second voice to ask. Its remaining counts are held
-// by the shipped-counterpoint ratchet instead.
+// The Goldberg variation line is asserted parallel-free against everything,
+// everywhere, and the inner line is asserted parallel-free off the bar head.
+// That is a stronger claim than the chorale prelude's above, and it rests on a
+// different argument, because here almost nothing can be relieved after the
+// fact -- the aria bass is immutable by contract, and a canon's follower is the
+// exact imitation of a leader it cannot leave, so neither end of that pair may
+// be re-aimed without dissolving the imitation the block exists to state.
 //
-// Off the downbeat it IS asserted parallel-free against the bass. The
-// congruence is not confined to the bar head -- the bass arpeggiates the same
-// bar chord the variation figures above it, so the two reach a perfect interval
-// together mid-bar as readily as on the head -- but on the head alone are both
-// ends pinned. Anywhere else one side is a running tone of the figure, and a
-// running tone is free.
-TEST(FormCantusGoldberg, VariationLeavesNoParallelOverTheAriaBassOffTheDownbeat) {
+// What answers for the congruence instead is the choice made before any of it is
+// committed. A canon block and the quodlibet block are each a closed system: the
+// bass repeats on exactly the four-bar period they span, and their upper lines
+// follow from one small choice -- the leader's tones, the tune's rotation -- so
+// the whole three-voice surface can be assembled and read while that choice is
+// still open. The free figuration between those blocks has no such closed form
+// and is relieved arrival by arrival instead.
+//
+// What those two together cannot reach is the bar head of a wide canon, and the
+// reason is arithmetic rather than musical. The follower of such a canon sits
+// more than two octaves above its leader, so the pair is pinned from both ends
+// at once: the follower may not pass the top of the keyboard, and the leader may
+// not sink into the bass arpeggiating below it. That leaves the leader a window
+// of about a fifth, and a window that narrow holds only one tone of some triads.
+// Where two adjacent bars are both such triads the leader has no choice left to
+// make, and if the bass happens to step congruently underneath, the parallel
+// stands. It is bounded to one per piece because one canon in the scheme is that
+// wide, and it is held to that bound here so that a wider failure cannot hide
+// behind the exception.
+TEST(FormCantusGoldberg, ShippedTextureIsFreeOfParallelPerfects) {
   for (bool minor : {false, true}) {
     for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Playful,
                                        SubjectCharacter::Noble, SubjectCharacter::Restless}) {
       for (std::uint16_t bars : {std::uint16_t{20}, std::uint16_t{128}}) {
-        for (std::uint32_t seed : {1u, 42u}) {
+        for (std::uint32_t seed : {1u, 3u, 6u, 42u}) {
           const HarnessFixture fx =
               build(FormType::GoldbergVariations, minor, character, bars, seed);
           const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -528,14 +540,21 @@ TEST(FormCantusGoldberg, VariationLeavesNoParallelOverTheAriaBassOffTheDownbeat)
                                     " character=" + std::to_string(static_cast<int>(character)) +
                                     " bars=" + std::to_string(bars) +
                                     " seed=" + std::to_string(seed);
+          int boxed_in = 0;
           forEachUnionMotion(result, [&](Tick curr, VoiceId upper, VoiceId lower, int up_prev,
                                          int up_curr, int lo_prev, int lo_curr) {
-            if (upper != 0 || lower != 2 || curr % kTicksPerBar == 0)
+            if (!isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
               return;
-            EXPECT_FALSE(isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
-                << where << " parallel perfect at tick " << curr << " (" << up_prev << "->"
-                << up_curr << " over " << lo_prev << "->" << lo_curr << ")";
+            if (upper == 1 && lower == 2 && curr % kTicksPerBar == 0) {
+              ++boxed_in;
+              return;
+            }
+            ADD_FAILURE() << where << " v" << static_cast<int>(upper) << "/v"
+                          << static_cast<int>(lower) << " parallel perfect at tick " << curr << " ("
+                          << up_prev << "->" << up_curr << " over " << lo_prev << "->" << lo_curr
+                          << ")";
           });
+          EXPECT_LE(boxed_in, 1) << where << " inner-line bar-head parallels over the aria bass";
         }
       }
     }
