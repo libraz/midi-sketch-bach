@@ -24,6 +24,7 @@ namespace {
 // duplicate or a misplaced row.
 constexpr CounterpointBudgetEntry kOpenRules[] = {
     // Fugue
+    {FormType::Fugue, "battuta"},
     {FormType::Fugue, "cross_relation"},
     {FormType::Fugue, "doubling_no_leading_tone"},
     {FormType::Fugue, "hidden_parallel_fifth"},
@@ -35,6 +36,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Fugue, "unprepared_dissonance"},
     {FormType::Fugue, "vertical_dissonance"},
     // PreludeAndFugue
+    {FormType::PreludeAndFugue, "battuta"},
     {FormType::PreludeAndFugue, "cross_relation"},
     {FormType::PreludeAndFugue, "doubling_no_leading_tone"},
     {FormType::PreludeAndFugue, "hidden_parallel_fifth"},
@@ -46,6 +48,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::PreludeAndFugue, "unprepared_dissonance"},
     {FormType::PreludeAndFugue, "vertical_dissonance"},
     // TrioSonata
+    {FormType::TrioSonata, "battuta"},
     {FormType::TrioSonata, "cross_relation"},
     {FormType::TrioSonata, "doubling_no_leading_tone"},
     {FormType::TrioSonata, "hidden_parallel_fifth"},
@@ -57,6 +60,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::TrioSonata, "unprepared_dissonance"},
     {FormType::TrioSonata, "vertical_dissonance"},
     // ChoralePrelude -- the cantus firmus never doubles a leading tone.
+    {FormType::ChoralePrelude, "battuta"},
     {FormType::ChoralePrelude, "cross_relation"},
     {FormType::ChoralePrelude, "hidden_parallel_fifth"},
     {FormType::ChoralePrelude, "hidden_parallel_octave"},
@@ -67,6 +71,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::ChoralePrelude, "unprepared_dissonance"},
     {FormType::ChoralePrelude, "vertical_dissonance"},
     // ToccataAndFugue
+    {FormType::ToccataAndFugue, "battuta"},
     {FormType::ToccataAndFugue, "cross_relation"},
     {FormType::ToccataAndFugue, "doubling_no_leading_tone"},
     {FormType::ToccataAndFugue, "hidden_parallel_fifth"},
@@ -78,6 +83,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::ToccataAndFugue, "unprepared_dissonance"},
     {FormType::ToccataAndFugue, "vertical_dissonance"},
     // Passacaglia -- the only form that still doubles a seventh.
+    {FormType::Passacaglia, "battuta"},
     {FormType::Passacaglia, "cross_relation"},
     {FormType::Passacaglia, "doubling_no_leading_tone"},
     {FormType::Passacaglia, "doubling_no_seventh"},
@@ -90,6 +96,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},
     // FantasiaAndFugue -- its countersubjects already invert at the octave.
+    {FormType::FantasiaAndFugue, "battuta"},
     {FormType::FantasiaAndFugue, "cross_relation"},
     {FormType::FantasiaAndFugue, "doubling_no_leading_tone"},
     {FormType::FantasiaAndFugue, "hidden_parallel_fifth"},
@@ -104,6 +111,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::CelloPrelude, "strong_beat_dissonance"},
     {FormType::CelloPrelude, "unprepared_dissonance"},
     // Chaconne
+    {FormType::Chaconne, "battuta"},
     {FormType::Chaconne, "cross_relation"},
     {FormType::Chaconne, "doubling_no_leading_tone"},
     {FormType::Chaconne, "hidden_parallel_fifth"},
@@ -114,6 +122,7 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Chaconne, "unprepared_dissonance"},
     {FormType::Chaconne, "vertical_dissonance"},
     // GoldbergVariations
+    {FormType::GoldbergVariations, "battuta"},
     {FormType::GoldbergVariations, "cross_relation"},
     {FormType::GoldbergVariations, "doubling_no_leading_tone"},
     {FormType::GoldbergVariations, "hidden_parallel_fifth"},

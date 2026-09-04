@@ -110,6 +110,87 @@ TEST(ParallelDetectionTest, PerfectMotionAllowsObliqueAndContraryMotion) {
 }
 
 // ---------------------------------------------------------------------------
+// Ottava battuta
+// ---------------------------------------------------------------------------
+
+// Every factor the rule reads, crossed against the verdict it produces: the
+// motion type, the arrival interval class, the class the voices came from, the
+// size and direction of the upper voice's move, and which of the two arguments
+// is actually on top when they arrive.
+TEST(BattutaDetectionTest, EachFactorOfTheRuleIsExercised) {
+  struct Case {
+    const char* what;
+    int upper_prev;
+    int upper_curr;
+    int lower_prev;
+    int lower_curr;
+    bool expected;
+  };
+  constexpr Case kCases[] = {
+      // Contrary motion into an octave the voices were not already on, upper
+      // voice leaping down: the fault itself.
+      {"fourth down against a rising step", 76, 72, 59, 60, true},
+      {"minor third down, the smallest leap that counts", 75, 72, 59, 60, true},
+      // Compound intervals fold to the same class, so a double octave counts.
+      {"fifth down arriving at a double octave", 84, 79, 53, 55, true},
+      // Direction and size of the upper move.
+      {"whole tone down is a step, not a leap", 74, 72, 59, 60, false},
+      {"semitone down is a step, not a leap", 73, 72, 59, 60, false},
+      {"upper voice rising into the octave", 67, 72, 65, 60, false},
+      // Motion type.
+      {"similar motion is the hidden-perfect family", 76, 72, 64, 60, false},
+      {"oblique: the lower voice holds", 76, 72, 60, 60, false},
+      {"oblique: the upper voice holds", 72, 72, 55, 60, false},
+      // Arrival and departure classes.
+      {"arriving at a fifth instead of an octave", 76, 72, 60, 65, false},
+      {"octave to octave is an anti-parallel", 84, 79, 60, 67, false},
+      {"arriving at a sixth", 76, 72, 59, 64, false},
+  };
+  for (const Case& entry : kCases) {
+    EXPECT_EQ(
+        isBattutaMotion(entry.upper_prev, entry.upper_curr, entry.lower_prev, entry.lower_curr),
+        entry.expected)
+        << entry.what;
+  }
+}
+
+// The line that is on top AT THE ARRIVAL owns the leap, so a pair that crosses
+// is still judged by what the ear hears above.
+TEST(BattutaDetectionTest, TheUpperVoiceIsReadFromTheArrival) {
+  // The second argument ends on top and is the one that leaps down.
+  EXPECT_TRUE(isBattutaMotion(60, 62, 79, 74));
+  // Same crossing, but there the line that ends on top rises into the octave.
+  EXPECT_FALSE(isBattutaMotion(74, 79, 62, 60));
+}
+
+// Neither line is above the other at an exact unison, so the first argument is
+// taken as the upper one. Callers pass the conventionally higher part first.
+TEST(BattutaDetectionTest, AnExactUnisonResolvesToTheFirstArgument) {
+  EXPECT_TRUE(isBattutaMotion(72, 65, 58, 65));
+  EXPECT_FALSE(isBattutaMotion(58, 65, 72, 65));
+}
+
+// Battuta needs contrary motion and the perfect-motion classifier needs similar
+// motion, so no single pair of onsets can ever be reported as both.
+TEST(BattutaDetectionTest, NeverCoincidesWithAPerfectMotionClassification) {
+  constexpr int kPitches[] = {55, 60, 62, 64, 67, 72, 74, 79};
+  for (int upper_prev : kPitches) {
+    for (int upper_curr : kPitches) {
+      for (int lower_prev : kPitches) {
+        for (int lower_curr : kPitches) {
+          if (!isBattutaMotion(upper_prev, upper_curr, lower_prev, lower_curr))
+            continue;
+          EXPECT_EQ(classifyPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr),
+                    PerfectMotionKind::None)
+              << upper_prev << "->" << upper_curr << " against " << lower_prev << "->"
+              << lower_curr;
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Pitch class and octave
 // ---------------------------------------------------------------------------
 

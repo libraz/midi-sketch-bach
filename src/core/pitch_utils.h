@@ -160,6 +160,22 @@ bool isParallelPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int
 /// True for a parallel perfect or a hidden perfect reached by upper-voice leap.
 bool isForbiddenPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
 
+/// Ottava battuta: contrary motion arriving at a perfect octave or unison with
+/// the upper voice leaping DOWN into it.
+///
+/// A stepwise arrival is allowed, as is the same octave reached with the upper
+/// voice rising, so only the downward leap is flagged. Arriving at a class the
+/// voices already sat on is the anti-parallel case, which belongs to
+/// classifyPerfectMotion; battuta is reserved for a perfect class that was not
+/// already there.
+///
+/// Which line counts as the upper one is read from the ARRIVAL, not the
+/// argument order, so a pair that crosses is judged by what the ear hears on
+/// top. The order still matters at an exact unison, where neither line is above
+/// the other: the first pair is taken as the upper one there, so callers should
+/// pass the conventionally higher part first.
+bool isBattutaMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
+
 // ---------------------------------------------------------------------------
 // Pitch utility functions
 // ---------------------------------------------------------------------------

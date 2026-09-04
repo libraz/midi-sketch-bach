@@ -42,10 +42,18 @@ constexpr SubjectCharacter kCharacters[] = {
 // Every counterpoint rule that relates two voices sounding together, sorted by
 // rule id. The geometry assertion below keeps this list honest.
 constexpr const char* kVerticalRules[] = {
-    "cross_relation",        "doubling_no_leading_tone", "doubling_no_seventh",
-    "hidden_parallel_fifth", "hidden_parallel_octave",   "invertible_at_octave",
-    "parallel_fifth",        "parallel_octave",          "strong_beat_dissonance",
-    "unprepared_dissonance", "vertical_dissonance",
+    "battuta",
+    "cross_relation",
+    "doubling_no_leading_tone",
+    "doubling_no_seventh",
+    "hidden_parallel_fifth",
+    "hidden_parallel_octave",
+    "invertible_at_octave",
+    "parallel_fifth",
+    "parallel_octave",
+    "strong_beat_dissonance",
+    "unprepared_dissonance",
+    "vertical_dissonance",
 };
 
 // Every counterpoint rule that describes one voice on its own.
@@ -151,7 +159,7 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // Monophonic: every rule comparing two lines is closed permanently, and only
   // the two judged against the harmonic plan stay open.
   EXPECT_EQ(closedRulesFor(FormType::CelloPrelude),
-            (std::vector<std::string>{"cross_relation", "doubling_no_leading_tone",
+            (std::vector<std::string>{"battuta", "cross_relation", "doubling_no_leading_tone",
                                       "doubling_no_seventh", "hidden_parallel_fifth",
                                       "hidden_parallel_octave", "invertible_at_octave",
                                       "parallel_fifth", "parallel_octave", "vertical_dissonance"}));

@@ -111,6 +111,7 @@ struct RuleGeometryEntry {
 // assertions below can reject a duplicate or a misplaced entry.
 constexpr RuleGeometryEntry kRuleGeometryTable[] = {
     {"augmented_melodic", RuleGeometry::Linear},
+    {"battuta", RuleGeometry::Vertical},
     {"consecutive_leaps", RuleGeometry::Linear},
     {"cross_relation", RuleGeometry::Vertical},
     {"diminished_melodic", RuleGeometry::Linear},
@@ -954,6 +955,16 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           failure.rule_id = perfect_motion == PerfectMotionKind::HiddenFifth
                                 ? "hidden_parallel_fifth"
                                 : "hidden_parallel_octave";
+          recordCounterpointFinding(failure, {current_lower_index, current_upper_index});
+        }
+        // Ottava battuta is contrary motion, so it can never coincide with the
+        // similar-motion classifications above and is tested independently
+        // rather than as another branch of them.
+        if (prev_pa != 0 && prev_pb != 0 && !current_is_cadence &&
+            isBattutaMotion(prev_pa, pa, prev_pb, pb)) {
+          ValidationFailure failure;
+          failure.span_id = lower_span;
+          failure.rule_id = "battuta";
           recordCounterpointFinding(failure, {current_lower_index, current_upper_index});
         }
         prev_interval = interval;

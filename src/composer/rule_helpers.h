@@ -159,6 +159,15 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                            Tick prev_tick);
 
+// Ottava battuta: contrary motion into a perfect octave or unison the pair was
+// not already on, with the upper voice leaping down into it. Contrary motion,
+// so it is disjoint from every parallel check above rather than a variant of
+// one, and the search needs it separately or it keeps offering candidates the
+// validator then refuses.
+bool createsBattuta(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+                    std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
+                    Tick prev_tick);
+
 bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                                   std::uint8_t candidate_pitch, Tick cur_tick,
                                   std::uint8_t prev_pitch, Tick prev_tick);

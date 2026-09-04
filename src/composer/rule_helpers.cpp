@@ -508,6 +508,26 @@ bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
   return false;
 }
 
+bool createsBattuta(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+                    std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
+                    Tick prev_tick) {
+  if (prev_pitch == 0)
+    return false;
+  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
+    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
+    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+    if (op_now == 0 || op_prev == 0)
+      continue;
+    const bool battuta = candidate_voice < ov
+                             ? isBattutaMotion(prev_pitch, candidate_pitch, op_prev, op_now)
+                             : isBattutaMotion(op_prev, op_now, prev_pitch, candidate_pitch);
+    if (battuta) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                            Tick prev_tick) {

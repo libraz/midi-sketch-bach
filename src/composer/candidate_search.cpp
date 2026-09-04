@@ -1402,6 +1402,16 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                                               parallel_prev_tick)) {
         continue;
       }
+      // Ottava battuta reaches the octave by CONTRARY motion, so none of the
+      // parallel checks above can see it. It follows the same cadence bypass:
+      // a cadence cell pins its bass pitch class and has no candidate left to
+      // move to.
+      if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
+          rule_helpers::createsBattuta(*context.placed_notes, span.voice,
+                                       static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
+                                       parallel_prev_tick)) {
+        continue;
+      }
 
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
           createsHiddenParallelPerfect(*context.placed_notes, span.voice,
