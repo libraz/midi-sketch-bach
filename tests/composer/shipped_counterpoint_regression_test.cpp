@@ -376,7 +376,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fifths sit at the ninetieth percentile and its battuta past the
     // ninety-fifth. A trade out of either of those into hidden is payable.
     {FormType::TrioSonata, 33, 68, 61},
-    {FormType::ChoralePrelude, 12, 22, 42},
+    {FormType::ChoralePrelude, 3, 14, 12},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -401,7 +401,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
     {FormType::Chaconne, 0, 23, 0},
-    {FormType::GoldbergVariations, 32, 8, 35},
+    // What is left is the bar head, where the aria bass states the chord root in
+    // the one octave its band allows and the variation is anchored three octaves
+    // above that same class: neither end of the arrival can move, so the fault
+    // stands. Every other beat has a free tone on one side or the other.
+    {FormType::GoldbergVariations, 16, 8, 35},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
