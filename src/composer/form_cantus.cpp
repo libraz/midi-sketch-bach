@@ -773,9 +773,20 @@ void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
         break;
       }
     }
+    // The replacement sits between two fixed tones, and both intervals need a
+    // ceiling: bounding only the leap into the head leaves the approach free to
+    // be reached by a leap of its own, which is a registral break whether or not
+    // it resolves the perfect interval. The two ceilings are not the same size.
+    // Leaving the head is the constrained end, so it holds to what the designed
+    // tone already spanned; entering is the free end, and is asked only not to
+    // exceed an octave, because tightening it there costs more perfect intervals
+    // elsewhere than the wider choice ever buys.
     const int leap_ceiling = std::max(7, std::abs(arrival - original));
+    const int entry_ceiling = own_prev < 0 ? 0 : std::max(12, std::abs(original - own_prev));
     auto admissible = [&](int cand) {
       if (!detail::inScale(cand, mode) || std::abs(arrival - cand) > leap_ceiling)
+        return false;
+      if (own_prev >= 0 && std::abs(cand - own_prev) > entry_ceiling)
         return false;
       for (const ConcurrentMotion& motion : at_onset) {
         // A lower voice index sounds higher.
@@ -789,9 +800,18 @@ void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
 
     // Clean first, then progressively less clean, but never at or below the
     // rank the displaced tone already carried.
+    //
+    // The sweep covers the whole admissible window and is only ORDERED by
+    // distance from the tone it displaces. What constrains a replacement is the
+    // two intervals it spans; staying near the designed tone is a preference.
+    // Bounding the sweep at the designed tone instead conflated the two, and put
+    // the stepwise neighbourhood of the arrival out of reach exactly when the
+    // design leaps into the head -- and a step into a perfect interval is the one
+    // approach that is legal however the other voice moves.
+    const int reach = 2 * leap_ceiling;
     bool placed = false;
     for (int accept = 0; accept < original_rank && !placed; ++accept) {
-      for (int dist = 1; dist <= 7 && !placed; ++dist) {
+      for (int dist = 1; dist <= reach && !placed; ++dist) {
         for (const int sgn : {-1, 1}) {
           const int cand = original + sgn * dist;
           if (admissible(cand) && perfectFaultRank(cand, arrival, into_head) <= accept) {

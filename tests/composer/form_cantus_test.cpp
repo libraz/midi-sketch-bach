@@ -473,13 +473,19 @@ void expectNoParallelFifth(const ComposeResult& result, const std::string& where
 // stopped being consulted, which is how the last set of them arrived: the
 // passing eighths between the embellished cantus firmus's chord-tone beats
 // were emitted with no guard at all, and every remaining fifth was one of them.
+// Several bar counts, because the phrase boundaries that make the figuration
+// leap into a bar head fall at different bars as the piece lengthens, and it is
+// at such a head that the only relief left is a step into the arrival.
 TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelFifths) {
   for (bool minor : {false, true}) {
-    for (std::uint32_t seed : kSeeds) {
-      const HarnessFixture fx =
-          build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
-      expectNoParallelFifth(Composer{}.run(fx.material, fx.harmony, fx.voice_plan),
-                            "minor=" + std::to_string(minor) + " seed=" + std::to_string(seed));
+    for (int bars : {16, 32, 64}) {
+      for (std::uint32_t seed : kSeeds) {
+        const HarnessFixture fx =
+            build(FormType::ChoralePrelude, minor, choraleCharacter(minor), bars, seed);
+        expectNoParallelFifth(Composer{}.run(fx.material, fx.harmony, fx.voice_plan),
+                              "minor=" + std::to_string(minor) + " bars=" + std::to_string(bars) +
+                                  " seed=" + std::to_string(seed));
+      }
     }
   }
 }

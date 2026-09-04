@@ -372,7 +372,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // over the ninety-fifth -- while its hidden rate is under half of what the
     // corpus writes, so the payment comes out of the one column with room.
     {FormType::TrioSonata, 32, 101, 52},
-    {FormType::ChoralePrelude, 9, 23, 40},
+    {FormType::ChoralePrelude, 9, 18, 40},
     // Most of this form's parallel octaves are deliberate: the opening
     // octave cascade states its gesture high, an octave lower, then doubled in
     // V0 and V1 across a descending scale, which is a parallel octave on every
