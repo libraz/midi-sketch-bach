@@ -31,6 +31,25 @@ bool isAnchorTone(int pitch, const CycleBar& bar, detail::Mode mode) {
   return std::find(pcs.begin(), pcs.end(), pc) != pcs.end();
 }
 
+/// @brief Pitch the note list sounds at `tick`, or -1 when it rests there.
+///
+/// The latest-starting covering note wins, matching how the shipped-output gate
+/// reads a voice: a list may hold two notes overlapping one tick, and taking the
+/// first in document order pairs tones from different places in the line.
+int soundingPitchOf(const std::vector<MaterialNote>& notes, Tick tick) {
+  int pitch = -1;
+  Tick best_start = -1;
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick > tick || tick >= note.start_tick + note.duration)
+      continue;
+    if (note.start_tick >= best_start) {
+      best_start = note.start_tick;
+      pitch = static_cast<int>(note.pitch);
+    }
+  }
+  return pitch;
+}
+
 /// @brief True when `pitch`'s class is a tone of the chord's triad.
 bool isTriadTone(int pitch, const detail::ChordSpec& chord) {
   const int third = chord.minor ? 3 : 4;
@@ -397,6 +416,84 @@ TEST(FigurationPaletteFigurationWave, FormsNoPerfectParallelAgainstRegistryVoice
       ++parallels;
   }
   EXPECT_EQ(parallels, 0);
+}
+
+TEST(FigurationPaletteFigurationWave, StepEscapeReachesOutsideTheWorkingWindow) {
+  // The wave's step guard escapes a faulting step through three tones: the
+  // reversed step and a scale third either way. The working window that keeps
+  // the ordinary walk conjunct must not also bound that escape -- a third-skip
+  // rejected for sitting a tone outside the window leaves the guard with only
+  // the reversed step, and when that one is the parallel the wave ships it.
+  //
+  // Swept rather than pinned to one setting: the situation needs the window
+  // edge, the earlier voice's stride and the figuration's own stride to line up,
+  // and which combination does that is not something to assert by eye.
+  const int kAscending[8] = {72, 74, 76, 77, 79, 81, 83, 84};
+  const int kDescending[8] = {84, 83, 81, 79, 77, 76, 74, 72};
+  const Tick kStrides[3] = {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 4};
+
+  for (const bool ascending : {true, false}) {
+    for (const Tick stride : kStrides) {
+      for (const int notes_per_beat : {2, 4}) {
+        for (int offset = 0; offset < 4; ++offset) {
+          for (int transpose = -6; transpose <= 5; ++transpose) {
+            SCOPED_TRACE(testing::Message() << "ascending=" << ascending << " stride=" << stride
+                                            << " notes_per_beat=" << notes_per_beat
+                                            << " offset=" << offset << " transpose=" << transpose);
+            ThemeToneRegistry registry;
+            const int* line = ascending ? kAscending : kDescending;
+            int step_index = 0;
+            for (Tick tick = 0; tick < 4 * kTicksPerBar; tick += stride) {
+              registry.record(tick, /*voice=*/0, line[step_index % 8] + transpose, stride);
+              ++step_index;
+            }
+
+            const detail::ChordSpec chord{0, false};
+            FigurationSection section;
+            int prev_anchor = 0;
+            for (int bar = 0; bar < 4; ++bar) {
+              appendFigurationWaveBar(registry, section, bar, /*voice=*/1, chord,
+                                      detail::Mode::Major, notes_per_beat, offset, prev_anchor, 51,
+                                      66,
+                                      /*num_voices=*/3);
+            }
+
+            // Walked over the union of both voices' onsets, which is the grain the
+            // shipped-output gate judges at and the grain the guard samples for:
+            // reading the earlier voice only at this line's own onsets skips the
+            // onsets it attacked in between and asks about a motion pair nobody
+            // hears. Only true parallels are asserted. A hidden perfect is a fault
+            // the escape vocabulary is sometimes allowed to settle for -- that
+            // ranking is deliberate -- but a true one it never is.
+            std::set<Tick> onsets;
+            for (const MaterialNote& note : section.notes)
+              onsets.insert(note.start_tick);
+            for (Tick tick = 0; tick < 4 * kTicksPerBar; tick += stride)
+              onsets.insert(tick);
+
+            int line_prev = -1;
+            int other_prev = -1;
+            for (const Tick tick : onsets) {
+              const int line_now = soundingPitchOf(section.notes, tick);
+              const int other_now = registry.soundingPitchInVoice(0, tick);
+              if (line_now < 0 || other_now < 0) {
+                line_prev = -1;
+                other_prev = -1;
+                continue;
+              }
+              if (line_prev >= 0 && other_prev >= 0) {
+                EXPECT_FALSE(formsStrictPerfectParallel(line_prev, line_now, other_prev, other_now))
+                    << "true parallel at tick " << tick << ": " << line_prev << "->" << line_now
+                    << " against " << other_prev << "->" << other_now;
+              }
+              line_prev = line_now;
+              other_prev = other_now;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(FigurationPaletteFigurationWave, BarFigureRotationVariesIntervalVocabulary) {

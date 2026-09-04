@@ -518,5 +518,75 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
             kFormCeilings.size() * kCharacters.size() * kSeedCount - expected.size() * kSeedCount);
 }
 
+// --- Length axis -------------------------------------------------------------
+//
+// The sweep above composes every form at its natural length, and that one
+// setting is not the shipped surface: a longer piece runs more episodes, more
+// entries and more figuration, and its guards meet motion the natural length
+// never produces. A fault that only appears once a form is stretched is
+// therefore invisible to the ceilings above no matter how tight they are.
+//
+// This sweep re-measures the two forms whose figuration runs against theme
+// entries -- the pairing that generates the length-dependent faults -- across
+// every DurationScale, and holds them to their own ceilings. It is a second
+// axis over the same counter, not a second counter.
+
+constexpr std::array<DurationScale, 4> kScales = {{
+    DurationScale::Short,
+    DurationScale::Medium,
+    DurationScale::Long,
+    DurationScale::Full,
+}};
+
+struct LengthCeiling {
+  FormType form;
+  std::size_t max_strict;
+  std::size_t max_hidden;
+  std::size_t max_battuta;
+};
+
+// RATCHET: as above, these may only ever be LOWERED. Measured across
+// 4 scales x 4 characters x 8 seeds x both modes.
+constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
+    {FormType::Fugue, 106, 114, 1263},
+    {FormType::PreludeAndFugue, 51, 73, 491},
+}};
+
+TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
+  for (const LengthCeiling& entry : kLengthCeilings) {
+    PerfectMotionCounts total;
+    for (DurationScale scale : kScales) {
+      const std::uint16_t bars = resolveBars(entry.form, scale, /*target_bars=*/0);
+      for (SubjectCharacter character : kCharacters) {
+        for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
+          ComposeRequest request;
+          request.form = entry.form;
+          request.character = character;
+          request.seed = kFirstSeed + offset;
+          request.is_minor = (offset % 2) == 1;
+          request.target_bars = bars;
+
+          HarnessFixture fixture;
+          if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
+            continue;
+          const ComposeResult result =
+              Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+          ASSERT_FALSE(result.notes.empty());
+          total.add(countPerfectMotion(result.notes));
+        }
+      }
+    }
+    std::printf("[counterpoint/length] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu\n",
+                formLabel(entry.form), total.parallel_fifth, total.parallel_octave, total.hidden(),
+                total.battuta);
+    EXPECT_LE(total.strict(), entry.max_strict)
+        << formLabel(entry.form) << ": parallel perfect intervals rose above the ratchet once the "
+        << "form is stretched (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave
+        << ")";
+    EXPECT_LE(total.battuta, entry.max_battuta) << formLabel(entry.form) << ": battuta rose";
+    EXPECT_LE(total.hidden(), entry.max_hidden) << formLabel(entry.form) << ": hidden rose";
+  }
+}
+
 }  // namespace
 }  // namespace bach::composer
