@@ -144,7 +144,7 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
 
   EXPECT_EQ(closedRulesFor(FormType::Fugue), keyboard_polyphony);
   EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), keyboard_polyphony);
-  EXPECT_EQ(closedRulesFor(FormType::TrioSonata), keyboard_polyphony);
+  EXPECT_EQ(closedRulesFor(FormType::TrioSonata), with_invertible_counterpoint);
   EXPECT_EQ(closedRulesFor(FormType::ChoralePrelude),
             (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh"}));
   EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue), keyboard_polyphony);
@@ -159,7 +159,11 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
           "anti_parallel_perfect", "battuta", "cross_relation", "doubling_no_leading_tone",
           "doubling_no_seventh", "hidden_parallel_fifth", "hidden_parallel_octave",
           "invertible_at_octave", "parallel_fifth", "parallel_octave", "vertical_dissonance"}));
-  EXPECT_EQ(closedRulesFor(FormType::Chaconne), with_invertible_counterpoint);
+  // Its upper line is ranked against the ground before it ships, and those are
+  // the two fault classes that search clears every time.
+  EXPECT_EQ(closedRulesFor(FormType::Chaconne),
+            (std::vector<std::string>{"battuta", "doubling_no_seventh", "invertible_at_octave",
+                                      "parallel_octave"}));
   EXPECT_EQ(closedRulesFor(FormType::GoldbergVariations), with_invertible_counterpoint);
 }
 

@@ -15,10 +15,10 @@ namespace {
 // break it somewhere on that surface -- a rule that never matched is absent and
 // therefore closed.
 //
-// Every form except the passacaglia already satisfies `doubling_no_seventh`
-// everywhere, and the monophonic cello prelude has no voice pair at all, so it
-// satisfies every rule that compares two lines. Those are the closures this
-// table starts with.
+// Every form except the passacaglia satisfies `doubling_no_seventh` everywhere,
+// and the monophonic cello prelude has no voice pair at all, so it satisfies
+// every rule that compares two lines. Closures narrower than that are noted at
+// the form they belong to.
 //
 // Sorted by form ordinal, then by rule_id, so the regression can reject a
 // duplicate or a misplaced row.
@@ -49,14 +49,16 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::PreludeAndFugue, "strong_beat_dissonance"},
     {FormType::PreludeAndFugue, "unprepared_dissonance"},
     {FormType::PreludeAndFugue, "vertical_dissonance"},
-    // TrioSonata
+    // TrioSonata -- `invertible_at_octave` judges the upper pair alone, and in
+    // this texture that is exactly the pair the second manual voice is guarded
+    // against as it is written. The guard admits a fifth, which inverts to a
+    // fourth and is tolerated here, so `parallel_fifth` stays open.
     {FormType::TrioSonata, "anti_parallel_perfect"},
     {FormType::TrioSonata, "battuta"},
     {FormType::TrioSonata, "cross_relation"},
     {FormType::TrioSonata, "doubling_no_leading_tone"},
     {FormType::TrioSonata, "hidden_parallel_fifth"},
     {FormType::TrioSonata, "hidden_parallel_octave"},
-    {FormType::TrioSonata, "invertible_at_octave"},
     {FormType::TrioSonata, "parallel_fifth"},
     {FormType::TrioSonata, "parallel_octave"},
     {FormType::TrioSonata, "strong_beat_dissonance"},
@@ -117,15 +119,18 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // closed permanently. What remains is judged against the harmonic plan.
     {FormType::CelloPrelude, "strong_beat_dissonance"},
     {FormType::CelloPrelude, "unprepared_dissonance"},
-    // Chaconne
+    // Chaconne -- two voices, the lower of them the immutable ground. Every
+    // onset of the upper line is ranked against that ground while the material
+    // is built, and the octave and the battuta are the two fault classes that
+    // search finds a replacement for every time. It does not always find one
+    // for the fifth, and the ranking accepts a lesser fault over a worse one,
+    // so `parallel_fifth` and `anti_parallel_perfect` stay open.
     {FormType::Chaconne, "anti_parallel_perfect"},
-    {FormType::Chaconne, "battuta"},
     {FormType::Chaconne, "cross_relation"},
     {FormType::Chaconne, "doubling_no_leading_tone"},
     {FormType::Chaconne, "hidden_parallel_fifth"},
     {FormType::Chaconne, "hidden_parallel_octave"},
     {FormType::Chaconne, "parallel_fifth"},
-    {FormType::Chaconne, "parallel_octave"},
     {FormType::Chaconne, "strong_beat_dissonance"},
     {FormType::Chaconne, "unprepared_dissonance"},
     {FormType::Chaconne, "vertical_dissonance"},
