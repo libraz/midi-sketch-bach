@@ -715,16 +715,69 @@ TEST(GroundVariationPassacaglia, CounterFigurationOffBeatsAreJudgedAgainstMoving
     }
   }
   ASSERT_GT(judged, 0u) << "no off-beat counter-figuration tone was reached";
-  // The residue is the bind where the companion vocabulary itself runs out:
-  // this tone may only be a stepwise neighbour of the anchor or the nearest
-  // other triad tone, all three of which must also stay consonant against the
-  // held ground, and where none of them clears the tone in hand stands. Widening
-  // that vocabulary was tried and rejected before -- a free diatonic
-  // oscillation hammers a sustained seventh against the bar-long ground. Like
-  // the shipped ratchet, this ceiling may only ever be LOWERED.
-  EXPECT_LE(parallel, 6u) << parallel << " of " << judged
+  // The companion vocabulary is deliberately narrow -- a stepwise neighbour of
+  // the anchor or the nearest other triad tone, each of which must also stay
+  // consonant against the held ground -- because widening it was tried and
+  // rejected: a free diatonic oscillation hammers a sustained seventh against
+  // the bar-long ground. The bind where all of them clash is instead answered by
+  // holding the tone already sounding, which is oblique and so can form no
+  // parallel at all. Like the shipped ratchet, this ceiling may only ever be
+  // LOWERED.
+  EXPECT_LE(parallel, 0u) << parallel << " of " << judged
                           << " off-beat counter-figuration tones move in a true parallel perfect "
                              "with a concurrently moving voice";
+}
+
+// The octave gate is closed for this form, so the shipped surface must carry no
+// true parallel octave anywhere -- not only at the bar heads the test above
+// samples. Walk every voice pair over the union of onsets, which is the reading
+// the counterpoint budget and the ear both use: the last tone that sounded
+// paired with the next one that starts. Fifths are deliberately not asserted
+// here; a handful still reach bar heads the variation itself owns, and the
+// shipped ratchet is what tracks them.
+TEST(GroundVariationPassacaglia, ShippedTextureIsFreeOfParallelOctaves) {
+  for (const Case& c : casesFor(FormType::Passacaglia)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    std::vector<Tick> onsets;
+    for (const NoteEvent& note : r.notes)
+      onsets.push_back(note.start_tick);
+    std::sort(onsets.begin(), onsets.end());
+    onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+    const auto sounding = [&](VoiceId voice, Tick tick) {
+      int pitch = -1;
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice != voice || note.start_tick > tick)
+          continue;
+        if (tick < note.start_tick + note.duration)
+          pitch = note.pitch;
+      }
+      return pitch;
+    };
+    for (VoiceId upper = 0; upper + 1 < fx.voice_plan.num_voices; ++upper) {
+      for (VoiceId lower = upper + 1; lower < fx.voice_plan.num_voices; ++lower) {
+        int upper_prev = -1;
+        int lower_prev = -1;
+        for (Tick tick : onsets) {
+          const int upper_now = sounding(upper, tick);
+          const int lower_now = sounding(lower, tick);
+          if (upper_now < 0 || lower_now < 0) {
+            upper_prev = -1;
+            lower_prev = -1;
+            continue;
+          }
+          if (upper_prev >= 0 && lower_prev >= 0 && std::abs(upper_now - lower_now) % 12 == 0) {
+            EXPECT_FALSE(formsStrictPerfectParallel(upper_prev, upper_now, lower_prev, lower_now))
+                << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+                << " tick " << tick << " v" << static_cast<int>(upper) << "/v"
+                << static_cast<int>(lower);
+          }
+          upper_prev = upper_now;
+          lower_prev = lower_now;
+        }
+      }
+    }
+  }
 }
 
 TEST(GroundVariationChaconne, HasNoGroundBarHeadParallelPerfects) {
