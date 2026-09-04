@@ -239,11 +239,22 @@ constexpr int kV0RepairCeiling = 91;
 ///        register freely, so this floor is what keeps the variation above the
 ///        voices under it: a cycle the arc lifts must raise it by the same
 ///        shift, or a repaired onset drops into the middle voice's band.
+/// @param every_voice_placed Whether the two contrary-motion faults may also be
+///        repaired here. Every candidate is judged against the ground and
+///        nothing else, so in a texture that still has a voice to come the
+///        relocation is unverified against it -- and the wider the remit, the
+///        more onsets move and the more often that unverified choice is the
+///        one that ships. In the two-voice chaconne there is nothing left to
+///        verify against and the wider remit removes the form's characteristic
+///        fault outright; in the three-voice passacaglia, whose counter
+///        figuration is written after this scan, it measurably traded parallel
+///        fifths for parallel octaves, which is the wrong direction.
 void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                           const std::vector<std::uint8_t>& ground_pitch,
                           const std::vector<CycleBar>& cycle_bar_plan, const HarmonicPlan& harmony,
                           int preceding_v0_bar_head = -1, int preceding_ground_pitch = -1,
-                          int band_lo = kV0RepairFloor) {
+                          int preceding_v0_last = -1, int band_lo = kV0RepairFloor,
+                          bool every_voice_placed = true) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   // Realized V0 pitch per beat: the previous bar's (the chain reference, seeded
   // at the cycle seam with the caller's closing bar head) and this bar's.
@@ -252,9 +263,14 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
   int beat_pitch[3] = {-1, -1, -1};
   int scanned_bar = -1;
   // The onset immediately before the one under test, with the ground tone held
-  // under it -- the pair the perfect-motion audit samples.
-  int previous_onset_pitch = -1;
-  int previous_onset_ground = -1;
+  // under it -- the pair the perfect-motion audit samples. Seeded at the block
+  // seam with the caller's closing onset, for the same reason the bar chain is:
+  // the audit reads one continuous line, so the first onset of a block is not
+  // the first onset of anything and leaving it unreferenced makes every seam a
+  // hole. The ground under that closing onset is the previous block's last bar
+  // tone, which is what preceding_ground_pitch carries.
+  int previous_onset_pitch = preceding_v0_last;
+  int previous_onset_ground = preceding_ground_pitch;
   for (std::size_t i = 0; i < notes.size(); ++i) {
     const Tick tick = notes[i].start_tick;
     const Tick offset = tick - block_start;
@@ -284,13 +300,35 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
     // is invisible to the preceding onset when the two are inside one held
     // ground tone, and the audited succession is invisible to the chain when the
     // figuration turns between them.
-    const auto formsGroundParallel = [&](int candidate) {
-      return formsPerfectParallel(previous_onset_pitch, candidate, previous_onset_ground,
-                                  ground_now) ||
-             formsPerfectParallel(prior_beat_pitch[beat], candidate, prior_bar_ground, ground_now);
+    //
+    // Ranked, not pooled. Over a ground that rises while the figuration falls,
+    // the same-direction test alone is nearly blind: the two lines here almost
+    // never move together, so what the audit hears as a perfect arrival reaches
+    // it by contrary motion -- as a battuta when the figuration leaps down onto
+    // it, as an anti-parallel when the two exchange one perfect interval for
+    // another. Folding those into the boolean would be worse than leaving them
+    // out, because a candidate search that cannot find a fully clean tone keeps
+    // the ORIGINAL, and some originals are true parallels. The rank instead
+    // lets a replacement be accepted for being less bad.
+    const auto groundFaultRank = [&](int candidate) {
+      const int reference[2][2] = {{previous_onset_pitch, previous_onset_ground},
+                                   {prior_beat_pitch[beat], prior_bar_ground}};
+      int worst = 0;
+      for (const auto& pair : reference) {
+        if (formsPerfectParallel(pair[0], candidate, pair[1], ground_now))
+          return 3;
+        if (!every_voice_placed)
+          continue;
+        if (formsAntiParallelPerfect(pair[0], candidate, pair[1], ground_now))
+          worst = std::max(worst, 2);
+        else if (formsBattuta(pair[0], candidate, pair[1], ground_now))
+          worst = std::max(worst, 1);
+      }
+      return worst;
     };
+    const int original_rank = groundFaultRank(pitch);
     const int prev_pitch = previous_onset_pitch;
-    if (!formsGroundParallel(pitch)) {
+    if (original_rank == 0) {
       beat_pitch[beat] = pitch;
       previous_onset_pitch = pitch;
       previous_onset_ground = ground_now;
@@ -318,46 +356,52 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
       const int to_pc = ((to % 12) + 12) % 12;
       return (from_pc == 8 && to_pc == 11) || (from_pc == 11 && to_pc == 8);
     };
-    for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
-      for (int cand : {pitch + dist, pitch - dist}) {
-        const int pc = ((cand % 12) + 12) % 12;
-        if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
-          continue;
+    // Cleanest first, and never worse than what is already there: the triad
+    // tier and the contextual-scale tier below are both re-offered at each
+    // accept level, so a clean scale tone is preferred over a triad tone that
+    // only downgrades the fault.
+    for (int accept = 0; accept < original_rank && !placed; ++accept) {
+      for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
+        for (int cand : {pitch + dist, pitch - dist}) {
+          const int pc = ((cand % 12) + 12) % 12;
+          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+            continue;
+          }
+          if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+              !rule_helpers::isConsonantInterval(cand - ground_now)) {
+            continue;
+          }
+          if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+              (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
+            continue;
+          }
+          if (groundFaultRank(cand) > accept) {
+            continue;
+          }
+          notes[i].pitch = static_cast<std::uint8_t>(cand);
+          placed = true;
+          break;
         }
-        if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
-            !rule_helpers::isConsonantInterval(cand - ground_now)) {
-          continue;
-        }
-        if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-            (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
-          continue;
-        }
-        if (formsGroundParallel(cand)) {
-          continue;
-        }
-        notes[i].pitch = static_cast<std::uint8_t>(cand);
-        placed = true;
-        break;
       }
-    }
-    // At a leading-tone bass the structural triad is deliberately a dominant
-    // in first inversion.  If all of those tones would retain the parallel,
-    // use another contextual scale tone that is still consonant above the bass
-    // rather than leave the perfect motion in place.
-    for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
-      for (int cand : {pitch + dist, pitch - dist}) {
-        if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
-            !rule_helpers::isConsonantInterval(cand - ground_now) ||
-            !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony, tick,
-                                                  cand - pitch) ||
-            (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-            (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
-            formsGroundParallel(cand)) {
-          continue;
+      // At a leading-tone bass the structural triad is deliberately a dominant
+      // in first inversion.  If all of those tones would retain the fault, use
+      // another contextual scale tone that is still consonant above the bass
+      // rather than leave the perfect motion in place.
+      for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
+        for (int cand : {pitch + dist, pitch - dist}) {
+          if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+              !rule_helpers::isConsonantInterval(cand - ground_now) ||
+              !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony, tick,
+                                                    cand - pitch) ||
+              (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+              (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
+              groundFaultRank(cand) > accept) {
+            continue;
+          }
+          notes[i].pitch = static_cast<std::uint8_t>(cand);
+          placed = true;
+          break;
         }
-        notes[i].pitch = static_cast<std::uint8_t>(cand);
-        placed = true;
-        break;
       }
     }
     // Whether the onset was relocated or had to keep its pitch, it becomes the
@@ -925,7 +969,8 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       // a relocated onset can never land in the V1 counter-figuration's band.
       scrubGroundParallels(v0_notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
                            prev_v0_bar_head, cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1,
-                           kPassV0BandLo + point.register_shift);
+                           prev_v0_last, kPassV0BandLo + point.register_shift,
+                           /*every_voice_placed=*/false);
       if (!v0_notes.empty()) {
         prev_v0_last = static_cast<int>(v0_notes.back().pitch);
         prev_v0_bar_head = pitchAtBarHead(
@@ -1216,6 +1261,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // (quarter notes only, no sub-quarter ornaments) so the chaconne form's
   // variation_role_ornament_constraint stays satisfied. ---
   int previous_v0_bar_head = -1;
+  int previous_v0_last = -1;
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
     // Cycle 0 is the sparse Ground-role establishing statement (quarters).
@@ -1275,7 +1321,8 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
 
     scrubGroundParallels(notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
                          previous_v0_bar_head,
-                         cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1);
+                         cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1, previous_v0_last,
+                         kV0RepairFloor, /*every_voice_placed=*/!passacaglia);
 
     // Compact cadential landing on the piece's final bar. The chaconne coda
     // replaces the repeating dominant bass with a tonic, so its upper voice
@@ -1360,6 +1407,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     if (!notes.empty()) {
       previous_v0_bar_head =
           pitchAtBarHead(notes, block_start + static_cast<Tick>(cycle_bars - 1) * kTicksPerBar34);
+      previous_v0_last = static_cast<int>(notes.back().pitch);
     }
 
     if (passacaglia) {

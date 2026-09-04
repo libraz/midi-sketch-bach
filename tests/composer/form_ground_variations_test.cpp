@@ -32,6 +32,7 @@
 #include "composer/provenance.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -473,7 +474,60 @@ TEST(GroundVariationPassacaglia, MinorHasNoAugmentedSecond) {
   expectNoAugmentedSecond(FormType::Passacaglia);
 }
 
-// --- 8. Picardy: minor + even seed final chord major ------------------------
+// --- 8. No downward leap onto a perfect interval over the ground ------------
+
+// The chaconne is two voices over an immutable ground, so a perfect interval
+// arriving there has exactly one line that may move. Over a ground that rises
+// while the variation falls the two almost never travel together, which is why
+// the same-direction test alone leaves this form's characteristic fault behind:
+// the variation leaping DOWN onto an octave or a fifth above a rising bass.
+// That is the ottava battuta, and in a two-voice texture it is bare.
+//
+// Asserted for the chaconne only. The passacaglia has a third voice its ground
+// scrub cannot see, so a repair there is unverified against the counter line
+// and its residue is held by the shipped-counterpoint ratchet instead.
+TEST(GroundVariationChaconne, NoBattutaOverTheGround) {
+  for (const Case& c : casesFor(FormType::Chaconne)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    auto sounding = [&](VoiceId voice, Tick at) -> int {
+      int pitch = -1;
+      Tick best = 0;
+      bool found = false;
+      for (const auto& note : r.notes) {
+        if (note.voice != voice)
+          continue;
+        if (note.start_tick <= at && at < note.start_tick + note.duration &&
+            (!found || note.start_tick > best)) {
+          found = true;
+          best = note.start_tick;
+          pitch = note.pitch;
+        }
+      }
+      return pitch;
+    };
+    std::vector<Tick> onsets;
+    for (const auto& note : r.notes)
+      onsets.push_back(note.start_tick);
+    std::sort(onsets.begin(), onsets.end());
+    onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+    const VoiceId ground = groundVoice(FormType::Chaconne);
+    for (std::size_t idx = 1; idx < onsets.size(); ++idx) {
+      const int up_prev = sounding(0, onsets[idx - 1]);
+      const int up_curr = sounding(0, onsets[idx]);
+      const int lo_prev = sounding(ground, onsets[idx - 1]);
+      const int lo_curr = sounding(ground, onsets[idx]);
+      if (up_prev < 0 || up_curr < 0 || lo_prev < 0 || lo_curr < 0)
+        continue;
+      EXPECT_FALSE(isBattutaMotion(up_prev, up_curr, lo_prev, lo_curr))
+          << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+          << " battuta at tick " << onsets[idx] << " (" << up_prev << "->" << up_curr << " over "
+          << lo_prev << "->" << lo_curr << ")";
+    }
+  }
+}
+
+// --- 9. Picardy: minor + even seed final chord major ------------------------
 
 void expectPicardyFinalChord(FormType form) {
   for (const Case& c : casesFor(form)) {

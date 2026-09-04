@@ -392,13 +392,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // remains is almost all fifths.
     {FormType::FantasiaAndFugue, 39, 84, 129},
     {FormType::CelloPrelude, 0, 0, 0},
-    // Trade: -2 strict to 0, +13 hidden, -16 battuta. Two voices only, so the
-    // cadential approach to the dominant meets a fixed bass with no third part
-    // to hide behind: every dominant tone in the compass arrives on a perfect
-    // interval, reached either by a downward leap (battuta) or an upward one
-    // (hidden). Leaping up to the dominant over a rising bass is ordinary
-    // cadential writing; leaping down onto it is not.
-    {FormType::Chaconne, 0, 24, 21},
+    // Two voices only, so an arrival on a perfect interval meets a fixed bass
+    // with no third part to hide behind. Both remaining ways in are upward
+    // leaps, which is ordinary cadential writing; the downward ones, which are
+    // not, are gone. Hidden carries the whole residue by design.
+    {FormType::Chaconne, 0, 23, 0},
     {FormType::GoldbergVariations, 24, 12, 39},
 }};
 
