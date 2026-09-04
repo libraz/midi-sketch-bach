@@ -467,6 +467,16 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
 
   int line_prev = -1;
   int prev_emitted = -1;  // last pitch actually pushed (anchor OR oscillation tone).
+  // The counter-line is ONE continuous voice across ground cycles, and this
+  // vector already holds the previous cycle's tail whenever the schedule kept V1
+  // sounding. Opening each cycle with no history disabled both parallel tests on
+  // its first beat -- consonantChordTone reads a negative previous pitch as "no
+  // motion to judge", and the audible-grain re-check below is skipped outright
+  // -- so the cycle seam shipped this form's largest single fault group.
+  if (!notes.empty() && notes.back().start_tick + notes.back().duration == block_start) {
+    prev_emitted = static_cast<int>(notes.back().pitch);
+    line_prev = prev_emitted;
+  }
   int cursor = (band_lo + band_hi) / 2;
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
@@ -598,7 +608,13 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           for (int pass = 0; pass < 2 && !displaced; ++pass) {
             if (pass == 1 && !anchor_is_true_parallel(anchor))
               break;
-            for (int dist = 1; dist <= 7 && !displaced; ++dist) {
+            // The sweep reaches the whole band, not a fixed fifth-and-a-bit. Two
+            // of the three tests below are pitch-class shaped (scale membership,
+            // consonance against the concurrent tones), so the admissible set is
+            // sparse and its nearest member is regularly further than a fifth
+            // away; a short radius left the anchor sitting on a true parallel
+            // while a free tone waited an octave down.
+            for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
               for (int dir : {1, -1}) {
                 const int cand = anchor + dir * dist;
                 if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
@@ -621,6 +637,23 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                 break;
               }
             }
+          }
+          // Last resort: hold the tone that just sounded. Oblique motion forms
+          // no parallel at all, and where the band offers nothing else the
+          // repeated tone is the smaller blemish -- the anti-stall displacement
+          // above exists to keep the line from going dull, not to buy that at
+          // the price of a parallel octave.
+          if (!displaced && anchor_is_true_parallel(anchor) && prev_emitted >= band_lo &&
+              prev_emitted <= band_hi) {
+            bool consonant = true;
+            for (int upper : theme_pitches) {
+              if (!isConsonantIc(prev_emitted - upper)) {
+                consonant = false;
+                break;
+              }
+            }
+            if (consonant)
+              anchor = prev_emitted;
           }
         }
       }
@@ -659,32 +692,58 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           motions.clear();
           registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
                                      /*voice=*/1, /*num_voices=*/3, motions);
-          auto osc_is_parallel = [&](int cand) {
+          // The true parallel and the hidden perfect sit on separate rungs. The
+          // companion vocabulary here is four tones wide and each must still be
+          // consonant with the held ground, so demanding full freedom regularly
+          // rejects all four and leaves the design tone in place -- including
+          // when that tone is the true parallel and a merely hidden companion
+          // was available. Take the mildest fault the vocabulary can reach.
+          constexpr int kOscClean = 0;
+          constexpr int kOscHidden = 1;
+          constexpr int kOscParallel = 2;
+          auto osc_fault_rank = [&](int cand) {
+            int worst = kOscClean;
             for (const ConcurrentMotion& motion : motions) {
-              if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
-                return true;
-              }
+              if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+                return kOscParallel;
+              if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+                worst = kOscHidden;
             }
-            return false;
+            return worst;
           };
-          if (osc_is_parallel(pitch)) {
-            // The anchor is the last candidate, not one of the first: repeating
-            // it flattens the oscillation into a held tone, which is why the
-            // neighbours and the broken third are tried ahead of it. But an
-            // oblique repeat cannot form a parallel with anything, so where the
-            // whole companion vocabulary is tied it is the one escape left.
+          // The anchor is the last candidate, not one of the first: repeating
+          // it flattens the oscillation into a held tone, which is why the
+          // neighbours and the broken third are tried ahead of it. But an
+          // oblique repeat cannot form a parallel with anything, so where the
+          // whole companion vocabulary is tied it is the one escape left.
+          const int design_rank = osc_fault_rank(pitch);
+          for (int accept = kOscClean; accept < design_rank; ++accept) {
+            bool placed = false;
             for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode),
                              nearest_other_triad_tone(anchor), anchor}) {
               if (cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
               if (!isConsonantIc(cand - plan.ground_pc))
                 continue;
-              if (osc_is_parallel(cand))
+              if (osc_fault_rank(cand) > accept)
                 continue;
               pitch = cand;
+              placed = true;
               break;
             }
+            if (placed)
+              break;
           }
+          // Last resort: sustain the tone that just sounded. Oblique motion can
+          // form no parallel at all, and the repeat introduces no interval the
+          // ear has not already accepted one sixteenth earlier -- which is why
+          // it is exempt from the ground-consonance test the fresh candidates
+          // take, and how it escapes bars whose chord puts a tritone between the
+          // companion tone and the ground. It ranks below the anchor's own
+          // return because a repeat flattens the oscillation; only a true
+          // parallel is worth that.
+          if (osc_fault_rank(pitch) == kOscParallel)
+            pitch = prev_emitted;
         }
         mnote.pitch = static_cast<std::uint8_t>(pitch);
         notes.push_back(mnote);
@@ -870,6 +929,12 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   std::vector<MaterialNote> counter_notes;
   int prev_v0_last = -1;  // previous variation's closing pitch (seam voice-leading).
   int prev_v0_bar_head = -1;
+  // The previous cycle's closing V0 note, carried into the next cycle's
+  // read-back registry. The registry is rebuilt per cycle, so without this the
+  // concurrent voices have no onset before the cycle's first beat and every
+  // motion test there passes on an undefined pair.
+  MaterialNote carry_v0{};
+  bool carry_v0_valid = false;
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
@@ -999,11 +1064,27 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
         registry.record(block_start + bar_tick(bar), /*voice=*/2,
                         static_cast<int>(ground_pitch[gi]), kTicksPerBar34);
       }
+      // Carry the last onset each concurrent voice made before this cycle so the
+      // first beat has a motion to judge (the ground is period-tiled, so its
+      // preceding bar is the cycle's last ground pitch).
+      if (carry_v0_valid) {
+        registry.record(carry_v0.start_tick, /*voice=*/0, static_cast<int>(carry_v0.pitch),
+                        carry_v0.duration);
+      }
+      if (cycle > 0) {
+        registry.record(block_start - kTicksPerBar34, /*voice=*/2,
+                        static_cast<int>(ground_pitch[static_cast<std::size_t>(cycle_bars - 1)]),
+                        kTicksPerBar34);
+      }
       const int v1_tier = (cycle_tier > 0) ? cycle_tier - 1 : 0;
       const int notes_per_beat = notesPerBeatForTier(v1_tier);
       appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
                               point.register_shift, notes_per_beat, mode);
     }
+
+    carry_v0_valid = !v0_notes.empty();
+    if (carry_v0_valid)
+      carry_v0 = v0_notes.back();
   }
 
   // --- Cadential landing over the final two bars. The ground is immutable, so
@@ -1047,15 +1128,34 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       v0_prefinal = prefinal;
       const int final_tone = tritone_seam ? prefinal - 2 : prefinal + 1;
       v0_final = final_tone;
+      // The supertonic trill falls D -> C, and where the immutable ground
+      // approaches its own final tonic from that same degree the two outer
+      // voices walk into the piece's last chord in parallel octaves. The trill
+      // then takes its termination: the last eighth of the landing bar steps
+      // down to the leading tone, so the tonic is reached from B against the
+      // ground's D -- contrary motion, and the figure the cadence wants anyway.
+      const int penultimate_ground_pc =
+          cycle_bars >= 2
+              ? static_cast<int>(ground_pitch[static_cast<std::size_t>(cycle_bars - 2)]) % 12
+              : -1;
+      const bool needs_termination = tritone_seam && penultimate_ground_pc == 2;
       last_var.notes.erase(
           std::remove_if(last_var.notes.begin(), last_var.notes.end(),
                          [&](const MaterialNote& note) { return note.start_tick >= landing_tick; }),
           last_var.notes.end());
+      const Tick termination = needs_termination ? kTicksPerBeat / 2 : 0;
       MaterialNote held;
       held.start_tick = landing_tick;
-      held.duration = kTicksPerBar34 - kTicksPerBeat;
+      held.duration = kTicksPerBar34 - kTicksPerBeat - termination;
       held.pitch = static_cast<std::uint8_t>(prefinal);
       last_var.notes.push_back(held);
+      if (needs_termination) {
+        MaterialNote leading;
+        leading.start_tick = held.start_tick + held.duration;
+        leading.duration = termination;
+        leading.pitch = static_cast<std::uint8_t>(final_tone - 1);
+        last_var.notes.push_back(leading);
+      }
       MaterialNote last;
       last.start_tick = piece_end - kTicksPerBar34;
       last.duration = kTicksPerBar34;
@@ -1720,6 +1820,41 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
       }
       return pitch;
     };
+    // The latest V0 onset strictly before a tick. The union-onset reading pairs
+    // the last tone that sounded with the next one that starts, so a running
+    // figuration must be sampled at its own onsets -- reading V0 one tick back
+    // returns the tone it is still holding, which is a different pair.
+    // `onset_tick`, when given, receives where that onset falls -- the caller
+    // needs it to tell an onset the suspension rewrite will overwrite from one
+    // the running figuration keeps.
+    const auto upperOnsetBefore = [&](Tick tick, Tick* onset_tick) {
+      int pitch = -1;
+      Tick best = 0;
+      for (const auto& variation : out.material.passacaglia_variations) {
+        for (const MaterialNote& note : variation.notes) {
+          if (note.start_tick < tick && (pitch < 0 || note.start_tick >= best)) {
+            best = note.start_tick;
+            pitch = static_cast<int>(note.pitch);
+          }
+        }
+      }
+      if (onset_tick != nullptr)
+        *onset_tick = best;
+      return pitch;
+    };
+    const auto counterOnsetBefore = [&](Tick tick) {
+      int pitch = -1;
+      Tick best = 0;
+      for (const TrioVoiceLine& line : out.material.trio_voices) {
+        for (const MaterialNote& note : line.notes) {
+          if (note.start_tick < tick && (pitch < 0 || note.start_tick >= best)) {
+            best = note.start_tick;
+            pitch = static_cast<int>(note.pitch);
+          }
+        }
+      }
+      return pitch;
+    };
     const int bass_prep = groundPitchAt(preparation_tick);
     const int bass_sus = groundPitchAt(suspension_tick);
     const int bass_res = groundPitchAt(resolution_tick);
@@ -1749,86 +1884,121 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     // is a normal cadential register choice that often clears a tritone the
     // near octave cannot. Ascending distance keeps the figuration's own tone
     // first, so a cadence that already works is left alone.
-    for (int distance = 0; distance <= 12 && !installed; ++distance) {
-      for (int direction : {1, -1}) {
-        if (distance == 0 && direction < 0)
-          continue;
-        const int upper_sus = original_upper_sus + direction * distance;
-        const int pc = ((upper_sus % 12) + 12) % 12;
-        if (upper_sus < 60 || upper_sus > 86 ||
-            (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
-          continue;
-        if (previous_upper_head >= 0 && previous_ground >= 0 &&
-            formsPerfectParallel(previous_upper_head, upper_sus, previous_ground, bass_sus))
-          continue;
-        bool creates_augmented_second = false;
-        if (req.mode == detail::Mode::Minor) {
-          const auto isAbBPair = [](int a, int b) {
-            const int a_pc = ((a % 12) + 12) % 12;
-            const int b_pc = ((b % 12) + 12) % 12;
-            return (a_pc == 8 && b_pc == 11) || (a_pc == 11 && b_pc == 8);
-          };
-          for (const auto& variation : out.material.passacaglia_variations) {
-            for (std::size_t i = 0; i < variation.notes.size(); ++i) {
-              const MaterialNote& note = variation.notes[i];
-              if (note.start_tick > suspension_tick ||
-                  suspension_tick >= note.start_tick + note.duration)
-                continue;
-              creates_augmented_second =
-                  (i > 0 && isAbBPair(variation.notes[i - 1].pitch, upper_sus)) ||
-                  (i + 1 < variation.notes.size() &&
-                   isAbBPair(upper_sus, variation.notes[i + 1].pitch));
-            }
-          }
-        }
-        if (creates_augmented_second)
-          continue;
-        const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
-        for (SuspensionType type :
-             {SuspensionType::Sus4_3, SuspensionType::Sus7_6, SuspensionType::Sus9_8}) {
-          SuspensionPattern suspension;
-          if (!designUpperSuspension(
-                  type, preparation_tick, suspension_tick, resolution_tick,
-                  /*voice=*/1, static_cast<std::uint8_t>(bass_prep),
-                  static_cast<std::uint8_t>(bass_sus), static_cast<std::uint8_t>(bass_res),
-                  static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
-                  static_cast<std::uint8_t>(upper_res),
-                  /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
-                  &suspension))
+    //
+    // The whole search runs twice. The first pass also demands that the
+    // pattern's own three tones form no true parallel with the figuration; the
+    // second drops that demand, because some cadences admit no parallel-free
+    // suspension at all and the form's closing dissonance is worth more than the
+    // fault it carries.
+    for (int strict_pass = 0; strict_pass < 2 && !installed; ++strict_pass) {
+      for (int distance = 0; distance <= 12 && !installed; ++distance) {
+        for (int direction : {1, -1}) {
+          if (distance == 0 && direction < 0)
             continue;
-          for (auto& variation : out.material.passacaglia_variations) {
-            std::vector<MaterialNote> rewritten;
-            rewritten.reserve(variation.notes.size() + 2);
-            for (const MaterialNote& note : variation.notes) {
-              const Tick note_end = note.start_tick + note.duration;
-              if (note.start_tick > suspension_tick || suspension_tick >= note_end) {
-                rewritten.push_back(note);
-                continue;
-              }
-              if (note.start_tick < suspension_tick) {
-                MaterialNote before = note;
-                before.duration = suspension_tick - note.start_tick;
-                rewritten.push_back(before);
-              }
-              MaterialNote accented = note;
-              accented.start_tick = suspension_tick;
-              accented.duration = std::min(note_end, resolution_tick) - suspension_tick;
-              accented.pitch = static_cast<std::uint8_t>(upper_sus);
-              rewritten.push_back(accented);
-              if (note_end > resolution_tick) {
-                MaterialNote after = note;
-                after.start_tick = resolution_tick;
-                after.duration = note_end - resolution_tick;
-                rewritten.push_back(after);
+          const int upper_sus = original_upper_sus + direction * distance;
+          const int pc = ((upper_sus % 12) + 12) % 12;
+          if (upper_sus < 60 || upper_sus > 86 ||
+              (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
+            continue;
+          if (previous_upper_head >= 0 && previous_ground >= 0 &&
+              formsPerfectParallel(previous_upper_head, upper_sus, previous_ground, bass_sus))
+            continue;
+          bool creates_augmented_second = false;
+          if (req.mode == detail::Mode::Minor) {
+            const auto isAbBPair = [](int a, int b) {
+              const int a_pc = ((a % 12) + 12) % 12;
+              const int b_pc = ((b % 12) + 12) % 12;
+              return (a_pc == 8 && b_pc == 11) || (a_pc == 11 && b_pc == 8);
+            };
+            for (const auto& variation : out.material.passacaglia_variations) {
+              for (std::size_t i = 0; i < variation.notes.size(); ++i) {
+                const MaterialNote& note = variation.notes[i];
+                if (note.start_tick > suspension_tick ||
+                    suspension_tick >= note.start_tick + note.duration)
+                  continue;
+                creates_augmented_second =
+                    (i > 0 && isAbBPair(variation.notes[i - 1].pitch, upper_sus)) ||
+                    (i + 1 < variation.notes.size() &&
+                     isAbBPair(upper_sus, variation.notes[i + 1].pitch));
               }
             }
-            variation.notes.swap(rewritten);
           }
-          installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
-          break;
+          if (creates_augmented_second)
+            continue;
+          const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
+          for (SuspensionType type :
+               {SuspensionType::Sus4_3, SuspensionType::Sus7_6, SuspensionType::Sus9_8}) {
+            SuspensionPattern suspension;
+            if (!designUpperSuspension(
+                    type, preparation_tick, suspension_tick, resolution_tick,
+                    /*voice=*/1, static_cast<std::uint8_t>(bass_prep),
+                    static_cast<std::uint8_t>(bass_sus), static_cast<std::uint8_t>(bass_res),
+                    static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
+                    static_cast<std::uint8_t>(upper_res),
+                    /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
+                    &suspension))
+              continue;
+            // The suspension's own three tones are a voice, and nothing has judged
+            // them: the test above only asks whether relocating V0 to `upper_sus`
+            // parallels the ground. Read each of the pattern's motions -- the
+            // counter-line's approach into the preparation, the preparation into
+            // the dissonance, the dissonance into its resolution -- against the V0
+            // tone sounding opposite it, and reject a pattern that ships a true
+            // parallel.
+            const auto strictAgainst = [](int line_prev, int cand, int other_prev, int other_curr) {
+              return line_prev >= 0 && cand >= 0 && other_prev >= 0 && other_curr >= 0 &&
+                     formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr);
+            };
+            // The rewrite replaces only the V0 note that CONTAINS the suspension;
+            // a figuration running faster than the pattern keeps its own onsets
+            // after it, and one of those -- not `upper_sus` -- is then what the
+            // resolution answers.
+            Tick res_onset = 0;
+            const int res_onset_pitch = upperOnsetBefore(resolution_tick, &res_onset);
+            const int upper_res_prev = res_onset > suspension_tick ? res_onset_pitch : upper_sus;
+            if (strict_pass == 0 &&
+                (strictAgainst(counterOnsetBefore(preparation_tick), suspension.preparation_pitch,
+                               upperOnsetBefore(preparation_tick, nullptr), upper_prep) ||
+                 strictAgainst(suspension.preparation_pitch, suspension.suspension_pitch,
+                               upperOnsetBefore(suspension_tick, nullptr), upper_sus) ||
+                 strictAgainst(suspension.suspension_pitch, suspension.resolution_pitch,
+                               upper_res_prev, upper_res))) {
+              continue;
+            }
+            for (auto& variation : out.material.passacaglia_variations) {
+              std::vector<MaterialNote> rewritten;
+              rewritten.reserve(variation.notes.size() + 2);
+              for (const MaterialNote& note : variation.notes) {
+                const Tick note_end = note.start_tick + note.duration;
+                if (note.start_tick > suspension_tick || suspension_tick >= note_end) {
+                  rewritten.push_back(note);
+                  continue;
+                }
+                if (note.start_tick < suspension_tick) {
+                  MaterialNote before = note;
+                  before.duration = suspension_tick - note.start_tick;
+                  rewritten.push_back(before);
+                }
+                MaterialNote accented = note;
+                accented.start_tick = suspension_tick;
+                accented.duration = std::min(note_end, resolution_tick) - suspension_tick;
+                accented.pitch = static_cast<std::uint8_t>(upper_sus);
+                rewritten.push_back(accented);
+                if (note_end > resolution_tick) {
+                  MaterialNote after = note;
+                  after.start_tick = resolution_tick;
+                  after.duration = note_end - resolution_tick;
+                  rewritten.push_back(after);
+                }
+              }
+              variation.notes.swap(rewritten);
+            }
+            installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+            break;
+          }
+          if (installed)
+            break;
         }
-        if (installed)
-          break;
       }
     }
   }
