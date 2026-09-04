@@ -131,7 +131,7 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
   return inverted;
 }
 
-/// @brief Whether a candidate stretto canon sustains a sharp dissonance.
+/// @brief How a candidate stretto canon reads against itself.
 ///
 /// Lays the leader and the delayed follower on a sixteenth grid and scans the
 /// overlap for interval class 1, 6 or 11 (the semitone/tritone family) held
@@ -140,6 +140,16 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
 /// dissonance rule on Material x Material pairs -- so a beat-long m2/M7
 /// between the two theme statements would ship unflagged. The caller uses this
 /// to vet each (delay, interval) configuration before committing the canon.
+///
+/// The same scan counts the true parallel perfects the pair would sound. Every
+/// canon configuration here transposes the follower by an octave or a fifth, so
+/// the two lines start a perfect interval apart and stay there wherever the
+/// subject's own contour repeats -- the pair is the one place in this form where
+/// a parallel is produced by the design rather than by a guard missing it, and
+/// no later pass can answer for it, because a follower that is re-aimed is no
+/// longer the imitation the stretto exists to state. The slot grid reads the
+/// pair exactly as a union-onset reading does: a slot where only one line moves
+/// is oblique motion and counts for nothing.
 ///
 /// @param leader_pat The leader's 16-note pattern (middle-entry material).
 /// @param leader_total Total semitone shift applied to the leader.
@@ -154,6 +164,7 @@ struct StrettoOverlapProfile {
   bool sustains_sharp = false;  // ic 1/6/11 held for >= a quarter note.
   int overlap_slots = 0;        // sixteenth slots where both lines sound.
   int broad_sharp_slots = 0;    // slots at ic 1/2/6/10/11 (seconds family).
+  int parallel_perfects = 0;    // slots where both lines move into one perfect class.
 };
 
 StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& leader_pat,
@@ -188,33 +199,31 @@ StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& 
   StrettoOverlapProfile profile;
   const int sustain_limit = static_cast<int>(kQuarter / kSlotTick);
   int run = 0;
+  int prev_leader = -1;
+  int prev_follower = -1;
   for (int slot = 0; slot < total_slots; ++slot) {
+    const int lead = leader[static_cast<std::size_t>(slot)];
+    const int foll = follower[static_cast<std::size_t>(slot)];
     bool sharp = false;
-    if (leader[static_cast<std::size_t>(slot)] >= 0 &&
-        follower[static_cast<std::size_t>(slot)] >= 0) {
+    if (lead >= 0 && foll >= 0) {
       profile.overlap_slots += 1;
-      const int ic = std::abs(leader[static_cast<std::size_t>(slot)] -
-                              follower[static_cast<std::size_t>(slot)]) %
-                     12;
+      const int ic = std::abs(lead - foll) % 12;
       sharp = (ic == 1 || ic == 6 || ic == 11);
       if (sharp || ic == 2 || ic == 10) {
         profile.broad_sharp_slots += 1;
       }
+      if (formsStrictPerfectParallel(prev_leader, lead, prev_follower, foll)) {
+        profile.parallel_perfects += 1;
+      }
     }
+    prev_leader = lead;
+    prev_follower = foll;
     run = sharp ? run + 1 : 0;
     if (run >= sustain_limit) {
       profile.sustains_sharp = true;
     }
   }
   return profile;
-}
-
-bool strettoSustainsDissonance(const std::array<std::uint8_t, 16>& leader_pat, int leader_total,
-                               const std::array<std::uint8_t, 16>& follower_pat, int follower_total,
-                               const std::array<Tick, 16>& rhythm, int delay_bars) {
-  return strettoOverlapProfile(leader_pat, leader_total, follower_pat, follower_total, rhythm,
-                               rhythm, delay_bars)
-      .sustains_sharp;
 }
 
 // Major-mode middle entries rotate V / vi / IV. In minor, a degree shift of
@@ -1239,18 +1248,42 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     };
     constexpr std::array<StrettoConfig, 4> kStrettoConfigs = {{{1, 0}, {2, 0}, {1, 7}, {2, 7}}};
     const int follower_key_semis = (leader_carry_voice == 1) ? 0 : key_semis;
-    for (const StrettoConfig& config : kStrettoConfigs) {
-      if (leader_carry_voice == 1 && config.extra_semis != 0) {
+    // Read every configuration before committing one, rather than taking the
+    // first that clears the dissonance veto. The configurations differ in the
+    // delay and in whether the canon sounds at the octave or at the fifth, and
+    // both of those decide how often the two statements step into a perfect
+    // interval together -- which the preference order has no way to see, and
+    // which no later pass can answer for, since a follower that is re-aimed is
+    // no longer an imitation. Fewest true parallels wins; the preference order
+    // (densest canon first) breaks ties, so a window whose configurations are
+    // equally clean commits exactly what it did before.
+    int best_index = -1;
+    int best_parallels = 0;
+    int best_follower_total = 0;
+    for (std::size_t idx = 0; idx < kStrettoConfigs.size(); ++idx) {
+      const StrettoConfig& candidate = kStrettoConfigs[idx];
+      if (leader_carry_voice == 1 && candidate.extra_semis != 0) {
         continue;  // no in-set fifth-up canon against the modal vi leader.
       }
-      const int follower_semis = follower_key_semis + config.extra_semis;
-      const int follower_off =
-          octaveOffsetForBand(subj_pat, follower_semis, follower_voice, kBandLo, kBandHi);
-      const int follower_total = follower_semis + follower_off;
-      if (strettoSustainsDissonance(leader_pat, leader_total, subj_pat, follower_total, subj_rhythm,
-                                    config.delay_bars)) {
+      const int candidate_semis = follower_key_semis + candidate.extra_semis;
+      const int candidate_off =
+          octaveOffsetForBand(subj_pat, candidate_semis, follower_voice, kBandLo, kBandHi);
+      const int candidate_total = candidate_semis + candidate_off;
+      const StrettoOverlapProfile profile =
+          strettoOverlapProfile(leader_pat, leader_total, subj_pat, candidate_total, subj_rhythm,
+                                subj_rhythm, candidate.delay_bars);
+      if (profile.sustains_sharp) {
         continue;
       }
+      if (best_index < 0 || profile.parallel_perfects < best_parallels) {
+        best_index = static_cast<int>(idx);
+        best_parallels = profile.parallel_perfects;
+        best_follower_total = candidate_total;
+      }
+    }
+    if (best_index >= 0) {
+      const StrettoConfig& config = kStrettoConfigs[static_cast<std::size_t>(best_index)];
+      const int follower_total = best_follower_total;
       // material.subject[i] == subj_pat[i] + v0_off (the V0 exposition
       // statement), so the validated relation follower[i] == subject[i] +
       // interval requires interval = follower_total - v0_off. This keeps the
@@ -1439,47 +1472,54 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
               me_real, me_off, subj_pat, first_total, subj_rhythm, subj_rhythm, first_delay);
           const bool first_canon_clean =
               4 * first_profile.broad_sharp_slots <= first_profile.overlap_slots;
-          for (const SecondConfig& config : kSecondConfigs) {
-            if (!first_canon_clean) {
-              break;
-            }
-            if (config.delay_bars <= first_delay) {
+          // The third statement is a FALSE ENTRY: the subject's one-bar head
+          // only. A full third statement of this catalog's subjects against
+          // themselves at a 1-3 bar delay always sustains the seconds family
+          // somewhere in the 3-4 shared bars, so a complete triple canon is
+          // structurally unavailable; the head quotation piling in late is
+          // the idiomatic maestrale gesture that stays vettable. Zero-length
+          // tail durations keep the profile scan to the head's single bar.
+          std::array<Tick, 16> head_rhythm{};
+          int head_notes = 0;
+          Tick head_span = 0;
+          while (head_notes < kSubjectNotes && head_span < kTicksPerBar) {
+            head_rhythm[static_cast<std::size_t>(head_notes)] =
+                subj_rhythm[static_cast<std::size_t>(head_notes)];
+            head_span += subj_rhythm[static_cast<std::size_t>(head_notes)];
+            ++head_notes;
+          }
+          // Vet the head against the leader AND the first follower: no
+          // sustained sharp dissonance, and the seconds family (ic
+          // 1/2/6/10/11) on at most a quarter of the shared slots -- the
+          // transient wash is what makes a pile-up read as mud instead of
+          // tension. Failing every config keeps the two-voice stretto.
+          //
+          // Among the configurations that clear those, the one whose head steps
+          // into the fewest perfect intervals with either line already sounding
+          // is committed; the preference order breaks ties. The head is a third
+          // verbatim statement of the same material, so it meets both other
+          // lines on the same terms the pair below already answers for.
+          int best_second = -1;
+          int best_second_parallels = 0;
+          int best_second_total = 0;
+          for (std::size_t idx = 0; first_canon_clean && idx < kSecondConfigs.size(); ++idx) {
+            const SecondConfig& candidate = kSecondConfigs[idx];
+            if (candidate.delay_bars <= first_delay) {
               continue;  // the pile-up requires a later entrance than the first.
             }
-            if (carry_voice == 1 && config.extra_semis != 0) {
+            if (carry_voice == 1 && candidate.extra_semis != 0) {
               continue;  // no in-set fifth-up canon against the modal vi leader.
             }
-            const int second_semis = second_key_semis + config.extra_semis;
-            const int second_off =
-                octaveOffsetForBand(subj_pat, second_semis, third_voice, kBandLo, kBandHi);
-            const int second_total = second_semis + second_off;
-            // The third statement is a FALSE ENTRY: the subject's one-bar head
-            // only. A full third statement of this catalog's subjects against
-            // themselves at a 1-3 bar delay always sustains the seconds family
-            // somewhere in the 3-4 shared bars, so a complete triple canon is
-            // structurally unavailable; the head quotation piling in late is
-            // the idiomatic maestrale gesture that stays vettable. Zero-length
-            // tail durations keep the profile scan to the head's single bar.
-            std::array<Tick, 16> head_rhythm{};
-            int head_notes = 0;
-            Tick head_span = 0;
-            while (head_notes < kSubjectNotes && head_span < kTicksPerBar) {
-              head_rhythm[static_cast<std::size_t>(head_notes)] =
-                  subj_rhythm[static_cast<std::size_t>(head_notes)];
-              head_span += subj_rhythm[static_cast<std::size_t>(head_notes)];
-              ++head_notes;
-            }
-            // Vet the head against the leader AND the first follower: no
-            // sustained sharp dissonance, and the seconds family (ic
-            // 1/2/6/10/11) on at most a quarter of the shared slots -- the
-            // transient wash is what makes a pile-up read as mud instead of
-            // tension. Failing every config keeps the two-voice stretto.
+            const int candidate_semis = second_key_semis + candidate.extra_semis;
+            const int candidate_off =
+                octaveOffsetForBand(subj_pat, candidate_semis, third_voice, kBandLo, kBandHi);
+            const int candidate_total = candidate_semis + candidate_off;
             const StrettoOverlapProfile vs_leader =
-                strettoOverlapProfile(me_real, me_off, subj_pat, second_total, subj_rhythm,
-                                      head_rhythm, config.delay_bars);
+                strettoOverlapProfile(me_real, me_off, subj_pat, candidate_total, subj_rhythm,
+                                      head_rhythm, candidate.delay_bars);
             const StrettoOverlapProfile vs_first =
-                strettoOverlapProfile(subj_pat, first_total, subj_pat, second_total, subj_rhythm,
-                                      head_rhythm, config.delay_bars - first_delay);
+                strettoOverlapProfile(subj_pat, first_total, subj_pat, candidate_total, subj_rhythm,
+                                      head_rhythm, candidate.delay_bars - first_delay);
             if (vs_leader.overlap_slots == 0 || vs_leader.sustains_sharp ||
                 vs_first.sustains_sharp) {
               continue;  // no overlap to vet means no basis to commit.
@@ -1488,6 +1528,16 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                 4 * vs_first.broad_sharp_slots > vs_first.overlap_slots) {
               continue;
             }
+            const int parallels = vs_leader.parallel_perfects + vs_first.parallel_perfects;
+            if (best_second < 0 || parallels < best_second_parallels) {
+              best_second = static_cast<int>(idx);
+              best_second_parallels = parallels;
+              best_second_total = candidate_total;
+            }
+          }
+          if (best_second >= 0) {
+            const SecondConfig& config = kSecondConfigs[static_cast<std::size_t>(best_second)];
+            const int second_total = best_second_total;
             // Same verbatim-transposition bookkeeping as the first follower:
             // interval = second_total - v0_off so stretto_overlap_valid stays
             // exact against material.subject (the head is a prefix, so the
@@ -1522,7 +1572,6 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
             // filling the wait with figuration doubles the transient
             // seconds-density of the window (the wash that reads as mud).
             second_stretto_placed = true;
-            break;
           }
         }
       } else if (cycle == second_stretto_cycle) {
@@ -1981,6 +2030,157 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   }
 }
 
+/// @brief Re-aim the tone an accompaniment span hands over with.
+///
+/// A span boundary is the one place in this form where two voices can both
+/// begin verbatim material on the same tick: an entry arrives in one voice
+/// while another voice's accompaniment ends, and each was written without the
+/// other's next tone. Neither head may move -- both are theme statements at
+/// designed levels -- but the accompaniment tone handing over to one of them is
+/// free, and it is what decides the interval class the pair leaves behind. Read
+/// here rather than while the span is built, because the boundary's other side
+/// does not exist until every voice is placed.
+///
+/// Only a TRUE parallel is repaired: the weaker perfect approaches are what a
+/// re-aim over fixed heads trades into, and paying for one with another buys
+/// nothing. The replacement keeps the span's band and its scale, and holds to
+/// the leaps the displaced tone already spanned; it may take a dissonance only
+/// where the tone it replaces was consonant and no consonant tone clears the
+/// parallel, which is the same order of preference the accompaniment's own
+/// anchor guard uses one layer down.
+void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
+  struct Replacement {
+    Tick start = 0;
+    Tick duration = 0;
+    VoiceId voice = 0;
+    int pitch = 0;
+  };
+  // A seam can hand over in two voices at once, and the registry cannot be
+  // amended in place (its lookup keeps the earliest matching onset), so a tone
+  // already re-aimed here is read back from this list rather than from it.
+  std::vector<Replacement> replaced;
+  // A figuration tone authored on a bar downbeat is the bar's harmonic anchor
+  // and may only be exchanged for another tone of the same triad; anywhere else
+  // in the bar the line is free to any scale tone.
+  const std::vector<ChordEvent>& chords = asm_ctx.out->harmony.chords;
+  auto anchors_bar_harmony = [&](Tick tick, int pitch) {
+    const ChordEvent* active = nullptr;
+    for (const ChordEvent& chord : chords) {
+      if (chord.start_tick <= tick && (active == nullptr || chord.start_tick >= active->start_tick))
+        active = &chord;
+    }
+    if (active == nullptr) {
+      return false;
+    }
+    const bool minor = active->quality == ChordQuality::Minor ||
+                       active->quality == ChordQuality::Minor7 ||
+                       active->quality == ChordQuality::Diminished ||
+                       active->quality == ChordQuality::HalfDiminished7 ||
+                       active->quality == ChordQuality::Diminished7;
+    const int third = minor ? 3 : 4;
+    const int fifth = active->quality == ChordQuality::Diminished ||
+                              active->quality == ChordQuality::Diminished7 ||
+                              active->quality == ChordQuality::HalfDiminished7
+                          ? 6
+                          : (active->quality == ChordQuality::Augmented ? 8 : 7);
+    const int pitch_class = ((pitch % 12) + 12) % 12;
+    const int root = active->root_pc % 12;
+    return pitch_class == root || pitch_class == (root + third) % 12 ||
+           pitch_class == (root + fifth) % 12;
+  };
+  auto sounding = [&](VoiceId voice, Tick tick) {
+    for (const Replacement& rep : replaced) {
+      if (rep.voice == voice && tick >= rep.start && tick < rep.start + rep.duration)
+        return rep.pitch;
+    }
+    return asm_ctx.theme_tones.soundingPitchInVoice(voice, tick);
+  };
+
+  for (FigurationSection& section : asm_ctx.out->material.figuration_sections) {
+    if (section.notes.empty()) {
+      continue;
+    }
+    MaterialNote& tail = section.notes.back();
+    const VoiceId voice = section.voice;
+    const Tick seam = tail.start_tick + tail.duration;
+    const int original = static_cast<int>(tail.pitch);
+    const int own_next = sounding(voice, seam);
+    const int own_prev = section.notes.size() > 1
+                             ? static_cast<int>(section.notes[section.notes.size() - 2].pitch)
+                             : sounding(voice, tail.start_tick > 0 ? tail.start_tick - 1 : Tick{0});
+    if (own_next < 0) {
+      continue;  // the voice rests after the span: nothing hands over.
+    }
+
+    auto seam_is_parallel = [&](int cand) {
+      for (VoiceId other = 0; other < kFugueVoices; ++other) {
+        if (other == voice)
+          continue;
+        if (formsStrictPerfectParallel(cand, own_next, sounding(other, seam - 1),
+                                       sounding(other, seam)))
+          return true;
+      }
+      return false;
+    };
+    if (!seam_is_parallel(original)) {
+      continue;
+    }
+
+    bool original_consonant = true;
+    for (VoiceId other = 0; other < kFugueVoices; ++other) {
+      if (other == voice)
+        continue;
+      const int at_tail = sounding(other, tail.start_tick);
+      if (at_tail >= 0 && !isConsonantPair(original, at_tail))
+        original_consonant = false;
+    }
+    const int entry_ceiling = own_prev < 0 ? 0 : std::max(7, std::abs(original - own_prev));
+    const int exit_ceiling = std::max(12, std::abs(own_next - original));
+
+    const bool anchors_harmony = tail.start_tick % kTicksPerBar == 0;
+    auto admissible = [&](int cand, bool allow_dissonance) {
+      if (cand < kBandLo[voice] || cand > kBandHi[voice] || !detail::inScale(cand, mode))
+        return false;
+      if (anchors_harmony && !anchors_bar_harmony(tail.start_tick, cand))
+        return false;
+      if (own_prev >= 0 && std::abs(cand - own_prev) > entry_ceiling)
+        return false;
+      if (std::abs(own_next - cand) > exit_ceiling)
+        return false;
+      for (VoiceId other = 0; other < kFugueVoices; ++other) {
+        if (other == voice)
+          continue;
+        const int at_tail = sounding(other, tail.start_tick);
+        if (at_tail >= 0 && original_consonant && !allow_dissonance &&
+            !isConsonantPair(cand, at_tail))
+          return false;
+        if (formsStrictPerfectParallel(own_prev, cand, sounding(other, tail.start_tick - 1),
+                                       at_tail))
+          return false;
+      }
+      return !seam_is_parallel(cand);
+    };
+
+    const int reach = std::max(entry_ceiling, exit_ceiling);
+    bool placed = false;
+    for (const bool allow_dissonance : {false, true}) {
+      if (allow_dissonance && (placed || !original_consonant))
+        break;
+      for (int dist = 1; dist <= reach && !placed; ++dist) {
+        for (const int sgn : {-1, 1}) {
+          const int cand = original + sgn * dist;
+          if (admissible(cand, allow_dissonance)) {
+            tail.pitch = static_cast<std::uint8_t>(cand);
+            replaced.push_back({tail.start_tick, tail.duration, voice, cand});
+            placed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 HarnessFixture buildFugueForm(const ResolvedRequest& req) {
@@ -1989,6 +2189,7 @@ HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   SpanId next_id = 0;
   FugueAssembly asm_ctx{&out, &next_id, {}};
   appendFugueSection(asm_ctx, /*first_bar=*/0, static_cast<int>(req.bars), req);
+  relieveFigurationSeams(asm_ctx, req.mode);
   return out;
 }
 
@@ -2056,6 +2257,7 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // --- FUGUE (bars prelude_bars .. total-1). Reuse the full fugue assembly at
   //     a bar offset; span ids continue from the prelude (shared next_id). ---
   appendFugueSection(asm_ctx, prelude_bars, fugue_bars, req);
+  relieveFigurationSeams(asm_ctx, req.mode);
 
   // Keep the concatenated HarmonicPlan chords in tick order.
   std::stable_sort(
