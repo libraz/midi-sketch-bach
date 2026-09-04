@@ -87,6 +87,25 @@ constexpr bool isConsonantPair(int pitch_a, int pitch_b) {
 /// @return True when the motion forms a forbidden parallel/hidden perfect.
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr);
 
+/// @brief True when the motion arrives at a perfect octave/unison by contrary
+///        motion with the upper voice leaping down into it (ottava battuta).
+///
+/// Deliberately a THIRD predicate rather than a branch of formsPerfectParallel.
+/// The three faults are not interchangeable: a parallel perfect is the cardinal
+/// prohibition, a battuta a lesser blemish the reference corpus itself commits
+/// regularly. Folding battuta into the parallel test makes a guard that cannot
+/// find a fully clean tone fall back to a TRUE PARALLEL in order to dodge a
+/// battuta -- trading the worst fault for the mildest one, backwards. Callers
+/// must therefore rank the two, never union them: prefer a candidate free of
+/// both, then one that is merely a battuta, and only then one that is parallel.
+///
+/// @param line_prev The line-under-construction's previous pitch (-1 = none).
+/// @param cand The line-under-construction's candidate current pitch.
+/// @param other_prev The already-placed voice's previous pitch (-1 = silent).
+/// @param other_curr The already-placed voice's current pitch (-1 = silent).
+/// @return True when the motion forms an ottava battuta.
+bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr);
+
 /// @brief True only for a TRUE parallel perfect (IC 0/7 of the same class at
 ///        both onsets under same-direction motion); the hidden-perfect
 ///        extension of formsPerfectParallel is excluded.

@@ -650,39 +650,63 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // `line_prev` is explicit rather than always `prev_emitted` so a figure can
     // be judged as a whole before any of it is emitted: the second tone of a
     // two-tone cell follows the first, not the last note already shipped.
-    auto guard_motion = [&](int line_prev, int cand, Tick tick) {
+    // How badly a candidate collides with the guard voice, not merely whether it
+    // does. The two faults are ranked because they are not worth the same: a
+    // parallel fifth or octave is the cardinal prohibition, while an ottava
+    // battuta is a blemish Bach himself commits regularly. A guard that treated
+    // them alike would step off a battuta onto a parallel whenever the clean
+    // tones ran out, which is the trade backwards. Every substitution below
+    // therefore has to LOWER this rank, never merely change it.
+    constexpr int kGuardClean = 0;
+    constexpr int kGuardBattuta = 1;
+    constexpr int kGuardParallel = 2;
+    auto guard_rank = [&](int line_prev, int cand, Tick tick) {
       if (guard_registry == nullptr || line_prev < 0)
-        return false;
+        return kGuardClean;
       const int other_curr = guard_sounding(tick);
       const int other_prev = guard_sounding(tick - 1);
       if (other_curr < 0 || other_prev < 0)
-        return false;
-      return formsPerfectParallel(line_prev, cand, other_prev, other_curr);
+        return kGuardClean;
+      if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
+        return kGuardParallel;
+      if (formsBattuta(line_prev, cand, other_prev, other_curr))
+        return kGuardBattuta;
+      return kGuardClean;
     };
-    auto forms_guard_parallel = [&](int cand, Tick tick) {
-      return guard_motion(prev_emitted, cand, tick);
-    };
-    // Nearest in-band triad tone that does not land the parallel; the anchor
-    // itself when every alternative is also parallel (a rare double bind --
-    // one consonant parallel beats a non-chord strong beat).
+    // The nearest in-band triad tone that ranks strictly better than the anchor,
+    // preferring a fully clean one; the anchor itself when nothing improves on
+    // it (a rare double bind -- one consonant parallel beats a non-chord strong
+    // beat).
     auto guarded_anchor = [&](int anchor, Tick tick) {
-      if (!forms_guard_parallel(anchor, tick))
-        return anchor;
-      int best = anchor;
-      int best_dist = 1 << 20;
-      for (int tone = 0; tone < 3; ++tone) {
-        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
-        for (int v = low; v <= band_hi; v += 12) {
-          if (v == anchor || forms_guard_parallel(v, tick))
-            continue;
-          const int dist = std::abs(v - anchor);
-          if (dist < best_dist) {
-            best_dist = dist;
-            best = v;
+      const int anchor_rank = guard_rank(prev_emitted, anchor, tick);
+      for (int accept = kGuardClean; accept < anchor_rank; ++accept) {
+        int best = -1;
+        int best_dist = 1 << 20;
+        for (int tone = 0; tone < 3; ++tone) {
+          int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+          for (int v = low; v <= band_hi; v += 12) {
+            if (v == anchor || guard_rank(prev_emitted, v, tick) > accept)
+              continue;
+            const int dist = std::abs(v - anchor);
+            if (dist < best_dist) {
+              best_dist = dist;
+              best = v;
+            }
           }
         }
+        if (best >= 0)
+          return best;
       }
-      return best;
+      return anchor;
+    };
+    // A candidate the line may swap onto only if it ranks strictly better than
+    // what it would otherwise emit. Sharing one shape across the figure cells
+    // keeps every substitution monotone in the same rank.
+    auto improved_by = [&](int pitch, int alt, Tick tick) {
+      if (alt < band_lo || alt > band_hi)
+        return pitch;
+      return guard_rank(prev_emitted, alt, tick) < guard_rank(prev_emitted, pitch, tick) ? alt
+                                                                                         : pitch;
     };
 
     auto walk = [&](int midi, int steps) {
@@ -771,29 +795,34 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // descending substitute does not exist at all, which is exactly where the
       // bind used to be unavoidable. Choosing the anchor with its own tail in
       // view dissolves the bind instead of trading one fault for another.
-      auto figure_clears = [&](int anchor, Tick beat_tick) {
-        return !guard_motion(prev_emitted, anchor, beat_tick) &&
-               !guard_motion(anchor, walk(anchor, 1), beat_tick + dq);
+      // A figure is only as good as its worse tone, so the whole cell carries one
+      // rank and the anchor is chosen to lower it.
+      auto figure_rank = [&](int anchor, Tick beat_tick) {
+        return std::max(guard_rank(prev_emitted, anchor, beat_tick),
+                        guard_rank(anchor, walk(anchor, 1), beat_tick + dq));
       };
       for (int half = 0; half < 2; ++half) {
         const Tick base =
             static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(half) * 2 * kTicksPerBeat;
         int long_pitch = half_anchor[half];
-        if (!figure_clears(long_pitch, base)) {
-          // Nearest in-band triad tone whose whole figure clears; when none
-          // does, fall back to guarding the strong beat alone, as every other
-          // shape in this builder does.
+        const int long_rank = figure_rank(long_pitch, base);
+        if (long_rank != kGuardClean) {
+          // Nearest in-band triad tone whose whole figure ranks better, a clean
+          // one first; when nothing improves on the cell, fall back to guarding
+          // the strong beat alone, as every other shape in this builder does.
           int best = -1;
-          int best_dist = 1 << 20;
-          for (int tone = 0; tone < 3; ++tone) {
-            const int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
-            for (int cand = low; cand <= band_hi; cand += 12) {
-              if (cand == long_pitch || !figure_clears(cand, base))
-                continue;
-              const int dist = std::abs(cand - long_pitch);
-              if (dist < best_dist) {
-                best_dist = dist;
-                best = cand;
+          for (int accept = kGuardClean; accept < long_rank && best < 0; ++accept) {
+            int best_dist = 1 << 20;
+            for (int tone = 0; tone < 3; ++tone) {
+              const int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+              for (int cand = low; cand <= band_hi; cand += 12) {
+                if (cand == long_pitch || figure_rank(cand, base) > accept)
+                  continue;
+                const int dist = std::abs(cand - long_pitch);
+                if (dist < best_dist) {
+                  best_dist = dist;
+                  best = cand;
+                }
               }
             }
           }
@@ -809,12 +838,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         // whole figure, the descending neighbour still carries the same
         // stepwise vocabulary and may escape where the ascending one cannot.
         const Tick short_tick = base + dq;
-        int short_pitch = walk(long_pitch, 1);
-        if (forms_guard_parallel(short_pitch, short_tick)) {
-          const int alt = walk(long_pitch, -1);
-          if (alt >= band_lo && !forms_guard_parallel(alt, short_tick))
-            short_pitch = alt;
-        }
+        const int short_pitch = improved_by(walk(long_pitch, 1), walk(long_pitch, -1), short_tick);
         MaterialNote shortn;
         shortn.start_tick = short_tick;
         shortn.duration = kEighth;
@@ -841,12 +865,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         prev_emitted = anchor;
         for (int sub = 0; sub < 2; ++sub) {
           const Tick tick = base + kEighth + static_cast<Tick>(sub) * kSixteenth;
-          int pitch = walk(anchor, sub == 0 ? 1 : 2);
-          if (forms_guard_parallel(pitch, tick)) {
-            const int alt = walk(anchor, sub == 0 ? -1 : -2);
-            if (alt >= band_lo && !forms_guard_parallel(alt, tick))
-              pitch = alt;
-          }
+          const int pitch =
+              improved_by(walk(anchor, sub == 0 ? 1 : 2), walk(anchor, sub == 0 ? -1 : -2), tick);
           MaterialNote shortn;
           shortn.start_tick = tick;
           shortn.duration = kSixteenth;
@@ -931,14 +951,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                                      : (broken_fits ? broken_dir * 2 * magnitude
                                                     : (falling ? -magnitude : magnitude)));
         int pitch = walk(anchor, degrees);
-        // Intra-beat cell tone landing a parallel against the guard voice:
-        // mirror the cell tone to the anchor's other side when that stays in
-        // the band and clears the parallel (the mirrored tone is the same
-        // neighbour vocabulary, so the cell still resolves to the anchor).
-        if (degrees != 0 && forms_guard_parallel(pitch, mn.start_tick)) {
+        // Intra-beat cell tone colliding with the guard voice: mirror the cell
+        // tone to the anchor's other side when that stays in the band and ranks
+        // strictly better (the mirrored tone is the same neighbour vocabulary,
+        // so the cell still resolves to the anchor). This cell reaches a step
+        // past the band ceiling, so it carries its own range test rather than
+        // the shared one.
+        const int cell_rank = guard_rank(prev_emitted, pitch, mn.start_tick);
+        if (degrees != 0 && cell_rank != kGuardClean) {
           const int alt = walk(anchor, -degrees);
           if (alt >= band_lo && alt <= walk(band_hi, 2) &&
-              !forms_guard_parallel(alt, mn.start_tick))
+              guard_rank(prev_emitted, alt, mn.start_tick) < cell_rank)
             pitch = alt;
         }
         mn.pitch = static_cast<std::uint8_t>(pitch);

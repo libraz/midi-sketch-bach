@@ -544,6 +544,12 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           // an immutable one, where every approach is at least hidden. Holding
           // out for a free tone there keeps the true parallel; taking the
           // hidden one steps off the fault the ear actually tracks.
+          //
+          // Battuta is deliberately not ranked in here. This anchor chain is
+          // load-bearing -- every off-beat tone of the beat is derived from it
+          // -- so displacing it reverberates through the whole beat, and moving
+          // it for the mildest of the three approach faults measurably costs
+          // more true parallels downstream than the battutas it removes.
           bool displaced = false;
           for (int pass = 0; pass < 2 && !displaced; ++pass) {
             if (pass == 1 && !anchor_is_true_parallel(anchor))
@@ -618,8 +624,13 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             return false;
           };
           if (osc_is_parallel(pitch)) {
+            // The anchor is the last candidate, not one of the first: repeating
+            // it flattens the oscillation into a held tone, which is why the
+            // neighbours and the broken third are tried ahead of it. But an
+            // oblique repeat cannot form a parallel with anything, so where the
+            // whole companion vocabulary is tied it is the one escape left.
             for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode),
-                             nearest_other_triad_tone(anchor)}) {
+                             nearest_other_triad_tone(anchor), anchor}) {
               if (cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
               if (!isConsonantIc(cand - plan.ground_pc))
@@ -1284,11 +1295,62 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
       if (!passacaglia) {
         const Tick approach_tick =
             static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat;
+        // The V1 pair this tone is heard against: the coda's held support tone
+        // moving to its dominant. Both are design values written further below,
+        // so they are recomputed here rather than read back.
+        constexpr int kCodaBassDominant = 43;  // G2.
+        const int bass_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(
+            (total_bars - 2) % static_cast<int>(ground_pitch.size()))]);
+        MaterialNote* approach_note = nullptr;
+        int approach_prev = -1;
         for (MaterialNote& note : notes) {
           if (note.start_tick == approach_tick) {
-            note.pitch = 67;  // G4 over G2: mode-neutral dominant approach.
+            approach_note = &note;
             break;
           }
+          approach_prev = static_cast<int>(note.pitch);
+        }
+        if (approach_note != nullptr) {
+          // Landing on the dominant is the design value; which dominant tone, and
+          // in which octave, is not. Root and fifth are the mode-neutral members
+          // of the dominant triad -- the third alone changes with the mode -- so
+          // either spells the same approach in major and minor. Rank the
+          // candidates by how they meet the bass and take the best. A fixed root
+          // two octaves above it leapt down into an octave under every ground
+          // whose penultimate tone rises, and no later pass can catch that: this
+          // write lands after the line's only guard.
+          //
+          // The penalties are ranked, not summed as equals: a true parallel
+          // outranks a battuta, which outranks spelling the dominant as its
+          // fifth, which outranks distance. Merging them would let the tone dodge
+          // the mildest fault by committing the worst. A hidden perfect is
+          // deliberately NOT penalised here: this is a two-voice cadential
+          // approach where the bass is fixed and the compass is an octave and a
+          // half, so demanding a similar-motion-free arrival too leaves only
+          // tones that fault worse elsewhere -- and a leap to the dominant over a
+          // rising bass is ordinary cadential writing, not a blemish.
+          int best = -1;
+          int best_key = 1 << 20;
+          for (const int approach_pc : {7, 2}) {
+            for (int cand = 67; cand <= 81; ++cand) {
+              if (cand % 12 != approach_pc)
+                continue;
+              const int parallel_penalty =
+                  formsStrictPerfectParallel(approach_prev, cand, bass_prev, kCodaBassDominant)
+                      ? (1 << 16)
+                      : 0;
+              const int battuta_penalty =
+                  formsBattuta(approach_prev, cand, bass_prev, kCodaBassDominant) ? (1 << 12) : 0;
+              const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
+              const int step = (approach_prev >= 0) ? std::abs(cand - approach_prev) : 0;
+              const int key = parallel_penalty + battuta_penalty + colour_penalty + step;
+              if (key < best_key) {
+                best_key = key;
+                best = cand;
+              }
+            }
+          }
+          approach_note->pitch = static_cast<std::uint8_t>(best >= 0 ? best : 67);
         }
       }
       appendCompactCadentialLanding(notes, static_cast<Tick>(total_bars - 1) * kTicksPerBar34,

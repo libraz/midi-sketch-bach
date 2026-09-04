@@ -403,6 +403,18 @@ bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_cur
   return isForbiddenPerfectMotion(other_prev, other_curr, line_prev, cand);
 }
 
+bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr) {
+  if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
+    return false;  // need both voices' two onsets to judge motion.
+  }
+  // isBattutaMotion reads the upper line from the arrival, so this ordering only
+  // settles an exact unison; it matches the sibling predicates so all three
+  // describe the same pair of lines.
+  if (cand >= other_curr)
+    return isBattutaMotion(line_prev, cand, other_prev, other_curr);
+  return isBattutaMotion(other_prev, other_curr, line_prev, cand);
+}
+
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
@@ -421,6 +433,14 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   auto is_parallel = [&](int cand) {
     for (const ConcurrentMotion& motion : motions) {
       if (formsPerfectParallel(line_prev, cand, motion.prev, motion.curr)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  auto is_battuta = [&](int cand) {
+    for (const ConcurrentMotion& motion : motions) {
+      if (formsBattuta(line_prev, cand, motion.prev, motion.curr)) {
         return true;
       }
     }
@@ -456,8 +476,17 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   // strikes ic 1/6/11 against a sounding theme tone is excluded from the
   // escape tier, so a consonant-but-parallel tone wins over a wrong-note
   // clash with the foreground line.
-  int consonant_free = -1;  // consonant AND parallel-free (best).
+  int consonant_free = -1;  // consonant, parallel-free AND battuta-free (best).
   int consonant_free_key = 1 << 20;
+  // Consonant and parallel-free, but arriving at an octave by a downward leap
+  // against a rising voice. Its own tier, immediately below the fully clean one
+  // and above everything that tolerates a parallel: a battuta is a real fault
+  // worth stepping off when a clean tone exists, but a far milder one than the
+  // parallel fifth/octave the lower tiers accept, so it must never be dodged at
+  // that price. When no candidate is a battuta this tier stays empty and the
+  // whole selection is unchanged.
+  int consonant_battuta = -1;
+  int consonant_battuta_key = 1 << 20;
   int free_any = -1;  // parallel-free, mildest clash profile (second).
   int free_any_key = 1 << 28;
   int consonant_any = -1;  // consonant, parallel allowed (third).
@@ -523,9 +552,16 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
         consonant_any_key = key;
         consonant_any = pitch;
       }
-      if (!is_parallel(pitch) && key < consonant_free_key) {
-        consonant_free_key = key;
-        consonant_free = pitch;
+      if (!is_parallel(pitch)) {
+        if (is_battuta(pitch)) {
+          if (key < consonant_battuta_key) {
+            consonant_battuta_key = key;
+            consonant_battuta = pitch;
+          }
+        } else if (key < consonant_free_key) {
+          consonant_free_key = key;
+          consonant_free = pitch;
+        }
       }
     } else if (!is_parallel(pitch) && !sharp_vs_theme) {
       // Weighted clashes dominate the packed (window clashes, distance) key so
@@ -552,6 +588,9 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   }
   if (consonant_free >= 0) {
     return consonant_free;
+  }
+  if (consonant_battuta >= 0) {
+    return consonant_battuta;
   }
   // Tier order between "parallel-free but clashing" and "consonant but
   // parallel" is a per-form contract: fugue-family figuration prefers the
