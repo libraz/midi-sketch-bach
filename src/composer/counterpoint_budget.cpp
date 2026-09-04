@@ -110,7 +110,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Passacaglia, "hidden_parallel_octave"},
     {FormType::Passacaglia, "invertible_at_octave"},
     {FormType::Passacaglia, "parallel_fifth"},
-    {FormType::Passacaglia, "parallel_octave"},
     {FormType::Passacaglia, "strong_beat_dissonance"},
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},

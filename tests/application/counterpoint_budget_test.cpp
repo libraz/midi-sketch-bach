@@ -161,8 +161,12 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
       (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
                                 "invertible_at_octave", "parallel_fifth", "parallel_octave"}));
   EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue), keyboard_polyphony);
-  // The passacaglia is the one form that still breaks every vertical rule.
-  EXPECT_EQ(closedRulesFor(FormType::Passacaglia), std::vector<std::string>{});
+  // The counter-figuration is written last against a settled variation and an
+  // immutable ground, and reads both as one continuous line across the ground
+  // cycles; where its band offers no admissible tone at all it holds the tone it
+  // just sounded, since an oblique repeat can form no parallel. Fifths still get
+  // through at bar heads the variation itself owns, so only the octave closes.
+  EXPECT_EQ(closedRulesFor(FormType::Passacaglia), (std::vector<std::string>{"parallel_octave"}));
   EXPECT_EQ(closedRulesFor(FormType::FantasiaAndFugue), with_invertible_counterpoint);
   // Monophonic: every rule comparing two lines is closed permanently, and only
   // the two judged against the harmonic plan stay open.
