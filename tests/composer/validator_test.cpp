@@ -373,6 +373,58 @@ TEST(ValidatorTest, ParallelOctaveFails) {
   EXPECT_TRUE(hasRule(r, "parallel_octave"));
 }
 
+TEST(ValidatorTest, ParallelFifthAcrossASilenceBetweenOnsetsPasses) {
+  // The same two fifths as ParallelFifthFails, but both voices fall silent for
+  // a beat in between and re-enter together. Nothing starts inside that
+  // silence, so the walk over the union of onsets has no tick to notice the
+  // rest at -- and the rule's own reason for breaking a succession at a rest is
+  // that nobody hears motion across one.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  prov[1].source = NoteSource::Material;
+  prov[3].source = NoteSource::Material;
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(r, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, ParallelFifthAcrossOneVoicesSilencePasses) {
+  // Only the lower voice drops out. The succession is broken by either voice's
+  // silence, not only by both falling silent together.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, 3 * kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 53, 1),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  prov[1].source = NoteSource::Material;
+  prov[3].source = NoteSource::Material;
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasRule(r, "parallel_fifth"));
+}
+
+TEST(ValidatorTest, ParallelFifthAcrossAnUnbrokenSustainStillFails) {
+  // The counterpart the two tests above must not weaken: the voices sustain
+  // right up to the arrival with no silence anywhere, so the succession holds
+  // and the fifths are still reported.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, 3 * kTicksPerBeat, 60, 0),
+      makeNote(0, 3 * kTicksPerBeat, 53, 1),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(3 * kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  prov[1].source = NoteSource::Material;
+  prov[3].source = NoteSource::Material;
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(hasRule(r, "parallel_fifth"));
+}
+
 TEST(ValidatorTest, OneStationaryVoicePasses) {
   // P5 → P5 but lower voice does not move (interval stays at 7 only because
   // the upper one moves to a different note that recreates a P5 — but here

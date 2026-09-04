@@ -198,6 +198,18 @@ class VoiceOnsetIndex {
     return index < notes_.size() ? notes_[index].pitch : 0;
   }
 
+  /// @brief Tick this voice's sound at `tick` runs out at, or `tick` when silent.
+  ///
+  /// Walking the union of onsets cannot see a rest that opens and closes
+  /// strictly between two of them: nothing starts inside a silence, so the walk
+  /// steps over it and reads the tones on either side as consecutive motion. A
+  /// succession rule asks this whether the sound it heard at the previous onset
+  /// lasted all the way to the current one.
+  Tick soundEndAt(VoiceId voice, Tick tick) const {
+    const std::size_t index = soundingAt(voice, tick);
+    return index < notes_.size() ? notes_[index].start_tick + notes_[index].duration : tick;
+  }
+
  private:
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;
@@ -883,6 +895,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       int prev_interval = INT32_MIN;
       std::uint8_t prev_pa = 0;
       std::uint8_t prev_pb = 0;
+      Tick prev_tick = 0;
       for (Tick t : ticks) {
         std::uint8_t pa = onset_index.pitchAt(voices[va], t);
         std::uint8_t pb = onset_index.pitchAt(voices[vb], t);
@@ -893,7 +906,18 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           prev_interval = INT32_MIN;
           prev_pa = 0;
           prev_pb = 0;
+          prev_tick = t;
           continue;
+        }
+        // The same break, for a rest that falls BETWEEN two onsets rather than
+        // on one. Silence with no onset inside it leaves no tick for the test
+        // above to fire at, so the sound heard at the previous onset is asked
+        // whether it lasted until this one.
+        if (onset_index.soundEndAt(voices[va], prev_tick) < t ||
+            onset_index.soundEndAt(voices[vb], prev_tick) < t) {
+          prev_interval = INT32_MIN;
+          prev_pa = 0;
+          prev_pb = 0;
         }
         int interval = static_cast<int>(pa) - static_cast<int>(pb);
 
@@ -980,6 +1004,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         prev_interval = interval;
         prev_pa = pa;
         prev_pb = pb;
+        prev_tick = t;
       }
     }
   }
