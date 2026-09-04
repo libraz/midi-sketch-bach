@@ -88,6 +88,12 @@ struct PerfectMotionCounts {
   std::size_t hidden_fifth = 0;
   std::size_t hidden_octave = 0;
   std::size_t battuta = 0;  // contrary-motion arrival, upper voice leaping down
+  // Leaving a perfect class and reaching the same class again in contrary
+  // motion. Counted because an outside reading that pools it with the true
+  // parallel reports an octave column an order of magnitude worse than the
+  // counterpoint it describes, and a class nobody counts cannot be shown to be
+  // holding steady.
+  std::size_t anti_parallel = 0;
 
   std::size_t strict() const { return parallel_fifth + parallel_octave; }
   std::size_t hidden() const { return hidden_fifth + hidden_octave; }
@@ -98,6 +104,7 @@ struct PerfectMotionCounts {
     hidden_fifth += other.hidden_fifth;
     hidden_octave += other.hidden_octave;
     battuta += other.battuta;
+    anti_parallel += other.anti_parallel;
   }
 };
 
@@ -219,12 +226,16 @@ PerfectMotionCounts countPerfectMotion(const std::vector<NoteEvent>& notes) {
             case PerfectMotionKind::None:
               break;
           }
-          // Battuta is contrary motion, so classifyPerfectMotion -- which only
-          // ever reports same-direction arrivals -- necessarily returns None for
-          // it. Counting it in the same sweep rather than a second one keeps all
-          // three ways of reaching a perfect interval on one sampling grid.
+          // Battuta and the anti-parallel are both contrary motion, so
+          // classifyPerfectMotion -- which only ever reports same-direction
+          // arrivals -- necessarily returns None for them. Counting them in the
+          // same sweep rather than separate ones keeps every way of reaching a
+          // perfect interval on one sampling grid.
           if (isBattutaMotion(prev_upper, upper_pitch, prev_lower, lower_pitch)) {
             ++counts.battuta;
+          }
+          if (isAntiParallelPerfectMotion(prev_upper, upper_pitch, prev_lower, lower_pitch)) {
+            ++counts.anti_parallel;
           }
         }
         prev_upper = upper_pitch;
@@ -343,6 +354,37 @@ TEST(PerfectMotionCounter, HiddenOctaveIsCountedApartFromStrictParallels) {
   EXPECT_EQ(counts.strict(), 0u);
 }
 
+TEST(PerfectMotionCounter, AntiParallelIsCountedApartFromStrictParallels) {
+  // The voices leave an octave and reach an octave again by moving apart. An
+  // outside reading that asks only whether a perfect class recurred calls this
+  // a parallel octave; it is contrary motion, and the two belong in separate
+  // columns or the octave count reads far worse than the counterpoint is.
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, 0, 480, 72),
+      makeNote(0, 480, 480, 74),
+      makeNote(1, 0, 480, 60),
+      makeNote(1, 480, 480, 50),
+  };
+  const PerfectMotionCounts counts = countPerfectMotion(notes);
+  EXPECT_EQ(counts.anti_parallel, 1u);
+  EXPECT_EQ(counts.strict(), 0u);
+  EXPECT_EQ(counts.hidden(), 0u);
+}
+
+TEST(PerfectMotionCounter, SimilarMotionIntoAnOctaveIsNotAnAntiParallel) {
+  // The counterpart: both voices rise from an octave to an octave. This is the
+  // true parallel, and the anti-parallel column must stay empty for it.
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, 0, 480, 72),
+      makeNote(0, 480, 480, 74),
+      makeNote(1, 0, 480, 60),
+      makeNote(1, 480, 480, 62),
+  };
+  const PerfectMotionCounts counts = countPerfectMotion(notes);
+  EXPECT_EQ(counts.parallel_octave, 1u);
+  EXPECT_EQ(counts.anti_parallel, 0u);
+}
+
 TEST(PerfectMotionCounter, ObliqueMotionUnderASustainedVoiceIsClean) {
   // The upper voice holds through both onsets, so there is no similar motion
   // even though the interval is a fifth at each onset.
@@ -385,6 +427,7 @@ struct FormCeiling {
   std::size_t max_strict;   // parallel fifths + parallel octaves/unisons
   std::size_t max_hidden;   // hidden fifths + hidden octaves
   std::size_t max_battuta;  // contrary-motion octave arrivals by downward leap
+  std::size_t max_anti;     // a perfect class left and reached again in contrary motion
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
@@ -405,9 +448,9 @@ struct FormCeiling {
 //
 // ONE EXCEPTION, and it is narrow. A guard that is band-pinned against an
 // immutable voice sometimes has no candidate left that is free of every perfect
-// approach, and can then only choose WHICH of the three it commits. Such a
-// change may raise one ceiling while lowering another, but only under both of
-// these conditions:
+// approach, and can then only choose WHICH of the four columns it commits to.
+// Such a change may raise one ceiling while lowering another, but only under
+// both of these conditions:
 //
 //   1. The fault being REMOVED is one this generator commits close to or beyond
 //      what the reference corpus of Bach's own writing does, and the fault being
@@ -418,13 +461,21 @@ struct FormCeiling {
 // The counts here are raw, but the authority is the corpus envelope: a rate
 // already deep inside it has room the ear does not miss, while a rate at its
 // edge does not. That is why a parallel octave -- heard as one voice vanishing,
-// and the rarest of the three in the corpus -- is never an acceptable payment,
-// in any quantity, for either of the others.
+// and the rarest of the four in the corpus -- is never an acceptable payment,
+// in any quantity, for any of the others.
+//
+// The anti-parallel column exists because it is the class an outside reading
+// pools with the true parallel: a predicate that asks only whether a perfect
+// class recurred counts both, and the octave figure it prints then reads an
+// order of magnitude worse than the counterpoint it describes. Kept in its own
+// column, it is measurable on its own terms -- a milder fault than a parallel,
+// firmer than a battuta, and one the guards deliberately step onto rather than
+// ship a parallel.
 //
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 23, 11, 145},
+    {FormType::Fugue, 23, 11, 145, 61},
     // Its bass support tone is read against the running voices at the grain they
     // actually move at rather than a bar back, and ranks a hidden perfect below
     // a true one; two true parallels left the strict column and two hidden ones
@@ -433,7 +484,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // bar heads where no chord tone was playable at all and left the chord for a
     // free diatonic tone: both remaining fifths and two octaves went with it, at
     // no cost to the hidden or battuta columns.
-    {FormType::PreludeAndFugue, 7, 5, 80},
+    {FormType::PreludeAndFugue, 7, 5, 80, 34},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
@@ -443,7 +494,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The pedal is the voice that pays -- it is written last against two settled
     // manuals, and once it ranks a hidden perfect below a true one it will step
     // onto the hidden approach rather than keep the parallel it began with.
-    {FormType::TrioSonata, 0, 82, 63},
+    {FormType::TrioSonata, 0, 82, 63, 8},
     // Both true-parallel classes reach zero. The tone before an arrival is
     // re-aimed over a bass pinned to a single octave, and where the consonant
     // window for that re-aim comes back empty it widens to admit a passing
@@ -453,7 +504,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Three true parallels left the strict column and one contrary-motion
     // arrival entered the battuta one -- a trade out of the fault the corpus
     // almost never writes and into the one it writes most freely.
-    {FormType::ChoralePrelude, 0, 14, 13},
+    {FormType::ChoralePrelude, 0, 14, 13, 0},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -462,7 +513,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Escaping a same-direction perfect by reversing the wave turns similar
     // motion into contrary motion, so what leaves the strict column here tends
     // to arrive in the battuta one.
-    {FormType::ToccataAndFugue, 48, 20, 84},
+    {FormType::ToccataAndFugue, 48, 20, 84, 5},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -471,7 +522,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // beside it. What survives is a single fifth at a bar head whose repair band
     // holds no admissible tone, and one contrary-motion arrival that entered the
     // battuta column in exchange.
-    {FormType::Passacaglia, 1, 20, 30},
+    {FormType::Passacaglia, 1, 20, 30, 9},
     // Almost all of what remains in the strict column is fifths, and they come
     // from the one place selection cannot reach: a stretto whose follower is the
     // leader's exact imitation an octave away, entering a whole bar later, so
@@ -480,13 +531,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // running voices, the pedal under the free section's figuration -- is now
     // read at the grain those voices move at, which is what emptied the octave
     // column and took most of the hidden one with it.
-    {FormType::FantasiaAndFugue, 10, 53, 110},
-    {FormType::CelloPrelude, 0, 0, 0},
+    {FormType::FantasiaAndFugue, 10, 53, 110, 6},
+    {FormType::CelloPrelude, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
-    {FormType::Chaconne, 0, 23, 0},
+    {FormType::Chaconne, 0, 23, 0, 5},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict column reaches zero because the imitative blocks are instead
@@ -495,7 +546,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // between them is relieved arrival by arrival. Hidden approaches are what
     // that choice pays with: the leader window of a wide canon is about a fifth
     // deep, so an arrival it can reach cleanly is often still approached by leap.
-    {FormType::GoldbergVariations, 0, 8, 3},
+    {FormType::GoldbergVariations, 0, 8, 3, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -551,9 +602,9 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
 
     // Emitted on every run so the current measurement is visible when the
     // ratchet is tightened after a counterpoint fix.
-    std::printf("[counterpoint] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu\n",
+    std::printf("[counterpoint] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu anti=%zu\n",
                 formLabel(entry.form), total.parallel_fifth, total.parallel_octave, total.hidden(),
-                total.battuta);
+                total.battuta, total.anti_parallel);
     EXPECT_LE(total.strict(), entry.max_strict)
         << formLabel(entry.form) << ": parallel perfect intervals in shipped output rose above the "
         << "ratchet (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave << ")";
@@ -562,6 +613,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
     EXPECT_LE(total.hidden(), entry.max_hidden)
         << formLabel(entry.form) << ": hidden perfect intervals in shipped output rose above the "
         << "ratchet (hidden5=" << total.hidden_fifth << " hidden8=" << total.hidden_octave << ")";
+    EXPECT_LE(total.anti_parallel, entry.max_anti)
+        << formLabel(entry.form)
+        << ": anti-parallel perfect intervals in shipped output rose above "
+        << "the ratchet";
   }
 
   std::sort(skipped.begin(), skipped.end());
@@ -598,13 +653,14 @@ struct LengthCeiling {
   std::size_t max_strict;
   std::size_t max_hidden;
   std::size_t max_battuta;
+  std::size_t max_anti;
 };
 
 // RATCHET: as above, these may only ever be LOWERED. Measured across
 // 4 scales x 4 characters x 8 seeds x both modes.
 constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
-    {FormType::Fugue, 90, 96, 1260},
-    {FormType::PreludeAndFugue, 36, 63, 489},
+    {FormType::Fugue, 90, 96, 1260, 428},
+    {FormType::PreludeAndFugue, 36, 63, 489, 219},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
@@ -631,15 +687,17 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
         }
       }
     }
-    std::printf("[counterpoint/length] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu\n",
+    std::printf("[counterpoint/length] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu anti=%zu\n",
                 formLabel(entry.form), total.parallel_fifth, total.parallel_octave, total.hidden(),
-                total.battuta);
+                total.battuta, total.anti_parallel);
     EXPECT_LE(total.strict(), entry.max_strict)
         << formLabel(entry.form) << ": parallel perfect intervals rose above the ratchet once the "
         << "form is stretched (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave
         << ")";
     EXPECT_LE(total.battuta, entry.max_battuta) << formLabel(entry.form) << ": battuta rose";
     EXPECT_LE(total.hidden(), entry.max_hidden) << formLabel(entry.form) << ": hidden rose";
+    EXPECT_LE(total.anti_parallel, entry.max_anti)
+        << formLabel(entry.form) << ": anti-parallel rose";
   }
 }
 
