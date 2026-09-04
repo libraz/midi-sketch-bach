@@ -121,6 +121,22 @@ class SoundingPitchIndex {
 
   // Returns 0 when the voice rests at this tick.
   std::uint8_t pitchAt(VoiceId voice, Tick tick) const {
+    const NoteEvent* note = noteAt(voice, tick);
+    return note != nullptr ? note->pitch : 0;
+  }
+
+  // Tick this voice's sound at `tick` runs out at, or `tick` itself when it is
+  // silent there. Sampling pitches at onsets alone cannot see a rest that opens
+  // and closes strictly between two onsets -- no note starts inside it, so the
+  // walk steps straight over the silence and reads the tones on either side as
+  // consecutive motion.
+  Tick soundEnd(VoiceId voice, Tick tick) const {
+    const NoteEvent* note = noteAt(voice, tick);
+    return note != nullptr ? note->start_tick + note->duration : tick;
+  }
+
+ private:
+  const NoteEvent* noteAt(VoiceId voice, Tick tick) const {
     const auto& indices = by_voice_[voice];
     auto iter = std::upper_bound(
         indices.begin(), indices.end(), tick,
@@ -129,12 +145,11 @@ class SoundingPitchIndex {
       --iter;
       const NoteEvent& note = notes_[*iter];
       if (note.start_tick <= tick && tick < note.start_tick + note.duration)
-        return note.pitch;
+        return &note;
     }
-    return 0;
+    return nullptr;
   }
 
- private:
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;
 };
@@ -168,13 +183,24 @@ PerfectMotionCounts countPerfectMotion(const std::vector<NoteEvent>& notes) {
     for (std::size_t lower = upper + 1; lower < voices.size(); ++lower) {
       std::uint8_t prev_upper = 0;
       std::uint8_t prev_lower = 0;
+      Tick prev_tick = 0;
       for (Tick tick : ticks) {
         const std::uint8_t upper_pitch = index.pitchAt(voices[upper], tick);
         const std::uint8_t lower_pitch = index.pitchAt(voices[lower], tick);
         if (upper_pitch == 0 || lower_pitch == 0) {
           prev_upper = 0;
           prev_lower = 0;
+          prev_tick = tick;
           continue;
+        }
+        // A rest between the two sampled onsets breaks the succession just as a
+        // rest ON one of them does. Sampling only at onsets cannot see it --
+        // nothing starts inside a silence -- so the sound reaching from the
+        // previous onset has to be asked whether it lasted all the way here.
+        if (index.soundEnd(voices[upper], prev_tick) < tick ||
+            index.soundEnd(voices[lower], prev_tick) < tick) {
+          prev_upper = 0;
+          prev_lower = 0;
         }
         if (prev_upper != 0 && prev_lower != 0) {
           switch (classifyPerfectMotion(prev_upper, upper_pitch, prev_lower, lower_pitch)) {
@@ -203,6 +229,7 @@ PerfectMotionCounts countPerfectMotion(const std::vector<NoteEvent>& notes) {
         }
         prev_upper = upper_pitch;
         prev_lower = lower_pitch;
+        prev_tick = tick;
       }
     }
   }
@@ -272,6 +299,34 @@ TEST(PerfectMotionCounter, RestBreaksTheSuccession) {
   const PerfectMotionCounts counts = countPerfectMotion(notes);
   EXPECT_EQ(counts.strict(), 0u);
   EXPECT_EQ(counts.hidden(), 0u);
+}
+
+TEST(PerfectMotionCounter, RestBetweenTwoOnsetsBreaksTheSuccession) {
+  // Both voices fall silent for a beat and re-enter together a bar later. No
+  // note starts inside that silence, so an onset-only walk steps straight over
+  // it and reads two octaves a bar apart as consecutive motion. The counter has
+  // to ask whether the sound from the previous onset lasted until this one.
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, 0, 480, 72),
+      makeNote(0, 1440, 480, 74),
+      makeNote(1, 0, 480, 60),
+      makeNote(1, 1440, 480, 62),
+  };
+  const PerfectMotionCounts counts = countPerfectMotion(notes);
+  EXPECT_EQ(counts.strict(), 0u);
+  EXPECT_EQ(counts.hidden(), 0u);
+}
+
+TEST(PerfectMotionCounter, OneVoiceRestingAloneBreaksTheSuccession) {
+  // The upper voice sustains across; the lower one drops out for a beat. The
+  // succession is broken by either voice's silence, not only by both.
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, 0, 1920, 72),
+      makeNote(0, 1920, 480, 74),
+      makeNote(1, 0, 480, 60),
+      makeNote(1, 1920, 480, 62),
+  };
+  EXPECT_EQ(countPerfectMotion(notes).strict(), 0u);
 }
 
 TEST(PerfectMotionCounter, HiddenOctaveIsCountedApartFromStrictParallels) {
@@ -369,7 +424,7 @@ struct FormCeiling {
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 25, 12, 145},
+    {FormType::Fugue, 23, 11, 145},
     // Its bass support tone is read against the running voices at the grain they
     // actually move at rather than a bar back, and ranks a hidden perfect below
     // a true one; two true parallels left the strict column and two hidden ones
@@ -378,7 +433,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // bar heads where no chord tone was playable at all and left the chord for a
     // free diatonic tone: both remaining fifths and two octaves went with it, at
     // no cost to the hidden or battuta columns.
-    {FormType::PreludeAndFugue, 9, 6, 80},
+    {FormType::PreludeAndFugue, 7, 5, 80},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
@@ -425,7 +480,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // running voices, the pedal under the free section's figuration -- is now
     // read at the grain those voices move at, which is what emptied the octave
     // column and took most of the hidden one with it.
-    {FormType::FantasiaAndFugue, 11, 57, 110},
+    {FormType::FantasiaAndFugue, 10, 53, 110},
     {FormType::CelloPrelude, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -548,8 +603,8 @@ struct LengthCeiling {
 // RATCHET: as above, these may only ever be LOWERED. Measured across
 // 4 scales x 4 characters x 8 seeds x both modes.
 constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
-    {FormType::Fugue, 106, 114, 1263},
-    {FormType::PreludeAndFugue, 51, 73, 491},
+    {FormType::Fugue, 90, 96, 1260},
+    {FormType::PreludeAndFugue, 36, 63, 489},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
