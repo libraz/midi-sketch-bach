@@ -647,14 +647,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // The union-onset pair at our onset `tick` is (guard just before tick ->
     // guard at tick): when the guard does not onset at `tick` the two samples
     // are equal, its motion is zero, and oblique motion is always allowed.
-    auto forms_guard_parallel = [&](int cand, Tick tick) {
-      if (guard_registry == nullptr || prev_emitted < 0)
+    // `line_prev` is explicit rather than always `prev_emitted` so a figure can
+    // be judged as a whole before any of it is emitted: the second tone of a
+    // two-tone cell follows the first, not the last note already shipped.
+    auto guard_motion = [&](int line_prev, int cand, Tick tick) {
+      if (guard_registry == nullptr || line_prev < 0)
         return false;
       const int other_curr = guard_sounding(tick);
       const int other_prev = guard_sounding(tick - 1);
       if (other_curr < 0 || other_prev < 0)
         return false;
-      return formsPerfectParallel(prev_emitted, cand, other_prev, other_curr);
+      return formsPerfectParallel(line_prev, cand, other_prev, other_curr);
+    };
+    auto forms_guard_parallel = [&](int cand, Tick tick) {
+      return guard_motion(prev_emitted, cand, tick);
     };
     // Nearest in-band triad tone that does not land the parallel; the anchor
     // itself when every alternative is also parallel (a rare double bind --
@@ -755,22 +761,62 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     if (dotted) {
       // Noble dotted figure: dotted-quarter + eighth per beat-pair. The long note
       // is the beat anchor (a chord tone on the strong beat); the short note is
-      // its upper scalar neighbour. Anchors are the bar's root and fifth.
+      // a scalar neighbour of it. Anchors are the bar's root and fifth.
       const Tick dq = kTicksPerBeat + kEighth;  // dotted quarter.
       const int half_anchor[2] = {beat_anchor[0], beat_anchor[2]};
+      // Both tones of the figure carry a candidate anchor: the long note on the
+      // strong beat and its ascending neighbour on the dotted seam. Judging
+      // only the anchor leaves the tail free to step into a parallel, and once
+      // the anchor is placed the tail has nowhere to go -- at the band floor the
+      // descending substitute does not exist at all, which is exactly where the
+      // bind used to be unavoidable. Choosing the anchor with its own tail in
+      // view dissolves the bind instead of trading one fault for another.
+      auto figure_clears = [&](int anchor, Tick beat_tick) {
+        return !guard_motion(prev_emitted, anchor, beat_tick) &&
+               !guard_motion(anchor, walk(anchor, 1), beat_tick + dq);
+      };
       for (int half = 0; half < 2; ++half) {
         const Tick base =
             static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(half) * 2 * kTicksPerBeat;
-        const int long_pitch = guarded_anchor(half_anchor[half], base);
+        int long_pitch = half_anchor[half];
+        if (!figure_clears(long_pitch, base)) {
+          // Nearest in-band triad tone whose whole figure clears; when none
+          // does, fall back to guarding the strong beat alone, as every other
+          // shape in this builder does.
+          int best = -1;
+          int best_dist = 1 << 20;
+          for (int tone = 0; tone < 3; ++tone) {
+            const int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+            for (int cand = low; cand <= band_hi; cand += 12) {
+              if (cand == long_pitch || !figure_clears(cand, base))
+                continue;
+              const int dist = std::abs(cand - long_pitch);
+              if (dist < best_dist) {
+                best_dist = dist;
+                best = cand;
+              }
+            }
+          }
+          long_pitch = (best >= 0) ? best : guarded_anchor(long_pitch, base);
+        }
         MaterialNote longn;
         longn.start_tick = base;
         longn.duration = dq;
         longn.pitch = static_cast<std::uint8_t>(long_pitch);
         dst.push_back(longn);
         prev_emitted = long_pitch;
-        const int short_pitch = walk(long_pitch, 1);
+        // The tail is re-judged after the fact too: when no anchor cleared the
+        // whole figure, the descending neighbour still carries the same
+        // stepwise vocabulary and may escape where the ascending one cannot.
+        const Tick short_tick = base + dq;
+        int short_pitch = walk(long_pitch, 1);
+        if (forms_guard_parallel(short_pitch, short_tick)) {
+          const int alt = walk(long_pitch, -1);
+          if (alt >= band_lo && !forms_guard_parallel(alt, short_tick))
+            short_pitch = alt;
+        }
         MaterialNote shortn;
-        shortn.start_tick = base + dq;
+        shortn.start_tick = short_tick;
         shortn.duration = kEighth;
         shortn.pitch = static_cast<std::uint8_t>(short_pitch);
         dst.push_back(shortn);

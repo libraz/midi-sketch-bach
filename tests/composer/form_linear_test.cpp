@@ -26,6 +26,7 @@
 #include "composer/arc.h"
 #include "composer/composer.h"
 #include "composer/form_director.h"
+#include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -439,6 +440,95 @@ TEST(FormLinearTrio, CadenceHasMomentaryManualExchangeWithoutPerfectParallel) {
   EXPECT_TRUE(saw_exchange);
   EXPECT_FALSE(hasRule(result.validation, "parallel_fifth"));
   EXPECT_FALSE(hasRule(result.validation, "parallel_octave"));
+}
+
+// The Noble dotted figure (dotted-quarter + eighth) is the only V1 vocabulary
+// that places two tones from one beat anchor, and the short one is what the
+// other manual voice actually meets on the off-beat. The pair is chosen as a
+// unit: an anchor that clears the strong beat on its own can still force its
+// neighbour into a perfect interval on the dotted seam, and with the anchor
+// already placed at the band floor there is no substitute tone left to escape
+// with. Selecting the anchor with its tail in view leaves no such site, so this
+// is pinned at zero rather than held under a ceiling.
+TEST(FormLinearTrio, NobleDottedShortNoteIsJudgedAgainstTheOtherManual) {
+  constexpr Tick kDottedQuarter = kTicksPerBeat + kTicksPerBeat / 2;
+  constexpr Tick kEighth = kTicksPerBeat / 2;
+
+  std::size_t dotted_pairs = 0;
+  std::size_t parallel_shorts = 0;
+  std::size_t hidden_shorts = 0;
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        ComposeRequest req;
+        req.form = FormType::TrioSonata;
+        req.seed = seed;
+        req.is_minor = minor;
+        req.target_bars = bars;
+        req.character = SubjectCharacter::Noble;  // the only prefer_dotted profile.
+        HarnessFixture fixture;
+        ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+        const ComposeResult result =
+            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+
+        std::vector<NoteEvent> top;
+        std::vector<NoteEvent> mid;
+        for (const NoteEvent& note : result.notes) {
+          if (note.voice == 0)
+            top.push_back(note);
+          else if (note.voice == 1)
+            mid.push_back(note);
+        }
+        std::stable_sort(top.begin(), top.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+          return lhs.start_tick < rhs.start_tick;
+        });
+        std::stable_sort(mid.begin(), mid.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+          return lhs.start_tick < rhs.start_tick;
+        });
+        // Latest-starting note covering the tick wins, matching how the guard
+        // reads the registry it was built against.
+        const auto top_sounding = [&](Tick tick) {
+          int pitch = -1;
+          for (const NoteEvent& note : top) {
+            if (note.start_tick > tick)
+              break;
+            if (tick < note.start_tick + note.duration)
+              pitch = note.pitch;
+          }
+          return pitch;
+        };
+
+        for (std::size_t idx = 0; idx + 1 < mid.size(); ++idx) {
+          const NoteEvent& longn = mid[idx];
+          const NoteEvent& shortn = mid[idx + 1];
+          // The dotted figure sits on a half-bar boundary and is the only V1
+          // shape pairing a dotted quarter with an eighth on its tail.
+          if (longn.duration != kDottedQuarter || shortn.duration != kEighth)
+            continue;
+          if (longn.start_tick % (2 * kTicksPerBeat) != 0)
+            continue;
+          if (shortn.start_tick != longn.start_tick + kDottedQuarter)
+            continue;
+          ++dotted_pairs;
+          const int other_prev = top_sounding(shortn.start_tick - 1);
+          const int other_curr = top_sounding(shortn.start_tick);
+          if (other_prev < 0 || other_curr < 0)
+            continue;
+          if (formsStrictPerfectParallel(longn.pitch, shortn.pitch, other_prev, other_curr))
+            ++parallel_shorts;
+          else if (formsPerfectParallel(longn.pitch, shortn.pitch, other_prev, other_curr))
+            ++hidden_shorts;
+        }
+      }
+    }
+  }
+  ASSERT_GT(dotted_pairs, 0u) << "no dotted figure was emitted, so nothing was judged";
+  EXPECT_EQ(parallel_shorts, 0u)
+      << parallel_shorts << " of " << dotted_pairs
+      << " dotted short notes step into a true parallel with the other manual voice";
+  EXPECT_EQ(hidden_shorts, 0u)
+      << hidden_shorts << " of " << dotted_pairs
+      << " dotted short notes reach a perfect interval by a hidden approach";
 }
 
 TEST(FormLinearTrio, DensityRisesTowardClimaxCycle) {
