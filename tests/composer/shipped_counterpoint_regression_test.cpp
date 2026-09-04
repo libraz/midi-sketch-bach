@@ -405,11 +405,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // motion into contrary motion, so what leaves the strict column here tends
     // to arrive in the battuta one.
     {FormType::ToccataAndFugue, 48, 20, 84},
-    // The counter figuration is pinned to a one-octave band under an immutable
-    // ground whose pitch class the chord root tracks, so its octave companion is
-    // often the only chord tone in reach and every approach to it is at least
-    // hidden. Strict faults here are payable in hidden ones for that reason.
-    {FormType::Passacaglia, 18, 26, 29},
+    // The counter figuration is one continuous voice across the ground cycles
+    // and is read as one at every seam; its oscillation tones rank a hidden
+    // perfect below a true one; the cadential suspension is chosen against the
+    // figuration it will sound with; and the closing trill takes its
+    // termination, so the tonic is reached contrary to the ground rather than
+    // beside it. What survives is a single fifth at a bar head whose repair band
+    // holds no admissible tone, and one contrary-motion arrival that entered the
+    // battuta column in exchange.
+    {FormType::Passacaglia, 1, 20, 30},
     // Almost all of what remains in the strict column is fifths, and they come
     // from the one place selection cannot reach: a stretto whose follower is the
     // leader's exact imitation an octave away, entering a whole bar later, so
