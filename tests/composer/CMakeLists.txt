@@ -24,6 +24,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   candidate_search_test.cpp
   texture_helpers_test.cpp
   figuration_palette_test.cpp
+  figuration_anchor_relaxation_test.cpp
   texture_expression_test.cpp
   composer_nct_test.cpp
   arpeggio_flow_test.cpp
