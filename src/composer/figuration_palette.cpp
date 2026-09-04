@@ -1198,11 +1198,23 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             }
             for (const int skip :
                  {(dir > 0) ? skip_up : skip_down, (dir > 0) ? skip_down : skip_up}) {
-              if (skip < wave_lo || skip > wave_hi) {
+              // Judged against the voice band, not the working wave window. The
+              // window is a conjunctness device -- it keeps the ordinary walk
+              // from wandering -- and this branch is not the ordinary walk: it
+              // only runs once the default step has already faulted. Holding the
+              // escape to the window rejects a perfectly clean skip for sitting
+              // a tone outside it and ships the parallel instead, which is the
+              // window enforcing a smaller preference at the cost of the larger
+              // rule. The window then stretches to contain what was taken, the
+              // same way the beat anchor's does, so the following steps do not
+              // reflect straight back off an edge the line is already past.
+              if (skip < band_lo || skip > band_hi) {
                 continue;
               }
               if (step_rank(skip) <= accept) {
                 next = skip;
+                wave_lo = std::min(wave_lo, next);
+                wave_hi = std::max(wave_hi, next);
                 escaped = true;
                 break;
               }
