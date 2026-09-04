@@ -165,7 +165,13 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   EXPECT_EQ(closedRulesFor(FormType::Chaconne),
             (std::vector<std::string>{"battuta", "doubling_no_seventh", "invertible_at_octave",
                                       "parallel_fifth", "parallel_octave"}));
-  EXPECT_EQ(closedRulesFor(FormType::GoldbergVariations), with_invertible_counterpoint);
+  // Its imitative blocks are chosen against the bass rather than repaired after
+  // it, and the figuration between them is relieved arrival by arrival. Octaves
+  // stay open for the one place neither reaches: a wide canon's bar head, where
+  // the pair is pinned between the top of the keyboard and the bass below.
+  EXPECT_EQ(
+      closedRulesFor(FormType::GoldbergVariations),
+      (std::vector<std::string>{"doubling_no_seventh", "invertible_at_octave", "parallel_fifth"}));
 }
 
 // ---------------------------------------------------------------------------

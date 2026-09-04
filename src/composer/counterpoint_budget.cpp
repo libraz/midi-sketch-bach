@@ -135,14 +135,20 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Chaconne, "strong_beat_dissonance"},
     {FormType::Chaconne, "unprepared_dissonance"},
     {FormType::Chaconne, "vertical_dissonance"},
-    // GoldbergVariations
+    // GoldbergVariations -- the imitative blocks are chosen rather than
+    // repaired: each spans exactly the period of the immutable bass beneath it,
+    // so the whole three-voice surface is read while the one free choice is
+    // still open, and the free figuration between them is relieved arrival by
+    // arrival. No true parallel fifth survives that. Octaves remain open for one
+    // place neither reaches: at the bar head of a wide canon the follower is
+    // pinned under the top of the keyboard and the leader above the arpeggiating
+    // bass, which leaves the leader a window too narrow to always hold a choice.
     {FormType::GoldbergVariations, "anti_parallel_perfect"},
     {FormType::GoldbergVariations, "battuta"},
     {FormType::GoldbergVariations, "cross_relation"},
     {FormType::GoldbergVariations, "doubling_no_leading_tone"},
     {FormType::GoldbergVariations, "hidden_parallel_fifth"},
     {FormType::GoldbergVariations, "hidden_parallel_octave"},
-    {FormType::GoldbergVariations, "parallel_fifth"},
     {FormType::GoldbergVariations, "parallel_octave"},
     {FormType::GoldbergVariations, "strong_beat_dissonance"},
     {FormType::GoldbergVariations, "unprepared_dissonance"},
