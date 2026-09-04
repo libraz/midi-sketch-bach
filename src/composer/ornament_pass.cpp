@@ -681,6 +681,39 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return false;
   };
 
+  // Voice-order guard. Every decoration tone is a neighbour of a base tone the
+  // texture already placed in order, but a neighbour reaches a semitone or two
+  // past it, and the voices are often barely a step apart where an inner line
+  // runs under a sustained one. An upper auxiliary can therefore lift this
+  // voice above a concurrently sounding higher-numbered part -- or a lower one
+  // drop it below a lower part -- and the per-tick order V0 >= V1 >= V2 is not
+  // re-checked after this pass, so the crossing ships. Suppress the ornament
+  // rather than trim the tone: the decoration is optional, the order is not.
+  auto expansion_crosses_voice = [&](const Expansion& cand_exp, const NoteEvent& base,
+                                     std::size_t idx) {
+    for (const NoteEvent& sub : cand_exp.notes) {
+      if (sub.pitch == base.pitch) {
+        continue;  // unchanged tone: already ordered where the base was placed.
+      }
+      for (VoiceId v = 0; v < static_cast<VoiceId>(voice_present.size()); ++v) {
+        if (!voice_present[v] || v == base.voice) {
+          continue;
+        }
+        const int other = sounding_in_voice(v, sub.start_tick, idx + 1);
+        if (other < 0) {
+          continue;
+        }
+        // A lower voice index sounds higher, so this tone must stay at or below
+        // every lower-numbered part and at or above every higher-numbered one.
+        if (v < base.voice ? static_cast<int>(sub.pitch) > other
+                           : static_cast<int>(sub.pitch) < other) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
     const NoteEvent& note = result.notes[idx];
     const NoteProvenance& prov = result.provenance[idx];
@@ -998,8 +1031,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
     if (!exp.notes.empty() &&
         (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx) ||
-         expansion_sustains_dissonance(exp, note, idx)))
-      exp.notes.clear();  // would clash against another voice: stay plain.
+         expansion_sustains_dissonance(exp, note, idx) || expansion_crosses_voice(exp, note, idx)))
+      exp.notes.clear();  // would clash with or cross another voice: stay plain.
 
     if (exp.notes.empty()) {
       out_notes.push_back(note);

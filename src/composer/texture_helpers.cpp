@@ -403,6 +403,17 @@ bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_cur
   return isForbiddenPerfectMotion(other_prev, other_curr, line_prev, cand);
 }
 
+bool formsAntiParallelPerfect(int line_prev, int cand, int other_prev, int other_curr) {
+  if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
+    return false;  // need both voices' two onsets to judge motion.
+  }
+  // The predicate is symmetric in its two pairs, so this ordering matches the
+  // sibling helpers rather than affecting the answer.
+  if (cand >= other_curr)
+    return isAntiParallelPerfectMotion(line_prev, cand, other_prev, other_curr);
+  return isAntiParallelPerfectMotion(other_prev, other_curr, line_prev, cand);
+}
+
 bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr) {
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.

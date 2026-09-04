@@ -87,6 +87,22 @@ constexpr bool isConsonantPair(int pitch_a, int pitch_b) {
 /// @return True when the motion forms a forbidden parallel/hidden perfect.
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr);
 
+/// @brief True when the pair leaves a perfect fifth or octave and lands on the
+///        same class again by contrary motion (an anti-parallel perfect).
+///
+/// The third peer of the two predicates around it, kept separate for the same
+/// reason: the three faults are ranked, not interchangeable. A true parallel is
+/// the cardinal prohibition, an anti-parallel a firmer blemish than a battuta
+/// but milder than a parallel, and a guard that pooled them would step off the
+/// mildest onto the worst whenever the clean candidates ran out.
+///
+/// @param line_prev The line-under-construction's previous pitch (-1 = none).
+/// @param cand The line-under-construction's candidate current pitch.
+/// @param other_prev The already-placed voice's previous pitch (-1 = silent).
+/// @param other_curr The already-placed voice's current pitch (-1 = silent).
+/// @return True when the motion forms an anti-parallel perfect.
+bool formsAntiParallelPerfect(int line_prev, int cand, int other_prev, int other_curr);
+
 /// @brief True when the motion arrives at a perfect octave/unison by contrary
 ///        motion with the upper voice leaping down into it (ottava battuta).
 ///

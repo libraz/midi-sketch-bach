@@ -364,8 +364,8 @@ struct FormCeiling {
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 16, 9, 116},
-    {FormType::PreludeAndFugue, 8, 3, 91},
+    {FormType::Fugue, 16, 9, 112},
+    {FormType::PreludeAndFugue, 8, 2, 85},
     // Trade: -2 strict, +1 hidden, buying a large drop in battuta.
     {FormType::TrioSonata, 71, 97, 99},
     {FormType::ChoralePrelude, 44, 77, 49},
@@ -375,13 +375,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // one of its sixteenths by design. The ceiling therefore cannot approach
     // zero, and a drop here means the surrounding figuration improved, not the
     // cascade.
-    {FormType::ToccataAndFugue, 73, 35, 83},
+    //
+    // Trade: -12 strict and -4 hidden, +14 battuta. Escaping a same-direction
+    // perfect by reversing the wave's direction turns similar motion into
+    // contrary motion, so some of what leaves as a parallel returns as the
+    // mildest of the three faults.
+    {FormType::ToccataAndFugue, 61, 31, 97},
     // Trade: -18 strict (10 of them parallel octaves), +7 hidden. The counter
     // figuration is pinned to a one-octave band under an immutable ground whose
     // pitch class the chord root tracks, so its octave companion is often the
     // only chord tone in reach and every approach to it is at least hidden.
     {FormType::Passacaglia, 20, 46, 28},
-    {FormType::FantasiaAndFugue, 71, 77, 107},
+    // Trade: -32 strict, +7 hidden and +22 battuta. The largest single drop in
+    // parallels any form here has taken, bought entirely with the two milder
+    // approaches -- and its parallel octaves fall from thirty to five, so what
+    // remains is almost all fifths.
+    {FormType::FantasiaAndFugue, 39, 84, 129},
     {FormType::CelloPrelude, 0, 0, 0},
     // Trade: -2 strict to 0, +13 hidden, -16 battuta. Two voices only, so the
     // cadential approach to the dominant meets a fixed bass with no third part

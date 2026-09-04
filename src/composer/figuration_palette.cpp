@@ -749,6 +749,31 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     // that is consonant with the sounding theme tones and parallel-free; the
     // snap stands when no such tone exists within a fifth.
     if (audible_from >= 0) {
+      // Voice-ordering window, shared by both displacements below. Either one
+      // may move the anchor several semitones off the tone consonantChordTone
+      // vetted, and that selector is the only thing holding the per-tick order
+      // V0 >= V1 >= V2 -- so a displacement that ignores the window trades a
+      // parallel for a crossed voice, which is the worse fault and a harder one
+      // to see, since it surfaces only once the bands are tight enough.
+      int order_ceiling = band_hi;
+      int order_floor = band_lo;
+      for (const ConcurrentMotion& motion : motions) {
+        if (motion.curr < 0) {
+          continue;
+        }
+        if (motion.voice < voice) {
+          order_ceiling = std::min(order_ceiling, motion.curr);
+        } else if (motion.voice > voice) {
+          order_floor = std::max(order_floor, motion.curr);
+        }
+      }
+      // A degenerate window (a concurrent voice already outside this band's
+      // order) would reject every candidate, so it falls back to the band and
+      // lets the displacement work as it did before the window existed.
+      const bool order_window_usable = order_floor <= order_ceiling;
+      auto within_order = [&](int cand) {
+        return !order_window_usable || (cand >= order_floor && cand <= order_ceiling);
+      };
       auto anchor_is_parallel = [&](int cand) {
         for (const ConcurrentMotion& motion : motions) {
           if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
@@ -762,7 +787,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
                                  (chord.root_pc + 7) % 12};
         auto admissible = [&](int cand) {
-          if (cand < band_lo || cand > band_hi || cand == snapped) {
+          if (cand < band_lo || cand > band_hi || cand == snapped || !within_order(cand)) {
             return false;
           }
           const int pc = ((cand % 12) + 12) % 12;
@@ -819,18 +844,6 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         }
       }
       if (beat >= 2 && trailing_locked && (snapped == bar_pitch_a || snapped == bar_pitch_b)) {
-        int order_ceiling = band_hi;
-        int order_floor = band_lo;
-        for (const ConcurrentMotion& motion : motions) {
-          if (motion.curr < 0) {
-            continue;
-          }
-          if (motion.voice < voice) {
-            order_ceiling = std::min(order_ceiling, motion.curr);
-          } else if (motion.voice > voice) {
-            order_floor = std::max(order_floor, motion.curr);
-          }
-        }
         const int third = chord.minor ? 3 : 4;
         const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
                                  (chord.root_pc + 7) % 12};
@@ -1049,33 +1062,56 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // actual motion into this onset, not a pitch from its own stride back.
         registry.concurrentMotions(tick - kSixteenth, tick, static_cast<VoiceId>(voice), num_voices,
                                    motions);
-        auto wave_is_parallel = [&](int cand) {
+        // How badly a candidate meets the concurrently moving voices, ranked by
+        // how much the ear and the reference corpus mind. Ranking rather than
+        // pooling matters here: escaping a parallel by reversing direction turns
+        // same-direction motion into contrary motion, which is exactly how an
+        // anti-parallel is made -- so a guard blind to that class does not
+        // remove the fault, it relabels it.
+        constexpr int kStepClean = 0;
+        constexpr int kStepBattuta = 1;
+        constexpr int kStepAntiParallel = 2;
+        constexpr int kStepParallel = 3;
+        auto step_rank = [&](int cand) {
+          int worst = kStepClean;
           for (const ConcurrentMotion& motion : motions) {
-            if (formsPerfectParallel(from, cand, motion.prev, motion.curr)) {
-              return true;
-            }
+            if (formsPerfectParallel(from, cand, motion.prev, motion.curr))
+              return kStepParallel;
+            if (formsAntiParallelPerfect(from, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kStepAntiParallel);
+            else if (formsBattuta(from, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kStepBattuta);
           }
-          return false;
+          return worst;
         };
-        if (wave_is_parallel(next)) {
+        const int next_rank = step_rank(next);
+        if (next_rank != kStepClean) {
           ++waveVetoStats().step_parallel_adjusted;
+          // The reversed step first, then a third-skip in either direction --
+          // two diatonic stepwise lines in rhythmic lockstep fault on both
+          // single steps systematically. Candidates are tried in ascending
+          // acceptance, so a clean tone later in the list still beats a merely
+          // better one earlier in it, and nothing is taken that does not improve
+          // on what the wave was about to emit.
           const int reversed = step_from(-dir);
-          if (!wave_is_parallel(reversed)) {
-            dir = -dir;
-            next = reversed;
-          } else {
-            // Both single steps land parallels (two diatonic stepwise lines in
-            // rhythmic lockstep do this systematically): try a third-skip in
-            // either direction before accepting the parallel, mirroring the
-            // harsh-clash fallback below.
-            for (const int skip_dir : {dir, -dir}) {
-              const int skip = (skip_dir > 0) ? detail::scaleUp(from, 2, mode)
-                                              : detail::scaleDown(from, 2, mode);
+          const int skip_up = detail::scaleUp(from, 2, mode);
+          const int skip_down = detail::scaleDown(from, 2, mode);
+          bool escaped = false;
+          for (int accept = kStepClean; accept < next_rank && !escaped; ++accept) {
+            if (step_rank(reversed) <= accept) {
+              dir = -dir;
+              next = reversed;
+              escaped = true;
+              break;
+            }
+            for (const int skip :
+                 {(dir > 0) ? skip_up : skip_down, (dir > 0) ? skip_down : skip_up}) {
               if (skip < wave_lo || skip > wave_hi) {
                 continue;
               }
-              if (!wave_is_parallel(skip)) {
+              if (step_rank(skip) <= accept) {
                 next = skip;
+                escaped = true;
                 break;
               }
             }
@@ -1122,10 +1158,10 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           }
           return false;
         };
-        if (!wave_is_parallel(next) && wave_is_harsh(next)) {
+        if (step_rank(next) != kStepParallel && wave_is_harsh(next)) {
           ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
-          if (!wave_is_parallel(reversed) && !wave_is_harsh(reversed)) {
+          if (step_rank(reversed) != kStepParallel && !wave_is_harsh(reversed)) {
             dir = -dir;
             next = reversed;
           } else {
@@ -1139,7 +1175,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               if (skip < wave_lo || skip > wave_hi) {
                 continue;
               }
-              if (!wave_is_parallel(skip) && !wave_is_harsh(skip)) {
+              if (step_rank(skip) != kStepParallel && !wave_is_harsh(skip)) {
                 next = skip;
                 break;
               }
