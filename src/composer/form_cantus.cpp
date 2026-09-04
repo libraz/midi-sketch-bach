@@ -707,47 +707,135 @@ std::vector<MaterialNote*> lineInTickOrder(const std::vector<std::vector<Materia
   return line;
 }
 
-// Relieve one line's arrival on the bar head, over the finished lower voice.
+// Displace an arrival that the way in cannot answer for.
 //
-// Both ends of that arrival are fixed. The bass states the bar chord's root on
-// the downbeat and the bass band spans a single octave, so the root's register
-// is determined -- there is no second octave to move it to. The cantus firmus
-// lands on its immutable skeleton tone, and the figuration's own bar head must
-// be a chord tone. A perfect-interval fault formed there can therefore never be
-// answered at the arrival itself, only on the way in, and the only tone free on
-// the way in is the onset immediately before the head. It is re-aimed here
-// rather than inside the line's own loop because the bass is built last: this
-// is the earliest point at which the fault is visible at all.
+// Reached only when the tone before it is a bar head, which is structural and
+// may not move, and the arrival itself is not -- so the arrival is a tone of the
+// figure and the one free end left.
+//
+// How far it may travel is read off the figure rather than fixed: no further
+// than the wider of the two intervals it already spans, and at least a step. A
+// tone embedded in a run may then only step, which is what keeps the run's
+// conjunct surface, while one the design already leaps to and from may be
+// re-aimed as freely as the design itself moves. A repair that trades a
+// contrapuntal blemish for a hole in the figure is not a repair.
+//
+// Non-regressive at both ends, like the way-in re-aim: the replacement lowers
+// the fault formed arriving here and may not raise the one formed leaving.
+void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t arrival_idx,
+                           const ThemeToneRegistry& registry, VoiceId voice, VoiceId num_voices,
+                           Mode mode, const std::vector<ConcurrentMotion>& into_arrival,
+                           int approach, int original_rank) {
+  MaterialNote& note = *line[arrival_idx];
+  const int original = static_cast<int>(note.pitch);
+
+  std::vector<ConcurrentMotion> at_arrival;
+  registry.concurrentMotions(note.start_tick - 1, note.start_tick, voice, num_voices, at_arrival);
+  bool original_consonant = true;
+  for (const ConcurrentMotion& motion : at_arrival) {
+    if (!isConsonantPair(original, motion.curr)) {
+      original_consonant = false;
+      break;
+    }
+  }
+
+  std::vector<ConcurrentMotion> out_of_arrival;
+  int next_pitch = -1;
+  if (arrival_idx + 1 < line.size()) {
+    const MaterialNote& next = *line[arrival_idx + 1];
+    next_pitch = static_cast<int>(next.pitch);
+    registry.concurrentMotions(next.start_tick - kSixteenth, next.start_tick, voice, num_voices,
+                               out_of_arrival);
+  }
+  const int exit_ceiling =
+      next_pitch < 0 ? 0 : perfectFaultRank(original, next_pitch, out_of_arrival);
+  int displacement = std::max(2, std::abs(original - approach));
+  if (next_pitch >= 0)
+    displacement = std::max(displacement, std::abs(original - next_pitch));
+
+  // A replacement that takes a neighbour's pitch the displaced tone did not
+  // already share lengthens a static run, so it is tried only after the window
+  // has been swept without one.
+  const auto flattens = [&](int cand) {
+    return (cand == approach && original != approach) ||
+           (next_pitch >= 0 && cand == next_pitch && original != next_pitch);
+  };
+  for (int accept = 0; accept < original_rank; ++accept) {
+    for (const bool allow_flatten : {false, true}) {
+      for (int dist = 1; dist <= displacement; ++dist) {
+        for (const int sgn : {-1, 1}) {
+          const int cand = original + sgn * dist;
+          if (!detail::inScale(cand, mode) || (!allow_flatten && flattens(cand)))
+            continue;
+          bool admissible = true;
+          for (const ConcurrentMotion& motion : at_arrival) {
+            // A lower voice index sounds higher.
+            if (motion.voice < voice ? cand >= motion.curr : cand <= motion.curr) {
+              admissible = false;
+              break;
+            }
+            if (original_consonant && !isConsonantPair(cand, motion.curr)) {
+              admissible = false;
+              break;
+            }
+          }
+          if (!admissible || perfectFaultRank(approach, cand, into_arrival) > accept)
+            continue;
+          if (next_pitch >= 0 && perfectFaultRank(cand, next_pitch, out_of_arrival) > exit_ceiling)
+            continue;
+          note.pitch = static_cast<std::uint8_t>(cand);
+          return;
+        }
+      }
+    }
+  }
+}
+
+// Relieve one line's arrivals over the voices already placed.
+//
+// Every beat is an arrival, not only the bar head. The voice under this one
+// moves within the bar as well as at its head -- the bass states the bar chord
+// and then arpeggiates it -- so the two lines trace the same triad and reach a
+// perfect interval together off the downbeat as readily as on it.
+//
+// What moves is the onset immediately before the arrival, never the arrival
+// itself. At a bar head both ends are fixed: the bass band spans a single
+// octave so the root's register is determined, the cantus firmus lands on its
+// immutable skeleton tone, and the figuration's own head must be a chord tone.
+// Inside the bar the arrival is instead a running tone whose neighbours spell
+// the figure, and moving it there breaks the shape the block exists to state.
+// Either way the answer is on the way in. It is applied here rather than inside
+// the line's own loop because the lower voices are built last: this is the
+// earliest point at which the fault is visible at all.
 //
 // The re-aim is non-regressive at both ends. The replacement must lower the
-// fault it forms arriving at the head, and may not raise the one it forms
+// fault it forms arriving at the beat, and may not raise the one it forms
 // arriving at its own onset; it keeps the register order, and may be dissonant
 // only where the tone it displaces already was (the eighth-note fills are
 // passing tones and dissonant by design).
-void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
-                           const ThemeToneRegistry& registry, VoiceId voice, VoiceId num_voices,
-                           int bars, Mode mode) {
+void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegistry& registry,
+                     VoiceId voice, VoiceId num_voices, int bars, Mode mode) {
+  constexpr int kBeatsPerBar = kTicksPerBar / kTicksPerBeat;
   std::vector<ConcurrentMotion> into_head;
   std::vector<ConcurrentMotion> into_onset;
   std::vector<ConcurrentMotion> at_onset;
-  for (int bar = 1; bar < bars; ++bar) {
-    const Tick head = barTick(bar);
+  for (int beat = 1; beat < bars * kBeatsPerBar; ++beat) {
+    const Tick head = static_cast<Tick>(beat) * kTicksPerBeat;
     std::size_t approach_idx = line.size();
-    int arrival = -1;
+    std::size_t arrival_idx = line.size();
     for (std::size_t idx = 0; idx < line.size(); ++idx) {
       const Tick start = line[idx]->start_tick;
       if (start < head)
         approach_idx = idx;
       else if (start == head)
-        arrival = static_cast<int>(line[idx]->pitch);
+        arrival_idx = idx;
       else
         break;
     }
-    if (arrival < 0 || approach_idx == line.size())
+    if (arrival_idx == line.size() || approach_idx == line.size())
       continue;
     MaterialNote& approach = *line[approach_idx];
-    if (approach.start_tick % kTicksPerBar == 0)
-      continue;  // The onset before the head IS a head: a structural tone.
+    const int arrival = static_cast<int>(line[arrival_idx]->pitch);
     const int original = static_cast<int>(approach.pitch);
     const int own_prev = approach_idx > 0 ? static_cast<int>(line[approach_idx - 1]->pitch) : -1;
 
@@ -758,6 +846,20 @@ void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
     const int original_rank = perfectFaultRank(original, arrival, into_head);
     if (original_rank == 0)
       continue;
+
+    if (approach.start_tick % kTicksPerBar == 0) {
+      // Nothing on the way in is free: the tone before this arrival is a bar
+      // head, pinned at both ends. Where the arrival is a bar head too there is
+      // no free tone at all and the fault stands. Off the downbeat the arrival
+      // is instead a running tone, so it is the one that moves -- by a step, so
+      // the figure keeps its conjunct surface, and only where it neither
+      // dissolves the register order nor worsens the motion out of the beat.
+      if (head % kTicksPerBar == 0)
+        continue;
+      relieveRunningArrival(line, arrival_idx, registry, voice, num_voices, mode, into_head,
+                            original, original_rank);
+      continue;
+    }
 
     into_onset.clear();
     registry.concurrentMotions(approach.start_tick - kSixteenth, approach.start_tick, voice,
@@ -783,6 +885,13 @@ void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
     // elsewhere than the wider choice ever buys.
     const int leap_ceiling = std::max(7, std::abs(arrival - original));
     const int entry_ceiling = own_prev < 0 ? 0 : std::max(12, std::abs(original - own_prev));
+    // Whether the replacement takes a neighbour's pitch that the displaced tone
+    // did not already share. Such a tone lengthens a static run, so it is tried
+    // only once the window has been swept without one -- ranked, not vetoed,
+    // because a rule this pass has closed leaves no room to decline a repair.
+    auto flattens = [&](int cand) {
+      return (cand == own_prev && original != own_prev) || (cand == arrival && original != arrival);
+    };
     auto admissible = [&](int cand) {
       if (!detail::inScale(cand, mode) || std::abs(arrival - cand) > leap_ceiling)
         return false;
@@ -811,15 +920,20 @@ void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
     const int reach = 2 * leap_ceiling;
     bool placed = false;
     for (int accept = 0; accept < original_rank && !placed; ++accept) {
-      for (int dist = 1; dist <= reach && !placed; ++dist) {
-        for (const int sgn : {-1, 1}) {
-          const int cand = original + sgn * dist;
-          if (admissible(cand) && perfectFaultRank(cand, arrival, into_head) <= accept) {
-            approach.pitch = static_cast<std::uint8_t>(cand);
-            placed = true;
-            break;
+      for (const bool allow_flatten : {false, true}) {
+        for (int dist = 1; dist <= reach && !placed; ++dist) {
+          for (const int sgn : {-1, 1}) {
+            const int cand = original + sgn * dist;
+            if ((allow_flatten || !flattens(cand)) && admissible(cand) &&
+                perfectFaultRank(cand, arrival, into_head) <= accept) {
+              approach.pitch = static_cast<std::uint8_t>(cand);
+              placed = true;
+              break;
+            }
           }
         }
+        if (placed)
+          break;
       }
     }
   }
@@ -1323,8 +1437,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     for (const MaterialNote& note : bass_notes)
       relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
                              note.duration);
-    relieveBarHeadArrival(lineInTickOrder({voice == 0 ? &fig_notes : &out.material.cf_embellished}),
-                          relief_registry, voice, /*num_voices=*/3, bars, mode);
+    relieveArrivals(lineInTickOrder({voice == 0 ? &fig_notes : &out.material.cf_embellished}),
+                    relief_registry, voice, /*num_voices=*/3, bars, mode);
   }
 
   ChordEvent approach;
@@ -2028,9 +2142,12 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // tone from that one root, so they arrive congruently by construction rather
   // than by accident. Nothing in the variation loop can see this, because the
   // Goldberg builder keeps no registry of the voices it has already placed.
-  // Relieved here, where the whole texture is finally known, on the same terms
-  // as the chorale prelude: the bar heads themselves are fixed at both ends, so
-  // the tone that moves is the onset before each one.
+  // The congruence is not confined to the bar head either: the aria bass
+  // arpeggiates that same root through the bar while the variation figures the
+  // same triad above it, so the two lines meet on a perfect interval off the
+  // downbeat as well. Relieved here, where the whole texture is finally known,
+  // on the same terms as the chorale prelude: the tone that moves is the onset
+  // before each arrival.
   {
     ThemeToneRegistry relief_registry;
     const Tick ground_period = out.material.goldberg_aria_bass_period;
@@ -2063,8 +2180,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       if (!imitative[idx])
         blocks.push_back(&out.material.goldberg_variations[idx].notes);
     }
-    relieveBarHeadArrival(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
-                          /*num_voices=*/3, bars, mode);
+    relieveArrivals(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
+                    /*num_voices=*/3, bars, mode);
   }
 
   Span coda_span;
