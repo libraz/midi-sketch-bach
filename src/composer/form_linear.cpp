@@ -1129,6 +1129,22 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     }
     return -1;
   };
+  // The manual lines rest between onsets at the sparser tiers, and a perfect
+  // parallel is heard note-to-note ACROSS such a rest: the union-onset reading
+  // pairs the last tone that sounded with the next one that starts. Sampling one
+  // tick back returns nothing from inside a rest and silently clears the pair,
+  // so guards take the latest onset strictly before the tick as the "from" tone.
+  const auto onset_before = [](const std::vector<MaterialNote>& line, Tick tick) -> int {
+    int pitch = -1;
+    Tick best = 0;
+    for (const MaterialNote& note : line) {
+      if (note.start_tick < tick && (pitch < 0 || note.start_tick >= best)) {
+        best = note.start_tick;
+        pitch = static_cast<int>(note.pitch);
+      }
+    }
+    return pitch;
+  };
   const Tick coda_start = static_cast<Tick>(bars - 2) * kTicksPerBar;
   const Tick final_bar_tick = static_cast<Tick>(bars - 1) * kTicksPerBar;
   for (MaterialNote& note : v1.notes) {
@@ -1214,23 +1230,45 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // most of what an audit hears here arrives by contrary motion. Judging only
   // same-direction arrivals left the pedal free to leap down onto an octave --
   // and it is the last voice written, so nothing downstream corrects it.
+  //
+  // The true parallel and the hidden perfect sit on SEPARATE rungs, unlike the
+  // manual guard one voice above. The pedal has no room to treat them alike:
+  // its band spans a thirteenth and holds three chord tones, so under two lines
+  // that both move at every beat almost every tone the bar offers is at least a
+  // hidden perfect against one of them. Pooling the two left the guard with no
+  // candidate ranking better than the design tone, so it kept whatever it had --
+  // including a true parallel it could have traded for a hidden one.
+  constexpr int kPedalClean = 0;
+  constexpr int kPedalBattuta = 1;
+  constexpr int kPedalAntiParallel = 2;
+  constexpr int kPedalHidden = 3;
+  constexpr int kPedalParallel = 4;
   const auto pedal_fault_rank = [&](int from, int cand, Tick t) {
-    int worst = 0;
+    int worst = kPedalClean;
     for (const TrioVoiceLine& manual : out.material.trio_voices) {
       const int prev = upper_before(manual.notes, t);
       const int curr = upper_sounding(manual.notes, t);
       if (prev < 0 || curr < 0)
         continue;
+      if (formsStrictPerfectParallel(from, cand, prev, curr))
+        return kPedalParallel;
       if (formsPerfectParallel(from, cand, prev, curr))
-        return 3;
-      if (formsAntiParallelPerfect(from, cand, prev, curr))
-        worst = std::max(worst, 2);
+        worst = std::max(worst, kPedalHidden);
+      else if (formsAntiParallelPerfect(from, cand, prev, curr))
+        worst = std::max(worst, kPedalAntiParallel);
       else if (formsBattuta(from, cand, prev, curr))
-        worst = std::max(worst, 1);
+        worst = std::max(worst, kPedalBattuta);
     }
     return worst;
   };
 
+  // Onsets where the pedal ran out of room: its band spans a thirteenth and a
+  // triad puts exactly three tones in it, so a bar can arrive where all three
+  // read as a true parallel against one manual or the other and the design tone
+  // has to stand. The middle manual is the voice that can still travel there,
+  // and the closing repair at the end of this builder already knows how to move
+  // it, so the ticks are handed to it rather than answered here.
+  std::vector<Tick> pedal_boxed_ticks;
   int prev_root = 48;  // seed near C3.
   for (int bar = 0; bar < bars; ++bar) {
     const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
@@ -1336,6 +1374,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           }
         }
       }
+      if (beat != 0 && pedal_prev >= 0 && pedal_fault_rank(pedal_prev, pitch, t) == kPedalParallel)
+        pedal_boxed_ticks.push_back(t);
+      if (next_root >= 0 && pedal_fault_rank(pitch, next_root, t + kTicksPerBeat) == kPedalParallel)
+        pedal_boxed_ticks.push_back(t + kTicksPerBeat);
       MaterialNote mn;
       mn.start_tick = t;
       mn.duration = kTicksPerBeat;
@@ -1392,6 +1434,16 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     const auto& upper = out.material.trio_voices[0].notes;
     const auto& middle = out.material.trio_voices[1].notes;
     auto& bass = out.material.trio_voices[2].notes;
+    // The figure's three tones are designed from register and dissonance alone,
+    // and the closing repair below deliberately steps over the window they
+    // occupy, so nothing downstream ever re-reads them against the outer voices.
+    const auto strict_against = [&](const std::vector<MaterialNote>& outer, int line_prev, int cand,
+                                    Tick tick) {
+      const int other_prev = onset_before(outer, tick);
+      const int other_curr = soundingMaterialPitch(outer, tick);
+      return other_prev >= 0 && other_curr >= 0 &&
+             formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr);
+    };
     bool installed = false;
     for (int bar_offset : {3, 4, 5, 6, 7}) {
       if (installed || bars <= bar_offset)
@@ -1446,11 +1498,46 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
             std::abs(static_cast<int>(suspension.resolution_pitch) - middle_after) > 12) {
           continue;
         }
+        const int prep_pitch = static_cast<int>(suspension.preparation_pitch);
+        const int sus_pitch = static_cast<int>(suspension.suspension_pitch);
+        const int res_pitch = static_cast<int>(suspension.resolution_pitch);
+        // Reject a formula whose own onsets would ship a true parallel; the next
+        // suspension type (or the next bar offset) is tried instead. The bass is
+        // exempt at the resolution: the rewrite immediately below pins it to the
+        // suspended bar's tone, so it moves obliquely there by construction.
+        if (strict_against(upper, middle_before, prep_pitch, preparation_tick) ||
+            strict_against(bass, middle_before, prep_pitch, preparation_tick) ||
+            strict_against(upper, prep_pitch, sus_pitch, suspension_tick) ||
+            strict_against(bass, prep_pitch, sus_pitch, suspension_tick) ||
+            strict_against(upper, sus_pitch, res_pitch, resolution_tick)) {
+          continue;
+        }
+        // The rewrite also changes what the bass LEAVES the resolution beat
+        // with: the pedal chose its next tone against the tone the rewrite
+        // replaces, and its own guard has long since run. Only the top voice
+        // needs re-reading there -- the middle is inside the figure's window,
+        // where it either rests or holds its resolution, and an oblique voice is
+        // never in a parallel.
+        const Tick departure_tick = resolution_tick + kTicksPerBeat;
+        const int bass_departure = soundingMaterialPitch(bass, departure_tick);
+        if (bass_departure >= 0 &&
+            strict_against(upper, held_bass, bass_departure, departure_tick)) {
+          continue;
+        }
         for (MaterialNote& note : bass) {
           if (note.start_tick == resolution_tick)
             note.pitch = static_cast<std::uint8_t>(held_bass);
         }
         installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+        if (installed) {
+          // The figure may sit up to seven bars from the end, well before the
+          // landing the closing repair below already covers, and it pins the
+          // bass under its own resolution. The tone the middle voice resumes its
+          // carrier on is therefore judged against a bass that no longer reads
+          // as it did when that tone was written, so open the repair window at
+          // the disturbance rather than at the landing.
+          v1_repair_start = std::min(v1_repair_start, resolution_tick);
+        }
         break;
       }
     }
@@ -1466,26 +1553,42 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // shipped notes. Re-judge V1 against the FINAL content of both outer voices
   // over that window and move it off any surviving perfect parallel: the
   // soprano's cadential close and the bass's structural V -> I are fixed, so the
-  // middle voice is the one that can travel.
+  // middle voice is the one that can travel. The same pass answers the onsets
+  // anywhere in the piece where the pedal's own guard was boxed in, for the same
+  // reason: at those the middle voice is again the only one still free.
   {
     const std::vector<MaterialNote>& upper = out.material.trio_voices[0].notes;
     const std::vector<MaterialNote>& pedal = out.material.trio_voices[2].notes;
     std::vector<MaterialNote>& middle = out.material.trio_voices[1].notes;
-    // Same sampling as the in-loop guard: the outer voice just before this
-    // onset and at it, which is the pair the union-onset reading (and the ear)
-    // takes. An outer voice that does not move between the two samples is
-    // oblique and can never be in a parallel.
-    const auto forms_outer_parallel = [&](int line_prev, int cand, Tick tick) {
+    // Same sampling as the in-loop guard: the outer voice's last onset before
+    // this one and whatever it sounds at it, which is the pair the union-onset
+    // reading (and the ear) takes. An outer voice that does not move between the
+    // two samples is oblique and can never be in a parallel.
+    //
+    // Ranked for the reason the pedal guard is: inside the closing region the
+    // soprano's cadence and the bass's V -> I are both fixed, so the triad tones
+    // this voice may take here are frequently all at least a hidden perfect
+    // against one of them. A boolean reject then finds nothing better than the
+    // design tone and ships the true parallel it was called to remove.
+    constexpr int kMiddleClean = 0;
+    constexpr int kMiddleHidden = 1;
+    constexpr int kMiddleParallel = 2;
+    const auto outer_fault_rank = [&](int line_prev, int cand, Tick tick) {
       if (line_prev < 0)
-        return false;
-      for (const std::vector<MaterialNote>* outer : {&upper, &pedal}) {
-        const int other_prev = sounding_pitch(*outer, tick > 0 ? tick - 1 : 0);
+        return kMiddleClean;
+      int worst = kMiddleClean;
+      const std::vector<MaterialNote>* outers[2] = {&upper, &pedal};
+      for (const std::vector<MaterialNote>* outer : outers) {
+        const int other_prev = onset_before(*outer, tick);
         const int other_curr = sounding_pitch(*outer, tick);
-        if (other_prev >= 0 && other_curr >= 0 &&
-            formsPerfectParallel(line_prev, cand, other_prev, other_curr))
-          return true;
+        if (other_prev < 0 || other_curr < 0)
+          continue;
+        if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr))
+          return kMiddleParallel;
+        if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
+          worst = std::max(worst, kMiddleHidden);
       }
-      return false;
+      return worst;
     };
     // The cadential suspension installed above hands its three tones to a
     // SuspensionCarrier span, which replays them from the material pattern; the
@@ -1512,8 +1615,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         continue;
       }
       const int design = static_cast<int>(note.pitch);
-      if (note.start_tick < v1_repair_start ||
-          !forms_outer_parallel(prev_pitch, design, note.start_tick)) {
+      const bool pedal_boxed = std::find(pedal_boxed_ticks.begin(), pedal_boxed_ticks.end(),
+                                         note.start_tick) != pedal_boxed_ticks.end();
+      if ((note.start_tick < v1_repair_start && !pedal_boxed) ||
+          outer_fault_rank(prev_pitch, design, note.start_tick) == kMiddleClean) {
         prev_pitch = design;
         continue;
       }
@@ -1528,28 +1633,37 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       const Tick next_tick = (idx + 1 < middle.size()) ? middle[idx + 1].start_tick : 0;
       const int upper_now = sounding_pitch(upper, note.start_tick);
       const int pedal_now = sounding_pitch(pedal, note.start_tick);
-      // Nearest in-band triad tone that clears BOTH outer voices on the way in
-      // AND on the way out (a repair that hands the parallel to the following
-      // onset has repaired nothing), keeping the pedal < middle < upper order
-      // the trio is read in at this onset. When nothing clears, the design tone
-      // stands: one consonant parallel beats a non-chord tone in the middle of
-      // a cadence.
+      // How badly a tone reads at BOTH ends of the onset: the motion into it and
+      // the motion out of it (a repair that hands the parallel to the following
+      // onset has repaired nothing).
+      const auto both_ends = [&](int cand) {
+        int rank = outer_fault_rank(prev_pitch, cand, note.start_tick);
+        if (next_pitch >= 0)
+          rank = std::max(rank, outer_fault_rank(cand, next_pitch, next_tick));
+        return rank;
+      };
+      // Nearest in-band triad tone that reads strictly better than the design
+      // one, preferring a fully clean rung before settling for a hidden perfect,
+      // and keeping the pedal < middle < upper order the trio is read in at this
+      // onset. When nothing improves on it, the design tone stands: one
+      // consonant parallel beats a non-chord tone in the middle of a cadence.
+      const int design_rank = both_ends(design);
       int best = design;
-      int best_dist = 1 << 20;
-      for (int tone = 0; tone < 3; ++tone) {
-        const int low = kV1BandLo + (((triad_pc[tone] - kV1BandLo) % 12) + 12) % 12;
-        for (int cand = low; cand <= kV1BandHi; cand += 12) {
-          if (cand == design || (upper_now >= 0 && cand >= upper_now) ||
-              (pedal_now >= 0 && cand <= pedal_now))
-            continue;
-          if (forms_outer_parallel(prev_pitch, cand, note.start_tick))
-            continue;
-          if (next_pitch >= 0 && forms_outer_parallel(cand, next_pitch, next_tick))
-            continue;
-          const int dist = std::abs(cand - design);
-          if (dist < best_dist) {
-            best_dist = dist;
-            best = cand;
+      for (int accept = kMiddleClean; accept < design_rank && best == design; ++accept) {
+        int best_dist = 1 << 20;
+        for (int tone = 0; tone < 3; ++tone) {
+          const int low = kV1BandLo + (((triad_pc[tone] - kV1BandLo) % 12) + 12) % 12;
+          for (int cand = low; cand <= kV1BandHi; cand += 12) {
+            if (cand == design || (upper_now >= 0 && cand >= upper_now) ||
+                (pedal_now >= 0 && cand <= pedal_now))
+              continue;
+            if (both_ends(cand) > accept)
+              continue;
+            const int dist = std::abs(cand - design);
+            if (dist < best_dist) {
+              best_dist = dist;
+              best = cand;
+            }
           }
         }
       }
