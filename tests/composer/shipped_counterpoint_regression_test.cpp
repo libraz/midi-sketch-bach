@@ -370,7 +370,12 @@ struct FormCeiling {
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     {FormType::Fugue, 25, 12, 145},
-    {FormType::PreludeAndFugue, 15, 4, 80},
+    // Its bass support tone is read against the running voices at the grain they
+    // actually move at rather than a bar back, and ranks a hidden perfect below
+    // a true one; two true parallels left the strict column and two hidden ones
+    // entered -- the corpus writes hidden perfects in this texture far more
+    // freely than it writes either true class.
+    {FormType::PreludeAndFugue, 13, 6, 80},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
@@ -399,16 +404,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Escaping a same-direction perfect by reversing the wave turns similar
     // motion into contrary motion, so what leaves the strict column here tends
     // to arrive in the battuta one.
-    {FormType::ToccataAndFugue, 56, 27, 85},
+    {FormType::ToccataAndFugue, 48, 20, 84},
     // The counter figuration is pinned to a one-octave band under an immutable
     // ground whose pitch class the chord root tracks, so its octave companion is
     // often the only chord tone in reach and every approach to it is at least
     // hidden. Strict faults here are payable in hidden ones for that reason.
     {FormType::Passacaglia, 18, 26, 29},
-    // Almost all of what remains in the strict column is fifths; the parallel
-    // octaves this form used to carry are gone, bought with the two milder
-    // approaches, which is why its hidden and battuta columns are the widest.
-    {FormType::FantasiaAndFugue, 14, 89, 111},
+    // Almost all of what remains in the strict column is fifths, and they come
+    // from the one place selection cannot reach: a stretto whose follower is the
+    // leader's exact imitation an octave away, entering a whole bar later, so
+    // the two lines attack together and the subject's own intervals decide what
+    // sounds. Everything the builders do choose -- the bass support under the
+    // running voices, the pedal under the free section's figuration -- is now
+    // read at the grain those voices move at, which is what emptied the octave
+    // column and took most of the hidden one with it.
+    {FormType::FantasiaAndFugue, 11, 57, 110},
     {FormType::CelloPrelude, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
