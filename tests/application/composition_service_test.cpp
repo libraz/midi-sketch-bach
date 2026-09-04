@@ -588,5 +588,26 @@ TEST(CompositionServiceTest, ChaconneInGMinorAtFullLengthShipsOnEverySeed) {
   EXPECT_TRUE(needed_nearest_placement);
 }
 
+// The figuration wave's veto counters are a process-wide accumulator that only
+// the form builders drive. compose() resets it per piece and snapshots it onto
+// the report, so the exported document describes this piece alone: a fugue
+// fires the wave's reactive layers, and composing the same request twice must
+// report the same counts rather than accumulating them.
+TEST(CompositionServiceTest, GeneratedJsonCarriesPerPieceWaveVetoCounters) {
+  CompositionProduct first;
+  ASSERT_EQ(compose(fugueRequest(1), &first), CompositionStatus::Ok);
+  EXPECT_NE(first.generated_json.find("\"informational_findings\":["), std::string::npos);
+  const long total = first.final_validation.wave_veto.total();
+  EXPECT_GT(total, 0);
+  EXPECT_NE(first.generated_json.find("\"wave_veto\":{\"anchor_parallel_displaced\":"),
+            std::string::npos);
+  EXPECT_NE(first.generated_json.find("\"total\":" + std::to_string(total) + "}"),
+            std::string::npos);
+
+  CompositionProduct second;
+  ASSERT_EQ(compose(fugueRequest(1), &second), CompositionStatus::Ok);
+  EXPECT_EQ(second.final_validation.wave_veto.total(), total);
+}
+
 }  // namespace
 }  // namespace bach::application

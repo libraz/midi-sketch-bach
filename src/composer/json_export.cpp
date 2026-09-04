@@ -1,6 +1,7 @@
 #include "composer/json_export.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <queue>
 #include <string>
@@ -203,6 +204,45 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
     w.endObject();
   }
   w.endArray();
+  // Soft findings that were recorded without gating generation. Emitted on the
+  // same terms as the tallies above -- always present, empty when nothing was
+  // found -- so a consumer never has to guess whether the producer measured.
+  w.key("informational_findings");
+  w.beginArray();
+  for (const auto& finding : validation.informational) {
+    w.beginObject();
+    w.key("span_id");
+    writeSpanId(w, finding.span_id);
+    w.key("rule_id");
+    w.value(std::string_view(finding.rule_id));
+    w.key("geometry");
+    writeStr(w, ruleGeometryToWire(counterpointRuleGeometry(finding.rule_id)));
+    w.key("kind");
+    writeStr(w, failKindToWire(finding.kind));
+    w.endObject();
+  }
+  w.endArray();
+  // Figuration-wave reactive-layer firing counts for this piece. The counters
+  // are `long`; JsonWriter has no `long` overload, so widen to uint64 rather
+  // than narrowing to int. Emitted unconditionally, all-zero when no layer
+  // fired, for the same reason as the arrays above.
+  w.key("wave_veto");
+  w.beginObject();
+  w.key("anchor_parallel_displaced");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.anchor_parallel_displaced));
+  w.key("wobble_breaker_fired");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.wobble_breaker_fired));
+  w.key("step_parallel_adjusted");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.step_parallel_adjusted));
+  w.key("step_harsh_adjusted");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.step_harsh_adjusted));
+  w.key("order_clamp_changed");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.order_clamp_changed));
+  w.key("window_expanded");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.window_expanded));
+  w.key("total");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.total()));
+  w.endObject();
   if (!validation.subject_features.empty() || !validation.stream_segregation.empty() ||
       !validation.texture_metrics.empty()) {
     w.key("info");

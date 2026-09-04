@@ -7,6 +7,7 @@
 #include "composer/figuration.h"
 #include "composer/material.h"
 #include "composer/texture_helpers.h"
+#include "composer/validation.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -266,32 +267,9 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
                              int band_hi, VoiceId num_voices, bool cadential_close = false);
 
-/**
- * @brief Firing counters for appendFigurationWaveBar's reactive layers.
- *
- * Each counter increments only when the layer actually CHANGED the note the
- * wave was about to emit (a veto that confirmed the default costs nothing).
- * The counters measure how often the wave's design space is hostile enough to
- * need reactive escapes: a layer that no longer fires under the designed
- * chord plans is dead machinery and a candidate for removal. Measurement
- * only -- generation never reads these.
- */
-struct WaveVetoStats {
-  long anchor_parallel_displaced = 0;  ///< Beat anchor moved off a parallel arrival.
-  long wobble_breaker_fired = 0;       ///< Two-pitch oscillation escaped by register move.
-  long step_parallel_adjusted = 0;     ///< Wave step reversed / skipped off a parallel.
-  long step_harsh_adjusted = 0;        ///< Wave step reversed / skipped off a sharp clash.
-  long order_clamp_changed = 0;        ///< Step pinned into the concurrent voice-order window.
-  long window_expanded = 0;            ///< Working window stretched to contain a snapped anchor.
-
-  void reset() { *this = WaveVetoStats{}; }
-  long total() const {
-    return anchor_parallel_displaced + wobble_breaker_fired + step_parallel_adjusted +
-           step_harsh_adjusted + order_clamp_changed + window_expanded;
-  }
-};
-
 /// @brief Process-wide accumulator for the wave's reactive-layer firings.
+/// @note The counters live on WaveVetoStats (composer/validation.h) so a
+///       per-piece snapshot can ride out on the validation report.
 WaveVetoStats& waveVetoStats();
 
 /**

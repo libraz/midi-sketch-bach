@@ -7,6 +7,7 @@
 
 #include "composer/counterpoint_budget.h"
 #include "composer/expression_events.h"
+#include "composer/figuration_palette.h"
 #include "composer/form_director.h"
 #include "composer/harness_fixture.h"
 #include "composer/json_export.h"
@@ -146,6 +147,10 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
     return CompositionStatus::InvalidArgument;
   }
   *out = CompositionProduct{};
+  // The wave's veto counters are a process-wide accumulator; compose() is the
+  // per-piece boundary, so clearing here is what makes the snapshot below
+  // describe this piece and not every piece the process built before it.
+  composer::waveVetoStats().reset();
   CompositionRequest effective = request;
   resolveDefaults(&effective);
   out->form = effective.form;
@@ -196,6 +201,9 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
 
   out->composition =
       composer::Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+  // Only the form builders drive the figuration wave, so the counters are
+  // already final once buildFormFixture has returned.
+  out->composition.validation.wave_veto = composer::waveVetoStats();
   out->generated_json =
       composer::emitGeneratedJson(out->composition.notes, out->composition.validation);
   out->provenance_json = composer::emitProvenanceJson(out->composition.provenance);
@@ -253,6 +261,9 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   if (!out->final_validation.failures.empty()) {
     out->final_validation.status = composer::ValidationStatus::FailedSpan;
   }
+  // After the wholesale assignment above and the budget pass, and before every
+  // emitGeneratedJson call that carries `final_validation`.
+  out->final_validation.wave_veto = composer::waveVetoStats();
   if (out->final_validation.status != composer::ValidationStatus::Ok) {
     out->generated_json =
         composer::emitGeneratedJson(out->composition.notes, out->final_validation);

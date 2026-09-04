@@ -32,7 +32,11 @@ constexpr std::uint32_t kTicksPerBeatExport = kTicksPerBeat;
 // Emit the evaluator-facing JSON. Contains the polyphonic note stream, the
 // minimum metadata an external evaluator needs to interpret tick units,
 // an optional MIDI-aligned tempo map, and optional info-level validation
-// metrics. Legacy overloads omit tempo rather than guessing it.
+// metrics. Three measurement channels ride on the root and are always
+// present, empty/zero when nothing was measured, so a consumer can tell
+// "measured, nothing found" from "producer did not measure":
+// `counterpoint_observations`, `informational_findings`, `wave_veto`.
+// Legacy overloads omit tempo rather than guessing it.
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes);
 std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
                               const ValidationReport& validation);

@@ -8,7 +8,9 @@
     "ticks_per_beat",
     "duration_ticks",
     "notes",
-    "counterpoint_observations"
+    "counterpoint_observations",
+    "informational_findings",
+    "wave_veto"
   ],
   "additionalProperties": false,
   "properties": {
@@ -126,6 +128,90 @@
             "type": "integer",
             "minimum": 0
           }
+        }
+      }
+    },
+    "informational_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "span_id",
+          "rule_id",
+          "geometry",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "span_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "geometry": {
+            "type": "string",
+            "enum": [
+              "linear",
+              "vertical",
+              "unclassified"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "StructuralFail",
+              "MusicalFail",
+              "ConfigFail"
+            ]
+          }
+        }
+      }
+    },
+    "wave_veto": {
+      "type": "object",
+      "required": [
+        "anchor_parallel_displaced",
+        "wobble_breaker_fired",
+        "step_parallel_adjusted",
+        "step_harsh_adjusted",
+        "order_clamp_changed",
+        "window_expanded",
+        "total"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "anchor_parallel_displaced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wobble_breaker_fired": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "step_parallel_adjusted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "step_harsh_adjusted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "order_clamp_changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "window_expanded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

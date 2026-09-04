@@ -106,6 +106,43 @@ struct RuleObservation {
   int exempted = 0;  // suppressed because every operand is an immutable input
 };
 
+/**
+ * @brief Firing counters for appendFigurationWaveBar's reactive layers.
+ *
+ * Each counter increments only when the layer actually CHANGED the note the
+ * wave was about to emit (a veto that confirmed the default costs nothing).
+ * The counters measure how often the wave's design space is hostile enough to
+ * need reactive escapes. Generation never reads them; they are carried on the
+ * report so the firing profile is observable outside the process.
+ *
+ * A zero does not by itself mean the layer is dead. Some escapes are
+ * proof-of-exhaustion exemptions that fire only after the builder has shown no
+ * ordinary choice qualifies, so rarity is their designed frequency and a zero
+ * over a handful of seeds says more about the provocation than the layer. Look
+ * for a test that drives the layer before reading a zero as removable.
+ *
+ * The accumulator behind these is process-wide, and compose() clears it at the
+ * entry to each piece so the snapshot on the report describes that piece. That
+ * makes the per-piece reading correct only while one process composes one piece
+ * at a time. Test cases running as separate processes are fine; threading
+ * composition inside a process would not merely add noise, it would let one
+ * piece's reset erase another's counts.
+ */
+struct WaveVetoStats {
+  long anchor_parallel_displaced = 0;  ///< Beat anchor moved off a parallel arrival.
+  long wobble_breaker_fired = 0;       ///< Two-pitch oscillation escaped by register move.
+  long step_parallel_adjusted = 0;     ///< Wave step reversed / skipped off a parallel.
+  long step_harsh_adjusted = 0;        ///< Wave step reversed / skipped off a sharp clash.
+  long order_clamp_changed = 0;        ///< Step pinned into the concurrent voice-order window.
+  long window_expanded = 0;            ///< Working window stretched to contain a snapped anchor.
+
+  void reset() { *this = WaveVetoStats{}; }
+  long total() const {
+    return anchor_parallel_displaced + wobble_breaker_fired + step_parallel_adjusted +
+           step_harsh_adjusted + order_clamp_changed + window_expanded;
+  }
+};
+
 // Validator report for one pipeline pass over one piece.
 //
 // `status == Ok` && `failures.empty()` is the only valid success shape.
@@ -119,14 +156,19 @@ struct ValidationReport {
   // stylistic property the existing corpus does not uniformly satisfy (e.g.
   // strict octave-invertibility of a countersubject), so they can be reported
   // for provenance/audit without spuriously failing established pieces.
+  // Exported as generated.v1 `informational_findings`.
   std::vector<ValidationFailure> informational;
   // Counterpoint rule tallies. Unlike `informational`, which is recorded only
-  // for fully authored findings and never leaves the process, this channel is
-  // always populated and always exported (generated.v1
-  // `counterpoint_observations`), so a rule that is exempted from `failures`
-  // stays countable outside the composer. One entry per rule that matched at
-  // least once, sorted by `rule_id`.
+  // for fully authored findings, this channel is always populated, so a rule
+  // that is exempted from `failures` stays countable outside the composer.
+  // Exported as generated.v1 `counterpoint_observations`. One entry per rule
+  // that matched at least once, sorted by `rule_id`.
   std::vector<RuleObservation> observations;
+  // Per-piece snapshot of the process-wide figuration-wave accumulator
+  // (`waveVetoStats()`). Only meaningful when the caller reset that
+  // accumulator at the start of the piece; otherwise it carries whatever
+  // earlier pieces in the same process left behind.
+  WaveVetoStats wave_veto;
   std::vector<SubjectFeatures> subject_features;
   std::vector<StreamSegregationSpan> stream_segregation;
   std::vector<TextureMetrics> texture_metrics;

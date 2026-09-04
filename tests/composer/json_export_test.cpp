@@ -133,6 +133,55 @@ TEST(JsonExportObservationTest, GeneratedJsonCarriesObservationCountsAndGeometry
                        "\"total\":3,\"gated\":0,\"exempted\":3}]"));
 }
 
+TEST(JsonExportInformationalTest, GeneratedJsonAlwaysCarriesInformationalFindings) {
+  // Same contract as the tallies: an empty array states "measured, nothing
+  // found" where an absent key would state nothing at all.
+  const std::string json = emitGeneratedJson({}, ValidationReport{});
+  EXPECT_TRUE(contains(json, "\"counterpoint_observations\":[],\"informational_findings\":[]"));
+}
+
+TEST(JsonExportInformationalTest, GeneratedJsonCarriesInformationalFindingFields) {
+  ValidationReport report;
+  report.informational.push_back({7, "parallel_fifth", FailKind::MusicalFail});
+  report.informational.push_back({kInvalidSpanId, "tritone_melodic", FailKind::StructuralFail});
+
+  const std::string json = emitGeneratedJson({}, report);
+  EXPECT_TRUE(contains(json,
+                       "\"informational_findings\":["
+                       "{\"span_id\":7,\"rule_id\":\"parallel_fifth\","
+                       "\"geometry\":\"vertical\",\"kind\":\"MusicalFail\"},"
+                       "{\"span_id\":null,\"rule_id\":\"tritone_melodic\","
+                       "\"geometry\":\"linear\",\"kind\":\"StructuralFail\"}]"));
+  // Informational findings never gate, so they must not disturb the tallies.
+  EXPECT_TRUE(contains(json, "\"counterpoint_observations\":[]"));
+}
+
+TEST(JsonExportWaveVetoTest, GeneratedJsonCarriesZeroedWaveVetoForEmptyReport) {
+  const std::string json = emitGeneratedJson({}, ValidationReport{});
+  EXPECT_TRUE(contains(json,
+                       "\"wave_veto\":{\"anchor_parallel_displaced\":0,"
+                       "\"wobble_breaker_fired\":0,\"step_parallel_adjusted\":0,"
+                       "\"step_harsh_adjusted\":0,\"order_clamp_changed\":0,"
+                       "\"window_expanded\":0,\"total\":0}"));
+}
+
+TEST(JsonExportWaveVetoTest, GeneratedJsonCarriesWaveVetoCountersAndTotal) {
+  ValidationReport report;
+  report.wave_veto.anchor_parallel_displaced = 1;
+  report.wave_veto.wobble_breaker_fired = 2;
+  report.wave_veto.step_parallel_adjusted = 3;
+  report.wave_veto.step_harsh_adjusted = 4;
+  report.wave_veto.order_clamp_changed = 5;
+  report.wave_veto.window_expanded = 6;
+
+  const std::string json = emitGeneratedJson({}, report);
+  EXPECT_TRUE(contains(json,
+                       "\"wave_veto\":{\"anchor_parallel_displaced\":1,"
+                       "\"wobble_breaker_fired\":2,\"step_parallel_adjusted\":3,"
+                       "\"step_harsh_adjusted\":4,\"order_clamp_changed\":5,"
+                       "\"window_expanded\":6,\"total\":21}"));
+}
+
 TEST(JsonExportInfoTest, GeneratedJsonCarriesStreamCellDivergenceMetrics) {
   ValidationReport report;
   StreamSegregationSpan span;
