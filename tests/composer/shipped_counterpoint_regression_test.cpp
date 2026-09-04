@@ -369,7 +369,7 @@ struct FormCeiling {
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 27, 12, 145},
+    {FormType::Fugue, 25, 12, 145},
     {FormType::PreludeAndFugue, 15, 4, 80},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
