@@ -376,7 +376,16 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fifths sit at the ninetieth percentile and its battuta past the
     // ninety-fifth. A trade out of either of those into hidden is payable.
     {FormType::TrioSonata, 33, 68, 61},
-    {FormType::ChoralePrelude, 3, 14, 12},
+    // Both true-parallel classes reach zero. The tone before an arrival is
+    // re-aimed over a bass pinned to a single octave, and where the consonant
+    // window for that re-aim comes back empty it widens to admit a passing
+    // dissonance rather than let the parallel ship; the cadential figure that
+    // pins the bass under its own resolution is chosen against the three-line
+    // surface it produces instead of installed over one settled without it.
+    // Three true parallels left the strict column and one contrary-motion
+    // arrival entered the battuta one -- a trade out of the fault the corpus
+    // almost never writes and into the one it writes most freely.
+    {FormType::ChoralePrelude, 0, 14, 13},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of

@@ -453,48 +453,48 @@ void forEachUnionMotion(const ComposeResult& result, Visit visit) {
   }
 }
 
-// Assert that no true parallel perfect fifth survives anywhere in a composed
-// result, at any pair of voices and any union onset. `where` names the case.
-//
-// Octaves are deliberately NOT asserted to zero here. Some arrivals are
-// genuinely boxed in -- fixed voices in narrow bands admit positions where no
-// candidate lowers the fault -- and their count is held by the
-// shipped-counterpoint ratchet instead, which can record a bounded number
-// without pretending it is none. Fifths always have somewhere to go, so zero is
-// the honest bar for them.
-void expectNoParallelFifth(const ComposeResult& result, const std::string& where) {
+// Assert that no true parallel perfect of either class survives anywhere in a
+// composed result, at any pair of voices and any union onset. `where` names the
+// case.
+void expectNoParallelPerfect(const ComposeResult& result, const std::string& where) {
   forEachUnionMotion(result, [&](Tick curr, VoiceId upper, VoiceId lower, int up_prev, int up_curr,
                                  int lo_prev, int lo_curr) {
-    if (std::abs(up_curr - lo_curr) % 12 != interval::kPerfect5th)
-      return;
     EXPECT_FALSE(isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
         << where << " v" << static_cast<int>(upper) << "/v" << static_cast<int>(lower)
-        << " parallel fifth at tick " << curr << " (" << up_prev << "->" << up_curr << " over "
+        << " parallel perfect at tick " << curr << " (" << up_prev << "->" << up_curr << " over "
         << lo_prev << "->" << lo_curr << ")";
   });
 }
 
-// The chorale prelude reaches this because every tone that could form a fifth is
-// reachable by some guard: the figuration's bar heads and the cantus firmus
-// skeleton are fixed, but each is approached through a tone that is not, and
-// the walking bass -- whose own bar head is pinned to the chord root inside a
-// one-octave band, leaving it no register to move to -- is guarded on every
-// other beat. A parallel fifth appearing here means one of those approaches
-// stopped being consulted, which is how the last set of them arrived: the
-// passing eighths between the embellished cantus firmus's chord-tone beats
-// were emitted with no guard at all, and every remaining fifth was one of them.
+// The chorale prelude reaches this because every tone that could form a perfect
+// interval is reachable by some guard: the figuration's bar heads and the cantus
+// firmus skeleton are fixed, but each is approached through a tone that is not,
+// and the walking bass -- whose own bar head is pinned to the chord root inside
+// a one-octave band, leaving it no register to move to -- is guarded on every
+// other beat. Where the way in has no consonant tone left, it takes a dissonant
+// one rather than keep the parallel: a passing dissonance between two guarded
+// arrivals is the smaller fault, and refusing it is what left the octaves
+// standing while the fifths were already gone.
+//
+// The last of them were not in the counterpoint at all but in the figure written
+// over it: the cadential suspension pins the bass under its own preparation and
+// again under its own resolution, after every voice has been settled against the
+// bass those pins replace. It is the last thing this form moves, so it is now
+// chosen against the three-line surface it produces -- a fault it would install
+// is one nothing downstream can see.
+//
 // Several bar counts, because the phrase boundaries that make the figuration
 // leap into a bar head fall at different bars as the piece lengthens, and it is
 // at such a head that the only relief left is a step into the arrival.
-TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelFifths) {
+TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelPerfects) {
   for (bool minor : {false, true}) {
     for (int bars : {16, 32, 64}) {
       for (std::uint32_t seed : kSeeds) {
         const HarnessFixture fx =
             build(FormType::ChoralePrelude, minor, choraleCharacter(minor), bars, seed);
-        expectNoParallelFifth(Composer{}.run(fx.material, fx.harmony, fx.voice_plan),
-                              "minor=" + std::to_string(minor) + " bars=" + std::to_string(bars) +
-                                  " seed=" + std::to_string(seed));
+        expectNoParallelPerfect(Composer{}.run(fx.material, fx.harmony, fx.voice_plan),
+                                "minor=" + std::to_string(minor) + " bars=" + std::to_string(bars) +
+                                    " seed=" + std::to_string(seed));
       }
     }
   }
