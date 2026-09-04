@@ -774,19 +774,35 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       auto within_order = [&](int cand) {
         return !order_window_usable || (cand >= order_floor && cand <= order_ceiling);
       };
-      auto anchor_is_parallel = [&](int cand) {
+      // The true parallel and the hidden perfect are ranked, not pooled. A
+      // candidate here has to be a triad tone, inside the band, inside the voice
+      // order window, and consonant with every sounding theme tone all at once,
+      // and against two or three concurrent lines that leaves a set small enough
+      // that every member is often at least a hidden perfect. Pooling the two
+      // made the displacement find nothing admissible at exactly those onsets
+      // and keep the true parallel it was called to remove -- the worse of the
+      // two faults, held in order to avoid the milder one.
+      constexpr int kAnchorClean = 0;
+      constexpr int kAnchorHidden = 1;
+      constexpr int kAnchorParallel = 2;
+      auto anchor_fault_rank = [&](int cand) {
+        int worst = kAnchorClean;
         for (const ConcurrentMotion& motion : motions) {
+          if (formsStrictPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
+            return kAnchorParallel;
+          }
           if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
-            return true;
+            worst = kAnchorHidden;
           }
         }
-        return false;
+        return worst;
       };
-      if (anchor_is_parallel(snapped)) {
+      const int snapped_rank = anchor_fault_rank(snapped);
+      if (snapped_rank != kAnchorClean) {
         const int third = chord.minor ? 3 : 4;
         const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
                                  (chord.root_pc + 7) % 12};
-        auto admissible = [&](int cand) {
+        auto admissible = [&](int cand, int accept) {
           if (cand < band_lo || cand > band_hi || cand == snapped || !within_order(cand)) {
             return false;
           }
@@ -799,17 +815,21 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               return false;
             }
           }
-          return !anchor_is_parallel(cand);
+          return anchor_fault_rank(cand) <= accept;
         };
-        for (int dist = 1; dist <= 7; ++dist) {
+        // Accept levels ascend, so a fully clean tone anywhere in reach beats a
+        // hidden one that happens to sit closer.
+        for (int accept = kAnchorClean; accept < snapped_rank; ++accept) {
           bool placed = false;
-          for (const int sgn : {-1, 1}) {
-            const int cand = snapped + sgn * dist;
-            if (admissible(cand)) {
-              snapped = cand;
-              placed = true;
-              ++waveVetoStats().anchor_parallel_displaced;
-              break;
+          for (int dist = 1; dist <= 7 && !placed; ++dist) {
+            for (const int sgn : {-1, 1}) {
+              const int cand = snapped + sgn * dist;
+              if (admissible(cand, accept)) {
+                snapped = cand;
+                placed = true;
+                ++waveVetoStats().anchor_parallel_displaced;
+                break;
+              }
             }
           }
           if (placed) {

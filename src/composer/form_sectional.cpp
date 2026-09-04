@@ -250,34 +250,56 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // pitch and how many identical onsets precede the next one.
   int last_pedal_pitch = -1;
   int pedal_run = 0;
+  // How badly a candidate pedal tone reads against the voices already sounding
+  // above it. The true parallel and the hidden perfect are ranked, not pooled:
+  // the band, the triad and those voices constrain the candidate set at once, so
+  // a tone free of every perfect approach frequently does not exist, and a guard
+  // that demanded one would keep whatever it started from -- including the true
+  // parallel it was called to remove.
+  constexpr int kPedalClean = 0;
+  constexpr int kPedalHidden = 1;
+  constexpr int kPedalParallel = 2;
+  const auto pedal_fault_rank = [&](int cand) {
+    if (last_pedal_pitch < 0) {
+      return kPedalClean;
+    }
+    int worst = kPedalClean;
+    for (const ConcurrentMotion& motion : motions) {
+      if (motion.prev < 0 || motion.curr < 0) {
+        continue;
+      }
+      if (formsStrictPerfectParallel(last_pedal_pitch, cand, motion.prev, motion.curr)) {
+        return kPedalParallel;
+      }
+      if (formsPerfectParallel(last_pedal_pitch, cand, motion.prev, motion.curr)) {
+        worst = kPedalHidden;
+      }
+    }
+    return worst;
+  };
   // Pick the pitch for the next pedal onset: the chord root, unless holding it
-  // would extend an identical-pitch run to the gate cap, in which case the fifth
-  // (else the third) above the root is taken, falling within the V2 band and
-  // parallel-free against the concurrent earlier voices.
+  // would extend an identical-pitch run to the gate cap, or the root itself
+  // moves in a perfect class with a voice above it. Both escapes draw on the
+  // same chord tones (third and fifth, each above and below the root) so the
+  // step can be the smallest available interval rather than always a leaping
+  // fifth -- a conjunct walking bass keeps the melodic-interval distribution
+  // near the corpus (the BWV565 / BWV538 walking-pedal idiom).
   auto pedal_pitch = [&](int root, const ChordSpec& chord) {
+    const int third_iv = chord.minor ? 3 : 4;
+    const int candidates[4] = {root + third_iv, root - (12 - third_iv), root + 7, root - 5};
     int pitch = root;
+    // A run at the gate cap has to break whatever the break costs vertically, so
+    // it enters the sweep one rung above the worst vertical fault; a root that
+    // merely sounds a perfect approach is moved only for something better.
+    int start_rank = pedal_fault_rank(root);
     if (last_pedal_pitch == root && pedal_run >= 3) {
-      // Candidate chord tones (third and fifth, each both above and below the
-      // root) so the alternation can move by the smallest available interval
-      // rather than always leaping a fifth -- a conjunct walking bass keeps the
-      // melodic-interval distribution near the corpus and avoids stacking wide
-      // leaps. Ordered by increasing distance from the root.
-      const int third_iv = chord.minor ? 3 : 4;
-      const int candidates[4] = {root + third_iv, root - (12 - third_iv), root + 7, root - 5};
+      start_rank = std::max(start_rank, kPedalParallel);
+    }
+    for (int accept = kPedalClean; accept < start_rank; ++accept) {
       int best = -1;
       int best_dist = 1 << 30;
       for (int alt : candidates) {
-        if (alt < kFreeV2Lo || alt > kFreeV2Hi || alt == root) {
-          continue;
-        }
-        bool parallel = false;
-        for (const ConcurrentMotion& motion : motions) {
-          if (formsPerfectParallel(last_pedal_pitch, alt, motion.prev, motion.curr)) {
-            parallel = true;
-            break;
-          }
-        }
-        if (parallel) {
+        if (alt < kFreeV2Lo || alt > kFreeV2Hi || alt == root || pedal_fault_rank(alt) > accept) {
           continue;
         }
         const int dist = std::abs(alt - last_pedal_pitch);
@@ -288,6 +310,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       }
       if (best >= 0) {
         pitch = best;
+        break;
       }
     }
     pedal_run = (pitch == last_pedal_pitch) ? pedal_run + 1 : 1;
@@ -307,10 +330,14 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // parallel-free against the concurrent V0 figuration.
     const int centre = (kFreeV2Lo + kFreeV2Hi) / 2;
     registry.concurrentThemePitches(bar_start, /*voice=*/2, theme_pitches);
-    registry.concurrentMotions(bar_start - kTicksPerBar, bar_start, /*voice=*/2,
+    // One sixteenth back, not one bar: this voice contributes one tone per bar
+    // while the figuration above it attacks many times inside that bar, so a
+    // bar-back sample compares a motion nobody hears. The union-onset reading
+    // (and the ear) pairs the two at the onset just before the bar head.
+    registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/2,
                                /*num_voices=*/3, motions);
     int root = consonantChordTone(chord, /*voice=*/2, kFreeV2Lo, kFreeV2Hi, centre, theme_pitches,
-                                  /*line_prev=*/-1, motions, mode, /*downbeat=*/true);
+                                  last_pedal_pitch, motions, mode, /*downbeat=*/true);
     if (bar == free_bars - 1) {
       // The free section's declared half cadence needs the actual lowest voice
       // on V, not merely an arbitrary member of the dominant triad.
@@ -693,14 +720,77 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     std::vector<ConcurrentMotion> motions;
     int line_prev = -1;
     const int centre = (kBandLo[voice] + kBandHi[voice]) / 2;
+    // Ranked rather than pooled, and read at the grain the other lines move at.
+    // This support tone is the one note per bar the lowest voice contributes,
+    // so the running lines above it attack many times before it moves again:
+    // sampling them a whole bar back compares a motion nobody hears, while the
+    // union-onset reading (and the ear) pairs them one sixteenth before the bar
+    // head. And with the tone constrained to a chord tone of the bar, inside its
+    // band, below both running voices and consonant with every sounding theme
+    // tone, the admissible set is small enough that a candidate free of every
+    // perfect approach frequently does not exist -- so the true parallel and the
+    // hidden perfect have to sit on separate rungs or the design tone stands.
+    constexpr int kSupportClean = 0;
+    constexpr int kSupportHidden = 1;
+    constexpr int kSupportParallel = 2;
+    const auto support_fault_rank = [&](int cand) {
+      int worst = kSupportClean;
+      for (const ConcurrentMotion& motion : motions) {
+        if (motion.prev < 0 || motion.curr < 0)
+          continue;
+        if (formsStrictPerfectParallel(line_prev, cand, motion.prev, motion.curr))
+          return kSupportParallel;
+        if (formsPerfectParallel(line_prev, cand, motion.prev, motion.curr))
+          worst = kSupportHidden;
+      }
+      return worst;
+    };
     for (int bar = first; bar <= last; ++bar) {
       const Tick bar_start = barTick(bar);
       registry.concurrentThemePitches(bar_start, voice, theme_pitches);
-      registry.concurrentMotions(bar_start - kTicksPerBar, bar_start, voice, kTailVoices, motions);
-      const int pitch =
+      registry.concurrentMotions(bar_start - kSixteenth, bar_start, voice, kTailVoices, motions);
+      int pitch =
           consonantChordTone(plan[static_cast<std::size_t>(bar)], voice, kBandLo[voice],
                              kBandHi[voice], centre, theme_pitches, line_prev, motions, mode,
                              /*downbeat=*/true);
+      const int design_rank = support_fault_rank(pitch);
+      if (design_rank != kSupportClean && line_prev >= 0) {
+        // The concurrent voices are all above this one, so a substitute has to
+        // stay under the lowest of them; that ordering is what the selector
+        // above was holding, and a displacement blind to it would trade a
+        // parallel for a crossed voice.
+        int order_ceiling = kBandHi[voice];
+        for (const ConcurrentMotion& motion : motions) {
+          if (motion.curr >= 0 && motion.voice < voice)
+            order_ceiling = std::min(order_ceiling, motion.curr);
+        }
+        const ChordSpec& bar_chord = plan[static_cast<std::size_t>(bar)];
+        const int third_semi = bar_chord.minor ? 3 : 4;
+        const int triad_pc[3] = {((bar_chord.root_pc % 12) + 12) % 12,
+                                 (bar_chord.root_pc + third_semi) % 12,
+                                 (bar_chord.root_pc + 7) % 12};
+        const int original = pitch;
+        for (int accept = kSupportClean; accept < design_rank && pitch == original; ++accept) {
+          for (int tone = 0; tone < 3 && pitch == original; ++tone) {
+            const int low = kBandLo[voice] + (((triad_pc[tone] - kBandLo[voice]) % 12) + 12) % 12;
+            for (int cand = low; cand <= kBandHi[voice]; cand += 12) {
+              if (cand == original || cand > order_ceiling)
+                continue;
+              bool consonant = true;
+              for (const int sounding : theme_pitches) {
+                if (!isConsonantPair(cand, sounding)) {
+                  consonant = false;
+                  break;
+                }
+              }
+              if (consonant && support_fault_rank(cand) <= accept) {
+                pitch = cand;
+                break;
+              }
+            }
+          }
+        }
+      }
       addNote(section.notes, bar_start, pulse_duration, pitch);
       registry.record(bar_start, voice, pitch, pulse_duration);
       line_prev = pitch;
