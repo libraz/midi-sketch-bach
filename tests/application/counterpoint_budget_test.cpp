@@ -182,12 +182,12 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
             (std::vector<std::string>{"battuta", "doubling_no_seventh", "invertible_at_octave",
                                       "parallel_fifth", "parallel_octave"}));
   // Its imitative blocks are chosen against the bass rather than repaired after
-  // it, and the figuration between them is relieved arrival by arrival. Octaves
-  // stay open for the one place neither reaches: a wide canon's bar head, where
-  // the pair is pinned between the top of the keyboard and the bass below.
-  EXPECT_EQ(
-      closedRulesFor(FormType::GoldbergVariations),
-      (std::vector<std::string>{"doubling_no_seventh", "invertible_at_octave", "parallel_fifth"}));
+  // it, and the figuration between them is relieved arrival by arrival. The
+  // choice ranks the two upper voices meeting on one pitch below the parallel
+  // that avoiding the meeting would cost, which is what closes the octave.
+  EXPECT_EQ(closedRulesFor(FormType::GoldbergVariations),
+            (std::vector<std::string>{"doubling_no_seventh", "invertible_at_octave",
+                                      "parallel_fifth", "parallel_octave"}));
 }
 
 // ---------------------------------------------------------------------------

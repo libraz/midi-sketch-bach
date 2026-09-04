@@ -1807,14 +1807,20 @@ struct CanonLines {
 // soggetto once per bar, re-anchored to the same source cell; the comes is an
 // exact constant-semitone copy of it, delayed one bar and truncated at the
 // block end.
+// The soggetto's neighbours alternate direction bar by bar, which is the shape
+// the cell is designed to have. `rising` carries that default in and lets a
+// caller depart from it where the default is what a fault is made of.
+constexpr std::array<bool, 4> kCanonSoggettoParity = {{true, false, true, false}};
+
 CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
-                       int source_register_shift, int comes_shift, Mode mode) {
+                       int source_register_shift, int comes_shift, Mode mode,
+                       const std::array<bool, 4>& rising) {
   CanonLines lines;
   lines.dux.reserve(24);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
     const int tone = designed[static_cast<std::size_t>(bar % 4)] + source_register_shift;
-    const auto source = canonSoggetto(tone, /*rising=*/(local % 2) == 0, mode);
+    const auto source = canonSoggetto(tone, rising[static_cast<std::size_t>(local)], mode);
     auto anchored = motif_ops::reanchorMelody(source, barTick(bar));
     lines.dux.insert(lines.dux.end(), anchored.begin(), anchored.end());
   }
@@ -1847,7 +1853,7 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 // or a unison breaks the register order the form is built on, a true parallel is the fault
 // the ear names, then the weaker perfect approaches, then the dissonant
 // simultaneities. A caller with its own terms to weigh interleaves them.
-std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
+std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode) {
   std::vector<MaterialNote> bass;
@@ -1872,7 +1878,7 @@ std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
   std::sort(onsets.begin(), onsets.end());
   onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
 
-  std::array<int, 4> score{};
+  std::array<int, 6> score{};
   std::array<int, 3> prev = {-1, -1, -1};
   for (const Tick tick : onsets) {
     std::array<int, 3> curr = {-1, -1, -1};
@@ -1888,12 +1894,23 @@ std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
       for (std::size_t below = above + 1; below < 3; ++below) {
         if (curr[above] < 0 || curr[below] < 0)
           continue;
-        // Strict: the form's register order admits no unison either, so a
-        // meeting counts the same as a crossing.
-        if (curr[above] <= curr[below])
+        // A crossing and a meeting are counted apart, and the two kinds of
+        // meeting apart from each other. Only the crossing is a rule: the
+        // validator reads the register order off the notes and fails a piece
+        // that inverts it. A unison is not -- it costs a pair its audible
+        // independence for one onset -- but it is not one thing either. Touching
+        // the immutable ground removes the independence of the voice the whole
+        // form is built over; the two upper voices touching is what a canon pair
+        // does when its lines cross paths. Pooled with the crossing, either
+        // blemish inherits a rule's weight and the design ships a true parallel
+        // octave rather than allow it: the cardinal prohibition paid for a
+        // matter of taste.
+        if (curr[above] < curr[below])
           ++score[0];
+        else if (curr[above] == curr[below])
+          ++(below == 2 ? score[2] : score[3]);
         if (!isConsonantPair(curr[above], curr[below]))
-          ++score[3];
+          ++score[5];
         if (prev[above] < 0 || prev[below] < 0)
           continue;
         if (formsStrictPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
@@ -1901,7 +1918,7 @@ std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
         else if (formsPerfectParallel(prev[above], curr[above], prev[below], curr[below]) ||
                  formsAntiParallelPerfect(prev[above], curr[above], prev[below], curr[below]) ||
                  formsBattuta(prev[above], curr[above], prev[below], curr[below]))
-          ++score[2];
+          ++score[4];
       }
     }
     prev = curr;
@@ -1909,54 +1926,98 @@ std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
   return score;
 }
 
-// Choose the leader tones for a canon block.
+// The tones and the cell shape a canon block is assembled from.
+struct CanonDesign {
+  std::array<int, 4> assignment{};
+  std::array<bool, 4> rising = kCanonSoggettoParity;
+};
+
+// Choose the leader tones for a canon block, and where they cannot answer on
+// their own, the direction of the soggetto's neighbours as well.
 //
 // Exhaustive over the candidate set rather than a left-to-right walk. A bar's
 // tone answers for two bars at once -- it is the dux in its own bar and the
 // comes in the next -- so a per-bar cost cannot be settled before the neighbour
 // it will be echoed against is known. Three tones in each of four bars is a
 // small enough set to read every assembly of it exactly.
-std::array<int, 4> designCanonLeader(int pitch_ceiling, Mode mode,
-                                     const std::array<std::uint8_t, 4>& ground,
-                                     int source_register_shift, int comes_shift,
-                                     bool imitate_above) {
+//
+// The tones alone answer for every block but the widest canons, where the comes
+// is pinned under the top of the keyboard and the dux above the arpeggiating
+// bass and the band holds one representative of each chord tone -- no slack
+// anywhere in it. Only there is the cell's own alternating shape opened as well,
+// and only after the tones are proved unable to clear a crossing and a true
+// parallel together. The alternation is a design value, so a departure from it
+// is scored and minimised: a block that never needed one keeps it exactly.
+CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
+                             const std::array<std::uint8_t, 4>& ground, int source_register_shift,
+                             int comes_shift, bool imitate_above) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
-  std::array<int, 4> chosen{};
-  std::array<int, 6> best{};
+  CanonDesign chosen;
+  std::array<int, 9> best{};
   bool have_best = false;
-  std::array<std::size_t, 4> pick{};
-  for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
-    for (pick[1] = 0; pick[1] < 3; ++pick[1]) {
-      for (pick[2] = 0; pick[2] < 3; ++pick[2]) {
-        for (pick[3] = 0; pick[3] < 3; ++pick[3]) {
-          std::array<int, 4> assignment{};
-          for (std::size_t bar = 0; bar < 4; ++bar)
-            assignment[bar] = candidates[bar][pick[bar]];
-          const CanonLines lines = layOutCanon(assignment, /*block_start_bar=*/0,
-                                               source_register_shift, comes_shift, mode);
-          const std::array<int, 4> faults = goldbergBlockFaults(
-              imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
-              /*block_start_bar=*/0, ground, mode);
-          // The leader's own bar-to-bar steps, which the comes inherits exactly:
-          // a tritone or a seventh between adjacent bars is unsingable however
-          // well it behaves against the other voices, so it is weighed above the
-          // faults that only the combination produces, and total travel breaks
-          // ties last so the contour walks rather than leaps.
-          int unsingable = 0;
-          int travel = 0;
-          for (std::size_t bar = 1; bar < 4; ++bar) {
-            const int step = std::abs(assignment[bar] - assignment[bar - 1]);
-            if (step == interval::kTritone || step >= interval::kMinor7th)
-              ++unsingable;
-            travel += step;
-          }
-          const std::array<int, 6> score = {faults[0], faults[1], unsingable,
-                                            faults[2], faults[3], travel};
-          if (!have_best || score < best) {
-            best = score;
-            chosen = assignment;
-            have_best = true;
+  bool clean = false;
+  // Pass 0 holds the cell's designed alternation; pass 1 opens it. The second
+  // pass runs only when the first cannot come back clean.
+  for (int pass = 0; pass < 2 && !clean; ++pass) {
+    const std::size_t shapes = pass == 0 ? 1u : 16u;
+    std::array<std::size_t, 4> pick{};
+    for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
+      for (pick[1] = 0; pick[1] < 3; ++pick[1]) {
+        for (pick[2] = 0; pick[2] < 3; ++pick[2]) {
+          for (pick[3] = 0; pick[3] < 3; ++pick[3]) {
+            std::array<int, 4> assignment{};
+            for (std::size_t bar = 0; bar < 4; ++bar)
+              assignment[bar] = candidates[bar][pick[bar]];
+            for (std::size_t shape = 0; shape < shapes; ++shape) {
+              std::array<bool, 4> rising = kCanonSoggettoParity;
+              int shape_deviation = 0;
+              if (pass == 1) {
+                for (std::size_t bar = 0; bar < 4; ++bar) {
+                  rising[bar] = ((shape >> bar) & 1u) != 0u;
+                  if (rising[bar] != kCanonSoggettoParity[bar])
+                    ++shape_deviation;
+                }
+              }
+              const CanonLines lines =
+                  layOutCanon(assignment, /*block_start_bar=*/0, source_register_shift, comes_shift,
+                              mode, rising);
+              const std::array<int, 6> faults = goldbergBlockFaults(
+                  imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
+                  /*block_start_bar=*/0, ground, mode);
+              // The leader's own bar-to-bar steps, which the comes inherits
+              // exactly: a tritone or a seventh between adjacent bars is
+              // unsingable however well it behaves against the other voices, so
+              // it is weighed above the faults that only the combination
+              // produces, and total travel breaks ties last so the contour walks
+              // rather than leaps.
+              int unsingable = 0;
+              int travel = 0;
+              for (std::size_t bar = 1; bar < 4; ++bar) {
+                const int step = std::abs(assignment[bar] - assignment[bar - 1]);
+                if (step == interval::kTritone || step >= interval::kMinor7th)
+                  ++unsingable;
+                travel += step;
+              }
+              // A crossing is a rule and comes first, a true parallel is the
+              // cardinal prohibition and comes next, and the leader's
+              // singability follows because the comes inherits every step of it.
+              // Only then a voice touching the ground, the upper pair touching
+              // each other, the weaker perfect approaches, the dissonance, the
+              // departure from the cell's designed shape and the distance
+              // travelled: preferences in descending weight, and none of them
+              // worth a parallel.
+              const std::array<int, 9> score = {faults[0], faults[1],       unsingable,
+                                                faults[2], faults[3],       faults[4],
+                                                faults[5], shape_deviation, travel};
+              if (!have_best || score < best) {
+                best = score;
+                chosen.assignment = assignment;
+                chosen.rising = rising;
+                have_best = true;
+              }
+              clean = clean || (faults[0] == 0 && faults[1] == 0);
+            }
           }
         }
       }
@@ -1980,10 +2041,10 @@ void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>&
   const int source_register_shift = imitate_above ? -12 : 12;
   const int comes_shift = imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
   const int design_ceiling = imitation_degrees >= 8 ? 70 : 72;
-  const std::array<int, 4> designed = designCanonLeader(
-      design_ceiling, mode, ground, source_register_shift, comes_shift, imitate_above);
-  const CanonLines lines =
-      layOutCanon(designed, block_start_bar, source_register_shift, comes_shift, mode);
+  const CanonDesign designed = designCanonBlock(design_ceiling, mode, ground, source_register_shift,
+                                                comes_shift, imitate_above);
+  const CanonLines lines = layOutCanon(designed.assignment, block_start_bar, source_register_shift,
+                                       comes_shift, mode, designed.rising);
 
   if (imitate_above) {
     principal.notes.insert(principal.notes.end(), lines.comes.begin(), lines.comes.end());
@@ -2156,7 +2217,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         // answering it. Every rotation is laid out against the figuration
         // already settled above and the bass below, and the cleanest is kept.
         std::vector<MaterialNote> tune;
-        std::array<int, 4> best_score{};
+        std::array<int, 6> best_score{};
         for (int rotation = 0; rotation < 4; ++rotation) {
           std::vector<MaterialNote> candidate;
           candidate.reserve(16);
@@ -2178,7 +2239,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 4> score =
+          const std::array<int, 6> score =
               goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode);
           if (rotation == 0 || score < best_score) {
             best_score = score;

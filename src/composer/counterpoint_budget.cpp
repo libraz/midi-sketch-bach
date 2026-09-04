@@ -147,17 +147,17 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // repaired: each spans exactly the period of the immutable bass beneath it,
     // so the whole three-voice surface is read while the one free choice is
     // still open, and the free figuration between them is relieved arrival by
-    // arrival. No true parallel fifth survives that. Octaves remain open for one
-    // place neither reaches: at the bar head of a wide canon the follower is
-    // pinned under the top of the keyboard and the leader above the arpeggiating
-    // bass, which leaves the leader a window too narrow to always hold a choice.
+    // arrival. Both true-parallel classes close with that. The choice ranks the
+    // two upper voices meeting on one pitch below the parallel it would
+    // otherwise be paid for: a meeting costs the pair its audible independence
+    // for an onset, a crossing breaks the register order the validator reads off
+    // the notes, and only the crossing is a rule.
     {FormType::GoldbergVariations, "anti_parallel_perfect"},
     {FormType::GoldbergVariations, "battuta"},
     {FormType::GoldbergVariations, "cross_relation"},
     {FormType::GoldbergVariations, "doubling_no_leading_tone"},
     {FormType::GoldbergVariations, "hidden_parallel_fifth"},
     {FormType::GoldbergVariations, "hidden_parallel_octave"},
-    {FormType::GoldbergVariations, "parallel_octave"},
     {FormType::GoldbergVariations, "strong_beat_dissonance"},
     {FormType::GoldbergVariations, "unprepared_dissonance"},
     {FormType::GoldbergVariations, "vertical_dissonance"},
