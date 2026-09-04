@@ -416,6 +416,46 @@ TEST(FormLinearTrio, ManualRegistersOverlapWhilePedalStaysBelowThem) {
   }
 }
 
+// The intra-beat cell keeps an oblique repeat of its beat anchor in reserve as
+// the escape of last resort: a repeated pitch cannot form a perfect motion with
+// anything, so it is the one tone available when the mirrored cell tone falls
+// outside this voice's band -- and V1's band is nine semitones wide, so a cell
+// stepping away from the floor has its mirror below the floor.
+//
+// The reserve has a cost, which is what this pins. Repeating the anchor flattens
+// the cell into a held tone, so the repeat must stay LAST among the escapes; put
+// it first and the line stalls wherever the guard is busiest. Four is one beat
+// of eighths, which the sparse manual line reaches on its own; a line that walks
+// past it is being held there by the escape rather than by its own figure.
+TEST(FormLinearTrio, EscapeToTheAnchorNeverFlattensALine) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+        for (VoiceId voice = 0; voice < 3; ++voice) {
+          std::vector<NoteEvent> line;
+          for (const NoteEvent& note : r.notes) {
+            if (note.voice == voice)
+              line.push_back(note);
+          }
+          std::stable_sort(line.begin(), line.end(),
+                           [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                             return lhs.start_tick < rhs.start_tick;
+                           });
+          int run = line.empty() ? 0 : 1;
+          for (std::size_t idx = 1; idx < line.size(); ++idx) {
+            run = (line[idx].pitch == line[idx - 1].pitch) ? run + 1 : 1;
+            EXPECT_LE(run, 4) << "seed " << seed << " minor " << minor << " bars " << bars << " v"
+                              << static_cast<int>(voice) << " holds pitch "
+                              << static_cast<int>(line[idx].pitch) << " for " << run
+                              << " onsets ending at tick " << line[idx].start_tick;
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(FormLinearTrio, CadenceHasMomentaryManualExchangeWithoutPerfectParallel) {
   // This seed reaches the deliberately prepared cadence meeting. The exchange
   // must last exactly one union onset; the ordinary validator then proves that

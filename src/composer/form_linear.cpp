@@ -651,15 +651,23 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // be judged as a whole before any of it is emitted: the second tone of a
     // two-tone cell follows the first, not the last note already shipped.
     // How badly a candidate collides with the guard voice, not merely whether it
-    // does. The two faults are ranked because they are not worth the same: a
+    // does. The faults are ranked because they are not worth the same: a
     // parallel fifth or octave is the cardinal prohibition, while an ottava
     // battuta is a blemish Bach himself commits regularly. A guard that treated
     // them alike would step off a battuta onto a parallel whenever the clean
     // tones ran out, which is the trade backwards. Every substitution below
     // therefore has to LOWER this rank, never merely change it.
+    //
+    // The anti-parallel level is what makes the escapes safe rather than
+    // cosmetic. Every escape below reaches its alternative by reversing the cell
+    // tone's direction, and reversing direction turns similar motion into
+    // contrary motion without changing where the tone lands -- so a guard that
+    // ranked only same-direction faults would hand back the same perfect
+    // interval, arrived at the other way round, and count it clean.
     constexpr int kGuardClean = 0;
     constexpr int kGuardBattuta = 1;
-    constexpr int kGuardParallel = 2;
+    constexpr int kGuardAntiParallel = 2;
+    constexpr int kGuardParallel = 3;
     auto guard_rank = [&](int line_prev, int cand, Tick tick) {
       if (guard_registry == nullptr || line_prev < 0)
         return kGuardClean;
@@ -669,6 +677,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         return kGuardClean;
       if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
         return kGuardParallel;
+      if (formsAntiParallelPerfect(line_prev, cand, other_prev, other_curr))
+        return kGuardAntiParallel;
       if (formsBattuta(line_prev, cand, other_prev, other_curr))
         return kGuardBattuta;
       return kGuardClean;
@@ -951,18 +961,31 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                                      : (broken_fits ? broken_dir * 2 * magnitude
                                                     : (falling ? -magnitude : magnitude)));
         int pitch = walk(anchor, degrees);
-        // Intra-beat cell tone colliding with the guard voice: mirror the cell
-        // tone to the anchor's other side when that stays in the band and ranks
-        // strictly better (the mirrored tone is the same neighbour vocabulary,
-        // so the cell still resolves to the anchor). This cell reaches a step
-        // past the band ceiling, so it carries its own range test rather than
-        // the shared one.
+        // Intra-beat cell tone colliding with the guard voice. The mirror comes
+        // first: the anchor's other side is the same neighbour vocabulary, so
+        // the cell still resolves to the anchor. But the mirror is one tone, and
+        // when it falls outside the band there was nothing else to offer -- V1's
+        // band is nine semitones wide, so a cell tone stepping away from the
+        // floor has its mirror below the floor and the fault stood. The anchor's
+        // own pitch is the escape of last resort: an oblique repeat cannot form
+        // a perfect motion with anything. It goes last because repeating the
+        // anchor flattens the cell into a held tone, a cost the mirror does not
+        // pay. This cell reaches a step past the band ceiling, so it carries its
+        // own range test rather than the shared one.
         const int cell_rank = guard_rank(prev_emitted, pitch, mn.start_tick);
         if (degrees != 0 && cell_rank != kGuardClean) {
-          const int alt = walk(anchor, -degrees);
-          if (alt >= band_lo && alt <= walk(band_hi, 2) &&
-              guard_rank(prev_emitted, alt, mn.start_tick) < cell_rank)
-            pitch = alt;
+          bool escaped = false;
+          for (int accept = kGuardClean; accept < cell_rank && !escaped; ++accept) {
+            for (const int alt : {walk(anchor, -degrees), anchor}) {
+              if (alt == pitch || alt < band_lo || alt > walk(band_hi, 2))
+                continue;
+              if (guard_rank(prev_emitted, alt, mn.start_tick) <= accept) {
+                pitch = alt;
+                escaped = true;
+                break;
+              }
+            }
+          }
         }
         mn.pitch = static_cast<std::uint8_t>(pitch);
         dst.push_back(mn);
@@ -1186,14 +1209,26 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // The manual lines were std::move'd into out.material.trio_voices above, so
   // the guard reads them from their final home (v0.notes / v1.notes are empty
   // husks at this point).
-  const auto pedal_parallel = [&](int from, int cand, Tick t) {
+  // Ranked rather than pooled, for the reason the manual guard is: the pedal
+  // walks a chord-tone cell under two lines that mostly move the other way, so
+  // most of what an audit hears here arrives by contrary motion. Judging only
+  // same-direction arrivals left the pedal free to leap down onto an octave --
+  // and it is the last voice written, so nothing downstream corrects it.
+  const auto pedal_fault_rank = [&](int from, int cand, Tick t) {
+    int worst = 0;
     for (const TrioVoiceLine& manual : out.material.trio_voices) {
       const int prev = upper_before(manual.notes, t);
       const int curr = upper_sounding(manual.notes, t);
-      if (prev >= 0 && curr >= 0 && formsPerfectParallel(from, cand, prev, curr))
-        return true;
+      if (prev < 0 || curr < 0)
+        continue;
+      if (formsPerfectParallel(from, cand, prev, curr))
+        return 3;
+      if (formsAntiParallelPerfect(from, cand, prev, curr))
+        worst = std::max(worst, 2);
+      else if (formsBattuta(from, cand, prev, curr))
+        worst = std::max(worst, 1);
     }
-    return false;
+    return worst;
   };
 
   int prev_root = 48;  // seed near C3.
@@ -1272,26 +1307,32 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                std::abs((next_root + 12) - root_midi) < std::abs(next_root - root_midi))
           next_root += 12;
       }
-      const bool into_par = beat != 0 && pedal_prev >= 0 && pedal_parallel(pedal_prev, pitch, t);
-      const bool fwd_par = next_root >= 0 && pedal_parallel(pitch, next_root, t + kTicksPerBeat);
-      if (into_par || fwd_par) {
-        auto admissible = [&](int cand) {
-          if (cand < kPedalFloor || cand > kPedalCeil || cand == pitch)
-            return false;
-          if (pedal_prev >= 0 && pedal_parallel(pedal_prev, cand, t))
-            return false;
-          // The closing beat also owns the boundary motion into the next
-          // bar's fixed root: do not trade an audible parallel here for one
-          // at the bar head.
-          if (next_root >= 0 && pedal_parallel(cand, next_root, t + kTicksPerBeat))
-            return false;
-          return true;
-        };
-        for (const int cand : {fifth_midi, third_midi, fifth_up, root_midi, root_midi - 12,
-                               fifth_midi + 12, third_midi + 12}) {
-          if (admissible(cand)) {
-            pitch = cand;
-            break;
+      // Both ends of the beat, worst first: the motion into it and, on the
+      // closing beat, the boundary motion into the next bar's fixed root. The
+      // second is the reason a repair here cannot look only backwards -- the
+      // bar head it lands on cannot move, so a tone that clears its own arrival
+      // and ruins that one has traded a fault for a fault.
+      const auto beat_rank = [&](int cand) {
+        int worst = 0;
+        if (beat != 0 && pedal_prev >= 0)
+          worst = std::max(worst, pedal_fault_rank(pedal_prev, cand, t));
+        if (next_root >= 0)
+          worst = std::max(worst, pedal_fault_rank(cand, next_root, t + kTicksPerBeat));
+        return worst;
+      };
+      const int design_rank = beat_rank(pitch);
+      if (design_rank != 0) {
+        bool placed = false;
+        for (int accept = 0; accept < design_rank && !placed; ++accept) {
+          for (const int cand : {fifth_midi, third_midi, fifth_up, root_midi, root_midi - 12,
+                                 fifth_midi + 12, third_midi + 12}) {
+            if (cand < kPedalFloor || cand > kPedalCeil || cand == pitch)
+              continue;
+            if (beat_rank(cand) <= accept) {
+              pitch = cand;
+              placed = true;
+              break;
+            }
           }
         }
       }

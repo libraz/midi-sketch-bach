@@ -366,8 +366,12 @@ struct FormCeiling {
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     {FormType::Fugue, 16, 9, 112},
     {FormType::PreludeAndFugue, 8, 2, 85},
-    // Trade: -2 strict, +1 hidden, buying a large drop in battuta.
-    {FormType::TrioSonata, 71, 97, 99},
+    // Trade: -39 strict (of which -39 are fifths) and -47 battuta, for +4
+    // hidden. Both faults given up sat at or past the corpus envelope for this
+    // form -- its fifths at the ninetieth percentile, its battuta half again
+    // over the ninety-fifth -- while its hidden rate is under half of what the
+    // corpus writes, so the payment comes out of the one column with room.
+    {FormType::TrioSonata, 32, 101, 52},
     {FormType::ChoralePrelude, 9, 23, 40},
     // Most of this form's parallel octaves are deliberate: the opening
     // octave cascade states its gesture high, an octave lower, then doubled in
