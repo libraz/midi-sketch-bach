@@ -369,6 +369,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Trade: -2 strict, +1 hidden, buying a large drop in battuta.
     {FormType::TrioSonata, 71, 97, 99},
     {FormType::ChoralePrelude, 44, 77, 49},
+    // Most of this form's parallel octaves are deliberate: the opening
+    // octave cascade states its gesture high, an octave lower, then doubled in
+    // V0 and V1 across a descending scale, which is a parallel octave on every
+    // one of its sixteenths by design. The ceiling therefore cannot approach
+    // zero, and a drop here means the surrounding figuration improved, not the
+    // cascade.
     {FormType::ToccataAndFugue, 73, 35, 83},
     // Trade: -18 strict (10 of them parallel octaves), +7 hidden. The counter
     // figuration is pinned to a one-octave band under an immutable ground whose

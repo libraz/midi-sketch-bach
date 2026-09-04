@@ -37,6 +37,25 @@ bool isForbiddenPerfectMotion(int upper_prev, int upper_curr, int lower_prev, in
          PerfectMotionKind::None;
 }
 
+bool isAntiParallelPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr) {
+  const int upper_motion = upper_curr - upper_prev;
+  const int lower_motion = lower_curr - lower_prev;
+  // Both lines must move: an oblique arrival keeps one of them as a common tone,
+  // which is how a perfect interval is legitimately repeated.
+  if (upper_motion == 0 || lower_motion == 0)
+    return false;
+  // Same-direction motion between two perfect intervals of one class is the
+  // true parallel, classified by classifyPerfectMotion; this predicate is the
+  // contrary-motion half of the same prohibition and is disjoint from it.
+  if ((upper_motion > 0) == (lower_motion > 0))
+    return false;
+
+  const int current_class = std::abs(upper_curr - lower_curr) % 12;
+  if (current_class != interval::kUnison && current_class != interval::kPerfect5th)
+    return false;
+  return std::abs(upper_prev - lower_prev) % 12 == current_class;
+}
+
 bool isBattutaMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr) {
   const int upper_motion = upper_curr - upper_prev;
   const int lower_motion = lower_curr - lower_prev;

@@ -110,6 +110,7 @@ struct RuleGeometryEntry {
 // of two voices look identical there. Kept in rule_id order so the static
 // assertions below can reject a duplicate or a misplaced entry.
 constexpr RuleGeometryEntry kRuleGeometryTable[] = {
+    {"anti_parallel_perfect", RuleGeometry::Vertical},
     {"augmented_melodic", RuleGeometry::Linear},
     {"battuta", RuleGeometry::Vertical},
     {"consecutive_leaps", RuleGeometry::Linear},
@@ -957,9 +958,18 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                 : "hidden_parallel_octave";
           recordCounterpointFinding(failure, {current_lower_index, current_upper_index});
         }
-        // Ottava battuta is contrary motion, so it can never coincide with the
-        // similar-motion classifications above and is tested independently
-        // rather than as another branch of them.
+        // Both of the following are contrary motion, so neither can coincide
+        // with the similar-motion classifications above; they are tested
+        // independently rather than as further branches of them. They are also
+        // disjoint from each other: an anti-parallel repeats the interval class
+        // it started on, which is precisely what a battuta excludes.
+        if (prev_pa != 0 && prev_pb != 0 && !current_is_cadence &&
+            isAntiParallelPerfectMotion(prev_pa, pa, prev_pb, pb)) {
+          ValidationFailure failure;
+          failure.span_id = lower_span;
+          failure.rule_id = "anti_parallel_perfect";
+          recordCounterpointFinding(failure, {current_lower_index, current_upper_index});
+        }
         if (prev_pa != 0 && prev_pb != 0 && !current_is_cadence &&
             isBattutaMotion(prev_pa, pa, prev_pb, pb)) {
           ValidationFailure failure;

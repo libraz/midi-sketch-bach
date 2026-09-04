@@ -190,6 +190,78 @@ TEST(BattutaDetectionTest, NeverCoincidesWithAPerfectMotionClassification) {
   }
 }
 
+TEST(AntiParallelDetectionTest, EachFactorOfTheRuleIsExercised) {
+  struct Case {
+    int upper_prev;
+    int upper_curr;
+    int lower_prev;
+    int lower_curr;
+    bool expected;
+    const char* what;
+  };
+  // One row per factor of the rule, each differing from an accepted case in a
+  // single respect: motion type, arrival class, and whether the previous class
+  // matches the arrival.
+  constexpr Case kCases[] = {
+      {72, 67, 60, 67, true, "contrary octave to unison: both are interval class 0"},
+      {72, 84, 60, 48, true, "contrary octave expanding to a triple octave"},
+      {67, 74, 60, 55, true, "contrary fifth to fifth"},
+      {84, 79, 60, 67, true, "compound octave counts by class, not by size"},
+      {72, 74, 60, 62, false, "similar octave to octave is the true parallel"},
+      {67, 69, 60, 62, false, "similar fifth to fifth is the true parallel"},
+      {72, 69, 60, 60, false, "oblique: the lower voice holds"},
+      {72, 72, 60, 62, false, "oblique: the upper voice holds"},
+      {72, 70, 60, 62, false, "contrary arrival on a minor sixth is not a perfect class"},
+      {74, 72, 60, 72, false, "contrary arrival on an octave from a ninth changes class"},
+      {72, 69, 60, 62, false, "contrary octave to fifth changes class"},
+  };
+  for (const Case& item : kCases) {
+    EXPECT_EQ(isAntiParallelPerfectMotion(item.upper_prev, item.upper_curr, item.lower_prev,
+                                          item.lower_curr),
+              item.expected)
+        << item.what;
+  }
+}
+
+TEST(AntiParallelDetectionTest, IsSymmetricInTheArgumentPairs) {
+  // Neither line is privileged: the rule is about the interval the pair forms,
+  // so swapping which pair is named first cannot change the answer.
+  constexpr int kPitches[] = {55, 60, 62, 64, 67, 72, 74, 79};
+  for (int upper_prev : kPitches) {
+    for (int upper_curr : kPitches) {
+      for (int lower_prev : kPitches) {
+        for (int lower_curr : kPitches) {
+          EXPECT_EQ(isAntiParallelPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr),
+                    isAntiParallelPerfectMotion(lower_prev, lower_curr, upper_prev, upper_curr))
+              << upper_prev << "->" << upper_curr << " against " << lower_prev << "->"
+              << lower_curr;
+        }
+      }
+    }
+  }
+}
+
+TEST(AntiParallelDetectionTest, IsDisjointFromEveryOtherPerfectMotionRule) {
+  constexpr int kPitches[] = {55, 60, 62, 64, 67, 72, 74, 79};
+  for (int upper_prev : kPitches) {
+    for (int upper_curr : kPitches) {
+      for (int lower_prev : kPitches) {
+        for (int lower_curr : kPitches) {
+          if (!isAntiParallelPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr))
+            continue;
+          EXPECT_EQ(classifyPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr),
+                    PerfectMotionKind::None)
+              << upper_prev << "->" << upper_curr << " against " << lower_prev << "->"
+              << lower_curr;
+          EXPECT_FALSE(isBattutaMotion(upper_prev, upper_curr, lower_prev, lower_curr))
+              << upper_prev << "->" << upper_curr << " against " << lower_prev << "->"
+              << lower_curr;
+        }
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pitch class and octave
 // ---------------------------------------------------------------------------

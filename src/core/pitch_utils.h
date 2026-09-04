@@ -160,6 +160,22 @@ bool isParallelPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int
 /// True for a parallel perfect or a hidden perfect reached by upper-voice leap.
 bool isForbiddenPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
 
+/// Anti-parallel perfect: the two voices sit on a perfect fifth or octave, move
+/// in OPPOSITE directions, and land on a perfect interval of the same class.
+///
+/// The contrary-motion half of the consecutive-perfects prohibition. Strict
+/// style forbids reaching a perfect consonance from a perfect consonance of the
+/// same kind by any motion that is not oblique, because the pair of independent
+/// lines still collapses into one sonority twice in a row -- the voices merely
+/// swap which side of it they are on. classifyPerfectMotion requires
+/// same-direction motion and so reports None for every one of these, making the
+/// class structurally invisible to any guard built on it alone.
+///
+/// Disjoint from both siblings by construction: same-direction arrivals belong
+/// to classifyPerfectMotion, and isBattutaMotion excludes a previous class that
+/// already matched the arrival, which is exactly the case this one requires.
+bool isAntiParallelPerfectMotion(int upper_prev, int upper_curr, int lower_prev, int lower_curr);
+
 /// Ottava battuta: contrary motion arriving at a perfect octave or unison with
 /// the upper voice leaping DOWN into it.
 ///
