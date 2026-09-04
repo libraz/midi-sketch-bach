@@ -876,6 +876,15 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
         break;
       }
     }
+    // Whether the fault being repaired is a true parallel rather than one of the
+    // weaker perfect approaches. Only that one is worth a vertical price.
+    bool original_strict = false;
+    for (const ConcurrentMotion& motion : into_head) {
+      if (formsStrictPerfectParallel(original, arrival, motion.prev, motion.curr)) {
+        original_strict = true;
+        break;
+      }
+    }
     // The replacement sits between two fixed tones, and both intervals need a
     // ceiling: bounding only the leap into the head leaves the approach free to
     // be reached by a leap of its own, which is a registral break whether or not
@@ -893,7 +902,7 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     auto flattens = [&](int cand) {
       return (cand == own_prev && original != own_prev) || (cand == arrival && original != arrival);
     };
-    auto admissible = [&](int cand) {
+    auto admissible = [&](int cand, bool allow_dissonance) {
       if (!detail::inScale(cand, mode) || std::abs(arrival - cand) > leap_ceiling)
         return false;
       if (own_prev >= 0 && std::abs(cand - own_prev) > entry_ceiling)
@@ -902,7 +911,7 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
         // A lower voice index sounds higher.
         if (motion.voice < voice ? cand >= motion.curr : cand <= motion.curr)
           return false;
-        if (original_consonant && !isConsonantPair(cand, motion.curr))
+        if (original_consonant && !allow_dissonance && !isConsonantPair(cand, motion.curr))
           return false;
       }
       return perfectFaultRank(own_prev, cand, into_onset) <= onset_ceiling;
@@ -918,23 +927,36 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     // the stepwise neighbourhood of the arrival out of reach exactly when the
     // design leaps into the head -- and a step into a perfect interval is the one
     // approach that is legal however the other voice moves.
+    //
+    // The consonance the replacement inherits is a preference, not a bound. A
+    // tone displacing a consonant one is asked to stay consonant, so the pass
+    // cannot trade a perfect interval for a vertical clash. But where the fault
+    // is a TRUE parallel and the consonant window comes back empty, the tone
+    // stands and the parallel ships -- and a passing dissonance is the smaller
+    // fault of the two. So the consonance clause is dropped on a second sweep,
+    // reached only after the first has been walked in full: the same trade the
+    // bass's own forward guard makes one voice below.
     const int reach = 2 * leap_ceiling;
     bool placed = false;
-    for (int accept = 0; accept < original_rank && !placed; ++accept) {
-      for (const bool allow_flatten : {false, true}) {
-        for (int dist = 1; dist <= reach && !placed; ++dist) {
-          for (const int sgn : {-1, 1}) {
-            const int cand = original + sgn * dist;
-            if ((allow_flatten || !flattens(cand)) && admissible(cand) &&
-                perfectFaultRank(cand, arrival, into_head) <= accept) {
-              approach.pitch = static_cast<std::uint8_t>(cand);
-              placed = true;
-              break;
+    for (const bool allow_dissonance : {false, true}) {
+      if (allow_dissonance && (placed || !original_strict || !original_consonant))
+        break;
+      for (int accept = 0; accept < original_rank && !placed; ++accept) {
+        for (const bool allow_flatten : {false, true}) {
+          for (int dist = 1; dist <= reach && !placed; ++dist) {
+            for (const int sgn : {-1, 1}) {
+              const int cand = original + sgn * dist;
+              if ((allow_flatten || !flattens(cand)) && admissible(cand, allow_dissonance) &&
+                  perfectFaultRank(cand, arrival, into_head) <= accept) {
+                approach.pitch = static_cast<std::uint8_t>(cand);
+                placed = true;
+                break;
+              }
             }
           }
+          if (placed)
+            break;
         }
-        if (placed)
-          break;
       }
     }
   }
@@ -1515,6 +1537,22 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int top_sus = soundingMaterialPitch(top, suspension_tick);
       const int top_res = soundingMaterialPitch(top, resolution_tick);
       const int band_hi = std::min(86, std::max({top_prep, top_sus, top_res}) + 5);
+      // The tone the three lines were last read against, one sixteenth before
+      // each arrival -- the grain a union-onset reading pairs the voices at.
+      const int bass_before = soundingMaterialPitch(bass, preparation_tick - kSixteenth);
+      const int cantus_before = soundingMaterialPitch(cantus, preparation_tick - kSixteenth);
+      const int top_before = soundingMaterialPitch(top, preparation_tick - kSixteenth);
+      // The figure also pins the bass under its resolution, which changes what
+      // the bass LEAVES that beat with. The top line rests immediately after, so
+      // the pair that carries the motion is the cantus over the bass -- and it
+      // does not depend on which preparation tone is picked below, so a bar
+      // whose exit cannot be answered is abandoned for the next candidate bar
+      // rather than searched.
+      const Tick departure_tick = resolution_tick + kTicksPerBeat;
+      if (formsStrictPerfectParallel(held_bass, soundingMaterialPitch(bass, departure_tick),
+                                     soundingMaterialPitch(cantus, departure_tick - kSixteenth),
+                                     soundingMaterialPitch(cantus, departure_tick)))
+        continue;
       for (int distance = 0; distance <= 7 && !installed; ++distance) {
         for (int direction : {1, -1}) {
           if (distance == 0 && direction < 0)
@@ -1535,6 +1573,23 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                     /*band_lo=*/
                     std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
                     band_hi, mode, &suspension))
+              continue;
+            // Displacing the bass and installing the carrier are one choice: the
+            // carrier overwrites the top line across the whole figure, so what
+            // ships here is the designed suspension over the displaced bass, not
+            // the figuration either of them was read against. This is the last
+            // point at which the form touches any voice, so the three-line
+            // surface the pair produces is read once, whole, before either end
+            // is committed -- every arrival the figure creates, against every
+            // other line sounding into it.
+            const int prep_pitch = static_cast<int>(suspension.preparation_pitch);
+            const int sus_pitch = static_cast<int>(suspension.suspension_pitch);
+            const int res_pitch = static_cast<int>(suspension.resolution_pitch);
+            if (formsStrictPerfectParallel(top_before, prep_pitch, cantus_before, cantus_prep) ||
+                formsStrictPerfectParallel(top_before, prep_pitch, bass_before, bass_prep) ||
+                formsStrictPerfectParallel(cantus_before, cantus_prep, bass_before, bass_prep) ||
+                formsStrictPerfectParallel(cantus_prep, cantus_sus, bass_prep, held_bass) ||
+                formsStrictPerfectParallel(sus_pitch, res_pitch, cantus_sus, cantus_res))
               continue;
             for (MaterialNote& note : bass) {
               if (note.start_tick <= preparation_tick &&
