@@ -1088,16 +1088,25 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // same-direction motion into contrary motion, which is exactly how an
         // anti-parallel is made -- so a guard blind to that class does not
         // remove the fault, it relabels it.
+        // The true parallel and the hidden perfect sit on SEPARATE rungs. The
+        // escape vocabulary here is three tones wide and clamped to the wave
+        // band, so two lines in rhythmic lockstep regularly leave every one of
+        // them at least a hidden perfect; pooling the two rungs then rejects the
+        // whole vocabulary and the wave emits what it was already holding --
+        // including a true parallel it could have traded for a hidden one.
         constexpr int kStepClean = 0;
         constexpr int kStepBattuta = 1;
         constexpr int kStepAntiParallel = 2;
-        constexpr int kStepParallel = 3;
+        constexpr int kStepHidden = 3;
+        constexpr int kStepParallel = 4;
         auto step_rank = [&](int cand) {
           int worst = kStepClean;
           for (const ConcurrentMotion& motion : motions) {
-            if (formsPerfectParallel(from, cand, motion.prev, motion.curr))
+            if (formsStrictPerfectParallel(from, cand, motion.prev, motion.curr))
               return kStepParallel;
-            if (formsAntiParallelPerfect(from, cand, motion.prev, motion.curr))
+            if (formsPerfectParallel(from, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kStepHidden);
+            else if (formsAntiParallelPerfect(from, cand, motion.prev, motion.curr))
               worst = std::max(worst, kStepAntiParallel);
             else if (formsBattuta(from, cand, motion.prev, motion.curr))
               worst = std::max(worst, kStepBattuta);
@@ -1178,10 +1187,10 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           }
           return false;
         };
-        if (step_rank(next) != kStepParallel && wave_is_harsh(next)) {
+        if (step_rank(next) < kStepHidden && wave_is_harsh(next)) {
           ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
-          if (step_rank(reversed) != kStepParallel && !wave_is_harsh(reversed)) {
+          if (step_rank(reversed) < kStepHidden && !wave_is_harsh(reversed)) {
             dir = -dir;
             next = reversed;
           } else {
@@ -1195,7 +1204,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               if (skip < wave_lo || skip > wave_hi) {
                 continue;
               }
-              if (step_rank(skip) != kStepParallel && !wave_is_harsh(skip)) {
+              if (step_rank(skip) < kStepHidden && !wave_is_harsh(skip)) {
                 next = skip;
                 break;
               }
