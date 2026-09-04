@@ -17,6 +17,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -1598,6 +1599,20 @@ BarChord goldbergBarChord(std::uint8_t ground_pitch, Mode mode) {
   return {pc, detail::diatonicTriadMinor(pc, mode == Mode::Minor)};
 }
 
+// The eight eighth-note positions of one aria-bass bar. Each bar articulates
+// its root, third and fifth and returns to the root on both structural accents,
+// so the bass does not merely hold the bar's root: it arpeggiates the bar chord
+// within the bar. Any voice above that figures the same triad therefore meets
+// it on a perfect interval off the downbeat as readily as on it, which is why
+// this shape is stated once and read by everything that has to answer for it.
+constexpr Tick kAriaBassUnit = kTicksPerBeat / 2;
+std::array<int, 8> goldbergAriaBassBar(int root, Mode mode) {
+  const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
+  const int third = root + (chord.minor ? 3 : 4);
+  const int fifth = root + 7;
+  return {root, third, fifth, third, root, fifth, third, root};
+}
+
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
 // unison). Octave membership is preserved because scaleUp walks the scale.
 int transposeUp(int pitch, int degrees, Mode mode) {
@@ -1663,24 +1678,21 @@ void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chor
 // physical V0/V1 register order.
 constexpr int kCanonLeaderBase = 72;  // C5: aligned with the figuration band.
 
-// Choose the per-bar leader chord tone for a canon so that the canon stays
-// consonant by construction. The follower at bar b is the leader of bar b-1
-// transposed UP by `imitation_degrees` diatonic degrees; it sounds against the
-// leader of bar b and against the ground of bar b. Because the per-beat scorer
-// samples chord tones, we pick, per bar, a chord tone of that bar's ground chord
-// that minimises the number of dissonant simultaneities (dux-vs-comes and
-// comes-vs-ground), solved exactly with a tiny DP over the (at most three)
-// chord tones per bar. The result is a smooth per-bar leader-tone contour whose
-// 1-bar-delayed, constant-semitone echo is consonant -- the consonance is
-// designed into the dux, since the comes is a fixed transform of it.
+// The leader tones a canon bar may be built on: chord tones of that bar's
+// ground chord, taken downwards from the ceiling of the leader band.
 //
-// Returns one MIDI pitch per cycle bar (size 4), all chord tones of the bar's
-// ground chord, in the leader register band.
-std::array<int, 4> designCanonLeader(int imitation_semitones, int pitch_ceiling, Mode mode,
-                                     const std::array<std::uint8_t, 4>& ground) {
-  // Up to three chord tones per cycle bar in the narrow middle register. Keep
-  // the design in one bounded band so later block-level octave placement can
-  // guarantee V0 > V1 > ground without changing the imitation interval.
+// The band is one octave deep, which is the shallowest depth that always holds
+// all three tones of a triad -- a narrower one leaves bars with a single
+// candidate, and a bar with no choice cannot answer for what it collides with.
+// Depth is what the band is for; the register order it used to guarantee by
+// being narrow is now read off the assembled block instead, where it is a
+// measured fact rather than a bound taken on trust.
+//
+// Always three per bar. Where the band holds fewer the last is repeated, so a
+// choice over this set is always defined and never has to test for emptiness.
+std::array<std::array<int, 3>, 4> canonLeaderCandidates(int pitch_ceiling, Mode mode,
+                                                        const std::array<std::uint8_t, 4>& ground) {
+  const int pitch_floor = pitch_ceiling - 11;
   std::array<std::array<int, 3>, 4> tones{};
   for (int bar = 0; bar < 4; ++bar) {
     const BarChord chord = goldbergBarChord(ground[static_cast<std::size_t>(bar)], mode);
@@ -1689,15 +1701,15 @@ std::array<int, 4> designCanonLeader(int imitation_semitones, int pitch_ceiling,
                                           (static_cast<int>(chord.root_pc) + third) % 12,
                                           (static_cast<int>(chord.root_pc) + 7) % 12};
     int count = 0;
-    for (int pitch = pitch_ceiling; pitch >= 67 && count < 3; --pitch) {
+    for (int pitch = pitch_ceiling; pitch >= pitch_floor && count < 3; --pitch) {
       const int pc = pitch % 12;
       if (pc == chord_pcs[0] || pc == chord_pcs[1] || pc == chord_pcs[2])
         tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(count++)] = pitch;
     }
-    // Every diatonic triad has a chord tone in 67..70, but fail closed to the
-    // snapped chord tone if a future ground table violates that design bound.
+    // An octave-deep band cannot miss a chord tone, but fail closed to the
+    // snapped one rather than to silence if a future ground table ever does.
     if (count == 0) {
-      int fallback = snapUpToChordTone(67, chord.root_pc, chord.minor);
+      int fallback = snapUpToChordTone(pitch_floor, chord.root_pc, chord.minor);
       while (fallback > pitch_ceiling)
         fallback -= 12;
       tones[static_cast<std::size_t>(bar)][0] = fallback;
@@ -1709,82 +1721,196 @@ std::array<int, 4> designCanonLeader(int imitation_semitones, int pitch_ceiling,
       ++count;
     }
   }
-  // Dissonance cost of a bar's leader-tone choice given the previous bar's choice.
-  auto isDiss = [](int pitch_a, int pitch_b) -> bool {
-    const int ic = ((pitch_a - pitch_b) % 12 + 12) % 12;
-    return ic == 1 || ic == 2 || ic == 6 || ic == 10 || ic == 11;
-  };
-  auto barCost = [&](int bar, int lead_pitch, int prev_pitch, bool has_prev) -> int {
-    int cost = 0;
-    const int ground_pc =
-        static_cast<int>(goldbergBarChord(ground[static_cast<std::size_t>(bar)], mode).root_pc);
-    const int ground = ground_pc;  // pitch class is sufficient (ic is octave-invariant).
-    if (isDiss(lead_pitch, ground))
-      ++cost;  // (never triggers: a chord tone is consonant with its own root).
-    if (has_prev) {
-      const int follower = prev_pitch + imitation_semitones;
-      if (isDiss(follower, lead_pitch))
-        ++cost;
-      if (isDiss(follower, ground))
-        ++cost;
-    }
-    return cost;
-  };
-  // DP: state = chosen tone index for the current bar; minimise total cost. Also
-  // track a smoothness tiebreak (absolute leader interval) so the contour walks.
-  constexpr int kInf = 1 << 20;
-  std::array<std::array<int, 3>, 4> best_cost{};
-  std::array<std::array<int, 3>, 4> back{};
-  for (int idx = 0; idx < 3; ++idx)
-    best_cost[0][static_cast<std::size_t>(idx)] =
-        barCost(0, tones[0][static_cast<std::size_t>(idx)], 0, false);
-  for (int bar = 1; bar < 4; ++bar) {
-    for (int cur = 0; cur < 3; ++cur) {
-      int best = kInf;
-      int best_prev = 0;
-      int best_leap = kInf;
-      const int lead = tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(cur)];
-      for (int prev = 0; prev < 3; ++prev) {
-        const int prev_pitch =
-            tones[static_cast<std::size_t>(bar - 1)][static_cast<std::size_t>(prev)];
-        const int cand =
-            best_cost[static_cast<std::size_t>(bar - 1)][static_cast<std::size_t>(prev)] +
-            barCost(bar, lead, prev_pitch, true);
-        const int leap = std::abs(lead - prev_pitch);
-        // Minimise cost; break ties toward the smaller leader leap (smoother line).
-        if (cand < best || (cand == best && leap < best_leap)) {
-          best = cand;
-          best_prev = prev;
-          best_leap = leap;
-        }
-      }
-      best_cost[static_cast<std::size_t>(bar)][static_cast<std::size_t>(cur)] = best;
-      back[static_cast<std::size_t>(bar)][static_cast<std::size_t>(cur)] = best_prev;
+  return tones;
+}
+
+// The dux cell: a six-note soggetto with an eighth-eighth-quarter rhythm in each
+// half-bar, its chord-tone beat onsets connected by contrary neighbours.
+std::vector<MaterialNote> canonSoggetto(int tone, bool rising, Mode mode) {
+  const int first_neighbour =
+      rising ? detail::scaleUp(tone, 1, mode) : detail::scaleDown(tone, 1, mode);
+  const int second_neighbour =
+      rising ? detail::scaleDown(tone, 1, mode) : detail::scaleUp(tone, 1, mode);
+  std::vector<MaterialNote> soggetto;
+  soggetto.reserve(6);
+  soggetto.push_back(materialNote(0, kEighth, tone));
+  soggetto.push_back(materialNote(kEighth, kEighth, first_neighbour));
+  soggetto.push_back(materialNote(kTicksPerBeat, kTicksPerBeat, tone));
+  soggetto.push_back(materialNote(kHalf, kEighth, tone));
+  soggetto.push_back(materialNote(kHalf + kEighth, kEighth, second_neighbour));
+  soggetto.push_back(materialNote(kHalf + kTicksPerBeat, kTicksPerBeat, tone));
+  return soggetto;
+}
+
+// The two lines of one canon block, before either is assigned to a voice.
+struct CanonLines {
+  std::vector<MaterialNote> dux;
+  std::vector<MaterialNote> comes;
+};
+
+// Lay out a canon block from a leader-tone assignment. The dux states the
+// soggetto once per bar, re-anchored to the same source cell; the comes is an
+// exact constant-semitone copy of it, delayed one bar and truncated at the
+// block end.
+CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
+                       int source_register_shift, int comes_shift, Mode mode) {
+  CanonLines lines;
+  lines.dux.reserve(24);
+  for (int local = 0; local < 4; ++local) {
+    const int bar = block_start_bar + local;
+    const int tone = designed[static_cast<std::size_t>(bar % 4)] + source_register_shift;
+    const auto source = canonSoggetto(tone, /*rising=*/(local % 2) == 0, mode);
+    auto anchored = motif_ops::reanchorMelody(source, barTick(bar));
+    lines.dux.insert(lines.dux.end(), anchored.begin(), anchored.end());
+  }
+  lines.comes.reserve(18);
+  const Tick block_end = barTick(block_start_bar + 4);
+  for (const auto& note : lines.dux) {
+    const Tick delayed = note.start_tick + kTicksPerBar;
+    if (delayed >= block_end)
+      continue;
+    MaterialNote copy = note;
+    copy.start_tick = delayed;
+    copy.pitch = static_cast<std::uint8_t>(static_cast<int>(copy.pitch) + comes_shift);
+    lines.comes.push_back(copy);
+  }
+  return lines;
+}
+
+// Read a laid-out four-bar block against the aria bass it will sound over.
+//
+// A block whose upper voices are settled here is a closed system. The aria bass
+// repeats on exactly the four-bar period the block spans, it is immutable by
+// contract, and the relief pass that answers for the free figuration elsewhere
+// deliberately skips the imitative blocks -- the canon pair cannot be re-aimed
+// one end at a time without dissolving the imitation. So the whole three-voice
+// surface follows from the choices made here and can be read before a note is
+// committed, at the grain an external reading pairs the voices at: every onset
+// of any voice, against whatever the others are sounding then.
+//
+// Reported worst first, so the array compares as a preference order: a crossing
+// or a unison breaks the register order the form is built on, a true parallel is the fault
+// the ear names, then the weaker perfect approaches, then the dissonant
+// simultaneities. A caller with its own terms to weigh interleaves them.
+std::array<int, 4> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
+                                       const std::vector<MaterialNote>& inner, int block_start_bar,
+                                       const std::array<std::uint8_t, 4>& ground, Mode mode) {
+  std::vector<MaterialNote> bass;
+  bass.reserve(32);
+  for (int local = 0; local < 4; ++local) {
+    const int bar = block_start_bar + local;
+    const std::array<int, 8> phrase =
+        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar % 4)], mode);
+    for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
+      bass.push_back(materialNote(barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit,
+                                  kAriaBassUnit, phrase[pos]));
     }
   }
-  // Recover the best final state and backtrack.
-  int final_idx = 0;
-  for (int idx = 1; idx < 3; ++idx)
-    if (best_cost[3][static_cast<std::size_t>(idx)] <
-        best_cost[3][static_cast<std::size_t>(final_idx)])
-      final_idx = idx;
+  // Register order, highest first, matching the physical voice indices.
+  const std::vector<MaterialNote>* voices[3] = {&upper, &inner, &bass};
+
+  std::vector<Tick> onsets;
+  for (const std::vector<MaterialNote>* voice : voices) {
+    for (const MaterialNote& note : *voice)
+      onsets.push_back(note.start_tick);
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+
+  std::array<int, 4> score{};
+  std::array<int, 3> prev = {-1, -1, -1};
+  for (const Tick tick : onsets) {
+    std::array<int, 3> curr = {-1, -1, -1};
+    for (std::size_t idx = 0; idx < 3; ++idx) {
+      for (const MaterialNote& note : *voices[idx]) {
+        if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
+          curr[idx] = static_cast<int>(note.pitch);
+          break;
+        }
+      }
+    }
+    for (std::size_t above = 0; above < 3; ++above) {
+      for (std::size_t below = above + 1; below < 3; ++below) {
+        if (curr[above] < 0 || curr[below] < 0)
+          continue;
+        // Strict: the form's register order admits no unison either, so a
+        // meeting counts the same as a crossing.
+        if (curr[above] <= curr[below])
+          ++score[0];
+        if (!isConsonantPair(curr[above], curr[below]))
+          ++score[3];
+        if (prev[above] < 0 || prev[below] < 0)
+          continue;
+        if (formsStrictPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
+          ++score[1];
+        else if (formsPerfectParallel(prev[above], curr[above], prev[below], curr[below]) ||
+                 formsAntiParallelPerfect(prev[above], curr[above], prev[below], curr[below]) ||
+                 formsBattuta(prev[above], curr[above], prev[below], curr[below]))
+          ++score[2];
+      }
+    }
+    prev = curr;
+  }
+  return score;
+}
+
+// Choose the leader tones for a canon block.
+//
+// Exhaustive over the candidate set rather than a left-to-right walk. A bar's
+// tone answers for two bars at once -- it is the dux in its own bar and the
+// comes in the next -- so a per-bar cost cannot be settled before the neighbour
+// it will be echoed against is known. Three tones in each of four bars is a
+// small enough set to read every assembly of it exactly.
+std::array<int, 4> designCanonLeader(int pitch_ceiling, Mode mode,
+                                     const std::array<std::uint8_t, 4>& ground,
+                                     int source_register_shift, int comes_shift,
+                                     bool imitate_above) {
+  const std::array<std::array<int, 3>, 4> candidates =
+      canonLeaderCandidates(pitch_ceiling, mode, ground);
   std::array<int, 4> chosen{};
-  int cur = final_idx;
-  for (int bar = 3; bar >= 0; --bar) {
-    chosen[static_cast<std::size_t>(bar)] =
-        tones[static_cast<std::size_t>(bar)][static_cast<std::size_t>(cur)];
-    if (bar > 0)
-      cur = back[static_cast<std::size_t>(bar)][static_cast<std::size_t>(cur)];
+  std::array<int, 6> best{};
+  bool have_best = false;
+  std::array<std::size_t, 4> pick{};
+  for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
+    for (pick[1] = 0; pick[1] < 3; ++pick[1]) {
+      for (pick[2] = 0; pick[2] < 3; ++pick[2]) {
+        for (pick[3] = 0; pick[3] < 3; ++pick[3]) {
+          std::array<int, 4> assignment{};
+          for (std::size_t bar = 0; bar < 4; ++bar)
+            assignment[bar] = candidates[bar][pick[bar]];
+          const CanonLines lines = layOutCanon(assignment, /*block_start_bar=*/0,
+                                               source_register_shift, comes_shift, mode);
+          const std::array<int, 4> faults = goldbergBlockFaults(
+              imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
+              /*block_start_bar=*/0, ground, mode);
+          // The leader's own bar-to-bar steps, which the comes inherits exactly:
+          // a tritone or a seventh between adjacent bars is unsingable however
+          // well it behaves against the other voices, so it is weighed above the
+          // faults that only the combination produces, and total travel breaks
+          // ties last so the contour walks rather than leaps.
+          int unsingable = 0;
+          int travel = 0;
+          for (std::size_t bar = 1; bar < 4; ++bar) {
+            const int step = std::abs(assignment[bar] - assignment[bar - 1]);
+            if (step == interval::kTritone || step >= interval::kMinor7th)
+              ++unsingable;
+            travel += step;
+          }
+          const std::array<int, 6> score = {faults[0], faults[1], unsingable,
+                                            faults[2], faults[3], travel};
+          if (!have_best || score < best) {
+            best = score;
+            chosen = assignment;
+            have_best = true;
+          }
+        }
+      }
+    }
   }
   return chosen;
 }
 
-// Build one canonic variation block (a 4-bar window). The dux is an identifiable
-// six-note soggetto with an eighth-eighth-quarter rhythm in each half-bar:
-// chord-tone beat onsets are connected by contrary neighbours. motif_ops
-// re-anchors the same source cell in each bar. The comes is an exact
-// constant-semitone copy of that material, delayed one bar and truncated at the
-// block end.
+// Build one canonic variation block (a 4-bar window).
 //
 // Unison through fourth canons imitate below: physical V0 is the dux and V1 the
 // comes. Fifth and wider canons imitate above: physical V1 is the lower dux and
@@ -1799,55 +1925,17 @@ void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>&
   const int source_register_shift = imitate_above ? -12 : 12;
   const int comes_shift = imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
   const int design_ceiling = imitation_degrees >= 8 ? 70 : 72;
-  const std::array<int, 4> designed =
-      designCanonLeader(imitation_semitones, design_ceiling, mode, ground);
-
-  auto make_soggetto = [&](int tone, bool rising) {
-    const int direction = rising ? 1 : -1;
-    const int first_neighbour =
-        direction > 0 ? detail::scaleUp(tone, 1, mode) : detail::scaleDown(tone, 1, mode);
-    const int second_neighbour =
-        direction > 0 ? detail::scaleDown(tone, 1, mode) : detail::scaleUp(tone, 1, mode);
-    std::vector<MaterialNote> soggetto;
-    soggetto.reserve(6);
-    soggetto.push_back(materialNote(0, kEighth, tone));
-    soggetto.push_back(materialNote(kEighth, kEighth, first_neighbour));
-    soggetto.push_back(materialNote(kTicksPerBeat, kTicksPerBeat, tone));
-    soggetto.push_back(materialNote(kHalf, kEighth, tone));
-    soggetto.push_back(materialNote(kHalf + kEighth, kEighth, second_neighbour));
-    soggetto.push_back(materialNote(kHalf + kTicksPerBeat, kTicksPerBeat, tone));
-    return soggetto;
-  };
-
-  std::vector<MaterialNote> dux;
-  dux.reserve(24);
-  for (int local = 0; local < 4; ++local) {
-    const int bar = block_start_bar + local;
-    const int tone = designed[static_cast<std::size_t>(bar % 4)] + source_register_shift;
-    const auto source = make_soggetto(tone, /*rising=*/(local % 2) == 0);
-    auto anchored = motif_ops::reanchorMelody(source, barTick(bar));
-    dux.insert(dux.end(), anchored.begin(), anchored.end());
-  }
-
-  std::vector<MaterialNote> comes;
-  comes.reserve(18);
-  const Tick block_end = barTick(block_start_bar + 4);
-  for (const auto& note : dux) {
-    const Tick delayed = note.start_tick + kTicksPerBar;
-    if (delayed >= block_end)
-      continue;
-    MaterialNote copy = note;
-    copy.start_tick = delayed;
-    copy.pitch = static_cast<std::uint8_t>(static_cast<int>(copy.pitch) + comes_shift);
-    comes.push_back(copy);
-  }
+  const std::array<int, 4> designed = designCanonLeader(
+      design_ceiling, mode, ground, source_register_shift, comes_shift, imitate_above);
+  const CanonLines lines =
+      layOutCanon(designed, block_start_bar, source_register_shift, comes_shift, mode);
 
   if (imitate_above) {
-    principal.notes.insert(principal.notes.end(), comes.begin(), comes.end());
-    inner_notes.insert(inner_notes.end(), dux.begin(), dux.end());
+    principal.notes.insert(principal.notes.end(), lines.comes.begin(), lines.comes.end());
+    inner_notes.insert(inner_notes.end(), lines.dux.begin(), lines.dux.end());
   } else {
-    principal.notes.insert(principal.notes.end(), dux.begin(), dux.end());
-    inner_notes.insert(inner_notes.end(), comes.begin(), comes.end());
+    principal.notes.insert(principal.notes.end(), lines.dux.begin(), lines.dux.end());
+    inner_notes.insert(inner_notes.end(), lines.comes.begin(), lines.comes.end());
   }
 }
 
@@ -1877,16 +1965,12 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
-  const Tick bass_unit = kTicksPerBeat / 2;
   for (int bar = 0; bar < kCycleBars; ++bar) {
-    const int root = ground[static_cast<std::size_t>(bar)];
-    const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
-    const int third = root + (chord.minor ? 3 : 4);
-    const int fifth = root + 7;
-    const std::array<int, 8> phrase = {root, third, fifth, third, root, fifth, third, root};
+    const std::array<int, 8> phrase =
+        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar)], mode);
     for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
-      out.material.goldberg_aria_bass.push_back(
-          materialNote(barTick(bar) + static_cast<Tick>(pos) * bass_unit, bass_unit, phrase[pos]));
+      out.material.goldberg_aria_bass.push_back(materialNote(
+          barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit, kAriaBassUnit, phrase[pos]));
     }
   }
   out.material.goldberg_aria_bass_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
@@ -2005,21 +2089,48 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         var.density_level = 2;
         for (int local = 0; local < kCycleBars; ++local) {
           const int bar = blk * kCycleBars + local;
-          const BarChord chord =
-              goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
-          appendVariationBar(var, bar, chord, mode, 4, kVarRegisterBase, offset);
-          const int root_pc = chord.root_pc;
-          const int third_pc = (root_pc + (chord.minor ? 3 : 4)) % 12;
-          const int fifth_pc = (root_pc + 7) % 12;
-          const std::array<int, 4> theme_pcs = {third_pc, fifth_pc, root_pc, fifth_pc};
-          for (std::size_t beat = 0; beat < theme_pcs.size(); ++beat) {
-            int pitch = 60 + ((theme_pcs[beat] - 60) % 12 + 12) % 12;
-            while (pitch > 67)
-              pitch -= 12;
-            inner_voice.push_back(materialNote(
-                barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
+          appendVariationBar(
+              var, bar, goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
+              mode, 4, kVarRegisterBase, offset);
+        }
+        // The tune states each bar's triad in one rotation held across the whole
+        // block, so what recurs is its shape. Which rotation that is has to be
+        // read off the texture rather than fixed: the bass arpeggiates the same
+        // triad underneath at its own pace, so a rotation that happens to reach
+        // the same chord tones in step with it doubles the bass instead of
+        // answering it. Every rotation is laid out against the figuration
+        // already settled above and the bass below, and the cleanest is kept.
+        std::vector<MaterialNote> tune;
+        std::array<int, 4> best_score{};
+        for (int rotation = 0; rotation < 4; ++rotation) {
+          std::vector<MaterialNote> candidate;
+          candidate.reserve(16);
+          for (int local = 0; local < kCycleBars; ++local) {
+            const int bar = blk * kCycleBars + local;
+            const BarChord chord =
+                goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
+            const int root_pc = chord.root_pc;
+            const int third_pc = (root_pc + (chord.minor ? 3 : 4)) % 12;
+            const int fifth_pc = (root_pc + 7) % 12;
+            const std::array<int, 4> theme_pcs = {third_pc, fifth_pc, root_pc, fifth_pc};
+            for (std::size_t beat = 0; beat < theme_pcs.size(); ++beat) {
+              const int pc =
+                  theme_pcs[(beat + static_cast<std::size_t>(rotation)) % theme_pcs.size()];
+              int pitch = 60 + ((pc - 60) % 12 + 12) % 12;
+              while (pitch > 67)
+                pitch -= 12;
+              candidate.push_back(materialNote(
+                  barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
+            }
+          }
+          const std::array<int, 4> score =
+              goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode);
+          if (rotation == 0 || score < best_score) {
+            best_score = score;
+            tune = std::move(candidate);
           }
         }
+        inner_voice.insert(inner_voice.end(), tune.begin(), tune.end());
         inner_blocks.push_back(blk);
         break;
       }
