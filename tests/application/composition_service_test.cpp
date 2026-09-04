@@ -245,19 +245,14 @@ TEST(CompositionServiceTest, FinalScoreGateAcceptsEveryShippedForm) {
 // semantic axis -- it selects different material and reaches validator rules the
 // major surface never does -- while the seed is a decorrelation axis, so half
 // the seeds in each mode covers more of what ships than all of them in one.
-TEST(CompositionServiceTest, FinalScoreGateSweepsEveryShippedFormConfiguration) {
-  constexpr FormType forms[] = {
-      FormType::Fugue,
-      FormType::PreludeAndFugue,
-      FormType::TrioSonata,
-      FormType::ChoralePrelude,
-      FormType::ToccataAndFugue,
-      FormType::Passacaglia,
-      FormType::FantasiaAndFugue,
-      FormType::CelloPrelude,
-      FormType::Chaconne,
-      FormType::GoldbergVariations,
-  };
+//
+// One case per form rather than one case over all of them. The sweep is the
+// suite's longest-running check by a wide margin and every cell of it is
+// independent, so a form per case lets the runner spread them over cores
+// instead of walking the whole product on one. The set of cells is unchanged.
+class ShippedFormSweep : public ::testing::TestWithParam<FormType> {};
+
+TEST_P(ShippedFormSweep, FinalScoreGateAcceptsEveryConfiguration) {
   constexpr SubjectCharacter characters[] = {
       SubjectCharacter::Severe,
       SubjectCharacter::Playful,
@@ -270,41 +265,50 @@ TEST(CompositionServiceTest, FinalScoreGateSweepsEveryShippedFormConfiguration) 
       DurationScale::Long,
       DurationScale::Full,
   };
-  for (FormType form : forms) {
-    for (SubjectCharacter character : characters) {
-      if (!composer::isFormCharacterCompatible(form, character)) {
-        continue;
-      }
-      for (DurationScale scale : scales) {
-        for (std::uint32_t seed = 1; seed <= 20; ++seed) {
-          SCOPED_TRACE(formTypeToString(form));
-          SCOPED_TRACE(subjectCharacterToString(character));
-          SCOPED_TRACE(durationScaleToString(scale));
-          SCOPED_TRACE(seed);
-          const bool minor = (seed % 2) == 0;
-          SCOPED_TRACE(minor ? "minor" : "major");
-          CompositionRequest request;
-          request.form = form;
-          request.character = character;
-          request.key = minor ? KeySignature{Key::G, true} : KeySignature{Key::C, false};
-          request.scale = scale;
-          request.seed = seed;
-          request.bpm = 100;
-          CompositionProduct product;
-          ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
-          EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
-          EXPECT_TRUE(product.final_validation.failures.empty())
-              << "first failure: "
-              << (product.final_validation.failures.empty()
-                      ? std::string()
-                      : product.final_validation.failures.front().rule_id);
-          EXPECT_TRUE(product.diagnostic_json.empty());
-          EXPECT_FALSE(product.midi_bytes.empty());
-        }
+  const FormType form = GetParam();
+  for (SubjectCharacter character : characters) {
+    if (!composer::isFormCharacterCompatible(form, character)) {
+      continue;
+    }
+    for (DurationScale scale : scales) {
+      for (std::uint32_t seed = 1; seed <= 20; ++seed) {
+        SCOPED_TRACE(formTypeToString(form));
+        SCOPED_TRACE(subjectCharacterToString(character));
+        SCOPED_TRACE(durationScaleToString(scale));
+        SCOPED_TRACE(seed);
+        const bool minor = (seed % 2) == 0;
+        SCOPED_TRACE(minor ? "minor" : "major");
+        CompositionRequest request;
+        request.form = form;
+        request.character = character;
+        request.key = minor ? KeySignature{Key::G, true} : KeySignature{Key::C, false};
+        request.scale = scale;
+        request.seed = seed;
+        request.bpm = 100;
+        CompositionProduct product;
+        ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+        EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
+        EXPECT_TRUE(product.final_validation.failures.empty())
+            << "first failure: "
+            << (product.final_validation.failures.empty()
+                    ? std::string()
+                    : product.final_validation.failures.front().rule_id);
+        EXPECT_TRUE(product.diagnostic_json.empty());
+        EXPECT_FALSE(product.midi_bytes.empty());
       }
     }
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(EveryShippedForm, ShippedFormSweep,
+                         ::testing::Values(FormType::Fugue, FormType::PreludeAndFugue,
+                                           FormType::TrioSonata, FormType::ChoralePrelude,
+                                           FormType::ToccataAndFugue, FormType::Passacaglia,
+                                           FormType::FantasiaAndFugue, FormType::CelloPrelude,
+                                           FormType::Chaconne, FormType::GoldbergVariations),
+                         [](const ::testing::TestParamInfo<FormType>& info) {
+                           return std::string(formTypeToString(info.param));
+                         });
 
 TEST(CompositionServiceTest, NonKeyboardInstrumentUsesPhraseVelocityCurve) {
   CompositionRequest request;

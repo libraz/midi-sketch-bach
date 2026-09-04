@@ -9,8 +9,14 @@ build:
 	@cd $(BUILD_DIR) && cmake .. -DCMAKE_BUILD_TYPE=Debug
 	@cmake --build $(BUILD_DIR) -j$$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 
+# Parallel: the suite is a few long form sweeps beside a thousand short cases,
+# so one core spends most of a serial run idle. Each case owns whatever file it
+# writes, so they do not collide. The coverage build in CI stays serial --
+# several processes of one binary merging into the same .gcda corrupts the
+# counts.
 test: build
-	@cd $(BUILD_DIR) && ctest --output-on-failure
+	@cd $(BUILD_DIR) && ctest --output-on-failure \
+		-j$$(sysctl -n hw.logicalcpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 
 clean:
 	@rm -rf $(BUILD_DIR)
