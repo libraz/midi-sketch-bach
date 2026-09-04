@@ -2512,7 +2512,13 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // scalewise (passing / neighbour tones are idiomatic), so only the bar
   // downbeat is constrained. Pedal-point notes (PedalPreparation) are exempt: a
   // pedal is by definition a single sustained pitch held against changing
-  // harmony. For each note stamped FigurationCommitted (and not PedalPreparation)
+  // harmony. FigurationAnchorRelaxed notes are likewise exempt: the figuration
+  // is the only voice this rule binds, while the theme entries sounding against
+  // it walk freely through non-chord tones, and the two constraints can close on
+  // each other until no chord tone in the voice band is playable at all. The
+  // builder stamps that bit only after scanning the whole band, so the exemption
+  // is carried by proof rather than granted by default.
+  // For each note stamped FigurationCommitted (and not PedalPreparation)
   // whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0), resolve
   // the active ChordEvent (latest plan.chords entry with start_tick <= the note's
   // onset) and reuse the same chord-tone arithmetic the P7 rules use: triadFor
@@ -2527,6 +2533,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         continue;
       if (hasRuleBit(provenance, i, RuleBit::PedalPreparation))
         continue;  // pedal points are held against changing harmony.
+      if (hasRuleBit(provenance, i, RuleBit::FigurationAnchorRelaxed))
+        continue;  // no chord tone was reachable; the builder proved exhaustion.
       const auto& note = notes[i];
       const Tick authored_tick =
           provenance[i].has_authored_note ? provenance[i].authored_start_tick : note.start_tick;

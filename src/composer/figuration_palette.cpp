@@ -836,6 +836,69 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             break;
           }
         }
+        // Bar-head escape. The displacement above may only offer triad tones,
+        // because the bar downbeat is the one onset the Validator holds to a
+        // chord tone. Against a theme entry walking through non-chord tones --
+        // the normal condition of the style, not a defect in the entry -- those
+        // three pitch classes can all be blocked at once, and then the line
+        // ships the true parallel it was called to remove. Take the nearest free
+        // diatonic tone instead, but only after a full-band scan proves no triad
+        // tone would do: the exemption this records is a proof of exhaustion,
+        // not a general licence to leave the chord.
+        if (beat == 0 && anchor_fault_rank(snapped) == kAnchorParallel) {
+          auto anchor_free = [&](int cand) {
+            if (cand < band_lo || cand > band_hi || !within_order(cand)) {
+              return false;
+            }
+            for (const int sounding : theme_pitches) {
+              if (!isConsonantPair(cand, sounding)) {
+                return false;
+              }
+            }
+            return anchor_fault_rank(cand) == kAnchorClean;
+          };
+          bool triad_available = false;
+          for (int cand = band_lo; cand <= band_hi && !triad_available; ++cand) {
+            const int pc = ((cand % 12) + 12) % 12;
+            if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+              continue;
+            }
+            triad_available = anchor_free(cand);
+          }
+          if (!triad_available) {
+            const int span = std::max(band_hi - snapped, snapped - band_lo);
+            for (int dist = 1; dist <= span; ++dist) {
+              bool relaxed = false;
+              for (const int sgn : {-1, 1}) {
+                const int cand = snapped + sgn * dist;
+                if (!detail::inScale(cand, mode) || !anchor_free(cand)) {
+                  continue;
+                }
+                // A tone the sustain window would grind against is not an
+                // improvement on the parallel it replaces.
+                bool clashes = false;
+                for (const int sounding : window_pitches) {
+                  const int ivc = std::abs(cand - sounding) % 12;
+                  if (ivc == 1 || ivc == 6 || ivc == 11) {
+                    clashes = true;
+                    break;
+                  }
+                }
+                if (clashes) {
+                  continue;
+                }
+                snapped = cand;
+                section.relaxed_anchor_ticks.push_back(beat_tick);
+                ++waveVetoStats().anchor_parallel_displaced;
+                relaxed = true;
+                break;
+              }
+              if (relaxed) {
+                break;
+              }
+            }
+          }
+        }
       }
       // Wobble breaker: the theme-consonance, harshness, and parallel vetoes
       // can shrink the working window's admissible set to two tones (typical

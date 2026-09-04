@@ -911,8 +911,16 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (mnote.start_tick >= span.end_tick)
           break;
         MaterialNote clipped;
-        if (clipMaterialNoteToSpan(mnote, span, &clipped))
-          out.push_back(emitMaterialNote(clipped, harmonic_plan, fig_bits));
+        if (!clipMaterialNoteToSpan(mnote, span, &clipped))
+          continue;
+        RuleIdMask note_bits = fig_bits;
+        // A bar downbeat the builder proved it could not anchor on a chord tone
+        // carries FigurationAnchorRelaxed, which is what the Validator's
+        // figuration_harmonic_consistency rule reads to exempt it.
+        if (std::find(section.relaxed_anchor_ticks.begin(), section.relaxed_anchor_ticks.end(),
+                      mnote.start_tick) != section.relaxed_anchor_ticks.end())
+          note_bits |= (ruleBitMask(RuleBit::FigurationAnchorRelaxed));
+        out.push_back(emitMaterialNote(clipped, harmonic_plan, note_bits));
       }
     }
     return out;

@@ -325,6 +325,17 @@ enum RuleBit : std::uint8_t {
   // note recorded below.  FinalScore validation accepts the idiomatic
   // neighbour figure only when this bit and the declaration agree.
   OrnamentRealized = 68,
+  // A figuration bar downbeat whose harmonic anchor could not be a chord tone.
+  // The figuration line is the only voice held to a bar-head chord tone, while
+  // the theme entries sounding against it walk freely through non-chord tones,
+  // so the two constraints can close on each other: every triad tone in the
+  // voice band is at once dissonant against a sounding theme tone, outside the
+  // voice-order window, or tied into a perfect parallel. The builder proves that
+  // exhaustion by scanning the whole band before it takes the nearest free
+  // diatonic tone instead, and stamps this bit on the tone it took. It is that
+  // proof -- not a general licence -- that exempts the note from the Validator's
+  // figuration_harmonic_consistency rule.
+  FigurationAnchorRelaxed = 69,
 };
 
 constexpr RuleIdMask ruleBitMask(int bit) {

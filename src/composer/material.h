@@ -276,6 +276,11 @@ struct FigurationSection {
   bool is_cadenza = false;
   bool is_pedal_prep = false;
   std::vector<MaterialNote> notes;
+  // Bar-downbeat onsets whose anchor had to leave the chord: no triad tone
+  // anywhere in the voice band was simultaneously consonant with the sounding
+  // theme tones, inside the voice-order window, and free of a perfect parallel.
+  // The replay stamps FigurationAnchorRelaxed on the notes starting here.
+  std::vector<Tick> relaxed_anchor_ticks;
 };
 
 // Organ Toccata. The four Bach toccata archetypes:
