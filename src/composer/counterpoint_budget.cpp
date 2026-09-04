@@ -64,17 +64,22 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::TrioSonata, "strong_beat_dissonance"},
     {FormType::TrioSonata, "unprepared_dissonance"},
     {FormType::TrioSonata, "vertical_dissonance"},
-    // ChoralePrelude -- the cantus firmus never doubles a leading tone. Its
-    // three lines all arrive on the bar head over a bass pinned to one octave,
-    // and the tone before the head is re-aimed until the fifth is gone; the
-    // octave is not always reachable that way, so `parallel_octave` stays open.
+    // ChoralePrelude -- the cantus firmus never doubles a leading tone, and no
+    // true parallel of either class survives its two free ends. The tone before
+    // an arrival is re-aimed over a bass pinned to a single octave, and where
+    // the consonant window for that re-aim comes back empty it is widened to
+    // admit a passing dissonance rather than let the parallel ship. The
+    // cadential figure that pins the bass under its own resolution is then
+    // chosen against the three-line surface it produces, not installed over one
+    // already settled without it. The upper pair carries no octave either, so
+    // `invertible_at_octave` closes with them; what the re-aim does accept is a
+    // weaker approach in place of a worse one, which is why the contrary-motion
+    // and hidden rules stay open.
     {FormType::ChoralePrelude, "anti_parallel_perfect"},
     {FormType::ChoralePrelude, "battuta"},
     {FormType::ChoralePrelude, "cross_relation"},
     {FormType::ChoralePrelude, "hidden_parallel_fifth"},
     {FormType::ChoralePrelude, "hidden_parallel_octave"},
-    {FormType::ChoralePrelude, "invertible_at_octave"},
-    {FormType::ChoralePrelude, "parallel_octave"},
     {FormType::ChoralePrelude, "strong_beat_dissonance"},
     {FormType::ChoralePrelude, "unprepared_dissonance"},
     {FormType::ChoralePrelude, "vertical_dissonance"},

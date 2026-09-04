@@ -145,9 +145,15 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   EXPECT_EQ(closedRulesFor(FormType::Fugue), keyboard_polyphony);
   EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), keyboard_polyphony);
   EXPECT_EQ(closedRulesFor(FormType::TrioSonata), with_invertible_counterpoint);
-  EXPECT_EQ(closedRulesFor(FormType::ChoralePrelude),
-            (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
-                                      "parallel_fifth"}));
+  // Its arrivals are re-aimed over a bass pinned to one octave, and the window
+  // for that re-aim widens to a passing dissonance rather than let a true
+  // parallel ship; the cadential figure that pins the bass under its resolution
+  // is chosen against the surface it produces. No octave reaches the upper pair
+  // either, so the invertibility rule closes with them.
+  EXPECT_EQ(
+      closedRulesFor(FormType::ChoralePrelude),
+      (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
+                                "invertible_at_octave", "parallel_fifth", "parallel_octave"}));
   EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue), keyboard_polyphony);
   // The passacaglia is the one form that still breaks every vertical rule.
   EXPECT_EQ(closedRulesFor(FormType::Passacaglia), std::vector<std::string>{});
@@ -219,9 +225,9 @@ TEST(CounterpointBudgetTest, AppendsOneFailurePerClosedRuleAndPreservesExistingO
   report.failures.push_back(existing);
   report.observations.push_back(observation("doubling_no_leading_tone", 3));
   report.observations.push_back(observation("doubling_no_seventh", 7));
-  report.observations.push_back(observation("parallel_octave", 9));
+  report.observations.push_back(observation("cross_relation", 9));
 
-  // The chorale prelude closes both doubling rules and leaves parallel_octave open.
+  // The chorale prelude closes both doubling rules and leaves cross_relation open.
   composer::applyCounterpointBudget(FormType::ChoralePrelude, &report);
 
   ASSERT_EQ(report.failures.size(), 3u);
