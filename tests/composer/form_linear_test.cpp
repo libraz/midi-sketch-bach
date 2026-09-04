@@ -9,7 +9,8 @@
 //   - the note span ends at bars * kTicksPerBar;
 //   - cello stays monophonic (no overlapping onsets / single voice);
 //   - trio carries three distinct voices, the pedal voice is all-quarters in
-//     the low register, density rises toward the climax cycle;
+//     the low register, density rises toward the climax cycle, and its shipped
+//     surface holds no true parallel perfect at any union onset;
 //   - the final bar's harmony is the tonic.
 
 #include <gtest/gtest.h>
@@ -72,6 +73,52 @@ bool hasRule(const ValidationReport& report, const std::string& rule_id) {
 // HarmonicPlan carries one chord per bar).
 int realizedBars(const HarnessFixture& fx) {
   return static_cast<int>(fx.harmony.chords.size());
+}
+
+// Assert that no true parallel perfect survives anywhere in a composed result.
+// Every voice pair is read into every union onset -- every tick at which any
+// voice attacks, which is the grain an external reading of the score pairs the
+// voices at, and the grain a rest is heard across. `where` names the case.
+void expectNoParallelPerfect(const ComposeResult& result, const std::string& where) {
+  const auto sounding = [&](VoiceId voice, Tick at) -> int {
+    int pitch = -1;
+    Tick best = 0;
+    bool found = false;
+    for (const auto& note : result.notes) {
+      if (note.voice != voice || note.start_tick > at || at >= note.start_tick + note.duration)
+        continue;
+      if (!found || note.start_tick > best) {
+        found = true;
+        best = note.start_tick;
+        pitch = note.pitch;
+      }
+    }
+    return pitch;
+  };
+  std::vector<Tick> onsets;
+  VoiceId voices = 0;
+  for (const auto& note : result.notes) {
+    onsets.push_back(note.start_tick);
+    voices = std::max(voices, static_cast<VoiceId>(note.voice + 1));
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+  for (std::size_t idx = 1; idx < onsets.size(); ++idx) {
+    for (VoiceId upper = 0; upper < voices; ++upper) {
+      for (VoiceId lower = static_cast<VoiceId>(upper + 1); lower < voices; ++lower) {
+        const int up_prev = sounding(upper, onsets[idx - 1]);
+        const int up_curr = sounding(upper, onsets[idx]);
+        const int lo_prev = sounding(lower, onsets[idx - 1]);
+        const int lo_curr = sounding(lower, onsets[idx]);
+        if (up_prev < 0 || up_curr < 0 || lo_prev < 0 || lo_curr < 0)
+          continue;
+        EXPECT_FALSE(formsStrictPerfectParallel(up_prev, up_curr, lo_prev, lo_curr))
+            << where << " v" << static_cast<int>(upper) << "/v" << static_cast<int>(lower)
+            << " parallel perfect at tick " << onsets[idx] << " (" << up_prev << "->" << up_curr
+            << " over " << lo_prev << "->" << lo_curr << ")";
+      }
+    }
+  }
 }
 
 // --- CelloPrelude -----------------------------------------------------------
@@ -480,6 +527,29 @@ TEST(FormLinearTrio, CadenceHasMomentaryManualExchangeWithoutPerfectParallel) {
   EXPECT_TRUE(saw_exchange);
   EXPECT_FALSE(hasRule(result.validation, "parallel_fifth"));
   EXPECT_FALSE(hasRule(result.validation, "parallel_octave"));
+}
+
+// Both true-parallel classes are closed for this form, so the shipped surface
+// must be free of them at every union onset -- not merely at the pairs any one
+// guard happens to read. The three lines are guarded in sequence (the second
+// manual against the first, the pedal against both), and two later passes
+// rewrite what those verdicts were made against: the cadential figure replaces
+// a window of the middle voice and pins the pedal under its own resolution.
+// The claim is therefore only worth anything asserted on the finished notes.
+//
+// Several bar counts, because the figure lands a different number of bars from
+// the end as the piece lengthens, and the voice it disturbs -- the pedal, in a
+// band a triad puts three tones in -- is the one with the least room to answer.
+TEST(FormLinearTrio, ShippedTextureIsFreeOfParallelPerfects) {
+  for (bool minor : kMinorFlags) {
+    for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+      for (std::uint32_t seed : kSeeds) {
+        const ComposeResult result = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+        expectNoParallelPerfect(result, "minor=" + std::to_string(minor) + " bars=" +
+                                            std::to_string(bars) + " seed=" + std::to_string(seed));
+      }
+    }
+  }
 }
 
 // The Noble dotted figure (dotted-quarter + eighth) is the only V1 vocabulary

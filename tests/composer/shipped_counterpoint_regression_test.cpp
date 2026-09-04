@@ -374,8 +374,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
-    // ninety-fifth. A trade out of either of those into hidden is payable.
-    {FormType::TrioSonata, 33, 68, 61},
+    // ninety-fifth. A trade out of either of those into hidden is payable, and
+    // that is the trade taken: both true-parallel classes reach zero, paid for
+    // with fourteen hidden perfects and two contrary-motion octave arrivals.
+    // The pedal is the voice that pays -- it is written last against two settled
+    // manuals, and once it ranks a hidden perfect below a true one it will step
+    // onto the hidden approach rather than keep the parallel it began with.
+    {FormType::TrioSonata, 0, 82, 63},
     // Both true-parallel classes reach zero. The tone before an arrival is
     // re-aimed over a bass pinned to a single octave, and where the consonant
     // window for that re-aim comes back empty it widens to admit a passing
