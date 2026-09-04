@@ -693,7 +693,21 @@ int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& mo
   return worst;
 }
 
-// Relieve one line's arrival on the bar head, over the finished walking bass.
+// A line as the relief pass wants it: every note of one voice in tick order,
+// by address, so a voice whose material is stored per block is still one line.
+std::vector<MaterialNote*> lineInTickOrder(const std::vector<std::vector<MaterialNote>*>& parts) {
+  std::vector<MaterialNote*> line;
+  for (std::vector<MaterialNote>* part : parts) {
+    for (MaterialNote& note : *part)
+      line.push_back(&note);
+  }
+  std::stable_sort(line.begin(), line.end(), [](const MaterialNote* lhs, const MaterialNote* rhs) {
+    return lhs->start_tick < rhs->start_tick;
+  });
+  return line;
+}
+
+// Relieve one line's arrival on the bar head, over the finished lower voice.
 //
 // Both ends of that arrival are fixed. The bass states the bar chord's root on
 // the downbeat and the bass band spans a single octave, so the root's register
@@ -710,8 +724,9 @@ int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& mo
 // arriving at its own onset; it keeps the register order, and may be dissonant
 // only where the tone it displaces already was (the eighth-note fills are
 // passing tones and dissonant by design).
-void relieveBarHeadArrival(std::vector<MaterialNote>& line, const ThemeToneRegistry& registry,
-                           VoiceId voice, int bars, Mode mode) {
+void relieveBarHeadArrival(const std::vector<MaterialNote*>& line,
+                           const ThemeToneRegistry& registry, VoiceId voice, VoiceId num_voices,
+                           int bars, Mode mode) {
   std::vector<ConcurrentMotion> into_head;
   std::vector<ConcurrentMotion> into_onset;
   std::vector<ConcurrentMotion> at_onset;
@@ -720,37 +735,37 @@ void relieveBarHeadArrival(std::vector<MaterialNote>& line, const ThemeToneRegis
     std::size_t approach_idx = line.size();
     int arrival = -1;
     for (std::size_t idx = 0; idx < line.size(); ++idx) {
-      const Tick start = line[idx].start_tick;
+      const Tick start = line[idx]->start_tick;
       if (start < head)
         approach_idx = idx;
       else if (start == head)
-        arrival = static_cast<int>(line[idx].pitch);
+        arrival = static_cast<int>(line[idx]->pitch);
       else
         break;
     }
     if (arrival < 0 || approach_idx == line.size())
       continue;
-    MaterialNote& approach = line[approach_idx];
+    MaterialNote& approach = *line[approach_idx];
     if (approach.start_tick % kTicksPerBar == 0)
       continue;  // The onset before the head IS a head: a structural tone.
     const int original = static_cast<int>(approach.pitch);
-    const int own_prev = approach_idx > 0 ? static_cast<int>(line[approach_idx - 1].pitch) : -1;
+    const int own_prev = approach_idx > 0 ? static_cast<int>(line[approach_idx - 1]->pitch) : -1;
 
     // Sampled one sixteenth back, the grain at which a union-onset reading pairs
     // an arrival with each other voice's last preceding onset.
     into_head.clear();
-    registry.concurrentMotions(head - kSixteenth, head, voice, /*num_voices=*/3, into_head);
+    registry.concurrentMotions(head - kSixteenth, head, voice, num_voices, into_head);
     const int original_rank = perfectFaultRank(original, arrival, into_head);
     if (original_rank == 0)
       continue;
 
     into_onset.clear();
     registry.concurrentMotions(approach.start_tick - kSixteenth, approach.start_tick, voice,
-                               /*num_voices=*/3, into_onset);
+                               num_voices, into_onset);
     const int onset_ceiling = perfectFaultRank(own_prev, original, into_onset);
     at_onset.clear();
-    registry.concurrentMotions(approach.start_tick - 1, approach.start_tick, voice,
-                               /*num_voices=*/3, at_onset);
+    registry.concurrentMotions(approach.start_tick - 1, approach.start_tick, voice, num_voices,
+                               at_onset);
     bool original_consonant = true;
     for (const ConcurrentMotion& motion : at_onset) {
       if (!isConsonantPair(original, motion.curr)) {
@@ -1288,8 +1303,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     for (const MaterialNote& note : bass_notes)
       relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
                              note.duration);
-    relieveBarHeadArrival(voice == 0 ? fig_notes : out.material.cf_embellished, relief_registry,
-                          voice, bars, mode);
+    relieveBarHeadArrival(lineInTickOrder({voice == 0 ? &fig_notes : &out.material.cf_embellished}),
+                          relief_registry, voice, /*num_voices=*/3, bars, mode);
   }
 
   ChordEvent approach;
@@ -1984,6 +1999,53 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   coda.notes.push_back(materialNote(final_approach_tick, kTicksPerBeat, 43));
   coda.notes.push_back(materialNote(final_bar_tick, kTicksPerBar, ground.front()));
   out.material.coda_extensions.push_back(std::move(coda));
+
+  // The variation line is the only voice here that may move at all. The aria
+  // bass is immutable by contract -- goldberg_aria_bass_immutable demands every
+  // one of its onsets verbatim -- and it is also the voice the variation runs
+  // into: the bar chord's root IS the ground tone's pitch class, the variation
+  // is anchored three octaves above the same class, and both derive their bar
+  // tone from that one root, so they arrive congruently by construction rather
+  // than by accident. Nothing in the variation loop can see this, because the
+  // Goldberg builder keeps no registry of the voices it has already placed.
+  // Relieved here, where the whole texture is finally known, on the same terms
+  // as the chorale prelude: the bar heads themselves are fixed at both ends, so
+  // the tone that moves is the onset before each one.
+  {
+    ThemeToneRegistry relief_registry;
+    const Tick ground_period = out.material.goldberg_aria_bass_period;
+    for (Tick offset_tick = 0; offset_tick < final_approach_tick; offset_tick += ground_period) {
+      for (const MaterialNote& note : out.material.goldberg_aria_bass) {
+        const Tick start = offset_tick + note.start_tick;
+        if (start < final_approach_tick)
+          relief_registry.record(start, /*voice=*/2, static_cast<int>(note.pitch), note.duration);
+      }
+    }
+    for (const MaterialNote& note : out.material.coda_extensions.back().notes)
+      relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
+                             note.duration);
+    for (const MaterialNote& note : out.material.goldberg_inner_voice)
+      relief_registry.record(note.start_tick, /*voice=*/1, static_cast<int>(note.pitch),
+                             note.duration);
+    // Canon and quodlibet blocks are excluded. Their variation line is the
+    // canon LEADER, and the follower on V1 is that leader plus one fixed
+    // imitation interval; moving a leader tone without moving its comes breaks
+    // the imitation the block exists to state. The blocks that remain carry
+    // free figuration, where a tone answers to nothing but its own line.
+    std::vector<bool> imitative(out.material.goldberg_variations.size(), false);
+    for (int blk : inner_blocks) {
+      if (blk >= 0 && static_cast<std::size_t>(blk) < imitative.size())
+        imitative[static_cast<std::size_t>(blk)] = true;
+    }
+    std::vector<std::vector<MaterialNote>*> blocks;
+    blocks.reserve(out.material.goldberg_variations.size());
+    for (std::size_t idx = 0; idx < out.material.goldberg_variations.size(); ++idx) {
+      if (!imitative[idx])
+        blocks.push_back(&out.material.goldberg_variations[idx].notes);
+    }
+    relieveBarHeadArrival(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
+                          /*num_voices=*/3, bars, mode);
+  }
 
   Span coda_span;
   coda_span.id = next_span_id++;

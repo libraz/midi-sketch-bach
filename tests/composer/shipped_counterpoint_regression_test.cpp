@@ -399,7 +399,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // (hidden). Leaping up to the dominant over a rising bass is ordinary
     // cadential writing; leaping down onto it is not.
     {FormType::Chaconne, 0, 24, 21},
-    {FormType::GoldbergVariations, 35, 48, 59},
+    {FormType::GoldbergVariations, 24, 12, 39},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale

@@ -406,10 +406,65 @@ TEST(FormCantusChorale, WalkingBassNeverCrossesCantusFirmus) {
   }
 }
 
-// No true parallel perfect fifth survives anywhere in the shipped three-voice
-// texture, at any pair of voices and any union onset.
+// Assert that no true parallel perfect fifth survives anywhere in a composed
+// result, at any pair of voices and any union onset. `where` names the case.
 //
-// The chorale prelude reaches this because every tone that could form one is
+// Octaves are deliberately NOT asserted to zero. Some arrivals are genuinely
+// boxed in -- fixed voices in narrow bands admit positions where no candidate
+// lowers the fault -- and their count is held by the shipped-counterpoint
+// ratchet instead, which can record a bounded number without pretending it is
+// none. Fifths have somewhere to go in both of these forms, so zero is the
+// honest bar for them.
+void expectNoParallelFifth(const ComposeResult& result, const std::string& where) {
+  auto sounding = [&](VoiceId voice, Tick at) -> int {
+    int pitch = -1;
+    Tick best = 0;
+    bool found = false;
+    for (const auto& note : result.notes) {
+      if (note.voice != voice)
+        continue;
+      if (note.start_tick <= at && at < note.start_tick + note.duration &&
+          (!found || note.start_tick > best)) {
+        found = true;
+        best = note.start_tick;
+        pitch = note.pitch;
+      }
+    }
+    return pitch;
+  };
+  // Union onsets: every tick at which any voice attacks, which is the grain an
+  // external reading of the score pairs the voices at.
+  std::vector<Tick> onsets;
+  VoiceId voices = 0;
+  for (const auto& note : result.notes) {
+    onsets.push_back(note.start_tick);
+    voices = std::max(voices, static_cast<VoiceId>(note.voice + 1));
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+  for (std::size_t idx = 1; idx < onsets.size(); ++idx) {
+    const Tick prev = onsets[idx - 1];
+    const Tick curr = onsets[idx];
+    for (VoiceId upper = 0; upper < voices; ++upper) {
+      for (VoiceId lower = static_cast<VoiceId>(upper + 1); lower < voices; ++lower) {
+        const int up_prev = sounding(upper, prev);
+        const int up_curr = sounding(upper, curr);
+        const int lo_prev = sounding(lower, prev);
+        const int lo_curr = sounding(lower, curr);
+        if (up_prev < 0 || up_curr < 0 || lo_prev < 0 || lo_curr < 0)
+          continue;
+        if (std::abs(up_curr - lo_curr) % 12 != interval::kPerfect5th)
+          continue;
+        EXPECT_FALSE(isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
+            << where << " v" << static_cast<int>(upper) << "/v" << static_cast<int>(lower)
+            << " parallel fifth at tick " << curr << " (" << up_prev << "->" << up_curr << " over "
+            << lo_prev << "->" << lo_curr << ")";
+      }
+    }
+  }
+}
+
+// The chorale prelude reaches this because every tone that could form a fifth is
 // reachable by some guard: the figuration's bar heads and the cantus firmus
 // skeleton are fixed, but each is approached through a tone that is not, and
 // the walking bass -- whose own bar head is pinned to the chord root inside a
@@ -418,63 +473,25 @@ TEST(FormCantusChorale, WalkingBassNeverCrossesCantusFirmus) {
 // stopped being consulted, which is how the last set of them arrived: the
 // passing eighths between the embellished cantus firmus's chord-tone beats
 // were emitted with no guard at all, and every remaining fifth was one of them.
-//
-// Octaves are NOT asserted to zero. Some arrivals are genuinely boxed in --
-// three fixed voices in narrow bands admit positions where no candidate lowers
-// the fault -- and their count is held by the shipped-counterpoint ratchet
-// instead, which can record a bounded number without pretending it is none.
 TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelFifths) {
   for (bool minor : {false, true}) {
     for (std::uint32_t seed : kSeeds) {
       const HarnessFixture fx =
           build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 16, seed);
-      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-      auto sounding = [&](VoiceId voice, Tick at) -> int {
-        int pitch = -1;
-        Tick best = 0;
-        bool found = false;
-        for (const auto& note : r.notes) {
-          if (note.voice != voice)
-            continue;
-          if (note.start_tick <= at && at < note.start_tick + note.duration &&
-              (!found || note.start_tick > best)) {
-            found = true;
-            best = note.start_tick;
-            pitch = note.pitch;
-          }
-        }
-        return pitch;
-      };
-      // Union onsets: every tick at which any voice attacks, which is the grain
-      // an external reading of the score pairs the voices at.
-      std::vector<Tick> onsets;
-      for (const auto& note : r.notes)
-        onsets.push_back(note.start_tick);
-      std::sort(onsets.begin(), onsets.end());
-      onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
-      for (std::size_t idx = 1; idx < onsets.size(); ++idx) {
-        const Tick prev = onsets[idx - 1];
-        const Tick curr = onsets[idx];
-        for (VoiceId upper = 0; upper < 3; ++upper) {
-          for (VoiceId lower = static_cast<VoiceId>(upper + 1); lower < 3; ++lower) {
-            const int up_prev = sounding(upper, prev);
-            const int up_curr = sounding(upper, curr);
-            const int lo_prev = sounding(lower, prev);
-            const int lo_curr = sounding(lower, curr);
-            if (up_prev < 0 || up_curr < 0 || lo_prev < 0 || lo_curr < 0)
-              continue;
-            if (std::abs(up_curr - lo_curr) % 12 != interval::kPerfect5th)
-              continue;
-            EXPECT_FALSE(isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
-                << "minor=" << minor << " seed=" << seed << " v" << static_cast<int>(upper) << "/v"
-                << static_cast<int>(lower) << " parallel fifth at tick " << curr << " (" << up_prev
-                << "->" << up_curr << " over " << lo_prev << "->" << lo_curr << ")";
-          }
-        }
-      }
+      expectNoParallelFifth(Composer{}.run(fx.material, fx.harmony, fx.voice_plan),
+                            "minor=" + std::to_string(minor) + " seed=" + std::to_string(seed));
     }
   }
 }
+
+// The Goldberg texture is NOT asserted fifth-free, and the reason is worth
+// stating: its variation line is the only voice that may move at all. The aria
+// bass is immutable by contract, the canon follower is a strict imitation of a
+// leader it cannot leave, and the variation is anchored three octaves above the
+// pitch class the bass states -- so the two outer voices arrive congruently by
+// construction rather than by accident. Where the variation's own candidates
+// are exhausted there is no second voice to ask. Its counts are held by the
+// shipped-counterpoint ratchet instead.
 
 // Embellishment density rises with the arc: a CF bar in a high-arc-density cycle
 // carries strictly more embellishment notes than a bar in a low-density cycle.
