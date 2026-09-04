@@ -123,16 +123,15 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::CelloPrelude, "unprepared_dissonance"},
     // Chaconne -- two voices, the lower of them the immutable ground. Every
     // onset of the upper line is ranked against that ground while the material
-    // is built, and the octave and the battuta are the two fault classes that
-    // search finds a replacement for every time. It does not always find one
-    // for the fifth, and the ranking accepts a lesser fault over a worse one,
-    // so `parallel_fifth` and `anti_parallel_perfect` stay open.
+    // is built, and the cadential coda ranks the two tones it writes over the
+    // bass at both ends, so no true parallel of either class survives. What the
+    // ranking does accept is a lesser fault in place of a worse one, which is
+    // why the contrary-motion and hidden rules stay open.
     {FormType::Chaconne, "anti_parallel_perfect"},
     {FormType::Chaconne, "cross_relation"},
     {FormType::Chaconne, "doubling_no_leading_tone"},
     {FormType::Chaconne, "hidden_parallel_fifth"},
     {FormType::Chaconne, "hidden_parallel_octave"},
-    {FormType::Chaconne, "parallel_fifth"},
     {FormType::Chaconne, "strong_beat_dissonance"},
     {FormType::Chaconne, "unprepared_dissonance"},
     {FormType::Chaconne, "vertical_dissonance"},

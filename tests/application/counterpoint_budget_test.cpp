@@ -160,11 +160,11 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
           "anti_parallel_perfect", "battuta", "cross_relation", "doubling_no_leading_tone",
           "doubling_no_seventh", "hidden_parallel_fifth", "hidden_parallel_octave",
           "invertible_at_octave", "parallel_fifth", "parallel_octave", "vertical_dissonance"}));
-  // Its upper line is ranked against the ground before it ships, and those are
-  // the two fault classes that search clears every time.
+  // Its upper line is ranked against the ground before it ships, at every onset
+  // the variation owns and at both ends of the cadential coda.
   EXPECT_EQ(closedRulesFor(FormType::Chaconne),
             (std::vector<std::string>{"battuta", "doubling_no_seventh", "invertible_at_octave",
-                                      "parallel_octave"}));
+                                      "parallel_fifth", "parallel_octave"}));
   EXPECT_EQ(closedRulesFor(FormType::GoldbergVariations), with_invertible_counterpoint);
 }
 
