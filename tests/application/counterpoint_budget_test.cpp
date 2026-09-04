@@ -144,7 +144,13 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
 
   EXPECT_EQ(closedRulesFor(FormType::Fugue), keyboard_polyphony);
   EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), keyboard_polyphony);
-  EXPECT_EQ(closedRulesFor(FormType::TrioSonata), with_invertible_counterpoint);
+  // The pedal is written last against two settled manuals and ranks a hidden
+  // perfect below a true one, so it steps onto the weaker approach instead of
+  // keeping the parallel its three-tone band left it with; where the band runs
+  // out entirely the middle manual takes the arrival.
+  EXPECT_EQ(closedRulesFor(FormType::TrioSonata),
+            (std::vector<std::string>{"doubling_no_seventh", "invertible_at_octave",
+                                      "parallel_fifth", "parallel_octave"}));
   // Its arrivals are re-aimed over a bass pinned to one octave, and the window
   // for that re-aim widens to a passing dissonance rather than let a true
   // parallel ship; the cadential figure that pins the bass under its resolution

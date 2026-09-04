@@ -51,16 +51,20 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::PreludeAndFugue, "vertical_dissonance"},
     // TrioSonata -- `invertible_at_octave` judges the upper pair alone, and in
     // this texture that is exactly the pair the second manual voice is guarded
-    // against as it is written. The guard admits a fifth, which inverts to a
-    // fourth and is tolerated here, so `parallel_fifth` stays open.
+    // against as it is written. Both true-parallel classes close with it. The
+    // pedal is laid down last against two finished manuals, and it separates a
+    // true parallel from a hidden one rather than pooling them: its band spans a
+    // thirteenth and a triad puts three tones in it, so a guard that treated the
+    // two alike had nothing better than the tone it started from. Where all
+    // three tones do run out the middle manual takes the arrival instead, and
+    // the cadential figure is chosen against the surface it produces on both
+    // sides of the resolution it pins the bass under.
     {FormType::TrioSonata, "anti_parallel_perfect"},
     {FormType::TrioSonata, "battuta"},
     {FormType::TrioSonata, "cross_relation"},
     {FormType::TrioSonata, "doubling_no_leading_tone"},
     {FormType::TrioSonata, "hidden_parallel_fifth"},
     {FormType::TrioSonata, "hidden_parallel_octave"},
-    {FormType::TrioSonata, "parallel_fifth"},
-    {FormType::TrioSonata, "parallel_octave"},
     {FormType::TrioSonata, "strong_beat_dissonance"},
     {FormType::TrioSonata, "unprepared_dissonance"},
     {FormType::TrioSonata, "vertical_dissonance"},
