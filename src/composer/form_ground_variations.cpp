@@ -526,28 +526,50 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           }
           return false;
         };
+        auto anchor_is_true_parallel = [&](int cand) {
+          for (const ConcurrentMotion& motion : motions) {
+            if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
+              return true;
+            }
+          }
+          return false;
+        };
         if (anchor_is_parallel(anchor)) {
+          // Two passes over the same candidates. The first demands full
+          // parallel-freedom. The second runs only when the anchor is a TRUE
+          // parallel and nothing was fully free, and then accepts a hidden
+          // perfect: the chord root tracks the ground's pitch class every bar
+          // and this band is one octave wide, so the ground's octave companion
+          // is often the only chord tone in reach -- a band-pinned tone meeting
+          // an immutable one, where every approach is at least hidden. Holding
+          // out for a free tone there keeps the true parallel; taking the
+          // hidden one steps off the fault the ear actually tracks.
           bool displaced = false;
-          for (int dist = 1; dist <= 7 && !displaced; ++dist) {
-            for (int dir : {1, -1}) {
-              const int cand = anchor + dir * dist;
-              if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-                  !detail::inScale(cand, mode)) {
-                continue;
-              }
-              bool consonant = true;
-              for (int upper : theme_pitches) {
-                if (!isConsonantIc(cand - upper)) {
-                  consonant = false;
-                  break;
-                }
-              }
-              if (!consonant || anchor_is_parallel(cand)) {
-                continue;
-              }
-              anchor = cand;
-              displaced = true;
+          for (int pass = 0; pass < 2 && !displaced; ++pass) {
+            if (pass == 1 && !anchor_is_true_parallel(anchor))
               break;
+            for (int dist = 1; dist <= 7 && !displaced; ++dist) {
+              for (int dir : {1, -1}) {
+                const int cand = anchor + dir * dist;
+                if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
+                    !detail::inScale(cand, mode)) {
+                  continue;
+                }
+                bool consonant = true;
+                for (int upper : theme_pitches) {
+                  if (!isConsonantIc(cand - upper)) {
+                    consonant = false;
+                    break;
+                  }
+                }
+                if (!consonant)
+                  continue;
+                if (pass == 0 ? anchor_is_parallel(cand) : anchor_is_true_parallel(cand))
+                  continue;
+                anchor = cand;
+                displaced = true;
+                break;
+              }
             }
           }
         }
@@ -573,12 +595,17 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
         int pitch = (sub % 2 == 1) ? osc : anchor;
-        // The oscillation tones move concurrently with the V0 sixteenths, so
-        // they need the same audible-grain parallel re-check as the anchor:
-        // when the companion tone lands a parallel against a concurrently
-        // moving voice, swap to the mirror neighbour (or the nearest other
-        // triad tone) that stays consonant with the held ground.
-        if (sub % 2 == 1 && prev_emitted >= 0) {
+        // Every off-beat tone moves concurrently with the V0 sixteenths, so all
+        // of them need the same audible-grain parallel re-check as the beat
+        // anchor: when the tone lands a parallel against a concurrently moving
+        // voice, swap to the mirror neighbour (or the nearest other triad tone)
+        // that stays consonant with the held ground. The anchor's RETURN at the
+        // second half of the beat counts here too -- it is approached from the
+        // companion tone, which is a different motion from the one the beat
+        // head was judged on, and leaving it out shipped the largest single
+        // group of parallel octaves this form produced. Only the beat head
+        // itself is excluded, having just been judged above.
+        if (sub > 0 && prev_emitted >= 0) {
           motions.clear();
           registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
                                      /*voice=*/1, /*num_voices=*/3, motions);

@@ -333,6 +333,17 @@ struct FormCeiling {
 // pass would throw away the only regression signal this file provides -- the
 // fix belongs in the form builder's material derivation instead.
 //
+// ONE EXCEPTION, and only in this direction: a guard that is band-pinned
+// against an immutable voice sometimes has no candidate left that is free of
+// every perfect approach, and can then only choose WHICH fault it commits. A
+// change that lowers max_strict by moving those sites onto hidden perfects may
+// raise max_hidden by at most the number of strict events it removed. The two
+// are not interchangeable to the ear or to the reference corpus -- a parallel
+// octave is heard as one voice vanishing, while Bach writes hidden perfects
+// several times more often than this generator does -- so the trade is only
+// ever valid in that direction, never the reverse. The passacaglia's hidden
+// ceiling carries such a trade.
+//
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
@@ -341,7 +352,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     {FormType::TrioSonata, 73, 96},
     {FormType::ChoralePrelude, 44, 77},
     {FormType::ToccataAndFugue, 73, 35},
-    {FormType::Passacaglia, 77, 28},
+    {FormType::Passacaglia, 38, 39},
     {FormType::FantasiaAndFugue, 71, 77},
     {FormType::CelloPrelude, 0, 0},
     {FormType::Chaconne, 2, 11},

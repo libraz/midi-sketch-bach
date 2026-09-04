@@ -589,6 +589,76 @@ void expectNoGroundBarHeadParallels(FormType form) {
   }
 }
 
+// The passacaglia's counter-figuration alternates a beat anchor with a
+// companion tone, and every one of those tones moves while V0's figuration is
+// also moving, so each needs judging at the grain the ear samples. The beat
+// head is judged where it is chosen; what this pins is everything AFTER it in
+// the beat -- including the anchor's own return in the second half, which is
+// approached from the companion tone and is therefore a different motion from
+// the one the head was judged on. Leaving that return unjudged shipped the
+// largest single group of parallel octaves this form produced.
+//
+// True parallels only: the anchor is often pinned to the ground's octave
+// companion (the chord root tracks the ground's pitch class every bar and the
+// counter-figuration's band is one octave wide), and where every reachable tone
+// is at least a hidden perfect the line is allowed to take the hidden one.
+TEST(GroundVariationPassacaglia, CounterFigurationOffBeatsAreJudgedAgainstMovingVoices) {
+  std::size_t judged = 0;
+  std::size_t parallel = 0;
+  for (const Case& c : casesFor(FormType::Passacaglia)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    std::vector<NoteEvent> counter;
+    for (const NoteEvent& note : r.notes) {
+      if (note.voice == 1)
+        counter.push_back(note);
+    }
+    std::stable_sort(
+        counter.begin(), counter.end(),
+        [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
+    // Latest-starting note covering the tick wins, matching how the builder
+    // reads the registry it judges against.
+    const auto sounding = [&](VoiceId voice, Tick tick) {
+      int pitch = -1;
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice != voice || note.start_tick > tick)
+          continue;
+        if (tick < note.start_tick + note.duration)
+          pitch = note.pitch;
+      }
+      return pitch;
+    };
+    for (std::size_t idx = 1; idx < counter.size(); ++idx) {
+      const NoteEvent& note = counter[idx];
+      if (note.start_tick % kTicksPerBeat == 0)
+        continue;  // beat heads are judged where the anchor is chosen.
+      const int line_prev = counter[idx - 1].pitch;
+      ++judged;
+      for (VoiceId other : {VoiceId{0}, VoiceId{2}}) {
+        const int other_prev = sounding(other, note.start_tick - 1);
+        const int other_curr = sounding(other, note.start_tick);
+        if (other_prev < 0 || other_curr < 0)
+          continue;
+        if (formsStrictPerfectParallel(line_prev, note.pitch, other_prev, other_curr)) {
+          ++parallel;
+          break;
+        }
+      }
+    }
+  }
+  ASSERT_GT(judged, 0u) << "no off-beat counter-figuration tone was reached";
+  // The residue is the bind where the companion vocabulary itself runs out:
+  // this tone may only be a stepwise neighbour of the anchor or the nearest
+  // other triad tone, all three of which must also stay consonant against the
+  // held ground, and where none of them clears the tone in hand stands. Widening
+  // that vocabulary was tried and rejected before -- a free diatonic
+  // oscillation hammers a sustained seventh against the bar-long ground. Like
+  // the shipped ratchet, this ceiling may only ever be LOWERED.
+  EXPECT_LE(parallel, 6u) << parallel << " of " << judged
+                          << " off-beat counter-figuration tones move in a true parallel perfect "
+                             "with a concurrently moving voice";
+}
+
 TEST(GroundVariationChaconne, HasNoGroundBarHeadParallelPerfects) {
   expectNoGroundBarHeadParallels(FormType::Chaconne);
 }
