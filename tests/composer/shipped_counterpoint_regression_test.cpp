@@ -374,8 +374,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // actually move at rather than a bar back, and ranks a hidden perfect below
     // a true one; two true parallels left the strict column and two hidden ones
     // entered -- the corpus writes hidden perfects in this texture far more
-    // freely than it writes either true class.
-    {FormType::PreludeAndFugue, 13, 6, 80},
+    // freely than it writes either true class. Its figuration then reached the
+    // bar heads where no chord tone was playable at all and left the chord for a
+    // free diatonic tone: both remaining fifths and two octaves went with it, at
+    // no cost to the hidden or battuta columns.
+    {FormType::PreludeAndFugue, 9, 6, 80},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
