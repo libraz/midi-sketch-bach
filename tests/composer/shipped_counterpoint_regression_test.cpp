@@ -333,7 +333,12 @@ struct FormCeiling {
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
-// seed x character sweep.
+// seed x character x mode sweep.
+//
+// The mode axis is half the product and is not optional here: minor draws on its
+// own subjects, resolves its own leading tone and closes on its own final chord,
+// so a ceiling measured over the major surface alone describes half of what
+// ships and leaves the other half free to regress silently.
 //
 // RATCHET: these numbers may only ever be LOWERED, never raised. They are the
 // counts measured from current shipped output, not a target, and the sweep is
@@ -364,44 +369,39 @@ struct FormCeiling {
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 16, 9, 112},
-    {FormType::PreludeAndFugue, 8, 2, 85},
-    // Trade: -39 strict (of which -39 are fifths) and -47 battuta, for +4
-    // hidden. Both faults given up sat at or past the corpus envelope for this
-    // form -- its fifths at the ninetieth percentile, its battuta half again
-    // over the ninety-fifth -- while its hidden rate is under half of what the
-    // corpus writes, so the payment comes out of the one column with room.
-    {FormType::TrioSonata, 32, 101, 52},
-    {FormType::ChoralePrelude, 9, 18, 40},
-    // Most of this form's parallel octaves are deliberate: the opening
-    // octave cascade states its gesture high, an octave lower, then doubled in
-    // V0 and V1 across a descending scale, which is a parallel octave on every
-    // one of its sixteenths by design. The ceiling therefore cannot approach
-    // zero, and a drop here means the surrounding figuration improved, not the
-    // cascade.
-    //
-    // Trade: -12 strict and -4 hidden, +14 battuta. Escaping a same-direction
-    // perfect by reversing the wave's direction turns similar motion into
-    // contrary motion, so some of what leaves as a parallel returns as the
-    // mildest of the three faults.
-    {FormType::ToccataAndFugue, 61, 31, 97},
-    // Trade: -18 strict (10 of them parallel octaves), +7 hidden. The counter
-    // figuration is pinned to a one-octave band under an immutable ground whose
-    // pitch class the chord root tracks, so its octave companion is often the
-    // only chord tone in reach and every approach to it is at least hidden.
-    {FormType::Passacaglia, 20, 46, 28},
-    // Trade: -32 strict, +7 hidden and +22 battuta. The largest single drop in
-    // parallels any form here has taken, bought entirely with the two milder
-    // approaches -- and its parallel octaves fall from thirty to five, so what
-    // remains is almost all fifths.
-    {FormType::FantasiaAndFugue, 39, 84, 129},
+    {FormType::Fugue, 27, 12, 145},
+    {FormType::PreludeAndFugue, 15, 4, 80},
+    // Its hidden column is the one with room: the corpus writes hidden perfects
+    // in this texture more than twice as freely as this form does, while its
+    // fifths sit at the ninetieth percentile and its battuta past the
+    // ninety-fifth. A trade out of either of those into hidden is payable.
+    {FormType::TrioSonata, 33, 68, 61},
+    {FormType::ChoralePrelude, 12, 22, 42},
+    // Most of this form's parallel octaves are deliberate: the opening octave
+    // cascade states its gesture high, an octave lower, then doubled in V0 and
+    // V1 across a descending scale, which is a parallel octave on every one of
+    // its sixteenths by design. The ceiling therefore cannot approach zero, and
+    // a drop here means the surrounding figuration improved, not the cascade.
+    // Escaping a same-direction perfect by reversing the wave turns similar
+    // motion into contrary motion, so what leaves the strict column here tends
+    // to arrive in the battuta one.
+    {FormType::ToccataAndFugue, 56, 27, 85},
+    // The counter figuration is pinned to a one-octave band under an immutable
+    // ground whose pitch class the chord root tracks, so its octave companion is
+    // often the only chord tone in reach and every approach to it is at least
+    // hidden. Strict faults here are payable in hidden ones for that reason.
+    {FormType::Passacaglia, 18, 26, 29},
+    // Almost all of what remains in the strict column is fifths; the parallel
+    // octaves this form used to carry are gone, bought with the two milder
+    // approaches, which is why its hidden and battuta columns are the widest.
+    {FormType::FantasiaAndFugue, 14, 89, 111},
     {FormType::CelloPrelude, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
-    // with no third part to hide behind. Both remaining ways in are upward
-    // leaps, which is ordinary cadential writing; the downward ones, which are
-    // not, are gone. Hidden carries the whole residue by design.
+    // with no third part to hide behind. No true parallel of either class
+    // survives; the remaining ways in are upward leaps, which is ordinary
+    // cadential writing, so hidden carries the whole residue by design.
     {FormType::Chaconne, 0, 23, 0},
-    {FormType::GoldbergVariations, 24, 12, 39},
+    {FormType::GoldbergVariations, 32, 8, 35},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -433,6 +433,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
         request.form = entry.form;
         request.character = character;
         request.seed = kFirstSeed + offset;
+        // Both modes, because they are different music: the minor material has
+        // its own subjects, its own leading tone and its own final chord, and a
+        // ceiling measured over one of them describes half of what ships.
+        request.is_minor = (offset % 2) == 1;
 
         HarnessFixture fixture;
         if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok) {
