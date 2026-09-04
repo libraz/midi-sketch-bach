@@ -677,6 +677,119 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
   }
 }
 
+// Severity of the worst perfect-interval fault a (prev -> curr) motion forms
+// against any concurrently sounding line. 0 clean, 1 battuta, 2 anti-parallel,
+// 3 parallel or hidden -- the ranking every displacement in this tree obeys.
+int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& motions) {
+  int worst = 0;
+  for (const ConcurrentMotion& motion : motions) {
+    if (formsPerfectParallel(prev, curr, motion.prev, motion.curr))
+      return 3;
+    if (formsAntiParallelPerfect(prev, curr, motion.prev, motion.curr))
+      worst = std::max(worst, 2);
+    else if (formsBattuta(prev, curr, motion.prev, motion.curr))
+      worst = std::max(worst, 1);
+  }
+  return worst;
+}
+
+// Relieve one line's arrival on the bar head, over the finished walking bass.
+//
+// Both ends of that arrival are fixed. The bass states the bar chord's root on
+// the downbeat and the bass band spans a single octave, so the root's register
+// is determined -- there is no second octave to move it to. The cantus firmus
+// lands on its immutable skeleton tone, and the figuration's own bar head must
+// be a chord tone. A perfect-interval fault formed there can therefore never be
+// answered at the arrival itself, only on the way in, and the only tone free on
+// the way in is the onset immediately before the head. It is re-aimed here
+// rather than inside the line's own loop because the bass is built last: this
+// is the earliest point at which the fault is visible at all.
+//
+// The re-aim is non-regressive at both ends. The replacement must lower the
+// fault it forms arriving at the head, and may not raise the one it forms
+// arriving at its own onset; it keeps the register order, and may be dissonant
+// only where the tone it displaces already was (the eighth-note fills are
+// passing tones and dissonant by design).
+void relieveBarHeadArrival(std::vector<MaterialNote>& line, const ThemeToneRegistry& registry,
+                           VoiceId voice, int bars, Mode mode) {
+  std::vector<ConcurrentMotion> into_head;
+  std::vector<ConcurrentMotion> into_onset;
+  std::vector<ConcurrentMotion> at_onset;
+  for (int bar = 1; bar < bars; ++bar) {
+    const Tick head = barTick(bar);
+    std::size_t approach_idx = line.size();
+    int arrival = -1;
+    for (std::size_t idx = 0; idx < line.size(); ++idx) {
+      const Tick start = line[idx].start_tick;
+      if (start < head)
+        approach_idx = idx;
+      else if (start == head)
+        arrival = static_cast<int>(line[idx].pitch);
+      else
+        break;
+    }
+    if (arrival < 0 || approach_idx == line.size())
+      continue;
+    MaterialNote& approach = line[approach_idx];
+    if (approach.start_tick % kTicksPerBar == 0)
+      continue;  // The onset before the head IS a head: a structural tone.
+    const int original = static_cast<int>(approach.pitch);
+    const int own_prev = approach_idx > 0 ? static_cast<int>(line[approach_idx - 1].pitch) : -1;
+
+    // Sampled one sixteenth back, the grain at which a union-onset reading pairs
+    // an arrival with each other voice's last preceding onset.
+    into_head.clear();
+    registry.concurrentMotions(head - kSixteenth, head, voice, /*num_voices=*/3, into_head);
+    const int original_rank = perfectFaultRank(original, arrival, into_head);
+    if (original_rank == 0)
+      continue;
+
+    into_onset.clear();
+    registry.concurrentMotions(approach.start_tick - kSixteenth, approach.start_tick, voice,
+                               /*num_voices=*/3, into_onset);
+    const int onset_ceiling = perfectFaultRank(own_prev, original, into_onset);
+    at_onset.clear();
+    registry.concurrentMotions(approach.start_tick - 1, approach.start_tick, voice,
+                               /*num_voices=*/3, at_onset);
+    bool original_consonant = true;
+    for (const ConcurrentMotion& motion : at_onset) {
+      if (!isConsonantPair(original, motion.curr)) {
+        original_consonant = false;
+        break;
+      }
+    }
+    const int leap_ceiling = std::max(7, std::abs(arrival - original));
+    auto admissible = [&](int cand) {
+      if (!detail::inScale(cand, mode) || std::abs(arrival - cand) > leap_ceiling)
+        return false;
+      for (const ConcurrentMotion& motion : at_onset) {
+        // A lower voice index sounds higher.
+        if (motion.voice < voice ? cand >= motion.curr : cand <= motion.curr)
+          return false;
+        if (original_consonant && !isConsonantPair(cand, motion.curr))
+          return false;
+      }
+      return perfectFaultRank(own_prev, cand, into_onset) <= onset_ceiling;
+    };
+
+    // Clean first, then progressively less clean, but never at or below the
+    // rank the displaced tone already carried.
+    bool placed = false;
+    for (int accept = 0; accept < original_rank && !placed; ++accept) {
+      for (int dist = 1; dist <= 7 && !placed; ++dist) {
+        for (const int sgn : {-1, 1}) {
+          const int cand = original + sgn * dist;
+          if (admissible(cand) && perfectFaultRank(cand, arrival, into_head) <= accept) {
+            approach.pitch = static_cast<std::uint8_t>(cand);
+            placed = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
@@ -950,6 +1063,57 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     return cand;
   };
 
+  // The passing eighths between the chord-tone beats carry no guard of their
+  // own: guardV1Parallel substitutes chord tones only, which a passing tone is
+  // by definition not obliged to be, so it has nothing admissible to offer here.
+  // Left unguarded these eighths step in parallel with the figuration above
+  // whenever the two lines happen to move the same way, which is often. The
+  // escape ranks the same way every displacement in this tree does, over a
+  // diatonic candidate set, and keeps the oblique repeat in reserve as the last
+  // resort -- a repeated tone cannot form a parallel with anything, which is
+  // exactly why it is worth holding back for the case where nothing else is
+  // clean.
+  auto guardV1Passing = [&](int cand, Tick onset, int from) -> int {
+    if (from < 0)
+      return cand;
+    const int fig_now = fig_registry.soundingPitchInVoice(/*voice=*/0, onset);
+    if (fig_now < 0)
+      return cand;
+    auto rank = [&](int pitch) {
+      int worst = 0;
+      for (const Tick grain : {kSixteenth, kEighth, kQuarterDur}) {
+        const int fig_prev = fig_registry.soundingPitchInVoice(/*voice=*/0, onset - grain);
+        if (fig_prev < 0)
+          continue;
+        if (formsPerfectParallel(from, pitch, fig_prev, fig_now))
+          return 3;
+        if (formsAntiParallelPerfect(from, pitch, fig_prev, fig_now))
+          worst = std::max(worst, 2);
+        else if (formsBattuta(from, pitch, fig_prev, fig_now))
+          worst = std::max(worst, 1);
+      }
+      return worst;
+    };
+    const int cand_rank = rank(cand);
+    if (cand_rank == 0)
+      return cand;
+    const int cand_consonant = isConsonantPair(cand, fig_now);
+    const int alternatives[] = {detail::scaleUp(from, 1, mode), detail::scaleDown(from, 1, mode),
+                                detail::scaleUp(from, 2, mode), detail::scaleDown(from, 2, mode),
+                                from};
+    for (int accept = 0; accept < cand_rank; ++accept) {
+      for (const int alt : alternatives) {
+        if (alt == cand || alt <= kBassBandHi || alt > kV1EmbellishCeiling)
+          continue;
+        if (cand_consonant && !isConsonantPair(alt, fig_now))
+          continue;
+        if (rank(alt) <= accept)
+          return alt;
+      }
+    }
+    return cand;
+  };
+
   for (int bar = 0; bar < bars; ++bar) {
     const int tone = skeleton[static_cast<std::size_t>(bar)].pitch;
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
@@ -1015,7 +1179,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       // The stepwise off-beats already break repetition; the run-break guard on
       // the two chord-tone beats keeps a long static figure from chaining.
       const int b2 = breakRun(guardV1Parallel(beat2, base + kHalf, chord), chord, base + kHalf);
-      const int off2 = stepToward(b2, beat3);
+      const int off2 = guardV1Passing(stepToward(b2, beat3), base + kHalf + kEighth, b2);
       out.material.cf_embellished.push_back(materialNote(base + kHalf, kEighth, b2));
       out.material.cf_embellished.push_back(materialNote(base + kHalf + kEighth, kEighth, off2));
       // The passing eighth advances the run tracker so the next beat sees it.
@@ -1033,6 +1197,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       int off3 = stepToward(b3, next_tone);
       if (off3 == b3)
         off3 = detail::scaleUp(b3, 1, mode);
+      off3 = guardV1Passing(off3, base + kHalf + 3 * kEighth, b3);
       out.material.cf_embellished.push_back(materialNote(base + kHalf + 2 * kEighth, kEighth, b3));
       out.material.cf_embellished.push_back(
           materialNote(base + kHalf + 3 * kEighth, kEighth, off3));
@@ -1074,29 +1239,59 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   appendWalkingBass(bass_notes, bass_registry, bar_chords, mode);
   const Tick final_bar_tick = barTick(bars - 1);
   const Tick final_approach_tick = final_bar_tick - kQuarterDur;
+  int final_root = -1;
+  for (const MaterialNote& note : bass_notes) {
+    if (note.start_tick == final_bar_tick)
+      final_root = static_cast<int>(note.pitch);
+  }
+  // Dominant approach into the tonic coda. This pitch is not a preference and
+  // is not negotiable against the counterpoint: the imperfect authentic cadence
+  // registered below requires the bass to sound the dominant pitch class on the
+  // approach beat, and the bass band admits exactly one octave of it. Any
+  // perfect-interval fault this beat forms has to be resolved by moving the
+  // voice above it, never by re-aiming the bass.
   for (MaterialNote& note : bass_notes) {
     if (note.start_tick == final_approach_tick) {
-      note.pitch = 43;  // G2: explicit V-to-I bass motion into the tonic coda.
+      note.pitch = 43;  // G2.
       break;
     }
   }
   // The bass joins the held final chord: its final bar collapses to one
   // whole-note tonic root instead of walking quarters through the close.
-  {
-    int final_root = -1;
-    for (const MaterialNote& note : bass_notes) {
-      if (note.start_tick == final_bar_tick)
-        final_root = static_cast<int>(note.pitch);
-    }
-    if (final_root >= 0) {
-      bass_notes.erase(std::remove_if(bass_notes.begin(), bass_notes.end(),
-                                      [&](const MaterialNote& note) {
-                                        return note.start_tick >= final_bar_tick;
-                                      }),
-                       bass_notes.end());
-      bass_notes.push_back(materialNote(final_bar_tick, kTicksPerBar, final_root));
-    }
+  if (final_root >= 0) {
+    bass_notes.erase(
+        std::remove_if(bass_notes.begin(), bass_notes.end(),
+                       [&](const MaterialNote& note) { return note.start_tick >= final_bar_tick; }),
+        bass_notes.end());
+    bass_notes.push_back(materialNote(final_bar_tick, kTicksPerBar, final_root));
   }
+
+  // Re-recorded from the finished lines: the two rewrites above (the pinned
+  // dominant approach and the coda collapse) landed after the walking bass was
+  // emitted, so the registry it built no longer describes the bass that ships.
+  // Relieved in build order, each line against the other two as they now stand,
+  // so the second pass sees the first pass's result rather than the tones it
+  // replaced.
+  std::vector<MaterialNote>& fig_notes = out.material.figuration_sections.back().notes;
+  for (VoiceId voice : {VoiceId{1}, VoiceId{0}}) {
+    ThemeToneRegistry relief_registry;
+    if (voice != 0) {
+      for (const MaterialNote& note : fig_notes)
+        relief_registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch),
+                               note.duration);
+    }
+    if (voice != 1) {
+      for (const MaterialNote& note : out.material.cf_embellished)
+        relief_registry.record(note.start_tick, /*voice=*/1, static_cast<int>(note.pitch),
+                               note.duration);
+    }
+    for (const MaterialNote& note : bass_notes)
+      relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
+                             note.duration);
+    relieveBarHeadArrival(voice == 0 ? fig_notes : out.material.cf_embellished, relief_registry,
+                          voice, bars, mode);
+  }
+
   ChordEvent approach;
   approach.start_tick = final_approach_tick;
   approach.root_pc = 7;
