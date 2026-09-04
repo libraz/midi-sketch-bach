@@ -64,14 +64,16 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::TrioSonata, "strong_beat_dissonance"},
     {FormType::TrioSonata, "unprepared_dissonance"},
     {FormType::TrioSonata, "vertical_dissonance"},
-    // ChoralePrelude -- the cantus firmus never doubles a leading tone.
+    // ChoralePrelude -- the cantus firmus never doubles a leading tone. Its
+    // three lines all arrive on the bar head over a bass pinned to one octave,
+    // and the tone before the head is re-aimed until the fifth is gone; the
+    // octave is not always reachable that way, so `parallel_octave` stays open.
     {FormType::ChoralePrelude, "anti_parallel_perfect"},
     {FormType::ChoralePrelude, "battuta"},
     {FormType::ChoralePrelude, "cross_relation"},
     {FormType::ChoralePrelude, "hidden_parallel_fifth"},
     {FormType::ChoralePrelude, "hidden_parallel_octave"},
     {FormType::ChoralePrelude, "invertible_at_octave"},
-    {FormType::ChoralePrelude, "parallel_fifth"},
     {FormType::ChoralePrelude, "parallel_octave"},
     {FormType::ChoralePrelude, "strong_beat_dissonance"},
     {FormType::ChoralePrelude, "unprepared_dissonance"},

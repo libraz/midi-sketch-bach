@@ -146,7 +146,8 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), keyboard_polyphony);
   EXPECT_EQ(closedRulesFor(FormType::TrioSonata), with_invertible_counterpoint);
   EXPECT_EQ(closedRulesFor(FormType::ChoralePrelude),
-            (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh"}));
+            (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
+                                      "parallel_fifth"}));
   EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue), keyboard_polyphony);
   // The passacaglia is the one form that still breaks every vertical rule.
   EXPECT_EQ(closedRulesFor(FormType::Passacaglia), std::vector<std::string>{});
