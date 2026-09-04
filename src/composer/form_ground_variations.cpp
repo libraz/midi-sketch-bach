@@ -1349,13 +1349,31 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         const int bass_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(
             (total_bars - 2) % static_cast<int>(ground_pitch.size()))]);
         MaterialNote* approach_note = nullptr;
-        int approach_prev = -1;
+        MaterialNote* before_approach = nullptr;
         for (MaterialNote& note : notes) {
           if (note.start_tick == approach_tick) {
             approach_note = &note;
             break;
           }
-          approach_prev = static_cast<int>(note.pitch);
+          before_approach = &note;
+        }
+        const int approach_prev =
+            before_approach == nullptr ? -1 : static_cast<int>(before_approach->pitch);
+        // The tone the landing is actually reached from: the last one the
+        // variation still sounds before the final bar, which is the approach
+        // tone only when nothing follows it. Both ends of that arrival are
+        // design values -- the landing spells the dominant, the coda bass states
+        // the tonic, and a dominant over a tonic is a fifth however either is
+        // spelt -- so a fault formed there can be answered only on the way in.
+        // Everything from the approach beat onward meets a bass holding its
+        // dominant, so the way in is free of any fault of its own.
+        const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+        const int coda_tonic = static_cast<int>(ground_pitch.front());
+        MaterialNote* tail_note = nullptr;
+        for (MaterialNote& note : notes) {
+          if (note.start_tick >= final_bar_tick)
+            break;
+          tail_note = &note;
         }
         if (approach_note != nullptr) {
           // Landing on the dominant is the design value; which dominant tone, and
@@ -1376,28 +1394,97 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
           // half, so demanding a similar-motion-free arrival too leaves only
           // tones that fault worse elsewhere -- and a leap to the dominant over a
           // rising bass is ordinary cadential writing, not a blemish.
-          int best = -1;
-          int best_key = 1 << 20;
-          for (const int approach_pc : {7, 2}) {
-            for (int cand = 67; cand <= 81; ++cand) {
-              if (cand % 12 != approach_pc)
-                continue;
-              const int parallel_penalty =
-                  formsStrictPerfectParallel(approach_prev, cand, bass_prev, kCodaBassDominant)
-                      ? (1 << 16)
-                      : 0;
-              const int battuta_penalty =
-                  formsBattuta(approach_prev, cand, bass_prev, kCodaBassDominant) ? (1 << 12) : 0;
-              const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
-              const int step = (approach_prev >= 0) ? std::abs(cand - approach_prev) : 0;
-              const int key = parallel_penalty + battuta_penalty + colour_penalty + step;
-              if (key < best_key) {
-                best_key = key;
-                best = cand;
+          const auto rankDominantApproach = [&](int prev, int* chosen) {
+            int best = -1;
+            int best_key = 1 << 20;
+            for (const int approach_pc : {7, 2}) {
+              for (int cand = 67; cand <= 81; ++cand) {
+                if (cand % 12 != approach_pc)
+                  continue;
+                const int parallel_penalty =
+                    formsStrictPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 16)
+                                                                                         : 0;
+                const int battuta_penalty =
+                    formsBattuta(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 12) : 0;
+                // When this tone is also the one the landing is reached from, the
+                // arrival it makes there is ranked too -- below the fault it would
+                // make here and above a battuta. Ranking the two ends as equals
+                // lets a candidate that faults at this end tie with one that
+                // faults at the far end, and the tie is then settled by colour and
+                // distance, which is how a fault gets moved rather than removed.
+                // This end is the dearer one: the bass leaves its dominant two
+                // octaves below, so a parallel here is an octave, while the
+                // landing states the tonic under a dominant, where it is a fifth.
+                const int landing_penalty =
+                    (tail_note == approach_note &&
+                     formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
+                        ? (1 << 14)
+                        : 0;
+                const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
+                const int step = (prev >= 0) ? std::abs(cand - prev) : 0;
+                const int key =
+                    parallel_penalty + landing_penalty + battuta_penalty + colour_penalty + step;
+                if (key < best_key) {
+                  best_key = key;
+                  best = cand;
+                }
+              }
+            }
+            if (chosen != nullptr)
+              *chosen = best;
+            return best_key;
+          };
+          int chosen = -1;
+          int chosen_key = rankDominantApproach(approach_prev, &chosen);
+          // Nothing clean left. The tone before this one is then the only free
+          // tone in reach, and it is genuinely free: the coda's support tone is
+          // held from the start of this bar to the approach beat, so any onset
+          // strictly inside that span meets an oblique bass and can fault
+          // against nothing. Re-aim it until a dominant tone clears both ends.
+          const Tick support_start = final_bar_tick - kTicksPerBar34;
+          if (chosen_key >= (1 << 14) && before_approach != nullptr &&
+              before_approach->start_tick > support_start) {
+            const int prev_original = static_cast<int>(before_approach->pitch);
+            for (int dist = 1; dist <= 5 && chosen_key >= (1 << 14); ++dist) {
+              for (const int sgn : {-1, 1}) {
+                const int prev_cand = prev_original + sgn * dist;
+                if (prev_cand < 67 || prev_cand > 81 || !detail::inScale(prev_cand, mode))
+                  continue;
+                int trial = -1;
+                const int trial_key = rankDominantApproach(prev_cand, &trial);
+                if (trial_key < (1 << 14)) {
+                  before_approach->pitch = static_cast<std::uint8_t>(prev_cand);
+                  chosen = trial;
+                  chosen_key = trial_key;
+                  break;
+                }
               }
             }
           }
-          approach_note->pitch = static_cast<std::uint8_t>(best >= 0 ? best : 67);
+          approach_note->pitch = static_cast<std::uint8_t>(chosen >= 0 ? chosen : 67);
+        }
+        // A figuration tone standing between the approach beat and the landing
+        // carries no such ranking of its own: the block's only guard reads the
+        // ground at bar heads, and this onset is neither. It is re-aimed to the
+        // nearest scale tone of the same compass that leaves the arrival clean.
+        if (tail_note != nullptr && tail_note != approach_note &&
+            formsStrictPerfectParallel(static_cast<int>(tail_note->pitch), prefinal,
+                                       kCodaBassDominant, coda_tonic)) {
+          const int original = static_cast<int>(tail_note->pitch);
+          for (int dist = 1; dist <= 12; ++dist) {
+            bool placed = false;
+            for (const int sgn : {-1, 1}) {
+              const int cand = original + sgn * dist;
+              if (cand < 67 || cand > 81 || !detail::inScale(cand, mode) ||
+                  formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
+                continue;
+              tail_note->pitch = static_cast<std::uint8_t>(cand);
+              placed = true;
+              break;
+            }
+            if (placed)
+              break;
+          }
         }
       }
       appendCompactCadentialLanding(notes, static_cast<Tick>(total_bars - 1) * kTicksPerBar34,

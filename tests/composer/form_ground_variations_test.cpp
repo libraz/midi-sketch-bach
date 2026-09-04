@@ -486,7 +486,9 @@ TEST(GroundVariationPassacaglia, MinorHasNoAugmentedSecond) {
 // Asserted for the chaconne only. The passacaglia has a third voice its ground
 // scrub cannot see, so a repair there is unverified against the counter line
 // and its residue is held by the shipped-counterpoint ratchet instead.
-TEST(GroundVariationChaconne, NoBattutaOverTheGround) {
+// Every (variation, ground) motion the chaconne ships, read the way the audit
+// reads it: at each union onset, whatever sounds in the two voices.
+void expectNoChaconneMotion(bool (*forbidden)(int, int, int, int), const char* label) {
   for (const Case& c : casesFor(FormType::Chaconne)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -519,12 +521,24 @@ TEST(GroundVariationChaconne, NoBattutaOverTheGround) {
       const int lo_curr = sounding(ground, onsets[idx]);
       if (up_prev < 0 || up_curr < 0 || lo_prev < 0 || lo_curr < 0)
         continue;
-      EXPECT_FALSE(isBattutaMotion(up_prev, up_curr, lo_prev, lo_curr))
-          << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
-          << " battuta at tick " << onsets[idx] << " (" << up_prev << "->" << up_curr << " over "
+      EXPECT_FALSE(forbidden(up_prev, up_curr, lo_prev, lo_curr))
+          << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars << " "
+          << label << " at tick " << onsets[idx] << " (" << up_prev << "->" << up_curr << " over "
           << lo_prev << "->" << lo_curr << ")";
     }
   }
+}
+
+TEST(GroundVariationChaconne, NoBattutaOverTheGround) {
+  expectNoChaconneMotion(isBattutaMotion, "battuta");
+}
+
+// The cadence is where the last of these lived: the coda states the tonic under
+// a landing that spells the dominant, so the arrival is a fifth however either
+// is spelt, and the two tones the variation still owns on the way in are what
+// carry the whole repair.
+TEST(GroundVariationChaconne, NoTrueParallelOverTheGround) {
+  expectNoChaconneMotion(isParallelPerfectMotion, "true parallel perfect");
 }
 
 // --- 9. Picardy: minor + even seed final chord major ------------------------
