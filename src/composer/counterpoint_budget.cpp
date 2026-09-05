@@ -98,7 +98,17 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::ChoralePrelude, "strong_beat_dissonance"},
     {FormType::ChoralePrelude, "unprepared_dissonance"},
     {FormType::ChoralePrelude, "vertical_dissonance"},
-    // ToccataAndFugue
+    // ToccataAndFugue -- it shares its section builder with the fantasia, so
+    // every closure listed for that form reaches this one and the fifth closes
+    // with them. The octave stays open for one reason and one only: the free
+    // section's opening rhetoric states its gesture low and doubles it exactly
+    // twelve semitones below in the neighbouring voice, which is a registration
+    // effect written as two note streams rather than a second part. The doubling
+    // is a verbatim transposition of the same bar, so every one of its sixteenth
+    // notes is a parallel octave to anything reading the two streams as
+    // independent lines -- and nothing else in this form writes one at any
+    // length. Removing the row would mean either abandoning the gesture or
+    // teaching the reading to fold a doubled line back into one part.
     {FormType::ToccataAndFugue, "anti_parallel_perfect"},
     {FormType::ToccataAndFugue, "battuta"},
     {FormType::ToccataAndFugue, "cross_relation"},
@@ -106,7 +116,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::ToccataAndFugue, "hidden_parallel_fifth"},
     {FormType::ToccataAndFugue, "hidden_parallel_octave"},
     {FormType::ToccataAndFugue, "invertible_at_octave"},
-    {FormType::ToccataAndFugue, "parallel_fifth"},
     {FormType::ToccataAndFugue, "parallel_octave"},
     {FormType::ToccataAndFugue, "strong_beat_dissonance"},
     {FormType::ToccataAndFugue, "unprepared_dissonance"},

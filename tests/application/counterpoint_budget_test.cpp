@@ -138,8 +138,6 @@ TEST(CounterpointBudgetTest, LinearAndUnknownRulesAreNeverClosed) {
 TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // Written out literally so any edit to the open-rule table shows up here as a
   // change of closure state rather than passing silently.
-  const std::vector<std::string> keyboard_polyphony = {"doubling_no_seventh"};
-
   // Both true-parallel classes close. The stretto refuses a canon configuration
   // that sounds one; the coda's cadence voicing is registered like any other
   // figuration so the seam into it is read as a hand-over rather than a rest;
@@ -165,7 +163,13 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
       closedRulesFor(FormType::ChoralePrelude),
       (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
                                 "invertible_at_octave", "parallel_fifth", "parallel_octave"}));
-  EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue), keyboard_polyphony);
+  // The fifth closes with the fantasia's, whose section builder this form
+  // shares. The octave cannot: the free section's opening rhetoric doubles its
+  // gesture exactly an octave below in a neighbouring voice, and a verbatim
+  // doubling is a parallel octave on every note to anything that reads the two
+  // streams as separate parts.
+  EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue),
+            (std::vector<std::string>{"doubling_no_seventh", "parallel_fifth"}));
   // The counter-figuration is written last against a settled variation and an
   // immutable ground, and reads both as one continuous line across the ground
   // cycles; where its band offers no admissible tone at all it holds the tone it
