@@ -131,102 +131,6 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
   return inverted;
 }
 
-/// @brief How a candidate stretto canon reads against itself.
-///
-/// Lays the leader and the delayed follower on a sixteenth grid and scans the
-/// overlap for interval class 1, 6 or 11 (the semitone/tritone family) held
-/// for a full quarter note or longer. Brief passing seconds are idiomatic in a
-/// stretto, but both lines are verbatim Material -- the validator skips every
-/// dissonance rule on Material x Material pairs -- so a beat-long m2/M7
-/// between the two theme statements would ship unflagged. The caller uses this
-/// to vet each (delay, interval) configuration before committing the canon.
-///
-/// The same scan counts the true parallel perfects the pair would sound. Every
-/// canon configuration here transposes the follower by an octave or a fifth, so
-/// the two lines start a perfect interval apart and stay there wherever the
-/// subject's own contour repeats -- the pair is the one place in this form where
-/// a parallel would be produced by the design rather than stumbled into, and no
-/// later pass can answer for it, because a follower that is re-aimed is no
-/// longer the imitation the stretto exists to state. That is why the count is
-/// taken here, while the choice of configuration is still open. The slot grid
-/// reads the pair exactly as a union-onset reading does: a slot where only one
-/// line moves is oblique motion and counts for nothing.
-///
-/// @param leader_pat The leader's 16-note pattern (middle-entry material).
-/// @param leader_total Total semitone shift applied to the leader.
-/// @param follower_pat The follower's 16-note pattern (exposition subject).
-/// @param follower_total Total semitone shift applied to the follower.
-/// @param leader_rhythm Leader per-note durations (one subject statement).
-/// @param follower_rhythm Follower per-note durations (zero-length tail
-///        entries lay nothing, so a one-bar head vets only its own span).
-/// @param delay_bars Follower entry delay in bars (1..kSubjectBars-1).
-/// @return The overlap's dissonance profile (see StrettoOverlapProfile).
-struct StrettoOverlapProfile {
-  bool sustains_sharp = false;  // ic 1/6/11 held for >= a quarter note.
-  int overlap_slots = 0;        // sixteenth slots where both lines sound.
-  int broad_sharp_slots = 0;    // slots at ic 1/2/6/10/11 (seconds family).
-  int parallel_perfects = 0;    // slots where both lines move into one perfect class.
-};
-
-StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& leader_pat,
-                                            int leader_total,
-                                            const std::array<std::uint8_t, 16>& follower_pat,
-                                            int follower_total,
-                                            const std::array<Tick, 16>& leader_rhythm,
-                                            const std::array<Tick, 16>& follower_rhythm,
-                                            int delay_bars) {
-  constexpr Tick kSlotTick = kTicksPerBeat / 4;  // sixteenth grid.
-  const int total_slots = static_cast<int>(barTick(kSubjectBars) / kSlotTick);
-  std::vector<int> leader(static_cast<std::size_t>(total_slots), -1);
-  std::vector<int> follower(static_cast<std::size_t>(total_slots), -1);
-  auto lay = [&](std::vector<int>& line, const std::array<std::uint8_t, 16>& pat, int total,
-                 const std::array<Tick, 16>& rhythm, Tick start) {
-    Tick cursor = start;
-    for (int note = 0; note < kSubjectNotes; ++note) {
-      const Tick dur = rhythm[static_cast<std::size_t>(note)];
-      for (Tick t = cursor; t < cursor + dur; t += kSlotTick) {
-        const int slot = static_cast<int>(t / kSlotTick);
-        if (slot >= total_slots) {
-          return;  // the follower is truncated at the leader's end.
-        }
-        line[static_cast<std::size_t>(slot)] =
-            static_cast<int>(pat[static_cast<std::size_t>(note)]) + total;
-      }
-      cursor += dur;
-    }
-  };
-  lay(leader, leader_pat, leader_total, leader_rhythm, 0);
-  lay(follower, follower_pat, follower_total, follower_rhythm, barTick(delay_bars));
-  StrettoOverlapProfile profile;
-  const int sustain_limit = static_cast<int>(kQuarter / kSlotTick);
-  int run = 0;
-  int prev_leader = -1;
-  int prev_follower = -1;
-  for (int slot = 0; slot < total_slots; ++slot) {
-    const int lead = leader[static_cast<std::size_t>(slot)];
-    const int foll = follower[static_cast<std::size_t>(slot)];
-    bool sharp = false;
-    if (lead >= 0 && foll >= 0) {
-      profile.overlap_slots += 1;
-      const int ic = std::abs(lead - foll) % 12;
-      sharp = (ic == 1 || ic == 6 || ic == 11);
-      if (sharp || ic == 2 || ic == 10) {
-        profile.broad_sharp_slots += 1;
-      }
-      if (formsStrictPerfectParallel(prev_leader, lead, prev_follower, foll)) {
-        profile.parallel_perfects += 1;
-      }
-    }
-    prev_leader = lead;
-    prev_follower = foll;
-    run = sharp ? run + 1 : 0;
-    if (run >= sustain_limit) {
-      profile.sustains_sharp = true;
-    }
-  }
-  return profile;
-}
-
 // Major-mode middle entries rotate V / vi / IV. In minor, a degree shift of
 // the selected minor subject stays inside the home minor collection while its
 // declared stations rotate v / III / iv; this avoids importing the major
@@ -1287,7 +1191,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const int candidate_total = candidate_semis + candidate_off;
       const StrettoOverlapProfile profile =
           strettoOverlapProfile(leader_pat, leader_total, subj_pat, candidate_total, subj_rhythm,
-                                subj_rhythm, candidate.delay_bars);
+                                subj_rhythm, candidate.delay_bars, kSubjectBars);
       ConfigRead& read = reads[idx];
       read.considered = true;
       read.parallels = profile.parallel_perfects;
@@ -1502,8 +1406,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
           // runs the seconds family on more than a quarter of its shared slots,
           // a third line can only thicken that wash, so the window keeps the
           // two-voice stretto.
-          const StrettoOverlapProfile first_profile = strettoOverlapProfile(
-              me_real, me_off, subj_pat, first_total, subj_rhythm, subj_rhythm, first_delay);
+          const StrettoOverlapProfile first_profile =
+              strettoOverlapProfile(me_real, me_off, subj_pat, first_total, subj_rhythm,
+                                    subj_rhythm, first_delay, kSubjectBars);
           const bool first_canon_clean =
               4 * first_profile.broad_sharp_slots <= first_profile.overlap_slots;
           // The third statement is a FALSE ENTRY: the subject's one-bar head
@@ -1550,10 +1455,10 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
             const int candidate_total = candidate_semis + candidate_off;
             const StrettoOverlapProfile vs_leader =
                 strettoOverlapProfile(me_real, me_off, subj_pat, candidate_total, subj_rhythm,
-                                      head_rhythm, candidate.delay_bars);
-            const StrettoOverlapProfile vs_first =
-                strettoOverlapProfile(subj_pat, first_total, subj_pat, candidate_total, subj_rhythm,
-                                      head_rhythm, candidate.delay_bars - first_delay);
+                                      head_rhythm, candidate.delay_bars, kSubjectBars);
+            const StrettoOverlapProfile vs_first = strettoOverlapProfile(
+                subj_pat, first_total, subj_pat, candidate_total, subj_rhythm, head_rhythm,
+                candidate.delay_bars - first_delay, kSubjectBars);
             if (vs_leader.overlap_slots == 0 || vs_leader.sustains_sharp ||
                 vs_first.sustains_sharp) {
               continue;  // no overlap to vet means no basis to commit.

@@ -541,7 +541,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Escaping a same-direction perfect by reversing the wave turns similar
     // motion into contrary motion, so what leaves the strict column here tends
     // to arrive in the battuta one.
-    {FormType::ToccataAndFugue, 48, 20, 84, 5},
+    // It shares its section builder with the fantasia, so every closure listed
+    // for that form reaches this one too: the fifth column empties and hidden
+    // halves, with the battuta column level and two anti-parallels leaving. The
+    // octave column is unmoved and stays open -- its remaining forty-two come
+    // from the toccata half, which this builder writes through a different path.
+    {FormType::ToccataAndFugue, 42, 10, 84, 3},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -559,7 +564,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // running voices, the pedal under the free section's figuration -- is now
     // read at the grain those voices move at, which is what emptied the octave
     // column and took most of the hidden one with it.
-    {FormType::FantasiaAndFugue, 10, 53, 110, 6},
+    // Its stretto used to state the follower an octave below the leader at a
+    // one-bar delay with nothing read first, so every place the subject's own
+    // contour repeated a bar later was a parallel by construction; it now reads
+    // four canon configurations and refuses one that sounds a true parallel. The
+    // fill running up to that block is written before it rather than after, so
+    // the block's lines have a preceding bar to be judged against instead of
+    // reporting no motion at all. The half-cadence bass and the coda's inner
+    // voice rank the register of a tone whose pitch class is the design value.
+    // And the sustained support leaves the chord for a free diatonic tone once
+    // no triad tone in the band would do. Nothing is traded here: both true
+    // classes empty and the hidden column falls with them.
+    {FormType::FantasiaAndFugue, 0, 11, 109, 6},
     {FormType::CelloPrelude, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class

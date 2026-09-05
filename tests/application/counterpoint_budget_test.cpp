@@ -139,8 +139,6 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // Written out literally so any edit to the open-rule table shows up here as a
   // change of closure state rather than passing silently.
   const std::vector<std::string> keyboard_polyphony = {"doubling_no_seventh"};
-  const std::vector<std::string> with_invertible_counterpoint = {"doubling_no_seventh",
-                                                                 "invertible_at_octave"};
 
   // Both true-parallel classes close. The stretto refuses a canon configuration
   // that sounds one; the coda's cadence voicing is registered like any other
@@ -174,7 +172,15 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // just sounded, since an oblique repeat can form no parallel. Fifths still get
   // through at bar heads the variation itself owns, so only the octave closes.
   EXPECT_EQ(closedRulesFor(FormType::Passacaglia), (std::vector<std::string>{"parallel_octave"}));
-  EXPECT_EQ(closedRulesFor(FormType::FantasiaAndFugue), with_invertible_counterpoint);
+  // Its stretto reads four canon configurations and refuses one that sounds a
+  // true parallel; the fill running up to that block is written before it so the
+  // block has a preceding bar to be read against; the half-cadence bass and the
+  // coda's inner voice rank the register of a tone whose pitch class is the
+  // design value; and the sustained support leaves the chord once no triad tone
+  // in the band would do.
+  EXPECT_EQ(closedRulesFor(FormType::FantasiaAndFugue),
+            (std::vector<std::string>{"doubling_no_seventh", "invertible_at_octave",
+                                      "parallel_fifth", "parallel_octave"}));
   // Monophonic: every rule comparing two lines is closed permanently, and only
   // the two judged against the harmonic plan stay open.
   EXPECT_EQ(

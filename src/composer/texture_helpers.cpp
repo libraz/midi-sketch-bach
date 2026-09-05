@@ -620,6 +620,67 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   return fallback >= 0 ? fallback : std::clamp(target, band_lo, band_hi);
 }
 
+StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& leader_pat,
+                                            int leader_total,
+                                            const std::array<std::uint8_t, 16>& follower_pat,
+                                            int follower_total,
+                                            const std::array<Tick, 16>& leader_rhythm,
+                                            const std::array<Tick, 16>& follower_rhythm,
+                                            int delay_bars, int window_bars) {
+  constexpr Tick kSlotTick = kTicksPerBeat / 4;  // sixteenth grid.
+  constexpr Tick kSustainLimit = kTicksPerBeat;  // a quarter note.
+  constexpr int kStrettoPatternNotes = 16;
+  const int total_slots = static_cast<int>(barToTick(window_bars) / kSlotTick);
+  std::vector<int> leader(static_cast<std::size_t>(total_slots), -1);
+  std::vector<int> follower(static_cast<std::size_t>(total_slots), -1);
+  auto lay = [&](std::vector<int>& line, const std::array<std::uint8_t, 16>& pat, int total,
+                 const std::array<Tick, 16>& rhythm, Tick start) {
+    Tick cursor = start;
+    for (int note = 0; note < kStrettoPatternNotes; ++note) {
+      const Tick dur = rhythm[static_cast<std::size_t>(note)];
+      for (Tick t = cursor; t < cursor + dur; t += kSlotTick) {
+        const int slot = static_cast<int>(t / kSlotTick);
+        if (slot >= total_slots) {
+          return;  // the follower is truncated at the leader's end.
+        }
+        line[static_cast<std::size_t>(slot)] =
+            static_cast<int>(pat[static_cast<std::size_t>(note)]) + total;
+      }
+      cursor += dur;
+    }
+  };
+  lay(leader, leader_pat, leader_total, leader_rhythm, 0);
+  lay(follower, follower_pat, follower_total, follower_rhythm, barToTick(delay_bars));
+  StrettoOverlapProfile profile;
+  const int sustain_limit = static_cast<int>(kSustainLimit / kSlotTick);
+  int run = 0;
+  int prev_leader = -1;
+  int prev_follower = -1;
+  for (int slot = 0; slot < total_slots; ++slot) {
+    const int lead = leader[static_cast<std::size_t>(slot)];
+    const int foll = follower[static_cast<std::size_t>(slot)];
+    bool sharp = false;
+    if (lead >= 0 && foll >= 0) {
+      profile.overlap_slots += 1;
+      const int ic = std::abs(lead - foll) % 12;
+      sharp = (ic == 1 || ic == 6 || ic == 11);
+      if (sharp || ic == 2 || ic == 10) {
+        profile.broad_sharp_slots += 1;
+      }
+      if (formsStrictPerfectParallel(prev_leader, lead, prev_follower, foll)) {
+        profile.parallel_perfects += 1;
+      }
+    }
+    prev_leader = lead;
+    prev_follower = foll;
+    run = sharp ? run + 1 : 0;
+    if (run >= sustain_limit) {
+      profile.sustains_sharp = true;
+    }
+  }
+  return profile;
+}
+
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord,

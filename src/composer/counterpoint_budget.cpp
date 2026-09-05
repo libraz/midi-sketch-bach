@@ -124,15 +124,24 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Passacaglia, "strong_beat_dissonance"},
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},
-    // FantasiaAndFugue -- its countersubjects already invert at the octave.
+    // FantasiaAndFugue -- its countersubjects already invert at the octave, and
+    // both true-parallel classes close. Its stretto reads four canon
+    // configurations and refuses one that sounds a true parallel, where it used
+    // to state the follower an octave below the leader at a one-bar delay
+    // unconditionally. The fill that runs up to the stretto is written before
+    // the block rather than after it, so the block's own lines have a preceding
+    // bar to be read against. The free section's half-cadence bass and the
+    // coda's inner voice both rank the register of a tone whose pitch class is
+    // the design value, since walking each voice up from its own band floor puts
+    // them a fixed perfect interval apart by construction. And the sustained
+    // support leaves the chord for a free diatonic tone once no triad tone in
+    // the band would do.
     {FormType::FantasiaAndFugue, "anti_parallel_perfect"},
     {FormType::FantasiaAndFugue, "battuta"},
     {FormType::FantasiaAndFugue, "cross_relation"},
     {FormType::FantasiaAndFugue, "doubling_no_leading_tone"},
     {FormType::FantasiaAndFugue, "hidden_parallel_fifth"},
     {FormType::FantasiaAndFugue, "hidden_parallel_octave"},
-    {FormType::FantasiaAndFugue, "parallel_fifth"},
-    {FormType::FantasiaAndFugue, "parallel_octave"},
     {FormType::FantasiaAndFugue, "strong_beat_dissonance"},
     {FormType::FantasiaAndFugue, "unprepared_dissonance"},
     {FormType::FantasiaAndFugue, "vertical_dissonance"},

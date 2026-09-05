@@ -349,6 +349,52 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
                             bool prefer_descending = false, bool lift_to_context = false,
                             std::uint8_t ts_numerator = 4);
 
+/// @brief How a candidate stretto canon reads against itself.
+///
+/// Lays the leader and the delayed follower on a sixteenth grid and scans the
+/// overlap for interval class 1, 6 or 11 (the semitone/tritone family) held
+/// for a full quarter note or longer. Brief passing seconds are idiomatic in a
+/// stretto, but both lines are verbatim Material -- the validator skips every
+/// dissonance rule on Material x Material pairs -- so a beat-long m2/M7
+/// between the two theme statements would ship unflagged. The caller uses this
+/// to vet each (delay, interval) configuration before committing the canon.
+///
+/// The same scan counts the true parallel perfects the pair would sound. Every
+/// canon configuration here transposes the follower by an octave or a fifth, so
+/// the two lines start a perfect interval apart and stay there wherever the
+/// subject's own contour repeats -- the pair is the one place in this form where
+/// a parallel would be produced by the design rather than stumbled into, and no
+/// later pass can answer for it, because a follower that is re-aimed is no
+/// longer the imitation the stretto exists to state. That is why the count is
+/// taken here, while the choice of configuration is still open. The slot grid
+/// reads the pair exactly as a union-onset reading does: a slot where only one
+/// line moves is oblique motion and counts for nothing.
+///
+/// @param leader_pat The leader's 16-note pattern (middle-entry material).
+/// @param leader_total Total semitone shift applied to the leader.
+/// @param follower_pat The follower's 16-note pattern (exposition subject).
+/// @param follower_total Total semitone shift applied to the follower.
+/// @param leader_rhythm Leader per-note durations (one subject statement).
+/// @param follower_rhythm Follower per-note durations (zero-length tail
+///        entries lay nothing, so a one-bar head vets only its own span).
+/// @param delay_bars Follower entry delay in bars (1..window_bars-1).
+/// @param window_bars Length of the leader statement, in bars.
+/// @return The overlap's dissonance profile (see StrettoOverlapProfile).
+struct StrettoOverlapProfile {
+  bool sustains_sharp = false;  // ic 1/6/11 held for >= a quarter note.
+  int overlap_slots = 0;        // sixteenth slots where both lines sound.
+  int broad_sharp_slots = 0;    // slots at ic 1/2/6/10/11 (seconds family).
+  int parallel_perfects = 0;    // slots where both lines move into one perfect class.
+};
+
+StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& leader_pat,
+                                            int leader_total,
+                                            const std::array<std::uint8_t, 16>& follower_pat,
+                                            int follower_total,
+                                            const std::array<Tick, 16>& leader_rhythm,
+                                            const std::array<Tick, 16>& follower_rhythm,
+                                            int delay_bars, int window_bars);
+
 /// @brief Emit an actual cadential I6/4 -> V -> I upper-voice cell.
 ///
 /// The first beat holds the tonic above a dominant pedal (the dissonant fourth

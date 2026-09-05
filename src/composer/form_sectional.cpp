@@ -340,15 +340,24 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
                                   last_pedal_pitch, motions, mode, /*downbeat=*/true);
     if (bar == free_bars - 1) {
       // The free section's declared half cadence needs the actual lowest voice
-      // on V, not merely an arbitrary member of the dominant triad.
+      // on V, not merely an arbitrary member of the dominant triad. Which V is
+      // not part of that: the pitch class is the design value and the octave is
+      // only a convenience, so the band's dominants are ranked against the
+      // voices above before the nearest to the band centre wins among equals.
+      // Taking the register unranked made this the one onset in the section
+      // that could not refuse a perfect approach -- the cadence bar bypasses the
+      // ordinary relief below, by design, so nothing downstream would catch it.
       int best_root = -1;
+      int best_rank = 1 << 30;
       int best_distance = 1 << 30;
       for (int pitch = kFreeV2Lo; pitch <= kFreeV2Hi; ++pitch) {
         if (pitch % 12 != chord.root_pc % 12)
           continue;
+        const int rank = pedal_fault_rank(pitch);
         const int distance = std::abs(pitch - centre);
-        if (distance < best_distance) {
+        if (rank < best_rank || (rank == best_rank && distance < best_distance)) {
           best_root = pitch;
+          best_rank = rank;
           best_distance = distance;
         }
       }
@@ -385,14 +394,21 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       registry.record(bar_start, /*voice=*/2, first, kTicksPerBeat * 2);
       registry.record(bar_start + kTicksPerBeat * 2, /*voice=*/2, second, kTicksPerBeat * 2);
     } else if (walking) {
-      // Half-note root then a half-note fifth above (still inside the band).
-      int fifth = root + 7;
+      // Half-note root then a half-note fifth above it (still inside the band).
+      // The first tone goes through the same ranking as every other pedal onset.
+      // Writing the root unranked here left this the one branch where a bar head
+      // could take a perfect approach against the figuration above it and keep
+      // it: the ordinary branch would have stepped to a chord tone instead. The
+      // fifth is measured from the tone actually taken, so the walk keeps its
+      // shape wherever the root is displaced.
+      const int first = pedal_pitch(root, chord);
+      int fifth = first + 7;
       if (fifth > kFreeV2Hi)
-        fifth = root - 5;  // fall to the fourth below if the fifth overflows.
+        fifth = first - 5;  // fall to the fourth below if the fifth overflows.
       fifth = std::clamp(fifth, kFreeV2Lo, kFreeV2Hi);
-      addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, root);
+      addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, first);
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, fifth);
-      registry.record(bar_start, /*voice=*/2, root, kTicksPerBeat * 2);
+      registry.record(bar_start, /*voice=*/2, first, kTicksPerBeat * 2);
       registry.record(bar_start + kTicksPerBeat * 2, /*voice=*/2, fifth, kTicksPerBeat * 2);
       last_pedal_pitch = fifth;
       pedal_run = 1;
@@ -790,6 +806,36 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
             }
           }
         }
+        // Proof of exhaustion, then leave the chord. The scan above offers only
+        // triad tones, and against running lines walking through non-chord tones
+        // all three pitch classes are regularly blocked at once -- at which point
+        // the tone the selector was called to replace stands, true parallel and
+        // all. This section already declares itself exempt from the downbeat
+        // chord-tone check, so a free diatonic tone is admissible here; it is
+        // taken only once no triad tone anywhere in the band would do.
+        if (pitch == original && design_rank == kSupportParallel) {
+          const int span = std::max(kBandHi[voice] - original, original - kBandLo[voice]);
+          for (int dist = 1; dist <= span && pitch == original; ++dist) {
+            for (const int sgn : {-1, 1}) {
+              const int cand = original + sgn * dist;
+              if (cand < kBandLo[voice] || cand > kBandHi[voice] || cand > order_ceiling ||
+                  !detail::inScale(cand, mode)) {
+                continue;
+              }
+              bool consonant = true;
+              for (const int sounding : theme_pitches) {
+                if (!isConsonantPair(cand, sounding)) {
+                  consonant = false;
+                  break;
+                }
+              }
+              if (consonant && support_fault_rank(cand) == kSupportClean) {
+                pitch = cand;
+                break;
+              }
+            }
+          }
+        }
       }
       addNote(section.notes, bar_start, pulse_duration, pitch);
       registry.record(bar_start, voice, pitch, pulse_duration);
@@ -963,26 +1009,76 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       leader_bar = next_free_bar + ((cadence_start - next_free_bar - 4) / 4) * 4;
     }
 
+    // The fill that runs up to the leader is written before the stretto block,
+    // not after it, so the block's own lines have a preceding bar to be read
+    // against. A line whose previous bar does not exist yet reports no motion at
+    // all -- `concurrentMotions` returns a previous pitch of -1 and every
+    // parallel predicate short-circuits on it -- so a guard placed after the
+    // fill can refuse a parallel that a guard placed before it cannot even see.
+    if (leader_bar > next_free_bar) {
+      add_counterline(0, next_free_bar, leader_bar - 1, 2);
+      add_counterline(1, next_free_bar, leader_bar - 1, 2, v1_alternate_density);
+      add_sustained_support(2, next_free_bar, leader_bar - 1, bass_pulse);
+    }
+
     // Leader: a full subject statement in V0 (bars leader_bar .. +3).
     stamp_subject(leader_bar, v0_off, 0);
     pushSpan(asm_ctx, 0, leader_bar, leader_bar + 3, VoiceIntent::SubjectCarrier);
 
-    // Follower: a subject statement in V1 entering one bar later (genuine
-    // overlap), 12 notes (3 bars) so it stays inside the development window.
-    const int follower_off = octaveOffsetForBand(subj_pat, 0, 1, kBandLo, kBandHi);
+    // Follower: a subject statement in V1 entering after the leader (genuine
+    // overlap), truncated at the leader's window end.
+    //
+    // Both lines are verbatim Material, so the validator skips every vertical
+    // rule on the pair and the canon configuration is the only place a parallel
+    // between the two theme statements can be answered. Read all four before
+    // committing one: a configuration that sounds a true parallel is refused
+    // outright, and among the rest the quieter overlap wins with the densest
+    // canon breaking ties. Stating the follower an octave below the leader at a
+    // one-bar delay -- the configuration this took unconditionally -- makes a
+    // parallel octave of every place the subject's own contour repeats.
+    struct CanonConfig {
+      int delay_bars;
+      int extra_semis;
+    };
+    constexpr std::array<CanonConfig, 4> kCanonConfigs = {{{1, 0}, {2, 0}, {1, 7}, {2, 7}}};
+    int follower_off = octaveOffsetForBand(subj_pat, 0, 1, kBandLo, kBandHi);
+    int follower_delay = 1;
+    {
+      int best_index = -1;
+      std::array<int, 2> best_key{};
+      for (std::size_t idx = 0; idx < kCanonConfigs.size(); ++idx) {
+        const CanonConfig& candidate = kCanonConfigs[idx];
+        const int candidate_off =
+            octaveOffsetForBand(subj_pat, candidate.extra_semis, 1, kBandLo, kBandHi) +
+            candidate.extra_semis;
+        const StrettoOverlapProfile profile =
+            strettoOverlapProfile(subj_pat, v0_off, subj_pat, candidate_off, subj_rhythm,
+                                  subj_rhythm, candidate.delay_bars, kSubjectBars);
+        if (profile.parallel_perfects > 0) {
+          continue;
+        }
+        const std::array<int, 2> key = {profile.sustains_sharp ? 1 : 0, profile.broad_sharp_slots};
+        if (best_index < 0 || key < best_key) {
+          best_index = static_cast<int>(idx);
+          best_key = key;
+          follower_off = candidate_off;
+          follower_delay = candidate.delay_bars;
+        }
+      }
+    }
     StrettoDecl stretto;
     stretto.leader_voice = 0;
     stretto.follower_voice = 1;
     stretto.leader_entry_tick = barTick(leader_bar);
     stretto.leader_length_ticks = barTick(kSubjectBars);
-    stretto.follower_entry_tick = barTick(leader_bar + 1);
+    stretto.follower_entry_tick = barTick(leader_bar + follower_delay);
     // The validator checks follower_notes[i] == material.subject[i] +
     // interval_semis, where material.subject[0..15] is the V0 exposition subject
     // (transposed by v0_off). The follower lives in the V1 band, so the declared
     // interval is the band-octave difference; the follower pitch is computed from
     // the raw pattern + follower_off, which equals subject[i] + interval_semis.
     stretto.interval_semis = follower_off - v0_off;
-    Tick follower_cursor = barTick(leader_bar + 1);
+    Tick follower_cursor = barTick(leader_bar + follower_delay);
     const Tick follower_end = barTick(leader_bar + kSubjectBars);
     for (int note = 0; note < kSubjectNotes && follower_cursor < follower_end; ++note) {
       const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + follower_off;
@@ -996,7 +1092,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       follower_cursor += subj_rhythm[static_cast<std::size_t>(note)];
     }
     out.material.stretto_entries.push_back(stretto);
-    pushSpan(asm_ctx, 1, leader_bar + 1, leader_bar + 3, VoiceIntent::StrettoCarrier);
+    pushSpan(asm_ctx, 1, leader_bar + follower_delay, leader_bar + 3, VoiceIntent::StrettoCarrier);
 
     // V2 figuration under the stretto block (band-confined, eighth motion so
     // the bass keeps moving against the overlapped theme statements). The two
@@ -1009,11 +1105,6 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     // support as part of its denser contrapuntal identity. Both variants keep
     // at least two sounding voices and a three-voice downbeat. Lines are built
     // top-down so each lower line selects consonant, parallel-free tones.
-    if (leader_bar > next_free_bar) {
-      add_counterline(0, next_free_bar, leader_bar - 1, 2);
-      add_counterline(1, next_free_bar, leader_bar - 1, 2, v1_alternate_density);
-      add_sustained_support(2, next_free_bar, leader_bar - 1, bass_pulse);
-    }
     if (leader_bar + 4 < cadence_start) {
       add_counterline(0, leader_bar + 4, cadence_start - 1, 2);
       add_counterline(1, leader_bar + 4, cadence_start - 1, 2, v1_alternate_density);
@@ -1103,6 +1194,48 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     int inner_dominant = kBandLo[1];
     while (inner_dominant % 12 != 7) {
       ++inner_dominant;
+    }
+    // Which G is not a design value -- the pitch class is. Walking up from the
+    // band floor in this voice and in the bass lands the two a fifth apart by
+    // construction, and the free figuration that runs into them is a fifth apart
+    // for the same reason, so the cadence was reached in parallel fifths. This
+    // voice is written last, so it is the one end of the pair that can read the
+    // other; the register is ranked against it and the lowest G still wins among
+    // equals. No register makes the pair clean -- G over C is a fifth in every
+    // octave -- so what a rank buys here is the contrary approach in place of the
+    // parallel one, which is the milder fault and the one the reference corpus
+    // actually writes at a cadence.
+    std::vector<ConcurrentMotion> cadence_motions;
+    const Tick inner_tick = barTick(cadence_start);
+    registry.concurrentMotions(inner_tick - kSixteenth, inner_tick, /*voice=*/1, kTailVoices,
+                               cadence_motions);
+    const int inner_prev = registry.soundingPitchInVoice(/*voice=*/1, inner_tick - kSixteenth);
+    if (inner_prev >= 0) {
+      const auto inner_rank = [&](int cand) {
+        int worst = 0;
+        for (const ConcurrentMotion& motion : cadence_motions) {
+          if (motion.prev < 0 || motion.curr < 0) {
+            continue;
+          }
+          if (formsStrictPerfectParallel(inner_prev, cand, motion.prev, motion.curr)) {
+            return 3;
+          }
+          if (formsPerfectParallel(inner_prev, cand, motion.prev, motion.curr)) {
+            worst = std::max(worst, 2);
+          } else if (formsAntiParallelPerfect(inner_prev, cand, motion.prev, motion.curr)) {
+            worst = std::max(worst, 1);
+          }
+        }
+        return worst;
+      };
+      int best_rank = inner_rank(inner_dominant);
+      for (int cand = inner_dominant + 12; cand <= kBandHi[1] && best_rank > 0; cand += 12) {
+        const int rank = inner_rank(cand);
+        if (rank < best_rank) {
+          best_rank = rank;
+          inner_dominant = cand;
+        }
+      }
     }
     const bool picardy_third = mode != Mode::Minor || detail::usePicardy(req.seed);
     int inner_third = kBandLo[1];

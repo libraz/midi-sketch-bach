@@ -563,11 +563,16 @@ TEST(FormSectionalTest, StrettoPresentWhenFugueIsLongEnough) {
         ASSERT_FALSE(fx.material.stretto_entries.empty())
             << formName(form) << " bars " << bars << " (fugue " << fugue_bars << ") has no stretto";
         const StrettoDecl& stretto = fx.material.stretto_entries.front();
-        // Follower enters strictly inside the leader window at a <= 1-bar delay.
+        // Follower enters strictly inside the leader window. The delay is one or
+        // two bars: the builder reads its canon configurations and refuses one
+        // that sounds a true parallel between the two theme statements, so the
+        // wider delay is taken wherever the dense canon is the faulting one. A
+        // one-bar bound here would pin the configuration the builder used to
+        // take unconditionally rather than the overlap the form requires.
         EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick);
         EXPECT_LT(stretto.follower_entry_tick,
                   stretto.leader_entry_tick + stretto.leader_length_ticks);
-        EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, kBar);
+        EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, 2 * kBar);
 
         bool has_stretto_span = false;
         for (const auto& span : fx.voice_plan.spans) {
