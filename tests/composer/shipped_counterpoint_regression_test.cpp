@@ -452,6 +452,16 @@ struct FormCeiling {
   std::size_t max_hidden;             // hidden fifths + hidden octaves, shipped
   std::size_t max_battuta;            // contrary-motion octave arrivals by downward leap
   std::size_t max_anti;               // a perfect class left and reached again in contrary motion
+  // The worst single configuration of the sweep, per shipped column. A sum
+  // cannot separate a fault population that was REMOVED from one that merely
+  // MOVED: redistributing findings across cells leaves the total wherever it
+  // was, and so does removing some from one cell while another gains the same
+  // number. A worst case does not survive removal, so the two statistics
+  // together say which happened. One accumulator, not a second instrument.
+  std::size_t max_cell_strict;
+  std::size_t max_cell_hidden;
+  std::size_t max_cell_battuta;
+  std::size_t max_cell_anti;
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
@@ -514,6 +524,11 @@ struct FormCeiling {
 //
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
+//
+// Row order, since ten bare numbers do not read on their own:
+//   form,
+//   structural strict, then the sweep totals: strict, hidden, battuta, anti,
+//   then the worst single configuration: strict, hidden, battuta, anti.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The stretto lays two verbatim theme statements against each other, so its
     // canon configuration is the one choice in this form that decides a parallel
@@ -534,7 +549,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the maximum, and its fifth rate is zero through the ninety-fifth -- while
     // hidden perfects are written freely in exactly this texture. There is no
     // quantity of true parallel that buys anything back.
-    {FormType::Fugue, 0, 0, 35, 306, 124},
+    {FormType::Fugue, 0, 0, 35, 306, 124, 0, 3, 8, 5},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -542,7 +557,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // than a bar back and ranks a hidden perfect below a true one, and its
     // figuration leaves the chord for a free diatonic tone at bar heads where no
     // chord tone is playable at all.
-    {FormType::PreludeAndFugue, 0, 0, 17, 168, 62},
+    {FormType::PreludeAndFugue, 0, 0, 17, 168, 62, 0, 1, 5, 3},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
@@ -551,7 +566,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // written last against two settled manuals, and once it ranks a hidden
     // perfect below a true one it steps onto the hidden approach rather than
     // keep the parallel it began with.
-    {FormType::TrioSonata, 0, 0, 184, 135, 8},
+    {FormType::TrioSonata, 0, 0, 184, 135, 8, 0, 7, 4, 2},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -559,7 +574,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // against the three-line surface it produces instead of installed over one
     // settled without it. What that re-aim accepts is a weaker approach in place
     // of a worse one, which is why the residue sits in hidden and battuta.
-    {FormType::ChoralePrelude, 0, 0, 28, 22, 1},
+    {FormType::ChoralePrelude, 0, 0, 28, 22, 1, 0, 3, 2, 1},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -572,8 +587,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // for that form reaches this one too and the fifth column is empty. The
     // octave column stays open: all of it comes from the toccata half, which
     // this builder writes through a different path, and it is the largest
-    // similar-motion population left anywhere in the product.
-    {FormType::ToccataAndFugue, 84, 84, 20, 163, 12},
+    // similar-motion population left anywhere in the product. Its worst
+    // configuration carries seven, which is the whole of that one bar: the
+    // octave column is one gesture repeated across the configurations that
+    // reach it, not a fault distributed over the form.
+    {FormType::ToccataAndFugue, 84, 84, 20, 163, 12, 7, 2, 7, 2},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -585,7 +603,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // quarters moves three times inside a bar, so the cadential suspension that
     // rewrites one of those tones after the scrub has passed it re-reads the
     // beat-grain reference rather than the bar head it would otherwise inherit.
-    {FormType::Passacaglia, 0, 0, 56, 65, 13},
+    {FormType::Passacaglia, 0, 0, 56, 65, 13, 0, 3, 3, 1},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -600,13 +618,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // do. Both strict columns are empty; the anti-parallel column is where the
     // register ranking steps when clean is unreachable, and the corpus writes
     // that class freely.
-    {FormType::FantasiaAndFugue, 0, 0, 23, 213, 31},
-    {FormType::CelloPrelude, 0, 0, 0, 0, 0},
+    {FormType::FantasiaAndFugue, 0, 0, 23, 213, 31, 0, 2, 7, 2},
+    {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
-    {FormType::Chaconne, 0, 0, 47, 0, 7},
+    {FormType::Chaconne, 0, 0, 47, 0, 7, 0, 1, 0, 1},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -615,7 +633,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // them is relieved arrival by arrival. Hidden approaches are what that
     // choice pays with: the leader window of a wide canon is about a fifth deep,
     // so an arrival it can reach cleanly is often still approached by leap.
-    {FormType::GoldbergVariations, 0, 0, 8, 8, 0},
+    {FormType::GoldbergVariations, 0, 0, 8, 8, 0, 0, 1, 1, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -641,6 +659,13 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
   for (const FormCeiling& entry : kFormCeilings) {
     PerfectMotionCounts structural_total;
     PerfectMotionCounts total;
+    // Composite maxima, not per-sub-column ones: the largest fifth count and the
+    // largest octave count can belong to different configurations, so adding
+    // their maxima would name a cell that does not exist and loosen the ceiling.
+    std::size_t worst_strict = 0;
+    std::size_t worst_hidden = 0;
+    std::size_t worst_battuta = 0;
+    std::size_t worst_anti = 0;
     for (SubjectCharacter character : kCharacters) {
       bool character_skipped = false;
       for (bool is_minor : kModes) {
@@ -662,7 +687,12 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
               << " seed " << request.seed;
           ++composed_cells;
           structural_total.add(countPerfectMotion(structural));
-          total.add(countPerfectMotion(notes));
+          const PerfectMotionCounts cell = countPerfectMotion(notes);
+          total.add(cell);
+          worst_strict = std::max(worst_strict, cell.strict());
+          worst_hidden = std::max(worst_hidden, cell.hidden());
+          worst_battuta = std::max(worst_battuta, cell.battuta);
+          worst_anti = std::max(worst_anti, cell.anti_parallel);
         }
       }
       if (character_skipped) {
@@ -675,9 +705,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
     // ratchet is tightened after a counterpoint fix.
     std::printf(
         "[counterpoint] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu battuta=%zu "
-        "anti=%zu\n",
+        "anti=%zu | worst-cell strict=%zu hidden=%zu battuta=%zu anti=%zu\n",
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
-        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel);
+        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
+        worst_hidden, worst_battuta, worst_anti);
     EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint rose "
@@ -698,6 +729,17 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
         << formTypeToString(entry.form)
         << ": anti-parallel perfect intervals in shipped output rose above "
         << "the ratchet";
+    // The worst single configuration, held beside the totals above. A change
+    // that leaves a total where it was while moving findings between cells is a
+    // redistribution, not a repair, and only this reads it.
+    EXPECT_LE(worst_strict, entry.max_cell_strict)
+        << formTypeToString(entry.form) << ": one configuration's parallel perfect count rose";
+    EXPECT_LE(worst_hidden, entry.max_cell_hidden)
+        << formTypeToString(entry.form) << ": one configuration's hidden perfect count rose";
+    EXPECT_LE(worst_battuta, entry.max_cell_battuta)
+        << formTypeToString(entry.form) << ": one configuration's battuta count rose";
+    EXPECT_LE(worst_anti, entry.max_cell_anti)
+        << formTypeToString(entry.form) << ": one configuration's anti-parallel count rose";
   }
 
   std::sort(skipped.begin(), skipped.end());
@@ -737,6 +779,11 @@ struct LengthCeiling {
   std::size_t max_hidden;
   std::size_t max_battuta;
   std::size_t max_anti;
+  // The worst single configuration, for the reason given on FormCeiling.
+  std::size_t max_cell_strict;
+  std::size_t max_cell_hidden;
+  std::size_t max_cell_battuta;
+  std::size_t max_cell_anti;
 };
 
 // RATCHET: as above, these may only ever be LOWERED. Measured across
@@ -748,16 +795,20 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // strict columns stay empty however far the form is stretched; the battuta
     // and anti-parallel columns grow with the length, which is what a longer
     // piece of the same counterpoint looks like.
-    {FormType::Fugue, 0, 0, 201, 2640, 958},
+    {FormType::Fugue, 0, 0, 201, 2640, 958, 0, 6, 28, 10},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length.
-    {FormType::PreludeAndFugue, 0, 0, 162, 1027, 485},
+    {FormType::PreludeAndFugue, 0, 0, 162, 1027, 485, 0, 3, 10, 8},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
   for (const LengthCeiling& entry : kLengthCeilings) {
     PerfectMotionCounts structural_total;
     PerfectMotionCounts total;
+    std::size_t worst_strict = 0;
+    std::size_t worst_hidden = 0;
+    std::size_t worst_battuta = 0;
+    std::size_t worst_anti = 0;
     for (DurationScale scale : kScales) {
       const std::uint16_t bars = resolveBars(entry.form, scale, /*target_bars=*/0);
       for (SubjectCharacter character : kCharacters) {
@@ -776,16 +827,22 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
               continue;
             ASSERT_FALSE(notes.empty());
             structural_total.add(countPerfectMotion(structural));
-            total.add(countPerfectMotion(notes));
+            const PerfectMotionCounts cell = countPerfectMotion(notes);
+            total.add(cell);
+            worst_strict = std::max(worst_strict, cell.strict());
+            worst_hidden = std::max(worst_hidden, cell.hidden());
+            worst_battuta = std::max(worst_battuta, cell.battuta);
+            worst_anti = std::max(worst_anti, cell.anti_parallel);
           }
         }
       }
     }
     std::printf(
         "[counterpoint/length] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu "
-        "battuta=%zu anti=%zu\n",
+        "battuta=%zu anti=%zu | worst-cell strict=%zu hidden=%zu battuta=%zu anti=%zu\n",
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
-        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel);
+        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
+        worst_hidden, worst_battuta, worst_anti);
     EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint rose "
@@ -800,6 +857,14 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
     EXPECT_LE(total.hidden(), entry.max_hidden) << formTypeToString(entry.form) << ": hidden rose";
     EXPECT_LE(total.anti_parallel, entry.max_anti)
         << formTypeToString(entry.form) << ": anti-parallel rose";
+    EXPECT_LE(worst_strict, entry.max_cell_strict)
+        << formTypeToString(entry.form) << ": one stretched configuration's parallel count rose";
+    EXPECT_LE(worst_hidden, entry.max_cell_hidden)
+        << formTypeToString(entry.form) << ": one stretched configuration's hidden count rose";
+    EXPECT_LE(worst_battuta, entry.max_cell_battuta)
+        << formTypeToString(entry.form) << ": one stretched configuration's battuta count rose";
+    EXPECT_LE(worst_anti, entry.max_cell_anti)
+        << formTypeToString(entry.form) << ": one stretched configuration's anti-parallel rose";
   }
 }
 
