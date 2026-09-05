@@ -475,7 +475,19 @@ struct FormCeiling {
 // cello_prelude is monophonic, so it has no voice pair and is pinned at 0
 // permanently.
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
-    {FormType::Fugue, 23, 11, 145, 61},
+    // The stretto lays two verbatim theme statements against each other, so its
+    // canon configuration is the one choice in this form that decides a parallel
+    // outright, and it is made while the whole overlap is still readable. A
+    // configuration that sounds a true parallel is now refused rather than
+    // ranked below a sustained dissonance: the dissonance is a matter of degree
+    // and the parallel is the prohibition. The strict column falls from
+    // twenty-three to three and the fifth reaches zero, paid for with four
+    // hidden perfects and four contrary-motion octave arrivals; two
+    // anti-parallels leave with the parallels. The corpus writes hidden perfects
+    // in this texture far more freely than either true class, and this form's
+    // true-octave rate sits at the edge of the corpus envelope where its hidden
+    // rate has room.
+    {FormType::Fugue, 3, 15, 149, 59},
     // Its bass support tone is read against the running voices at the grain they
     // actually move at rather than a bar back, and ranks a hidden perfect below
     // a true one; two true parallels left the strict column and two hidden ones
@@ -659,8 +671,16 @@ struct LengthCeiling {
 // RATCHET: as above, these may only ever be LOWERED. Measured across
 // 4 scales x 4 characters x 8 seeds x both modes.
 constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
-    {FormType::Fugue, 90, 96, 1260, 428},
-    {FormType::PreludeAndFugue, 36, 63, 489, 219},
+    // The stretto choice is worth far more on this axis than on the one above,
+    // because a longer fugue states more strettos: the strict column falls from
+    // ninety to eighteen with the fifth at zero throughout, against ten more
+    // contrary-motion octave arrivals and four more anti-parallels. Hidden holds
+    // where it was.
+    {FormType::Fugue, 18, 96, 1270, 432},
+    // The fugue half carries the same choice, and the prelude half adds no true
+    // parallel of its own: thirty-six down to twelve, paid with two hidden
+    // perfects and four anti-parallels, with the battuta column unmoved.
+    {FormType::PreludeAndFugue, 12, 65, 489, 223},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

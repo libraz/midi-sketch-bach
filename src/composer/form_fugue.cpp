@@ -145,11 +145,12 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
 /// canon configuration here transposes the follower by an octave or a fifth, so
 /// the two lines start a perfect interval apart and stay there wherever the
 /// subject's own contour repeats -- the pair is the one place in this form where
-/// a parallel is produced by the design rather than by a guard missing it, and
-/// no later pass can answer for it, because a follower that is re-aimed is no
-/// longer the imitation the stretto exists to state. The slot grid reads the
-/// pair exactly as a union-onset reading does: a slot where only one line moves
-/// is oblique motion and counts for nothing.
+/// a parallel would be produced by the design rather than stumbled into, and no
+/// later pass can answer for it, because a follower that is re-aimed is no
+/// longer the imitation the stretto exists to state. That is why the count is
+/// taken here, while the choice of configuration is still open. The slot grid
+/// reads the pair exactly as a union-onset reading does: a slot where only one
+/// line moves is oblique motion and counts for nothing.
 ///
 /// @param leader_pat The leader's 16-note pattern (middle-entry material).
 /// @param leader_total Total semitone shift applied to the leader.
@@ -1248,18 +1249,33 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     };
     constexpr std::array<StrettoConfig, 4> kStrettoConfigs = {{{1, 0}, {2, 0}, {1, 7}, {2, 7}}};
     const int follower_key_semis = (leader_carry_voice == 1) ? 0 : key_semis;
-    // Read every configuration before committing one, rather than taking the
-    // first that clears the dissonance veto. The configurations differ in the
-    // delay and in whether the canon sounds at the octave or at the fifth, and
-    // both of those decide how often the two statements step into a perfect
-    // interval together -- which the preference order has no way to see, and
-    // which no later pass can answer for, since a follower that is re-aimed is
-    // no longer an imitation. Fewest true parallels wins; the preference order
-    // (densest canon first) breaks ties, so a window whose configurations are
-    // equally clean commits exactly what it did before.
-    int best_index = -1;
-    int best_parallels = 0;
-    int best_follower_total = 0;
+    // Read every configuration before committing one. The configurations differ
+    // in the delay and in whether the canon sounds at the octave or at the
+    // fifth, and both of those decide how often the two statements step into a
+    // perfect interval together -- which the preference order has no way to see,
+    // and which no later pass can answer for, since a follower that is re-aimed
+    // is no longer an imitation.
+    //
+    // A window states its canon only if some configuration keeps clear of a
+    // sustained sharp dissonance AND some configuration keeps clear of a true
+    // parallel; failing either, the canon is not worth what it would cost and
+    // the window is left to its ordinary texture. Among the rest the two faults
+    // are ranked rather than pooled, and the parallel outranks the dissonance: a
+    // beat-long second between the two theme statements is a matter of degree,
+    // while the parallel is the cardinal prohibition, so a configuration that
+    // sounds one is refused even when it is the only quiet one on offer. The
+    // preference order (densest canon first) breaks the remaining ties, so a
+    // window whose configurations are equally clean commits exactly what it
+    // committed before.
+    struct ConfigRead {
+      bool considered = false;
+      int parallels = 0;
+      int sustains_sharp = 0;
+      int follower_total = 0;
+    };
+    std::array<ConfigRead, kStrettoConfigs.size()> reads{};
+    bool any_quiet = false;
+    bool any_parallel_free = false;
     for (std::size_t idx = 0; idx < kStrettoConfigs.size(); ++idx) {
       const StrettoConfig& candidate = kStrettoConfigs[idx];
       if (leader_carry_voice == 1 && candidate.extra_semis != 0) {
@@ -1272,13 +1288,31 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const StrettoOverlapProfile profile =
           strettoOverlapProfile(leader_pat, leader_total, subj_pat, candidate_total, subj_rhythm,
                                 subj_rhythm, candidate.delay_bars);
-      if (profile.sustains_sharp) {
-        continue;
-      }
-      if (best_index < 0 || profile.parallel_perfects < best_parallels) {
+      ConfigRead& read = reads[idx];
+      read.considered = true;
+      read.parallels = profile.parallel_perfects;
+      read.sustains_sharp = profile.sustains_sharp ? 1 : 0;
+      read.follower_total = candidate_total;
+      any_quiet = any_quiet || !profile.sustains_sharp;
+      any_parallel_free = any_parallel_free || profile.parallel_perfects == 0;
+    }
+    int best_index = -1;
+    int best_follower_total = 0;
+    if (any_quiet && any_parallel_free) {
+      for (std::size_t idx = 0; idx < reads.size(); ++idx) {
+        const ConfigRead& read = reads[idx];
+        if (!read.considered) {
+          continue;
+        }
+        if (best_index >= 0) {
+          const ConfigRead& best = reads[static_cast<std::size_t>(best_index)];
+          if (read.parallels > best.parallels)
+            continue;
+          if (read.parallels == best.parallels && read.sustains_sharp >= best.sustains_sharp)
+            continue;
+        }
         best_index = static_cast<int>(idx);
-        best_parallels = profile.parallel_perfects;
-        best_follower_total = candidate_total;
+        best_follower_total = read.follower_total;
       }
     }
     if (best_index >= 0) {

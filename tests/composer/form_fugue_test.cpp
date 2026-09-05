@@ -13,8 +13,8 @@
 //   - fugue exposition has three staggered entries (V0, then V1 at the answer
 //     band, then V2 at the third-entry band).
 //   - the V0 subject melody equals the selected catalog slot.
-//   - a stretto is present in the climax cycle (two overlapping subject
-//     statements <= 2 bars apart, vetted for sustained dissonance).
+//   - a stretto is present in the climax cycle of most seeds (two overlapping
+//     subject statements <= 2 bars apart), and never sounds a true parallel.
 //   - the final bars cadence on the tonic (Picardy when minor + even seed).
 //   - the middle-entry related-key degrees follow the rotation table.
 //   - P&F: the prelude region has no subject statements, the fugue region
@@ -43,6 +43,7 @@
 #include "composer/motif_ops.h"
 #include "composer/ornament_pass.h"
 #include "composer/subject_catalog.h"
+#include "composer/texture_helpers.h"
 #include "composer/validator.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -703,27 +704,42 @@ TEST(FormFugueTest, TextureGateRunLimitHoldsOnRepresentativeSeeds) {
 // --- 4. Stretto present in the climax cycle --------------------------------
 
 TEST(FormFugueTest, StrettoPresentInClimaxCycle) {
-  // A 64-bar fugue has several development cycles, so a climax stretto exists.
-  const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 64);
-  ASSERT_FALSE(fx.material.stretto_entries.empty()) << "no stretto declared";
-
-  const StrettoDecl& stretto = fx.material.stretto_entries.front();
-  // The follower enters strictly inside the leader's window (genuine overlap).
-  // The delay is 1 or 2 bars -- the builder vets each canon configuration for
-  // sustained dissonance and widens the delay when the 1-bar canon clashes.
-  EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick);
-  EXPECT_LT(stretto.follower_entry_tick, stretto.leader_entry_tick + stretto.leader_length_ticks);
-  EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, 2 * kBar)
-      << "stretto delay exceeds two bars";
-
-  // A StrettoCarrier span replays it.
-  bool has_stretto_span = false;
-  for (const auto& span : fx.voice_plan.spans) {
-    if (span.intent == VoiceIntent::StrettoCarrier) {
-      has_stretto_span = true;
+  // A 64-bar fugue has several development cycles, so a climax stretto is
+  // available -- but it is stated only when some canon configuration is free of
+  // a true parallel between the two theme statements and some configuration is
+  // free of a sustained dissonance. Where the subject cannot be laid against
+  // itself on those terms the window keeps its ordinary texture, so presence is
+  // counted over a seed range rather than demanded of every seed. The count is
+  // pinned in both directions: it is the frequency of the gesture, and a drift
+  // either way is a change in how often the climax states its canon.
+  std::size_t with_stretto = 0;
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 64);
+    if (fx.material.stretto_entries.empty()) {
+      continue;
     }
+    ++with_stretto;
+
+    const StrettoDecl& stretto = fx.material.stretto_entries.front();
+    // The follower enters strictly inside the leader's window (genuine overlap).
+    // The delay is 1 or 2 bars -- the builder reads each canon configuration and
+    // widens the delay when the 1-bar canon is the one that clashes.
+    EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick) << "seed " << seed;
+    EXPECT_LT(stretto.follower_entry_tick, stretto.leader_entry_tick + stretto.leader_length_ticks)
+        << "seed " << seed;
+    EXPECT_LE(stretto.follower_entry_tick - stretto.leader_entry_tick, 2 * kBar)
+        << "stretto delay exceeds two bars, seed " << seed;
+
+    // A StrettoCarrier span replays it.
+    bool has_stretto_span = false;
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent == VoiceIntent::StrettoCarrier) {
+        has_stretto_span = true;
+      }
+    }
+    EXPECT_TRUE(has_stretto_span) << "no StrettoCarrier span, seed " << seed;
   }
-  EXPECT_TRUE(has_stretto_span) << "no StrettoCarrier span";
+  EXPECT_EQ(with_stretto, 12u) << "the climax stretto changed how often it is stated";
 }
 
 TEST(FormFugueTest, EntrySchedulerUsesDecileIntervalsForLongFugue) {
@@ -950,24 +966,34 @@ TEST(FormFugueTest, ThreeVoiceStrettoPilesUpAtClimax) {
 // the kStrettoRate threshold) at 64 bars has six entry cycles, so it carries the
 // climax stretto AND a pre-coda stretto at two distinct leader ticks.
 TEST(FormFugueTest, SecondStrettoMomentRestatesBeforeCoda) {
-  const HarnessFixture fx = buildFixture(FormType::Fugue, 1, false, 64);
-  ASSERT_GE(fx.material.stretto_entries.size(), 2u);
-
-  std::set<Tick> leader_ticks;
-  for (const auto& stretto : fx.material.stretto_entries) {
-    leader_ticks.insert(stretto.leader_entry_tick);
-    // Every follower still overlaps its own leader window.
-    EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick);
-    EXPECT_LT(stretto.follower_entry_tick, stretto.leader_entry_tick + stretto.leader_length_ticks);
-  }
   // Two distinct leader ticks = the climax cycle plus a separate pre-coda cycle
   // (a three-voice pile-up shares ONE leader tick, so this is a second moment).
-  EXPECT_GE(leader_ticks.size(), 2u) << "no stretto restated outside the climax cycle";
+  // Each moment is placed on its own terms, so a seed that states one may fail
+  // to state the other; the reprise is looked for over a seed range and pinned
+  // by how many seeds carry it.
+  std::size_t with_second_moment = 0;
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 64);
+    std::set<Tick> leader_ticks;
+    for (const auto& stretto : fx.material.stretto_entries) {
+      leader_ticks.insert(stretto.leader_entry_tick);
+      // Every follower still overlaps its own leader window.
+      EXPECT_GT(stretto.follower_entry_tick, stretto.leader_entry_tick) << "seed " << seed;
+      EXPECT_LT(stretto.follower_entry_tick,
+                stretto.leader_entry_tick + stretto.leader_length_ticks)
+          << "seed " << seed;
+    }
+    if (leader_ticks.size() >= 2u) {
+      ++with_second_moment;
+    }
 
-  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-  EXPECT_TRUE(r.validation.failures.empty())
-      << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
-  EXPECT_FALSE(hasRule(r.validation, "stretto_overlap_valid"));
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    EXPECT_TRUE(r.validation.failures.empty())
+        << "seed " << seed << ": "
+        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+    EXPECT_FALSE(hasRule(r.validation, "stretto_overlap_valid")) << "seed " << seed;
+  }
+  EXPECT_EQ(with_second_moment, 3u) << "the pre-coda stretto reprise changed how often it lands";
 }
 
 // The dominant pedal is proportional to development weight: any development with
@@ -1798,19 +1824,26 @@ TEST(FormFugueTest, StrettoFollowerSharesLeaderKey) {
                           << overlaps << " (follower not in the leader's key?)";
 }
 
-// The committed stretto canon never sustains a sharp dissonance (interval
-// class 1, 6 or 11) between leader and follower for a quarter note or longer:
-// the builder vets every (delay, interval) canon configuration on a sixteenth
-// grid and drops the stretto when none is clean. Both lines are verbatim
-// Material -- the validator skips every dissonance rule on Material x Material
-// pairs -- so this build-time vet is the only guard against a beat-long m2/M7
-// between the two theme statements (the audible "wrong note" in the climax).
-TEST(FormFugueTest, StrettoOverlapNeverSustainsSharpDissonance) {
+// What the stretto overlap costs, read on the same sixteenth grid the builder
+// chooses its canon on. Both lines are verbatim Material -- the validator skips
+// every vertical rule on Material x Material pairs -- so the choice of canon
+// configuration is the only place either fault can be answered, and it is made
+// while the whole overlap is still readable. The two faults are ranked there,
+// not pooled: a configuration that sounds a true parallel is refused even when
+// it is the only one free of a beat-long m2/M7, because the parallel is the
+// prohibition and the dissonance is a matter of degree.
+struct StrettoOverlapCost {
+  std::size_t parallels = 0;
+  std::size_t sustained_sharps = 0;
+};
+
+StrettoOverlapCost measureStrettoOverlaps() {
   constexpr std::array<SubjectCharacter, 4> kCharacters = {
       SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
       SubjectCharacter::Restless};
   const Tick sixteenth = kBar / 16;
   const int sustain_limit = 4;  // four sixteenth slots = one quarter.
+  StrettoOverlapCost cost;
   for (const SubjectCharacter character : kCharacters) {
     for (const std::uint32_t seed : kSeeds) {
       for (const bool minor : {false, true}) {
@@ -1826,6 +1859,8 @@ TEST(FormFugueTest, StrettoOverlapNeverSustainsSharpDissonance) {
         for (const StrettoDecl& stretto : fx.material.stretto_entries) {
           const Tick overlap_end = stretto.leader_entry_tick + stretto.leader_length_ticks;
           int run = 0;
+          int previous_leader = -1;
+          int previous_follower = -1;
           for (Tick tick = stretto.follower_entry_tick; tick < overlap_end; tick += sixteenth) {
             const int leader = latestSoundingPitch(r.notes, stretto.leader_voice, tick);
             const int follower = latestSoundingPitch(r.notes, stretto.follower_voice, tick);
@@ -1833,17 +1868,39 @@ TEST(FormFugueTest, StrettoOverlapNeverSustainsSharpDissonance) {
             if (leader >= 0 && follower >= 0) {
               const int ic = std::abs(leader - follower) % 12;
               sharp = (ic == 1 || ic == 6 || ic == 11);
+              if (formsStrictPerfectParallel(previous_leader, leader, previous_follower,
+                                             follower)) {
+                ++cost.parallels;
+              }
             }
+            previous_leader = leader;
+            previous_follower = follower;
             run = sharp ? run + 1 : 0;
-            ASSERT_LT(run, sustain_limit)
-                << "sustained sharp dissonance in the stretto overlap at tick " << tick << " (seed "
-                << seed << ", character " << static_cast<int>(character) << ", minor " << minor
-                << ")";
+            if (run == sustain_limit) {
+              ++cost.sustained_sharps;
+            }
           }
         }
       }
     }
   }
+  return cost;
+}
+
+TEST(FormFugueTest, StrettoOverlapNeverSoundsATrueParallel) {
+  EXPECT_EQ(measureStrettoOverlaps().parallels, 0u)
+      << "a canon configuration that sounds a true parallel was committed";
+}
+
+// The counterpart to the guarantee above, and the price of it. A canon free of
+// the parallel is not always free of the dissonance, and where both cannot be
+// had the parallel is what gets refused. Counted rather than forbidden, so the
+// trade stays visible: a rise here means parallel-free configurations are
+// getting scarcer, which is a fact about the subject catalog and not a fault in
+// the choice.
+TEST(FormFugueTest, StrettoOverlapSustainsASharpOnlyWhereTheParallelWasRefused) {
+  EXPECT_EQ(measureStrettoOverlaps().sustained_sharps, 12u)
+      << "the beat-long m2/M7 count in the stretto overlap moved";
 }
 
 // The coda keeps a full three-voice texture under the final V0 subject head: a

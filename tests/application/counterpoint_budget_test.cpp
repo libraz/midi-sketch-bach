@@ -142,8 +142,15 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   const std::vector<std::string> with_invertible_counterpoint = {"doubling_no_seventh",
                                                                  "invertible_at_octave"};
 
-  EXPECT_EQ(closedRulesFor(FormType::Fugue), keyboard_polyphony);
-  EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), keyboard_polyphony);
+  // The stretto lays two verbatim theme statements against each other, so it is
+  // the one window where the fifth would be chosen rather than stumbled into.
+  // Every canon configuration is read before one is committed and a
+  // configuration that sounds a true parallel is refused, which closes the
+  // fifth. The octave also arrives from the free accompaniment, which that
+  // choice does not reach, so it stays open.
+  const std::vector<std::string> stretto_fifth_closed = {"doubling_no_seventh", "parallel_fifth"};
+  EXPECT_EQ(closedRulesFor(FormType::Fugue), stretto_fifth_closed);
+  EXPECT_EQ(closedRulesFor(FormType::PreludeAndFugue), stretto_fifth_closed);
   // The pedal is written last against two settled manuals and ranks a hidden
   // perfect below a true one, so it steps onto the weaker approach instead of
   // keeping the parallel its three-tone band left it with; where the band runs
@@ -218,7 +225,7 @@ TEST(CounterpointBudgetTest, ClosedRuleWithoutAMatchAppendsNothing) {
 
 TEST(CounterpointBudgetTest, OpenAndLinearRulesNeverAppendHoweverOftenTheyMatch) {
   composer::ValidationReport report;
-  report.observations.push_back(observation("parallel_fifth", 500));
+  report.observations.push_back(observation("parallel_octave", 500));
   report.observations.push_back(observation("strong_beat_dissonance", 500));
   report.observations.push_back(observation("tritone_melodic", 500));
 

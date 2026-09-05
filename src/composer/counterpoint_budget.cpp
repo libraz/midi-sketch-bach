@@ -23,7 +23,13 @@ namespace {
 // Sorted by form ordinal, then by rule_id, so the regression can reject a
 // duplicate or a misplaced row.
 constexpr CounterpointBudgetEntry kOpenRules[] = {
-    // Fugue
+    // Fugue -- the stretto is the one window where two verbatim theme statements
+    // are laid against each other, so it is the one window where a parallel is
+    // chosen rather than stumbled into: every canon configuration is read before
+    // one is committed, and a configuration that sounds a true parallel is
+    // refused even when it is the only quiet one on offer. That closes the fifth
+    // everywhere. The octave stays open because it also arrives from the
+    // free accompaniment, which the canon choice does not reach.
     {FormType::Fugue, "anti_parallel_perfect"},
     {FormType::Fugue, "battuta"},
     {FormType::Fugue, "cross_relation"},
@@ -31,12 +37,13 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Fugue, "hidden_parallel_fifth"},
     {FormType::Fugue, "hidden_parallel_octave"},
     {FormType::Fugue, "invertible_at_octave"},
-    {FormType::Fugue, "parallel_fifth"},
     {FormType::Fugue, "parallel_octave"},
     {FormType::Fugue, "strong_beat_dissonance"},
     {FormType::Fugue, "unprepared_dissonance"},
     {FormType::Fugue, "vertical_dissonance"},
-    // PreludeAndFugue
+    // PreludeAndFugue -- the fugue half is built by the same stretto choice, and
+    // the prelude half adds no parallel fifth of its own, so the fifth closes
+    // here for the same reason it closes on the bare fugue.
     {FormType::PreludeAndFugue, "anti_parallel_perfect"},
     {FormType::PreludeAndFugue, "battuta"},
     {FormType::PreludeAndFugue, "cross_relation"},
@@ -44,7 +51,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::PreludeAndFugue, "hidden_parallel_fifth"},
     {FormType::PreludeAndFugue, "hidden_parallel_octave"},
     {FormType::PreludeAndFugue, "invertible_at_octave"},
-    {FormType::PreludeAndFugue, "parallel_fifth"},
     {FormType::PreludeAndFugue, "parallel_octave"},
     {FormType::PreludeAndFugue, "strong_beat_dissonance"},
     {FormType::PreludeAndFugue, "unprepared_dissonance"},
