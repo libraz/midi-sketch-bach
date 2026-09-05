@@ -7,6 +7,7 @@
 #include "composer/composer.h"
 #include "composer/figuration.h"
 #include "composer/harmonic_plan.h"
+#include "composer/harness_fixture.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -118,6 +119,29 @@ struct OrnamentParams {
   Tick climax_end_tick = 0;                     // window end, exclusive (0 = none).
   std::vector<Tick> section_cadence_ticks;      // interior section-cadence bar starts (0 = none).
 };
+
+/**
+ * @brief Fill the fixture-derived half of an OrnamentParams.
+ *
+ * Meter, harmonic context, the voices a form exempts from decoration, the
+ * Goldberg aria window, the interior section cadences and the climax window are
+ * all properties of the built fixture rather than of the caller's surface, and
+ * getting any of them wrong changes which notes ship. Resolving them in one
+ * place is what keeps a second caller -- a measurement of the shipped note
+ * array, another front end -- from describing music the product does not
+ * produce.
+ *
+ * The caller keeps the choices the fixture cannot know: character, instrument,
+ * mode, seed and tempo.
+ *
+ * @param fixture Built form fixture (harmony, voice plan, section metadata).
+ * @param form Form being composed (selects the aria window).
+ * @param total_ticks Length of the composed notes, used only for the climax
+ *                    fallback window when the form declares none.
+ * @param params Destination; its caller-owned fields are left untouched.
+ */
+void resolveFixtureOrnamentContext(const HarnessFixture& fixture, FormType form,
+                                   std::uint32_t total_ticks, OrnamentParams* params);
 
 /**
  * @brief Resolve the effective ornament-density tier for a request.

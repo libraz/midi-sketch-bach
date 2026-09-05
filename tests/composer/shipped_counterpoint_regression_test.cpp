@@ -9,11 +9,37 @@
 // quality of the notes that actually ship.
 //
 // This file counts parallel and hidden perfect intervals directly from the
-// note array produced by the shipped path (ComposeRequest ->
-// buildFormFixture -> Composer::run), bypassing the validator and its
-// exemptions entirely, and holds each form to a per-form ceiling. The judge of
-// a single motion pair is the shared classifyPerfectMotion; only the sampling
-// and bookkeeping around it are written here.
+// note array the shipped path emits, bypassing the validator and its exemptions
+// entirely, and holds each form to a per-form ceiling. The judge of a single
+// motion pair is the shared classifyPerfectMotion; only the sampling and
+// bookkeeping around it are written here.
+//
+// TWO SURFACES, because the piece has two and neither one describes it alone.
+//
+// Composer::run produces the counterpoint; the ornament pass then rewrites the
+// same array, and it is the pass's output that ships. A trill, a turn or a
+// slide replaces one held tone with several moving ones, so the pass both adds
+// motion of its own and -- because the two structural tones are no longer
+// consecutive onsets -- hides motion that was there before it. Decoration
+// hiding a parallel is not the same as a form not writing one, and a ratchet
+// that reads only the decorated array would let a form close a gate by
+// ornamenting over the fault instead of removing it.
+//
+// So both are counted:
+//
+//   structural : Composer::run's own output. The strict column only. This is
+//                the counterpoint the form builders actually wrote, and no
+//                amount of decoration may be what brings it to zero.
+//   shipped    : after the ornament pass. All four columns. Everything past the
+//                pass -- velocity curve, renderer, MIDI writer -- leaves pitch
+//                and onset alone, so this is the final contrapuntal surface,
+//                and it is the surface the product's own gate reads
+//                (applyCounterpointBudget over FinalScore validation).
+//
+// The ornament configuration is not rebuilt here. resolveFixtureOrnamentContext
+// is the product's own derivation, called with the product's own instrument
+// default and tempo, because a decoration density chosen locally would put this
+// file back to describing a note array of its own.
 
 #include <gtest/gtest.h>
 
@@ -25,60 +51,20 @@
 #include <string>
 #include <vector>
 
+// For kDefaultBpm alone: trill pacing is tempo-dependent, so the shipped note
+// array is the one decorated at the tempo the product defaults to. This is a
+// compile-time constant, not a link dependency -- bach_composer_tests still
+// links bach_composer_lib only.
+#include "application/composition_service.h"
 #include "composer/composer.h"
 #include "composer/form_director.h"
 #include "composer/harness_fixture.h"
+#include "composer/ornament_pass.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
-
-// --- Local naming ------------------------------------------------------------
-//
-// bach_composer_tests links bach_composer_lib only, so the display helpers in
-// core/basic_types.cpp are out of reach. These labels exist for failure
-// messages and for the skipped-cell expectation.
-
-const char* formLabel(FormType form) {
-  switch (form) {
-    case FormType::Fugue:
-      return "fugue";
-    case FormType::PreludeAndFugue:
-      return "prelude_and_fugue";
-    case FormType::TrioSonata:
-      return "trio_sonata";
-    case FormType::ChoralePrelude:
-      return "chorale_prelude";
-    case FormType::ToccataAndFugue:
-      return "toccata_and_fugue";
-    case FormType::Passacaglia:
-      return "passacaglia";
-    case FormType::FantasiaAndFugue:
-      return "fantasia_and_fugue";
-    case FormType::CelloPrelude:
-      return "cello_prelude";
-    case FormType::Chaconne:
-      return "chaconne";
-    case FormType::GoldbergVariations:
-      return "goldberg_variations";
-  }
-  return "unknown_form";
-}
-
-const char* characterLabel(SubjectCharacter character) {
-  switch (character) {
-    case SubjectCharacter::Severe:
-      return "severe";
-    case SubjectCharacter::Playful:
-      return "playful";
-    case SubjectCharacter::Noble:
-      return "noble";
-    case SubjectCharacter::Restless:
-      return "restless";
-  }
-  return "unknown_character";
-}
 
 // --- Independent perfect-motion counter -------------------------------------
 
@@ -419,32 +405,86 @@ constexpr std::array<SubjectCharacter, 4> kCharacters = {{
     SubjectCharacter::Restless,
 }};
 
+// Major and minor are different music -- the minor material has its own
+// subjects, its own leading tone and its own final chord -- so both are swept
+// against every seed rather than interleaved across them. Tying the mode to the
+// seed's parity halves the grid and leaves each seed measured in one mode only,
+// which is a regression surface no ceiling can describe.
+constexpr std::array<bool, 2> kModes = {{false, true}};
+
 constexpr std::uint32_t kFirstSeed = 1;
 constexpr std::uint32_t kSeedCount = 8;
 
+std::uint32_t totalTicks(const std::vector<NoteEvent>& notes) {
+  std::uint32_t last = 0;
+  for (const NoteEvent& note : notes)
+    last = std::max(last, note.start_tick + note.duration);
+  return last;
+}
+
+// Both note arrays for one request: the composed counterpoint, and that same
+// counterpoint decorated exactly as the product decorates it. Returns false
+// when the form director refuses the request, which is the only reason a cell
+// is allowed to be missing.
+bool composeSurfaces(const ComposeRequest& request, std::vector<NoteEvent>* structural,
+                     std::vector<NoteEvent>* shipped) {
+  HarnessFixture fixture;
+  if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
+    return false;
+  ComposeResult result = Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+  *structural = result.notes;
+  OrnamentParams ornament;
+  ornament.character = request.character;
+  ornament.instrument = defaultInstrumentForForm(request.form);
+  ornament.mode = request.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+  ornament.seed = request.seed;
+  ornament.bpm = application::kDefaultBpm;
+  resolveFixtureOrnamentContext(fixture, request.form, totalTicks(result.notes), &ornament);
+  applyOrnamentPass(result, ornament);
+  *shipped = std::move(result.notes);
+  return true;
+}
+
 struct FormCeiling {
   FormType form;
-  std::size_t max_strict;   // parallel fifths + parallel octaves/unisons
-  std::size_t max_hidden;   // hidden fifths + hidden octaves
-  std::size_t max_battuta;  // contrary-motion octave arrivals by downward leap
-  std::size_t max_anti;     // a perfect class left and reached again in contrary motion
+  std::size_t max_structural_strict;  // parallel fifths + octaves before decoration
+  std::size_t max_strict;             // the same two classes on the array that ships
+  std::size_t max_hidden;             // hidden fifths + hidden octaves, shipped
+  std::size_t max_battuta;            // contrary-motion octave arrivals by downward leap
+  std::size_t max_anti;               // a perfect class left and reached again in contrary motion
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
-// seed x character x mode sweep.
+// character x mode x seed sweep.
 //
 // The mode axis is half the product and is not optional here: minor draws on its
 // own subjects, resolves its own leading tone and closes on its own final chord,
 // so a ceiling measured over the major surface alone describes half of what
-// ships and leaves the other half free to regress silently.
+// ships and leaves the other half free to regress silently. It is swept as a
+// full product against the seeds rather than interleaved across them, because
+// interleaving measures each seed in one mode only and calls the result both.
+//
+// The two strict columns are the same two rules read on the two surfaces the
+// piece has. Where they differ, decoration is standing between the structural
+// tones: the ornamented array has onsets between them, so the pair is no longer
+// consecutive and the counter no longer reads it. That is a real difference in
+// what the product ships and a real difference in what its gate sees, but it is
+// not the form builder writing better counterpoint, which is why the structural
+// column is pinned separately and is the one that may never be closed by
+// decoration.
 //
 // RATCHET: these numbers may only ever be LOWERED, never raised. They are the
-// counts measured from current shipped output, not a target, and the sweep is
-// fully deterministic (fixed seeds, fixed characters, natural bar counts), so
-// there is no run-to-run noise for a margin to absorb: they are pinned exactly.
-// A form that reaches 0 stays pinned at 0. Raising a ceiling to make a change
-// pass would throw away the only regression signal this file provides -- the
-// fix belongs in the form builder's material derivation instead.
+// counts measured from current output, not a target, and the sweep is fully
+// deterministic (fixed seeds, fixed characters, natural bar counts), so there is
+// no run-to-run noise for a margin to absorb: they are pinned exactly. A form
+// that reaches 0 stays pinned at 0. Raising a ceiling to make a change pass
+// would throw away the only regression signal this file provides -- the fix
+// belongs in the form builder's material derivation instead.
+//
+// The grid and the two arrays are part of the measurement, not incidental to
+// it: a count taken over a different seed range, a different mode axis or a
+// different point in the pipeline is a different quantity and cannot be
+// compared with these or pinned in their place.
 //
 // ONE EXCEPTION, and it is narrow. A guard that is band-pinned against an
 // immutable voice sometimes has no candidate left that is free of every perfect
@@ -477,62 +517,49 @@ struct FormCeiling {
 constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The stretto lays two verbatim theme statements against each other, so its
     // canon configuration is the one choice in this form that decides a parallel
-    // outright, and it is made while the whole overlap is still readable. A
-    // configuration that sounds a true parallel is now refused rather than
-    // ranked below a sustained dissonance: the dissonance is a matter of degree
-    // and the parallel is the prohibition. The strict column falls from
-    // twenty-three to three and the fifth reaches zero, paid for with four
-    // hidden perfects and four contrary-motion octave arrivals; two
-    // anti-parallels leave with the parallels.
+    // outright, and it is made while the whole overlap is still readable: a
+    // configuration that sounds a true parallel is refused even when it is the
+    // only quiet one on offer, because the dissonance is a matter of degree and
+    // the parallel is the prohibition. The coda's cadence voicing is written
+    // into the tone registry like any other figuration, so the seam handing the
+    // wave over to it reads as a hand-over rather than as a rest. And the
+    // bar-head escape ranks a sustain-window clash below the parallel instead of
+    // vetoing on it, since against a theme walking in seconds the escape
+    // vocabulary is regularly clash-free nowhere.
     //
-    // The remaining three then go, and the strict column reaches zero. Two of
-    // them came from the coda: its cadence voicing was the one figuration
-    // section never written into the tone registry, so the seam that hands the
-    // wave over to it read as a rest and no guard downstream could see the
-    // arrival at all. The third came from the bar-head escape, which vetoed on a
-    // sustain-window clash and therefore handed the onset back to the parallel
-    // wherever the escape vocabulary was clash-free nowhere. Both cost two
-    // hidden perfects between them and nothing in the other two columns.
-    //
-    // The trade is payable in one direction only. In the reference corpus the
-    // similar-motion parallel is the rarest thing measured -- across the
+    // Both strict columns are zero and the residue is hidden and contrary
+    // motion. That direction is the only payable one: in the reference corpus
+    // the similar-motion parallel is the rarest thing measured -- across the
     // three-voice works its octave rate is zero at every percentile including
     // the maximum, and its fifth rate is zero through the ninety-fifth -- while
     // hidden perfects are written freely in exactly this texture. There is no
     // quantity of true parallel that buys anything back.
-    {FormType::Fugue, 0, 17, 149, 59},
-    // Its bass support tone is read against the running voices at the grain they
-    // actually move at rather than a bar back, and ranks a hidden perfect below
-    // a true one; two true parallels left the strict column and two hidden ones
-    // entered -- the corpus writes hidden perfects in this texture far more
-    // freely than it writes either true class. Its figuration then reached the
-    // bar heads where no chord tone was playable at all and left the chord for a
-    // free diatonic tone: both remaining fifths and two octaves went with it, at
-    // no cost to the hidden or battuta columns. The fugue half is assembled by
-    // the same section builder as the bare fugue, so the registered coda voicing
-    // and the ranked bar-head escape close the strict column here too: seven to
-    // zero against four hidden perfects, with battuta and anti-parallel unmoved.
-    {FormType::PreludeAndFugue, 0, 9, 80, 34},
+    {FormType::Fugue, 0, 0, 35, 306, 124},
+    // The fugue half is assembled by the same section builder as the bare fugue,
+    // so every closure above holds here unchanged. The prelude half writes its
+    // two voices through the same parallel-aware wave: its bass support tone is
+    // read against the running voices at the grain they actually move at rather
+    // than a bar back and ranks a hidden perfect below a true one, and its
+    // figuration leaves the chord for a free diatonic tone at bar heads where no
+    // chord tone is playable at all.
+    {FormType::PreludeAndFugue, 0, 0, 17, 168, 62},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
-    // ninety-fifth. A trade out of either of those into hidden is payable, and
-    // that is the trade taken: both true-parallel classes reach zero, paid for
-    // with fourteen hidden perfects and two contrary-motion octave arrivals.
-    // The pedal is the voice that pays -- it is written last against two settled
-    // manuals, and once it ranks a hidden perfect below a true one it will step
-    // onto the hidden approach rather than keep the parallel it began with.
-    {FormType::TrioSonata, 0, 82, 63, 8},
-    // Both true-parallel classes reach zero. The tone before an arrival is
-    // re-aimed over a bass pinned to a single octave, and where the consonant
-    // window for that re-aim comes back empty it widens to admit a passing
-    // dissonance rather than let the parallel ship; the cadential figure that
-    // pins the bass under its own resolution is chosen against the three-line
-    // surface it produces instead of installed over one settled without it.
-    // Three true parallels left the strict column and one contrary-motion
-    // arrival entered the battuta one -- a trade out of the fault the corpus
-    // almost never writes and into the one it writes most freely.
-    {FormType::ChoralePrelude, 0, 14, 13, 0},
+    // ninety-fifth, so a trade out of either of those into hidden is payable and
+    // is the trade the form takes. The pedal is the voice that pays -- it is
+    // written last against two settled manuals, and once it ranks a hidden
+    // perfect below a true one it steps onto the hidden approach rather than
+    // keep the parallel it began with.
+    {FormType::TrioSonata, 0, 0, 184, 135, 8},
+    // The tone before an arrival is re-aimed over a bass pinned to a single
+    // octave, and where the consonant window for that re-aim comes back empty it
+    // widens to admit a passing dissonance rather than let the parallel ship;
+    // the cadential figure that pins the bass under its own resolution is chosen
+    // against the three-line surface it produces instead of installed over one
+    // settled without it. What that re-aim accepts is a weaker approach in place
+    // of a worse one, which is why the residue sits in hidden and battuta.
+    {FormType::ChoralePrelude, 0, 0, 28, 22, 1},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -542,55 +569,52 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // motion into contrary motion, so what leaves the strict column here tends
     // to arrive in the battuta one.
     // It shares its section builder with the fantasia, so every closure listed
-    // for that form reaches this one too: the fifth column empties and hidden
-    // halves, with the battuta column level and two anti-parallels leaving. The
-    // octave column is unmoved and stays open -- its remaining forty-two come
-    // from the toccata half, which this builder writes through a different path.
-    {FormType::ToccataAndFugue, 42, 10, 84, 3},
+    // for that form reaches this one too and the fifth column is empty. The
+    // octave column stays open: all of it comes from the toccata half, which
+    // this builder writes through a different path, and it is the largest
+    // similar-motion population left anywhere in the product.
+    {FormType::ToccataAndFugue, 84, 84, 20, 163, 12},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
     // figuration it will sound with; and the closing trill takes its
     // termination, so the tonic is reached contrary to the ground rather than
-    // beside it. What survives is a single fifth at a bar head whose repair band
-    // holds no admissible tone, and one contrary-motion arrival that entered the
-    // battuta column in exchange.
-    {FormType::Passacaglia, 1, 20, 30, 9},
-    // Almost all of what remains in the strict column is fifths, and they come
-    // from the one place selection cannot reach: a stretto whose follower is the
-    // leader's exact imitation an octave away, entering a whole bar later, so
-    // the two lines attack together and the subject's own intervals decide what
-    // sounds. Everything the builders do choose -- the bass support under the
-    // running voices, the pedal under the free section's figuration -- is now
-    // read at the grain those voices move at, which is what emptied the octave
-    // column and took most of the hidden one with it.
-    // Its stretto used to state the follower an octave below the leader at a
-    // one-bar delay with nothing read first, so every place the subject's own
-    // contour repeated a bar later was a parallel by construction; it now reads
-    // four canon configurations and refuses one that sounds a true parallel. The
-    // fill running up to that block is written before it rather than after, so
-    // the block's lines have a preceding bar to be judged against instead of
+    // beside it. What survives is bar-head fifths whose repair band holds no
+    // admissible tone -- the ground is immutable, so only the variation side of
+    // the pair can move at all. Two of the four are covered by decoration on the
+    // shipped surface and two are not, which is why the strict columns differ
+    // here and nowhere else: the fifths are written either way.
+    {FormType::Passacaglia, 4, 2, 56, 65, 13},
+    // Its stretto reads four canon configurations and refuses one that sounds a
+    // true parallel, where the follower would otherwise be the leader's exact
+    // imitation an octave away at a fixed one-bar delay -- the subject's own
+    // contour repeating a bar later is a parallel by construction. The fill
+    // running up to that block is written before it rather than after, so the
+    // block's lines have a preceding bar to be judged against instead of
     // reporting no motion at all. The half-cadence bass and the coda's inner
-    // voice rank the register of a tone whose pitch class is the design value.
-    // And the sustained support leaves the chord for a free diatonic tone once
-    // no triad tone in the band would do. Nothing is traded here: both true
-    // classes empty and the hidden column falls with them.
-    {FormType::FantasiaAndFugue, 0, 11, 109, 6},
-    {FormType::CelloPrelude, 0, 0, 0, 0},
+    // voice rank the register of a tone whose pitch class is the design value,
+    // since walking each voice up from its own band floor puts them a fixed
+    // perfect interval apart by construction. And the sustained support leaves
+    // the chord for a free diatonic tone once no triad tone in the band would
+    // do. Both strict columns are empty; the anti-parallel column is where the
+    // register ranking steps when clean is unreachable, and the corpus writes
+    // that class freely.
+    {FormType::FantasiaAndFugue, 0, 0, 23, 213, 31},
+    {FormType::CelloPrelude, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
-    {FormType::Chaconne, 0, 23, 0, 5},
+    {FormType::Chaconne, 0, 0, 47, 0, 7},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
-    // strict column reaches zero because the imitative blocks are instead
-    // assembled and read while their one free choice is still open -- a canon's
-    // leader tones, the quodlibet tune's rotation -- and the free figuration
-    // between them is relieved arrival by arrival. Hidden approaches are what
-    // that choice pays with: the leader window of a wide canon is about a fifth
-    // deep, so an arrival it can reach cleanly is often still approached by leap.
-    {FormType::GoldbergVariations, 0, 8, 3, 0},
+    // strict columns are zero because the imitative blocks are instead assembled
+    // and read while their one free choice is still open -- a canon's leader
+    // tones, the quodlibet tune's rotation -- and the free figuration between
+    // them is relieved arrival by arrival. Hidden approaches are what that
+    // choice pays with: the leader window of a wide canon is about a fifth deep,
+    // so an arrival it can reach cleanly is often still approached by leap.
+    {FormType::GoldbergVariations, 0, 0, 8, 8, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -600,12 +624,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
 // diff in the skipped set rather than as a silently smaller sweep.
 std::vector<std::string> expectedSkippedCells() {
   return {
-      std::string(formLabel(FormType::ChoralePrelude)) + " x " +
-          characterLabel(SubjectCharacter::Playful),
-      std::string(formLabel(FormType::ChoralePrelude)) + " x " +
-          characterLabel(SubjectCharacter::Restless),
-      std::string(formLabel(FormType::ToccataAndFugue)) + " x " +
-          characterLabel(SubjectCharacter::Noble),
+      std::string(formTypeToString(FormType::ChoralePrelude)) + " x " +
+          subjectCharacterToString(SubjectCharacter::Playful),
+      std::string(formTypeToString(FormType::ChoralePrelude)) + " x " +
+          subjectCharacterToString(SubjectCharacter::Restless),
+      std::string(formTypeToString(FormType::ToccataAndFugue)) + " x " +
+          subjectCharacterToString(SubjectCharacter::Noble),
   };
 }
 
@@ -614,51 +638,63 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
   std::size_t composed_cells = 0;
 
   for (const FormCeiling& entry : kFormCeilings) {
+    PerfectMotionCounts structural_total;
     PerfectMotionCounts total;
     for (SubjectCharacter character : kCharacters) {
       bool character_skipped = false;
-      for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
-        ComposeRequest request;
-        request.form = entry.form;
-        request.character = character;
-        request.seed = kFirstSeed + offset;
-        // Both modes, because they are different music: the minor material has
-        // its own subjects, its own leading tone and its own final chord, and a
-        // ceiling measured over one of them describes half of what ships.
-        request.is_minor = (offset % 2) == 1;
+      for (bool is_minor : kModes) {
+        for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
+          ComposeRequest request;
+          request.form = entry.form;
+          request.character = character;
+          request.seed = kFirstSeed + offset;
+          request.is_minor = is_minor;
 
-        HarnessFixture fixture;
-        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok) {
-          character_skipped = true;
-          continue;
+          std::vector<NoteEvent> structural;
+          std::vector<NoteEvent> notes;
+          if (!composeSurfaces(request, &structural, &notes)) {
+            character_skipped = true;
+            continue;
+          }
+          ASSERT_FALSE(notes.empty())
+              << formTypeToString(entry.form) << " x " << subjectCharacterToString(character)
+              << " seed " << request.seed;
+          ++composed_cells;
+          structural_total.add(countPerfectMotion(structural));
+          total.add(countPerfectMotion(notes));
         }
-        const ComposeResult result =
-            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-        ASSERT_FALSE(result.notes.empty()) << formLabel(entry.form) << " x "
-                                           << characterLabel(character) << " seed " << request.seed;
-        ++composed_cells;
-        total.add(countPerfectMotion(result.notes));
       }
       if (character_skipped) {
-        skipped.push_back(std::string(formLabel(entry.form)) + " x " + characterLabel(character));
+        skipped.push_back(std::string(formTypeToString(entry.form)) + " x " +
+                          subjectCharacterToString(character));
       }
     }
 
     // Emitted on every run so the current measurement is visible when the
     // ratchet is tightened after a counterpoint fix.
-    std::printf("[counterpoint] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu anti=%zu\n",
-                formLabel(entry.form), total.parallel_fifth, total.parallel_octave, total.hidden(),
-                total.battuta, total.anti_parallel);
+    std::printf(
+        "[counterpoint] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu battuta=%zu "
+        "anti=%zu\n",
+        formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
+        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel);
+    EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
+        << formTypeToString(entry.form)
+        << ": parallel perfect intervals in the composed counterpoint rose "
+        << "above the ratchet (par5=" << structural_total.parallel_fifth
+        << " par8=" << structural_total.parallel_octave << ")";
     EXPECT_LE(total.strict(), entry.max_strict)
-        << formLabel(entry.form) << ": parallel perfect intervals in shipped output rose above the "
+        << formTypeToString(entry.form)
+        << ": parallel perfect intervals in shipped output rose above the "
         << "ratchet (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave << ")";
     EXPECT_LE(total.battuta, entry.max_battuta)
-        << formLabel(entry.form) << ": ottava battuta in shipped output rose above the ratchet";
+        << formTypeToString(entry.form)
+        << ": ottava battuta in shipped output rose above the ratchet";
     EXPECT_LE(total.hidden(), entry.max_hidden)
-        << formLabel(entry.form) << ": hidden perfect intervals in shipped output rose above the "
+        << formTypeToString(entry.form)
+        << ": hidden perfect intervals in shipped output rose above the "
         << "ratchet (hidden5=" << total.hidden_fifth << " hidden8=" << total.hidden_octave << ")";
     EXPECT_LE(total.anti_parallel, entry.max_anti)
-        << formLabel(entry.form)
+        << formTypeToString(entry.form)
         << ": anti-parallel perfect intervals in shipped output rose above "
         << "the ratchet";
   }
@@ -668,8 +704,9 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
   std::sort(expected.begin(), expected.end());
   EXPECT_EQ(skipped, expected) << "the set of form x character pairs that fail to generate changed";
   // Guards against a partial skip hiding inside an already-expected pair.
+  const std::size_t cells_per_pair = kSeedCount * kModes.size();
   EXPECT_EQ(composed_cells,
-            kFormCeilings.size() * kCharacters.size() * kSeedCount - expected.size() * kSeedCount);
+            (kFormCeilings.size() * kCharacters.size() - expected.size()) * cells_per_pair);
 }
 
 // --- Length axis -------------------------------------------------------------
@@ -694,6 +731,7 @@ constexpr std::array<DurationScale, 4> kScales = {{
 
 struct LengthCeiling {
   FormType form;
+  std::size_t max_structural_strict;
   std::size_t max_strict;
   std::size_t max_hidden;
   std::size_t max_battuta;
@@ -701,56 +739,66 @@ struct LengthCeiling {
 };
 
 // RATCHET: as above, these may only ever be LOWERED. Measured across
-// 4 scales x 4 characters x 8 seeds x both modes.
+// 4 scales x 4 characters x 2 modes x 8 seeds.
 constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
-    // The stretto choice is worth far more on this axis than on the one above,
-    // because a longer fugue states more strettos: the strict column falls from
-    // ninety to eighteen with the fifth at zero throughout, against ten more
-    // contrary-motion octave arrivals and four more anti-parallels. The
-    // registered coda voicing and the ranked bar-head escape take the remaining
-    // eighteen to zero for two more hidden perfects, and nothing else moves.
-    {FormType::Fugue, 0, 98, 1270, 432},
-    // The fugue half carries the same choices, and the prelude half adds no true
-    // parallel of its own: thirty-six to zero, paid with six hidden perfects and
-    // four anti-parallels, with the battuta column unmoved throughout.
-    {FormType::PreludeAndFugue, 0, 69, 489, 223},
+    // The stretto choice is worth more on this axis than on the one above,
+    // because a longer fugue states more strettos and every one of them is a
+    // place where a canon configuration decides a parallel outright. Both
+    // strict columns stay empty however far the form is stretched; the battuta
+    // and anti-parallel columns grow with the length, which is what a longer
+    // piece of the same counterpoint looks like.
+    {FormType::Fugue, 0, 0, 201, 2640, 958},
+    // The fugue half carries the same choices and the prelude half adds no true
+    // parallel of its own at any length.
+    {FormType::PreludeAndFugue, 0, 0, 162, 1027, 485},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
   for (const LengthCeiling& entry : kLengthCeilings) {
+    PerfectMotionCounts structural_total;
     PerfectMotionCounts total;
     for (DurationScale scale : kScales) {
       const std::uint16_t bars = resolveBars(entry.form, scale, /*target_bars=*/0);
       for (SubjectCharacter character : kCharacters) {
-        for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
-          ComposeRequest request;
-          request.form = entry.form;
-          request.character = character;
-          request.seed = kFirstSeed + offset;
-          request.is_minor = (offset % 2) == 1;
-          request.target_bars = bars;
+        for (bool is_minor : kModes) {
+          for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
+            ComposeRequest request;
+            request.form = entry.form;
+            request.character = character;
+            request.seed = kFirstSeed + offset;
+            request.is_minor = is_minor;
+            request.target_bars = bars;
 
-          HarnessFixture fixture;
-          if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
-            continue;
-          const ComposeResult result =
-              Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-          ASSERT_FALSE(result.notes.empty());
-          total.add(countPerfectMotion(result.notes));
+            std::vector<NoteEvent> structural;
+            std::vector<NoteEvent> notes;
+            if (!composeSurfaces(request, &structural, &notes))
+              continue;
+            ASSERT_FALSE(notes.empty());
+            structural_total.add(countPerfectMotion(structural));
+            total.add(countPerfectMotion(notes));
+          }
         }
       }
     }
-    std::printf("[counterpoint/length] %-20s par5=%zu par8=%zu hidden=%zu battuta=%zu anti=%zu\n",
-                formLabel(entry.form), total.parallel_fifth, total.parallel_octave, total.hidden(),
-                total.battuta, total.anti_parallel);
+    std::printf(
+        "[counterpoint/length] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu "
+        "battuta=%zu anti=%zu\n",
+        formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
+        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel);
+    EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
+        << formTypeToString(entry.form)
+        << ": parallel perfect intervals in the composed counterpoint rose "
+        << "above the ratchet once the form is stretched (par5=" << structural_total.parallel_fifth
+        << " par8=" << structural_total.parallel_octave << ")";
     EXPECT_LE(total.strict(), entry.max_strict)
-        << formLabel(entry.form) << ": parallel perfect intervals rose above the ratchet once the "
+        << formTypeToString(entry.form)
+        << ": parallel perfect intervals rose above the ratchet once the "
         << "form is stretched (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave
         << ")";
-    EXPECT_LE(total.battuta, entry.max_battuta) << formLabel(entry.form) << ": battuta rose";
-    EXPECT_LE(total.hidden(), entry.max_hidden) << formLabel(entry.form) << ": hidden rose";
+    EXPECT_LE(total.battuta, entry.max_battuta) << formTypeToString(entry.form) << ": battuta rose";
+    EXPECT_LE(total.hidden(), entry.max_hidden) << formTypeToString(entry.form) << ": hidden rose";
     EXPECT_LE(total.anti_parallel, entry.max_anti)
-        << formLabel(entry.form) << ": anti-parallel rose";
+        << formTypeToString(entry.form) << ": anti-parallel rose";
   }
 }
 

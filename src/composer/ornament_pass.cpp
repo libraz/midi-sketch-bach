@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <vector>
 
 #include "composer/character_profile.h"
@@ -378,7 +379,49 @@ Tick longestEnd(const std::vector<NoteEvent>& notes) {
   return last;
 }
 
+std::vector<VoiceId> voicesForIntent(const VoicePlan& plan,
+                                     std::initializer_list<VoiceIntent> intents) {
+  std::vector<VoiceId> voices;
+  for (const auto& span : plan.spans) {
+    for (const auto intent : intents) {
+      if (span.intent == intent) {
+        voices.push_back(span.voice);
+        break;
+      }
+    }
+  }
+  std::sort(voices.begin(), voices.end());
+  voices.erase(std::unique(voices.begin(), voices.end()), voices.end());
+  return voices;
+}
+
 }  // namespace
+
+void resolveFixtureOrnamentContext(const HarnessFixture& fixture, FormType form,
+                                   std::uint32_t total_ticks, OrnamentParams* params) {
+  if (params == nullptr)
+    return;
+  const Tick ticks_per_bar = fixture.harmony.ticksPerBar();
+  params->ticks_per_bar = ticks_per_bar;
+  params->ts_numerator = fixture.harmony.ts_numerator;
+  params->meter_profile = fixture.harmony.meter_profile;
+  params->harmonic_plan = &fixture.harmony;
+  params->exempt_voices = voicesForIntent(
+      fixture.voice_plan, {VoiceIntent::GroundCarrier, VoiceIntent::PassacagliaGround,
+                           VoiceIntent::GoldbergBassCarrier});
+  params->skeleton_exempt_voices =
+      voicesForIntent(fixture.voice_plan, {VoiceIntent::CantusFirmusCarrier});
+  params->aria_end_tick = form == FormType::GoldbergVariations ? 4 * ticks_per_bar : 0;
+  params->section_cadence_ticks = fixture.section_cadence_ticks;
+  if (fixture.climax_end_tick > fixture.climax_start_tick) {
+    params->climax_start_tick = fixture.climax_start_tick;
+    params->climax_end_tick = fixture.climax_end_tick;
+  } else {
+    const Tick climax_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+    params->climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
+    params->climax_end_tick = climax_tick + ticks_per_bar;
+  }
+}
 
 std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType instrument) {
   int density = detail::characterProfile(character).ornament_density;

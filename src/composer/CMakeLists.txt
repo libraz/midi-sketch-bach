@@ -71,4 +71,10 @@ target_compile_features(bach_composer_lib PUBLIC cxx_std_17)
 target_sources(bach_composer_lib PRIVATE
   ${CMAKE_SOURCE_DIR}/src/core/json_helpers.cpp
   ${CMAKE_SOURCE_DIR}/src/core/perfect_motion.cpp
+  # basic_types.cpp carries the form -> default-instrument mapping. A test that
+  # measures the shipped note array has to ornament it at the density the
+  # product will, and instrument selects that density: without this the only
+  # way to name an instrument here is to copy the mapping, which is how a
+  # measurement drifts away from the music it claims to describe.
+  ${CMAKE_SOURCE_DIR}/src/core/basic_types.cpp
 )

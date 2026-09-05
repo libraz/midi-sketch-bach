@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <initializer_list>
 #include <utility>
 
 #include "composer/counterpoint_budget.h"
@@ -21,22 +20,6 @@
 
 namespace bach::application {
 namespace {
-
-std::vector<VoiceId> voicesForIntent(const composer::VoicePlan& plan,
-                                     std::initializer_list<composer::VoiceIntent> intents) {
-  std::vector<VoiceId> voices;
-  for (const auto& span : plan.spans) {
-    for (const auto intent : intents) {
-      if (span.intent == intent) {
-        voices.push_back(span.voice);
-        break;
-      }
-    }
-  }
-  std::sort(voices.begin(), voices.end());
-  voices.erase(std::unique(voices.begin(), voices.end()), voices.end());
-  return voices;
-}
 
 void mergeControlChanges(std::vector<CcEvent>* events) {
   if (events == nullptr || events->empty())
@@ -223,30 +206,8 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   ornament.mode =
       effective.key.is_minor ? composer::detail::Mode::Minor : composer::detail::Mode::Major;
   ornament.seed = out->seed;
-  ornament.ticks_per_bar = ticks_per_bar;
-  ornament.ts_numerator = fixture.harmony.ts_numerator;
-  ornament.meter_profile = fixture.harmony.meter_profile;
-  ornament.harmonic_plan = &fixture.harmony;
   ornament.bpm = effective.bpm;
-  ornament.exempt_voices =
-      voicesForIntent(fixture.voice_plan, {composer::VoiceIntent::GroundCarrier,
-                                           composer::VoiceIntent::PassacagliaGround,
-                                           composer::VoiceIntent::GoldbergBassCarrier});
-  ornament.skeleton_exempt_voices =
-      voicesForIntent(fixture.voice_plan, {composer::VoiceIntent::CantusFirmusCarrier});
-  if (effective.form == FormType::GoldbergVariations) {
-    ornament.aria_end_tick = 4 * ticks_per_bar;
-  }
-  ornament.section_cadence_ticks = fixture.section_cadence_ticks;
-  if (fixture.climax_end_tick > fixture.climax_start_tick) {
-    ornament.climax_start_tick = fixture.climax_start_tick;
-    ornament.climax_end_tick = fixture.climax_end_tick;
-  } else {
-    const Tick climax_tick =
-        static_cast<Tick>(static_cast<std::uint64_t>(out->total_ticks) * 3 / 4);
-    ornament.climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
-    ornament.climax_end_tick = climax_tick + ticks_per_bar;
-  }
+  composer::resolveFixtureOrnamentContext(fixture, effective.form, out->total_ticks, &ornament);
   composer::applyOrnamentPass(out->composition, ornament);
 
   out->final_validation = composer::Validator{}.validate(
