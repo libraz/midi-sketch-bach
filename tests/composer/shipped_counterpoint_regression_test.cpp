@@ -575,14 +575,19 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // figuration leaves the chord for a free diatonic tone at bar heads where no
     // chord tone is playable at all.
     {FormType::PreludeAndFugue, 0, 0, 17, 168, 62, 0, 1, 5, 3, 38133},
-    // Its hidden column is the one with room: the corpus writes hidden perfects
-    // in this texture more than twice as freely as this form does, while its
-    // fifths sit at the ninetieth percentile and its battuta past the
-    // ninety-fifth, so a trade out of either of those into hidden is payable and
-    // is the trade the form takes. The pedal is the voice that pays -- it is
-    // written last against two settled manuals, and once it ranks a hidden
-    // perfect below a true one it steps onto the hidden approach rather than
-    // keep the parallel it began with.
+    // Its hidden column is the one with room, and with a denominator in the
+    // table that can be said as a rate rather than as a ratio to some other
+    // form: 184 findings over 34,770 pair successions makes this the densest
+    // hidden writing in the product, and it is still a lower rate than a typical
+    // work of the reference corpus's THREE-VOICE group, which writes hidden
+    // perfects freely in exactly this texture. That comparison is a sweep-wide
+    // rate against a per-work distribution and is not like for like, but the gap
+    // is not one a units mismatch closes. A trade into hidden is payable at that
+    // distance; a trade into either true class is not, at any distance, and
+    // neither survives here. The pedal is the voice that pays -- written last
+    // against two settled manuals, once it ranks a hidden perfect below a true
+    // one it steps onto the hidden approach rather than keep the parallel it
+    // began with.
     {FormType::TrioSonata, 0, 0, 184, 135, 8, 0, 7, 4, 2, 34770},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
