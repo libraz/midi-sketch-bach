@@ -575,12 +575,14 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // figuration leaves the chord for a free diatonic tone at bar heads where no
     // chord tone is playable at all.
     {FormType::PreludeAndFugue, 0, 0, 17, 168, 62, 0, 1, 5, 3, 38133},
-    // Its hidden column is the one with room, and with a denominator in the
-    // table that can be said as a rate rather than as a ratio to some other
-    // form: 184 findings over 34,770 pair successions makes this the densest
-    // hidden writing in the product, and it is still a lower rate than a typical
-    // work of the reference corpus's THREE-VOICE group, which writes hidden
-    // perfects freely in exactly this texture. That comparison is a sweep-wide
+    // Its hidden column is the one with room, and with a denominator in the row
+    // that can be said as a rate rather than as a ratio to some other form. Its
+    // hidden total over its succession floor is the densest hidden writing in
+    // the product, and still a lower rate than a typical work of the reference
+    // corpus's THREE-VOICE group, which writes hidden perfects freely in exactly
+    // this texture. Both operands are the columns below rather than figures
+    // restated here: a measurement copied into prose beside the table it came
+    // from is one nothing re-reads. That comparison is a sweep-wide
     // rate against a per-work distribution and is not like for like, but the gap
     // is not one a units mismatch closes. A trade into hidden is payable at that
     // distance; a trade into either true class is not, at any distance, and
@@ -609,10 +611,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // for that form reaches this one too and the fifth column is empty. The
     // octave column stays open: all of it comes from the toccata half, which
     // this builder writes through a different path, and it is the largest
-    // similar-motion population left anywhere in the product. Its worst
-    // configuration carries seven, which is the whole of that one bar: the
-    // octave column is one gesture repeated across the configurations that
-    // reach it, not a fault distributed over the form.
+    // similar-motion population left anywhere in the product. Its worst-cell
+    // strict figure below is the entire content of that one bar, which is what
+    // says the octave column is one gesture repeated across the configurations
+    // that reach it rather than a fault distributed over the form.
     {FormType::ToccataAndFugue, 84, 84, 20, 163, 12, 7, 2, 7, 2, 33429},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
