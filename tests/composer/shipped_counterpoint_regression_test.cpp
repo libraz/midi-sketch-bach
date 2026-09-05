@@ -579,12 +579,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // perfect below a true one; the cadential suspension is chosen against the
     // figuration it will sound with; and the closing trill takes its
     // termination, so the tonic is reached contrary to the ground rather than
-    // beside it. What survives is bar-head fifths whose repair band holds no
-    // admissible tone -- the ground is immutable, so only the variation side of
-    // the pair can move at all. Two of the four are covered by decoration on the
-    // shipped surface and two are not, which is why the strict columns differ
-    // here and nowhere else: the fifths are written either way.
-    {FormType::Passacaglia, 4, 2, 56, 65, 13},
+    // beside it. The ground is immutable, so the variation is the only side of
+    // the pair that can move, and every onset it owns is read against the ground
+    // at the grain the ground actually moves at: a cycle that states it in
+    // quarters moves three times inside a bar, so the cadential suspension that
+    // rewrites one of those tones after the scrub has passed it re-reads the
+    // beat-grain reference rather than the bar head it would otherwise inherit.
+    {FormType::Passacaglia, 0, 0, 56, 65, 13},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own

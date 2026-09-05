@@ -1863,6 +1863,17 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     const int upper_res = upperPitchAt(resolution_tick);
     const int previous_upper_head = upperPitchAt(suspension_tick - kTicksPerBar34);
     const int previous_ground = groundPitchAt(suspension_tick - kTicksPerBar34);
+    // The bar-head chain above reads the ground at the grain a whole-bar ground
+    // moves at. A cycle that states the ground in quarters moves three times
+    // inside that span, and the pair a listener hears -- the pair the audit
+    // samples -- is the figuration's own last onset against the ground sounding
+    // under it, one beat back. The ground-parallel scrub already vetted that
+    // onset at beat grain, but this rewrite lands after it and replaces the tone
+    // it approved, so the beat-grain reference has to be re-read here or the
+    // suspension is free to walk into the ground in fifths.
+    Tick prior_upper_onset = 0;
+    const int prior_upper = upperOnsetBefore(suspension_tick, &prior_upper_onset);
+    const int prior_upper_ground = prior_upper >= 0 ? groundPitchAt(prior_upper_onset) : -1;
     int upper_window_min = 127;
     for (const auto& variation : out.material.passacaglia_variations) {
       for (const MaterialNote& note : variation.notes) {
@@ -1902,6 +1913,9 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             continue;
           if (previous_upper_head >= 0 && previous_ground >= 0 &&
               formsPerfectParallel(previous_upper_head, upper_sus, previous_ground, bass_sus))
+            continue;
+          if (prior_upper >= 0 && prior_upper_ground >= 0 &&
+              formsPerfectParallel(prior_upper, upper_sus, prior_upper_ground, bass_sus))
             continue;
           bool creates_augmented_second = false;
           if (req.mode == detail::Mode::Minor) {
