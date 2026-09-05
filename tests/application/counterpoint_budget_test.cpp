@@ -173,9 +173,14 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // The counter-figuration is written last against a settled variation and an
   // immutable ground, and reads both as one continuous line across the ground
   // cycles; where its band offers no admissible tone at all it holds the tone it
-  // just sounded, since an oblique repeat can form no parallel. Fifths still get
-  // through at bar heads the variation itself owns, so only the octave closes.
-  EXPECT_EQ(closedRulesFor(FormType::Passacaglia), (std::vector<std::string>{"parallel_octave"}));
+  // just sounded, since an oblique repeat can form no parallel. The variation's
+  // own onsets are scrubbed against the ground at beat grain, and the cadential
+  // suspension that rewrites one of them afterwards re-reads that same reference
+  // instead of the bar head, which a ground stated in quarters moves three times
+  // inside. Both true-parallel classes close; the seventh doubling does not,
+  // and this is the only form where it stays open.
+  EXPECT_EQ(closedRulesFor(FormType::Passacaglia),
+            (std::vector<std::string>{"parallel_fifth", "parallel_octave"}));
   // Its stretto reads four canon configurations and refuses one that sounds a
   // true parallel; the fill running up to that block is written before it so the
   // block has a preceding bar to be read against; the half-cadence bass and the

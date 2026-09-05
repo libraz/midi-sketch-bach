@@ -120,7 +120,15 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::ToccataAndFugue, "strong_beat_dissonance"},
     {FormType::ToccataAndFugue, "unprepared_dissonance"},
     {FormType::ToccataAndFugue, "vertical_dissonance"},
-    // Passacaglia -- the only form that still doubles a seventh.
+    // Passacaglia -- the only form that still doubles a seventh. Both
+    // true-parallel classes close against an immutable ground, which leaves the
+    // variation as the only side of the pair that can move. Every onset it owns
+    // is scrubbed against the ground at beat grain, and the cadential suspension
+    // that lands afterwards and rewrites one of those tones now re-reads the same
+    // beat-grain reference: a cycle that states the ground in quarters moves
+    // three times inside a bar, so a guard that vets against the bar head alone
+    // is reading a succession nobody hears and discards the scrub's work on the
+    // tone it replaces.
     {FormType::Passacaglia, "anti_parallel_perfect"},
     {FormType::Passacaglia, "battuta"},
     {FormType::Passacaglia, "cross_relation"},
@@ -129,7 +137,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Passacaglia, "hidden_parallel_fifth"},
     {FormType::Passacaglia, "hidden_parallel_octave"},
     {FormType::Passacaglia, "invertible_at_octave"},
-    {FormType::Passacaglia, "parallel_fifth"},
     {FormType::Passacaglia, "strong_beat_dissonance"},
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},
