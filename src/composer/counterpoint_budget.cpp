@@ -23,13 +23,19 @@ namespace {
 // Sorted by form ordinal, then by rule_id, so the regression can reject a
 // duplicate or a misplaced row.
 constexpr CounterpointBudgetEntry kOpenRules[] = {
-    // Fugue -- the stretto is the one window where two verbatim theme statements
-    // are laid against each other, so it is the one window where a parallel is
-    // chosen rather than stumbled into: every canon configuration is read before
-    // one is committed, and a configuration that sounds a true parallel is
-    // refused even when it is the only quiet one on offer. That closes the fifth
-    // everywhere. The octave stays open because it also arrives from the
-    // free accompaniment, which the canon choice does not reach.
+    // Fugue -- both true-parallel classes close, through three places where the
+    // form chooses rather than stumbles. The stretto lays two verbatim theme
+    // statements against each other, so every canon configuration is read before
+    // one is committed and a configuration that sounds a true parallel is
+    // refused even when it is the only quiet one on offer. The coda's cadence
+    // voicing is registered like any other figuration, so the seam that hands
+    // the wave over to it is read as a hand-over rather than as a rest -- an
+    // unregistered section is silence to every guard downstream of it, and the
+    // wave walked into the arrival in octaves for exactly that reason. And the
+    // bar-head escape ranks a sustain-window clash below the parallel instead of
+    // vetoing on it: against a theme walking in seconds the escape vocabulary is
+    // regularly clash-free nowhere, and a veto there hands the onset back to the
+    // parallel it was called to remove.
     {FormType::Fugue, "anti_parallel_perfect"},
     {FormType::Fugue, "battuta"},
     {FormType::Fugue, "cross_relation"},
@@ -37,13 +43,13 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Fugue, "hidden_parallel_fifth"},
     {FormType::Fugue, "hidden_parallel_octave"},
     {FormType::Fugue, "invertible_at_octave"},
-    {FormType::Fugue, "parallel_octave"},
     {FormType::Fugue, "strong_beat_dissonance"},
     {FormType::Fugue, "unprepared_dissonance"},
     {FormType::Fugue, "vertical_dissonance"},
-    // PreludeAndFugue -- the fugue half is built by the same stretto choice, and
-    // the prelude half adds no parallel fifth of its own, so the fifth closes
-    // here for the same reason it closes on the bare fugue.
+    // PreludeAndFugue -- the fugue half is assembled by the same section builder,
+    // so all three closures above hold here unchanged; the prelude half writes
+    // its two voices through the same parallel-aware wave and adds no true
+    // parallel of either class.
     {FormType::PreludeAndFugue, "anti_parallel_perfect"},
     {FormType::PreludeAndFugue, "battuta"},
     {FormType::PreludeAndFugue, "cross_relation"},
@@ -51,7 +57,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::PreludeAndFugue, "hidden_parallel_fifth"},
     {FormType::PreludeAndFugue, "hidden_parallel_octave"},
     {FormType::PreludeAndFugue, "invertible_at_octave"},
-    {FormType::PreludeAndFugue, "parallel_octave"},
     {FormType::PreludeAndFugue, "strong_beat_dissonance"},
     {FormType::PreludeAndFugue, "unprepared_dissonance"},
     {FormType::PreludeAndFugue, "vertical_dissonance"},

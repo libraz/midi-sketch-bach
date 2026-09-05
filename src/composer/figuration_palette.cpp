@@ -866,35 +866,44 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             triad_available = anchor_free(cand);
           }
           if (!triad_available) {
-            const int span = std::max(band_hi - snapped, snapped - band_lo);
-            for (int dist = 1; dist <= span; ++dist) {
-              bool relaxed = false;
-              for (const int sgn : {-1, 1}) {
-                const int cand = snapped + sgn * dist;
-                if (!detail::inScale(cand, mode) || !anchor_free(cand)) {
-                  continue;
+            // A tone the sustain window grinds against is worse than a quiet
+            // one, so a clash-free escape is taken first; it is not worse than
+            // the parallel it replaces, so a clashing one is still taken over
+            // shipping that. The two are ranked rather than pooled. Against a
+            // theme walking in seconds this vocabulary is regularly clash-free
+            // nowhere, and a veto then hands the onset back to the parallel --
+            // paying the cardinal prohibition to avoid a passing second, which
+            // the reference corpus writes constantly and in the same texture.
+            auto grinds = [&](int cand) {
+              for (const int sounding : window_pitches) {
+                const int ivc = std::abs(cand - sounding) % 12;
+                if (ivc == 1 || ivc == 6 || ivc == 11) {
+                  return true;
                 }
-                // A tone the sustain window would grind against is not an
-                // improvement on the parallel it replaces.
-                bool clashes = false;
-                for (const int sounding : window_pitches) {
-                  const int ivc = std::abs(cand - sounding) % 12;
-                  if (ivc == 1 || ivc == 6 || ivc == 11) {
-                    clashes = true;
-                    break;
-                  }
-                }
-                if (clashes) {
-                  continue;
-                }
-                snapped = cand;
-                section.relaxed_anchor_ticks.push_back(beat_tick);
-                ++waveVetoStats().anchor_parallel_displaced;
-                relaxed = true;
-                break;
               }
+              return false;
+            };
+            const int span = std::max(band_hi - snapped, snapped - band_lo);
+            bool relaxed = false;
+            for (const bool allow_grind : {false, true}) {
               if (relaxed) {
                 break;
+              }
+              for (int dist = 1; dist <= span && !relaxed; ++dist) {
+                for (const int sgn : {-1, 1}) {
+                  const int cand = snapped + sgn * dist;
+                  if (!detail::inScale(cand, mode) || !anchor_free(cand)) {
+                    continue;
+                  }
+                  if (!allow_grind && grinds(cand)) {
+                    continue;
+                  }
+                  snapped = cand;
+                  section.relaxed_anchor_ticks.push_back(beat_tick);
+                  ++waveVetoStats().anchor_parallel_displaced;
+                  relaxed = true;
+                  break;
+                }
               }
             }
           }

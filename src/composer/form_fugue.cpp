@@ -1995,6 +1995,14 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
               kQuarter, bass_tonic);
     }
     coalesceConsecutiveSamePitch(bass.notes);
+    // Register the design tones like any other figuration. Everything that reads
+    // the surface reads this registry, so a section missing from it is silence as
+    // far as every later guard is concerned -- and the seam reliever below then
+    // sees the preceding span hand over to a rest and leaves its tail alone,
+    // which is how the wave walks into this arrival in parallel octaves.
+    for (const MaterialNote& note : bass.notes) {
+      asm_ctx.theme_tones.record(note.start_tick, 2, static_cast<int>(note.pitch), note.duration);
+    }
     out.material.figuration_sections.push_back(bass);
     pushSpan(asm_ctx, 2, coda_start + 2, coda_start + 3, VoiceIntent::FigurationCarrier);
   }
@@ -2024,6 +2032,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     inner.is_pedal_prep = true;
     addNote(inner.notes, barTick(coda_start + 2), kTicksPerBar, inner_dominant);
     addNote(inner.notes, barTick(coda_start + 3), kTicksPerBar, inner_third);
+    for (const MaterialNote& note : inner.notes) {
+      asm_ctx.theme_tones.record(note.start_tick, 1, static_cast<int>(note.pitch), note.duration);
+    }
     out.material.figuration_sections.push_back(inner);
     pushSpan(asm_ctx, 1, coda_start + 2, coda_start + 3, VoiceIntent::FigurationCarrier);
   }

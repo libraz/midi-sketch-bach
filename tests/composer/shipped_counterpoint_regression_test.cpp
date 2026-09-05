@@ -483,11 +483,24 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // and the parallel is the prohibition. The strict column falls from
     // twenty-three to three and the fifth reaches zero, paid for with four
     // hidden perfects and four contrary-motion octave arrivals; two
-    // anti-parallels leave with the parallels. The corpus writes hidden perfects
-    // in this texture far more freely than either true class, and this form's
-    // true-octave rate sits at the edge of the corpus envelope where its hidden
-    // rate has room.
-    {FormType::Fugue, 3, 15, 149, 59},
+    // anti-parallels leave with the parallels.
+    //
+    // The remaining three then go, and the strict column reaches zero. Two of
+    // them came from the coda: its cadence voicing was the one figuration
+    // section never written into the tone registry, so the seam that hands the
+    // wave over to it read as a rest and no guard downstream could see the
+    // arrival at all. The third came from the bar-head escape, which vetoed on a
+    // sustain-window clash and therefore handed the onset back to the parallel
+    // wherever the escape vocabulary was clash-free nowhere. Both cost two
+    // hidden perfects between them and nothing in the other two columns.
+    //
+    // The trade is payable in one direction only. In the reference corpus the
+    // similar-motion parallel is the rarest thing measured -- across the
+    // three-voice works its octave rate is zero at every percentile including
+    // the maximum, and its fifth rate is zero through the ninety-fifth -- while
+    // hidden perfects are written freely in exactly this texture. There is no
+    // quantity of true parallel that buys anything back.
+    {FormType::Fugue, 0, 17, 149, 59},
     // Its bass support tone is read against the running voices at the grain they
     // actually move at rather than a bar back, and ranks a hidden perfect below
     // a true one; two true parallels left the strict column and two hidden ones
@@ -495,8 +508,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // freely than it writes either true class. Its figuration then reached the
     // bar heads where no chord tone was playable at all and left the chord for a
     // free diatonic tone: both remaining fifths and two octaves went with it, at
-    // no cost to the hidden or battuta columns.
-    {FormType::PreludeAndFugue, 7, 5, 80, 34},
+    // no cost to the hidden or battuta columns. The fugue half is assembled by
+    // the same section builder as the bare fugue, so the registered coda voicing
+    // and the ranked bar-head escape close the strict column here too: seven to
+    // zero against four hidden perfects, with battuta and anti-parallel unmoved.
+    {FormType::PreludeAndFugue, 0, 9, 80, 34},
     // Its hidden column is the one with room: the corpus writes hidden perfects
     // in this texture more than twice as freely as this form does, while its
     // fifths sit at the ninetieth percentile and its battuta past the
@@ -674,13 +690,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // The stretto choice is worth far more on this axis than on the one above,
     // because a longer fugue states more strettos: the strict column falls from
     // ninety to eighteen with the fifth at zero throughout, against ten more
-    // contrary-motion octave arrivals and four more anti-parallels. Hidden holds
-    // where it was.
-    {FormType::Fugue, 18, 96, 1270, 432},
-    // The fugue half carries the same choice, and the prelude half adds no true
-    // parallel of its own: thirty-six down to twelve, paid with two hidden
-    // perfects and four anti-parallels, with the battuta column unmoved.
-    {FormType::PreludeAndFugue, 12, 65, 489, 223},
+    // contrary-motion octave arrivals and four more anti-parallels. The
+    // registered coda voicing and the ranked bar-head escape take the remaining
+    // eighteen to zero for two more hidden perfects, and nothing else moves.
+    {FormType::Fugue, 0, 98, 1270, 432},
+    // The fugue half carries the same choices, and the prelude half adds no true
+    // parallel of its own: thirty-six to zero, paid with six hidden perfects and
+    // four anti-parallels, with the battuta column unmoved throughout.
+    {FormType::PreludeAndFugue, 0, 69, 489, 223},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
