@@ -1225,9 +1225,12 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
           if (formsStrictPerfectParallel(inner_prev, cand, motion.prev, motion.curr)) {
             return 3;
           }
-          if (formsPerfectParallel(inner_prev, cand, motion.prev, motion.curr)) {
+          // The contrary arrival ranks ABOVE the hidden perfect: the reference
+          // corpus writes it far more sparingly, so scaled by the spread each
+          // class occupies there it is the dearer of the two to pay.
+          if (formsAntiParallelPerfect(inner_prev, cand, motion.prev, motion.curr)) {
             worst = std::max(worst, 2);
-          } else if (formsAntiParallelPerfect(inner_prev, cand, motion.prev, motion.curr)) {
+          } else if (formsPerfectParallel(inner_prev, cand, motion.prev, motion.curr)) {
             worst = std::max(worst, 1);
           }
         }

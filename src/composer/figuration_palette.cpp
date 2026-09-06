@@ -1166,10 +1166,16 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // them at least a hidden perfect; pooling the two rungs then rejects the
         // whole vocabulary and the wave emits what it was already holding --
         // including a true parallel it could have traded for a hidden one.
+        // The contrary arrival is the dearest of the three payable classes, not
+        // the middle one. The reference corpus writes it far more sparingly than
+        // it writes either the hidden perfect or the battuta, so scaled by the
+        // spread each class occupies there it costs several times what they do,
+        // and a wave that steps off a hidden perfect onto a contrary arrival has
+        // paid more than it saved.
         constexpr int kStepClean = 0;
         constexpr int kStepBattuta = 1;
-        constexpr int kStepAntiParallel = 2;
-        constexpr int kStepHidden = 3;
+        constexpr int kStepHidden = 2;
+        constexpr int kStepAntiParallel = 3;
         constexpr int kStepParallel = 4;
         auto step_rank = [&](int cand) {
           int worst = kStepClean;

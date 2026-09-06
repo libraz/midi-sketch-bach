@@ -1255,10 +1255,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // worst single cell moves the other way. An order that only wins under one
   // reading of the corpus is not evidence for changing the order, so this one
   // stands on the ranking argument alone.
+  //
+  // The contrary arrival is a different matter and the corpus is not divided
+  // about it: every stratum of the reference works writes that class far more
+  // sparingly than either payable one, so scaled by the spread each occupies it
+  // is several times the dearer. It therefore sits at the bottom of what this
+  // guard is willing to pay rather than the top, where it used to be the first
+  // thing reached for.
   constexpr int kPedalClean = 0;
-  constexpr int kPedalAntiParallel = 1;
-  constexpr int kPedalHidden = 2;
-  constexpr int kPedalBattuta = 3;
+  constexpr int kPedalHidden = 1;
+  constexpr int kPedalBattuta = 2;
+  constexpr int kPedalAntiParallel = 3;
   constexpr int kPedalParallel = 4;
   const auto pedal_fault_rank = [&](int from, int cand, Tick t) {
     int worst = kPedalClean;
