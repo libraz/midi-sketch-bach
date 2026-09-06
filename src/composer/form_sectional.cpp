@@ -17,6 +17,7 @@
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -648,7 +649,7 @@ void prepareSectionalFugueHarmony(std::vector<ChordSpec>& plan, int free_bars, M
   }
 }
 
-void annotateSectionalFugueModulation(HarnessFixture& out, int free_bars, Mode mode) {
+void annotateSectionalPivotChords(HarnessFixture& out, int free_bars) {
   const int answer_bar = free_bars + kSubjectBars;
   if (answer_bar < 2 || static_cast<std::size_t>(answer_bar) >= out.harmony.chords.size())
     return;
@@ -662,19 +663,279 @@ void annotateSectionalFugueModulation(HarnessFixture& out, int free_bars, Mode m
   target.degree = RomanNumeral::V;
   target.function = HarmonicFunction::D;
   target.has_degree = true;
+}
 
-  const bool target_minor = mode == Mode::Minor;
-  out.harmony.modulations.push_back(
-      {barTick(answer_bar), 0, 7, target_minor, target_minor, ModulationType::Pivot});
+// ---------------------------------------------------------------------------
+// Key itinerary.
+//
+// A planned key area only becomes audible if the notes are spelled in it. Every
+// pitch these forms emit comes from a palette helper written on a fixed C
+// collection, so material that is merely degree-shifted stays inside the home
+// collection however far the plan travels. Two passes carry the plan to the ear:
+// the per-bar chord plan is restated in the key sounding at each bar, which puts
+// the local spelling into every chord-derived tone (anchors, pedal, punctuation,
+// chord blocks) without any selector knowing a modulation exists; and the tones
+// between those anchors -- the scalar fills the palette walks in C -- are bent
+// into the local collection afterwards.
+// ---------------------------------------------------------------------------
+
+// The bar the free section leaves the home key at: one four-bar block, long
+// enough to state the tonic before the first departure.
+constexpr int kFreeExcursionBar = 4;
+
+/// @brief Stamp the key areas both sectional forms travel through.
+///
+/// One destination, reached twice. The free section leaves home once its opening
+/// block has established the tonic and comes back for its closing half cadence,
+/// so that cadence is heard as V of the home key rather than as an arrival. The
+/// fugue tail's answer then inhabits the same dominant until the development
+/// restores home for the final cadence. The free-section boundaries are phrase
+/// modulations -- the section break itself carries them -- while the answer's is
+/// the pivot the V/V -> V approach below it already prepares.
+///
+/// @param harmony Plan receiving the home key and the modulation boundaries.
+/// @param total_bars Piece length in bars.
+/// @param free_bars Length of the free opening section in bars.
+/// @param mode Diatonic mode of the piece.
+void planSectionalModulations(HarmonicPlan& harmony, int total_bars, int free_bars, Mode mode) {
+  harmony.tonic_pc = 0;
+  harmony.is_minor = (mode == Mode::Minor);
+  const bool minor = harmony.is_minor;
+  constexpr std::uint8_t kDominantPc = 7;
+
+  const int free_return_bar = free_bars - 1;  // the half-cadence bar is home V.
+  if (free_return_bar > kFreeExcursionBar) {
+    harmony.modulations.push_back(
+        {barTick(kFreeExcursionBar), 0, kDominantPc, minor, minor, ModulationType::Phrase});
+    harmony.modulations.push_back(
+        {barTick(free_return_bar), kDominantPc, 0, minor, minor, ModulationType::Phrase});
+  }
+
+  const int answer_bar = free_bars + kSubjectBars;
+  if (answer_bar < 2 || answer_bar >= total_bars)
+    return;
+  harmony.modulations.push_back(
+      {barTick(answer_bar), 0, kDominantPc, minor, minor, ModulationType::Pivot});
   // A short sectional form may reach its reserved two-bar home cadence before
   // the full four-bar answer phrase has elapsed.  Restore the home context at
   // that cadence boundary instead of leaving the final C cadence interpreted
   // in the temporary dominant key.
-  const int final_cadence_bar = static_cast<int>(out.harmony.chords.size()) - 2;
+  const int final_cadence_bar = total_bars - 2;
   const int return_bar = std::min(answer_bar + kSubjectBars, final_cadence_bar);
-  if (return_bar > answer_bar && static_cast<std::size_t>(return_bar) < out.harmony.chords.size()) {
-    out.harmony.modulations.push_back(
-        {barTick(return_bar), 7, 0, target_minor, target_minor, ModulationType::Phrase});
+  if (return_bar > answer_bar && return_bar < total_bars) {
+    harmony.modulations.push_back(
+        {barTick(return_bar), kDominantPc, 0, minor, minor, ModulationType::Phrase});
+  }
+}
+
+/// @brief True when the key sounding at `tick` is not the piece's home key.
+bool isForeignKeyAt(const HarmonicPlan& harmony, Tick tick) {
+  const KeyContext local = localKeyAt(harmony, tick);
+  return local.tonic_pc != static_cast<std::uint8_t>(harmony.tonic_pc % 12) ||
+         local.is_minor != harmony.is_minor;
+}
+
+/// @brief True when a pitch belongs to the bar's chord.
+bool isChordTone(int pitch, const ChordSpec& chord) {
+  const int third_iv = chord.minor ? 3 : 4;
+  const int offset = ((pitch - static_cast<int>(chord.root_pc)) % 12 + 12) % 12;
+  return offset == 0 || offset == third_iv || offset == 7 || (chord.seventh && offset == 10);
+}
+
+/// @brief Restate every bar of the chord plan in the key sounding at it.
+///
+/// Degree-preserving, so a home progression keeps its function where it lands (V
+/// stays V) and picks up whatever accidentals the destination spells it with.
+/// Bars in the home key are left untouched, so a piece with no modulation comes
+/// out of this exactly as it went in.
+///
+/// @param plan Per-bar chord plan, modified in place.
+/// @param harmony Plan supplying the home key and the modulation boundaries.
+void retuneChordPlan(std::vector<ChordSpec>& plan, const HarmonicPlan& harmony) {
+  const KeyContext home{static_cast<std::uint8_t>(harmony.tonic_pc % 12), harmony.is_minor};
+  for (std::size_t bar = 0; bar < plan.size(); ++bar) {
+    const Tick tick = barTick(static_cast<int>(bar));
+    if (!isForeignKeyAt(harmony, tick))
+      continue;
+    const KeyContext local = localKeyAt(harmony, tick);
+    plan[bar].root_pc = static_cast<std::uint8_t>(
+        transposeIntoKey(static_cast<int>(plan[bar].root_pc), home, local) % 12);
+  }
+}
+
+// How badly a candidate tone reads against a statement it sounds with. Ranked
+// rather than pooled: the four faults are not interchangeable, and a guard that
+// unioned them would refuse a bend reading as the battuta the reference corpus
+// writes regularly in order to keep a tone that is already a true parallel. The
+// order follows the cost the corpus puts on each class -- the battuta is the
+// mildest of the motions, the contrary arrival at a perfect class sits just
+// under the true parallel.
+//
+// The mildest tier of all is not a motion at all: it is a tone that newly SITS
+// on a perfect class, reached obliquely while the statement sustains. Nothing is
+// wrong with that vertical on its own, which is why no motion rule names it, but
+// it is the material every one of the motions above is made of -- the line
+// leaves that perfect class at the next onset, and if the statement moves with
+// it the pair is a true parallel that this restatement created and no later pass
+// can see.
+constexpr int kBendClean = 0;
+constexpr int kBendPerfectArrival = 1;
+constexpr int kBendBattuta = 2;
+constexpr int kBendHidden = 3;
+constexpr int kBendAnti = 4;
+constexpr int kBendParallel = 5;
+
+/// @brief Rank the motion from this line's previous tone into `pitch` against
+///        every settled line sounding across the same pair of onsets.
+///
+/// Every fault ranked here is a motion rule, so each settled line is read at
+/// BOTH onsets. Which perfect interval a tone sits on says nothing on its own: a
+/// static reading cannot separate a parallel fifth from an oblique arrival at
+/// the same fifth, and so cannot keep the one out while letting the other
+/// through.
+///
+/// @param settled_lines One monophonic settled line per entry.
+/// @param prev_tick Onset of this line's previous note.
+/// @param prev_pitch This line's previous pitch (-1 when it has none).
+/// @param tick Onset of the note being ranked.
+/// @param pitch Candidate pitch for this line.
+/// @return The worst fault rank over the lines sounding at both onsets.
+int settledMotionRank(const std::vector<std::vector<MaterialNote>>& settled_lines, Tick prev_tick,
+                      int prev_pitch, Tick tick, int pitch) {
+  if (prev_pitch < 0)
+    return kBendClean;
+  int worst = kBendClean;
+  for (const std::vector<MaterialNote>& line : settled_lines) {
+    const int theme_prev = soundingMaterialPitch(line, prev_tick);
+    const int theme_curr = soundingMaterialPitch(line, tick);
+    if (theme_prev < 0 || theme_curr < 0)
+      continue;
+    // The classifier reads the register order from its argument positions, so
+    // the pair is normalised by what actually sounds on top at the arrival.
+    const bool line_on_top = pitch >= theme_curr;
+    const int upper_prev = line_on_top ? prev_pitch : theme_prev;
+    const int upper_curr = line_on_top ? pitch : theme_curr;
+    const int lower_prev = line_on_top ? theme_prev : prev_pitch;
+    const int lower_curr = line_on_top ? theme_curr : pitch;
+    const PerfectMotionKind kind =
+        classifyPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr);
+    if (kind == PerfectMotionKind::ParallelFifth || kind == PerfectMotionKind::ParallelOctave) {
+      worst = std::max(worst, kBendParallel);
+    } else if (kind == PerfectMotionKind::HiddenFifth || kind == PerfectMotionKind::HiddenOctave) {
+      worst = std::max(worst, kBendHidden);
+    } else if (isAntiParallelPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+      worst = std::max(worst, kBendAnti);
+    } else if (isBattutaMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+      worst = std::max(worst, kBendBattuta);
+    }
+    const int arrival_ic = ((pitch - theme_curr) % 12 + 12) % 12;
+    if (arrival_ic == 0 || arrival_ic == 7) {
+      worst = std::max(worst, kBendPerfectArrival);
+    }
+  }
+  return worst;
+}
+
+/// @brief Bend the notes from `first` onward into the key sounding under them.
+///
+/// The bar's own chord tones are left where they are: the harmony's spelling
+/// outranks the collection, so a local dominant's raised third survives a bend
+/// into a natural-minor collection that does not contain it, and every downbeat
+/// anchor stays the chord tone the figuration rule requires. Notes in the home
+/// key are untouched as well, which preserves the raised leading tones the
+/// minor-key cadence formulas write.
+///
+/// A bend is refused only when it reads WORSE against the settled lines than the
+/// tone it replaces; an equal or better motion is taken. Those lines are
+/// verbatim material chosen before this one was restated, so nothing downstream
+/// can answer for the pair, and this restatement runs after the
+/// parallel-avoidance machinery that chose them. Refusing outright on any
+/// perfect motion would be the wrong shape: against a statement that already
+/// pins the vertical the unbent tone is regularly no cleaner, and a veto there
+/// keeps the fault while also keeping the cross relation the bend was called to
+/// remove.
+///
+/// @param notes Line to restate, modified in place.
+/// @param first Index of the first note to consider.
+/// @param harmony Plan supplying the home key and the modulation boundaries.
+/// @param plan Per-bar chord plan, already restated in the local keys.
+/// @param settled_lines Lines already settled against this one, one per entry.
+void bendIntoLocalKeys(std::vector<MaterialNote>& notes, std::size_t first,
+                       const HarmonicPlan& harmony, const std::vector<ChordSpec>& plan,
+                       const std::vector<std::vector<MaterialNote>>& settled_lines = {}) {
+  for (std::size_t idx = first; idx < notes.size(); ++idx) {
+    MaterialNote& note = notes[idx];
+    const std::size_t bar = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+    if (bar >= plan.size() || !isForeignKeyAt(harmony, note.start_tick))
+      continue;
+    const int pitch = static_cast<int>(note.pitch);
+    if (isChordTone(pitch, plan[bar]))
+      continue;
+    const KeyContext local = localKeyAt(harmony, note.start_tick);
+    const int bent = std::clamp(bendIntoKey(pitch, local), 0, 127);
+    if (bent == pitch)
+      continue;
+    // The previous tone is the one this line will actually sound, bent and all,
+    // because the restatement walks the line in order.
+    const Tick prev_tick = idx > 0 ? notes[idx - 1].start_tick : 0;
+    const int prev_pitch = idx > 0 ? static_cast<int>(notes[idx - 1].pitch) : -1;
+    if (settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, bent) >
+        settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, pitch)) {
+      continue;
+    }
+    note.pitch = static_cast<std::uint8_t>(bent);
+  }
+}
+
+/// @brief Collect the theme statements, one monophonic line per entry.
+///
+/// Kept separate rather than flattened: the motion rank reads each line at two
+/// onsets, and a merged list would pair one line's departure with another's
+/// arrival. These are the lines every restatement starts out ranked against.
+std::vector<std::vector<MaterialNote>> gatherThemeLines(const Material& material) {
+  std::vector<std::vector<MaterialNote>> lines;
+  lines.push_back(material.subject);
+  lines.push_back(material.answer);
+  lines.push_back(material.tonal_answer);
+  for (const StrettoDecl& stretto : material.stretto_entries)
+    lines.push_back(stretto.follower_notes);
+  return lines;
+}
+
+/// @brief Bend every accompaniment line of the fixture into its local key.
+///
+/// The thematic vectors are deliberately excluded. A real answer is already the
+/// degree-preserving restatement of the subject in the dominant -- transposing
+/// down a fourth and transposing into the dominant collection are the same map --
+/// and the subject, its re-entry and the stretto pair all sound in the home key,
+/// where a bend is a no-op anyway. Bending them would additionally break the
+/// constant transposition the imitation and stretto declarations are checked
+/// against.
+///
+/// @param out Fixture whose accompaniment material is restated.
+/// @param plan Per-bar chord plan, already restated in the local keys.
+void bendAccompanimentIntoLocalKeys(HarnessFixture& out, const std::vector<ChordSpec>& plan) {
+  // The lines are restated in a fixed order and each joins the settled set once
+  // it is done, so a line reaches the rank carrying every line settled before
+  // it -- the statements first, then the accompaniment top down. The dependency
+  // is one-directional by construction: a line cannot see one restated after it,
+  // so half of each accompaniment pair is read rather than none.
+  std::vector<std::vector<MaterialNote>> settled = gatherThemeLines(out.material);
+  const auto settle = [&](std::vector<MaterialNote>& line) {
+    bendIntoLocalKeys(line, 0, out.harmony, plan, settled);
+    settled.push_back(line);
+  };
+  // The countersubject meets the statements directly, so it is restated first.
+  settle(out.material.countersubject);
+  for (VoiceId voice = 0; voice < kTailVoices; ++voice) {
+    for (FigurationSection& section : out.material.figuration_sections) {
+      if (section.voice == voice)
+        settle(section.notes);
+    }
+    for (CodaDecl& coda : out.material.coda_extensions) {
+      if (coda.voice == voice)
+        settle(coda.notes);
+    }
   }
 }
 
@@ -1371,11 +1632,16 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   out.registration_step_ticks.push_back(barTick(free_bars));
 
   // One per-bar chord plan over the whole piece (free + fugue). The fugue tail
-  // reads its slice (bars [free_bars, total)) by absolute bar index.
+  // reads its slice (bars [free_bars, total)) by absolute bar index. The
+  // itinerary is stamped first so the plan can be restated bar by bar in the key
+  // that sounds at it; the pivot and half-cadence pins come last, because those
+  // chords are design values in the home key whatever surrounds them.
   std::vector<ChordSpec> plan = buildRepeatingChordPlan(total, mode, harm_idx);
+  planSectionalModulations(out.harmony, total, free_bars, mode);
+  retuneChordPlan(plan, out.harmony);
   prepareSectionalFugueHarmony(plan, free_bars, mode);
   emitHarmony(out, plan, mode);
-  annotateSectionalFugueModulation(out, free_bars, mode);
+  annotateSectionalPivotChords(out, free_bars);
 
   // --- TOCCATA SECTION (bars 0 .. free_bars-1), V0 only. ---
   // Generalize OrganToccata's archetype machinery to the available bars. The
@@ -1572,6 +1838,10 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     for (int bar = win.first_bar; bar <= win.last_bar; ++bar) {
       FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
       const FreeBarKind kind = bar_kinds[static_cast<std::size_t>(bar)];
+      // Where this bar's notes start, so the scalar material just written can be
+      // restated in the key sounding at it (the palette walks a fixed C
+      // collection and would otherwise keep the whole section in the home key).
+      const std::size_t before = section.notes.size();
       if (kind == FreeBarKind::kGesture) {
         // V0 solo opening gesture; the bar's tail is silent and no layer enters.
         // In the octave cascade the gesture keeps the window's opening harmony
@@ -1580,6 +1850,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         const int octave_drop = (dramaticus_cascade && bar == 1) ? 1 : 0;
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(chord_bar)], mode,
                          kBandLo[0], kBandHi[0], octave_drop);
+        bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         prev_pitch = -1;
         continue;
       }
@@ -1588,9 +1859,9 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         // V0 and doubled exactly 12 below in V1. Both lines are Material, so the
         // validator's parallel-octave rules are skipped by design; the doubled
         // V1 statement is emitted as a verbatim voice-1 ToccataSection below.
-        const std::size_t before = section.notes.size();
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(win.first_bar)], mode,
                          kBandLo[0], kBandHi[0], /*octave_drop=*/2);
+        bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         for (std::size_t note_idx = before; note_idx < section.notes.size(); ++note_idx) {
           MaterialNote doubled = section.notes[note_idx];
           doubled.pitch = static_cast<std::uint8_t>(static_cast<int>(doubled.pitch) - 12);
@@ -1635,6 +1906,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         const int base = std::clamp(kBandLo[0], kBandLo[0], kBandHi[0] - 12);
         appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                             /*notes_per_beat=*/2, base, kBandHi[0], fig_offset, prev_pitch);
+        bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         lp.punctuate = true;
         continue;
       }
@@ -1646,10 +1918,15 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         // The roll is confined to the V0 band so it sounds above the V1
         // punctuation and V2 pedal exactly like a wave bar; the accompaniment
         // layers are identical to a wave bar's, so the dim7 rolls over the
-        // pedal like the model piece.
+        // pedal like the model piece. The roll is built on the leading tone of
+        // the key sounding at the bar, and is exempt from the bend that follows
+        // every other bar: its four tones are a chromatic design value, and a
+        // collection that does not contain the leading tone would flatten the
+        // one pitch the figure exists to state.
         const bool tighten_sweep = bar >= free_bars - 3;
-        appendDim7SweepBar(section.notes, bar, static_cast<int>(out.harmony.tonic_pc), kBandLo[0],
-                           kBandHi[0], tighten_sweep);
+        appendDim7SweepBar(section.notes, bar,
+                           static_cast<int>(localKeyAt(out.harmony, barTick(bar)).tonic_pc),
+                           kBandLo[0], kBandHi[0], tighten_sweep);
         lp.pedal = true;
         lp.punctuate = true;
         prev_pitch = -1;
@@ -1679,6 +1956,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch,
                           /*rotate_figures=*/true, /*triplet=*/tighten);
+      bendIntoLocalKeys(section.notes, before, out.harmony, plan);
       lp.pedal = true;
       lp.punctuate = true;
     }
@@ -1742,6 +2020,12 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,
                   /*open_development_texture=*/true);
 
+  // Every voice that is not stating the theme is restated in the key sounding
+  // under it. Without this the countersubject, the counterlines and the bass
+  // support keep the home collection while the answer speaks the dominant, and
+  // the piece sounds the two spellings of the same degree at once.
+  bendAccompanimentIntoLocalKeys(out, plan);
+
   return out;
 }
 
@@ -1758,10 +2042,15 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   const Split split = splitBars(total);
   const int free_bars = split.free_bars;
 
+  // The itinerary is stamped first so the plan can be restated bar by bar in the
+  // key that sounds at it; the pivot and half-cadence pins come last, because
+  // those chords are design values in the home key whatever surrounds them.
   std::vector<ChordSpec> plan = buildRepeatingChordPlan(total, mode, harm_idx);
+  planSectionalModulations(out.harmony, total, free_bars, mode);
+  retuneChordPlan(plan, out.harmony);
   prepareSectionalFugueHarmony(plan, free_bars, mode);
   emitHarmony(out, plan, mode);
-  annotateSectionalFugueModulation(out, free_bars, mode);
+  annotateSectionalPivotChords(out, free_bars);
 
   // Ornament metadata (fixture field only, never a note): the free fantasia
   // section closes at its final bar before the fugue enters, and the ornament
@@ -1867,6 +2156,10 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
     for (int bar = sec_start; bar <= sec_last; ++bar) {
       FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
       lp.pedal = true;  // every style carries the pedal.
+      // Where this bar's notes start, so the scalar material just written can be
+      // restated in the key sounding at it (the palette walks a fixed C
+      // collection and would otherwise keep the whole section in the home key).
+      const std::size_t before = section.notes.size();
       if (sp.style == FantasiaStyle::Chordal && (bar - sec_start) % 2 == 0) {
         // Declamatory chordal style: V0 half-note chord-block tones (alternating
         // inversions across blocks) over the homophonic V1+V2 strike, on every
@@ -1883,11 +2176,13 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
         // descending run, the bar tail silent) before the quarter-note wave.
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, base,
                          base + 14);
+        bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         prev_pitch = -1;
         continue;
       }
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           sp.notes_per_beat, base, base + 14, fig_offset, prev_pitch);
+      bendIntoLocalKeys(section.notes, before, out.harmony, plan);
       if (sp.style == FantasiaStyle::Fugal || sp.style == FantasiaStyle::Toccata) {
         lp.punctuate = true;  // V1 head punctuation on top of the pedal.
       }
@@ -1912,6 +2207,12 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   // --- FUGUE TAIL (bars free_bars .. total-1). ---
   appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,
                   /*open_development_texture=*/false);
+
+  // Every voice that is not stating the theme is restated in the key sounding
+  // under it. Without this the countersubject, the counterlines and the bass
+  // support keep the home collection while the answer speaks the dominant, and
+  // the piece sounds the two spellings of the same degree at once.
+  bendAccompanimentIntoLocalKeys(out, plan);
 
   return out;
 }

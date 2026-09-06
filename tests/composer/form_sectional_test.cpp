@@ -1342,12 +1342,14 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
 
 namespace {
 
-// The internal leading-tone diminished-seventh pitch classes of the C-minor
-// tonic used internally by every builder (transpose happens only at MIDI
-// output): leading tone B (11) plus its stacked minor thirds -> {2, 5, 8, 11}.
-// The set is symmetric under transposition by a minor third, so it is identical
-// for any minor tonic.
-const std::set<int> kDim7PitchClasses = {2, 5, 8, 11};
+// The leading-tone diminished-seventh pitch classes of the key sounding at a
+// bar: its leading tone plus the stacked minor thirds above it. The roll follows
+// the piece's own key areas, so a sweep inside the free section's dominant
+// excursion spells that key's leading tone, not the home one.
+std::set<int> dim7PitchClasses(const HarmonicPlan& harmony, Tick tick) {
+  const int leading = (localKeyAt(harmony, tick).tonic_pc + 11) % 12;
+  return {leading, (leading + 3) % 12, (leading + 6) % 12, (leading + 9) % 12};
+}
 
 // Mirror the builder's Dramaticus sweep placement: with the cascade layout
 // active (free_bars >= 12) the first sweep is the first wave bar after the
@@ -1389,9 +1391,11 @@ TEST(FormSectionalTest, DramaticusMinorDim7SweepBars) {
         const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
         ASSERT_FALSE(notes.empty())
             << "seed " << seed << " total " << total << " sweep bar " << bar << " is empty";
-        // Only the four leading-tone dim7 pitch classes sound.
+        // Only the four leading-tone dim7 pitch classes of the local key sound.
+        const std::set<int> expected_pcs =
+            dim7PitchClasses(fx.harmony, static_cast<Tick>(bar) * kTicksPerBar);
         for (const NoteEvent& note : notes) {
-          EXPECT_TRUE(kDim7PitchClasses.count(note.pitch % 12) == 1)
+          EXPECT_TRUE(expected_pcs.count(note.pitch % 12) == 1)
               << "seed " << seed << " total " << total << " sweep bar " << bar << " pitch "
               << static_cast<int>(note.pitch) << " (pc " << (note.pitch % 12)
               << ") is not a dim7 tone";
@@ -1428,9 +1432,12 @@ TEST(FormSectionalTest, DramaticusMajorHasNoDim7Sweep) {
       for (int bar : {sweep.first_bar, sweep.last_bar}) {
         const std::vector<NoteEvent> notes = barVoiceNotes(r.notes, bar, 0);
         ASSERT_FALSE(notes.empty()) << "seed " << seed << " total " << total << " bar " << bar;
-        const bool all_dim7 = std::all_of(notes.begin(), notes.end(), [](const NoteEvent& note) {
-          return kDim7PitchClasses.count(note.pitch % 12) == 1;
-        });
+        const std::set<int> expected_pcs =
+            dim7PitchClasses(fx.harmony, static_cast<Tick>(bar) * kTicksPerBar);
+        const bool all_dim7 =
+            std::all_of(notes.begin(), notes.end(), [&expected_pcs](const NoteEvent& note) {
+              return expected_pcs.count(note.pitch % 12) == 1;
+            });
         EXPECT_FALSE(all_dim7)
             << "seed " << seed << " total " << total << " major bar " << bar
             << " unexpectedly consists solely of dim7 tones (plan should be unchanged)";
@@ -1456,9 +1463,12 @@ TEST(FormSectionalTest, DramaticusShortFormHasNoDim7Sweep) {
       // from dim7 tones; a chord block's two/three triad tones are excluded by
       // the count so a triad that happens to be a dim7 subset is not mistaken
       // for a sweep.
+      const std::set<int> expected_pcs =
+          dim7PitchClasses(fx.harmony, static_cast<Tick>(bar) * kTicksPerBar);
       const bool sweep_signature =
-          notes.size() >= 16 && std::all_of(notes.begin(), notes.end(), [](const NoteEvent& note) {
-            return kDim7PitchClasses.count(note.pitch % 12) == 1;
+          notes.size() >= 16 &&
+          std::all_of(notes.begin(), notes.end(), [&expected_pcs](const NoteEvent& note) {
+            return expected_pcs.count(note.pitch % 12) == 1;
           });
       EXPECT_FALSE(sweep_signature)
           << "seed " << seed << " short-form bar " << bar << " is a dim7 sweep (should not exist)";
