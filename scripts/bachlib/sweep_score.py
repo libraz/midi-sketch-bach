@@ -233,8 +233,11 @@ def stepwise_ratio(voice_notes: list[dict[str, Any]]) -> float:
 def note_gap_ratio(voices: dict[int, list[dict[str, Any]]]) -> float:
     """Share of consecutive note pairs separated by silence within a voice.
 
-    Zero means the whole piece is legato -- every note-off coincides with the
-    next note-on -- which is what "no articulation" looks like in the data.
+    This reads generated.v1, which carries notated lengths, so the silence it
+    finds is a rest the form wrote -- not the release a player takes between two
+    joined notes. Touch is applied to the rendered output and is measured there;
+    a value near zero here says the voice writes few rests, not that the piece
+    is played legato.
     """
     pairs = 0
     gaps = 0
