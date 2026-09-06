@@ -48,8 +48,8 @@ ENFORCE_MODEL_SCORE = True
 # Shared floor for the KL-divergence model probability (bach-mcp
 # model_score_v2). The v2 model measures per-component KL divergence against
 # the reference corpus with a probability scale anchored to the reference
-# works' own p95 distance envelope (a real solo-cello prelude scores ~0.84;
-# degenerate interval-spam output scores ~0.01), so unlike the v1
+# works' own p95 distance envelope (a real solo-cello prelude lands high in
+# that envelope, degenerate interval-spam output near zero), so unlike the v1
 # cross-entropy score it cannot be gamed by over-concentrating on common
 # intervals. 0.70 is a conservative fallback for forms without an explicit
 # floor; the per-form floors in FORM_THRESHOLDS are the measured 20-seed
