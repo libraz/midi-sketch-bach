@@ -215,10 +215,16 @@ class ThemeToneRegistry {
 /// anchors with a complementary quarter/run/arpeggio rhythm while the source
 /// pitch is held. Fugue and sectional fugue-tail builders share this exact
 /// path so pitch scoring and rhythmic realization cannot drift.
+///
+/// @param avoid_battuta Add the ottava-battuta term to the pass-1 score. The
+///        arrival is contrary motion, so the similar-motion term never sees it.
+///        Off by default: the line this derives is also the line later entries
+///        restate, and callers that restate it must first check that the
+///        avoiding line still combines with the entry it will meet.
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
-                                std::vector<MaterialNote>& destination,
-                                ThemeToneRegistry& registry);
+                                std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
+                                bool avoid_battuta = false);
 
 /// @brief Replace part of one carrier span with an explicit suspension carrier.
 ///

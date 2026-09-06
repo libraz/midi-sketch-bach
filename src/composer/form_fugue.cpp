@@ -997,6 +997,27 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       cursor += subj_rhythm[static_cast<std::size_t>(note)];
     }
   };
+  // The third entry's line: the subject an octave down, octave-fit into the V2
+  // band. Built through one definition so the canonical countersubject can be
+  // vetted against the very line it will later be restated over, and the line
+  // stamped at the entry cannot drift from the line that vetted it.
+  auto third_entry_seed_at = [&](int base_bar) {
+    const int off = octaveOffsetForBand(subj_pat, -12, 2, kBandLo, kBandHi);
+    std::vector<MaterialNote> seed;
+    seed.reserve(kSubjectNotes);
+    Tick cursor = barTick(base_bar);
+    for (int note = 0; note < kSubjectNotes; ++note) {
+      MaterialNote mn;
+      mn.start_tick = cursor;
+      mn.duration = subj_rhythm[static_cast<std::size_t>(note)];
+      mn.pitch = static_cast<std::uint8_t>(std::clamp(
+          static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) - 12 + off, 0, 127));
+      seed.push_back(mn);
+      cursor += mn.duration;
+    }
+    return seed;
+  };
+
   stamp_subject(first_bar + 0, v0_off, 0);
   out.material.canonical_subject_note_count = kSubjectNotes;
   pushSpan(asm_ctx, 0, first_bar + 0, first_bar + 3, VoiceIntent::SubjectCarrier);
@@ -1036,8 +1057,93 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // V0 countersubject rides above the answer. It is fixed material rather than
   // free figuration, so the answer entry now carries a recurring counterline.
   const std::size_t cs_canonical_base = out.material.countersubject.size();
-  append_countersubject_from(use_tonal_answer ? out.material.tonal_answer : out.material.answer, 0,
-                             barTick(first_bar + 4), barTick(first_bar + 8));
+  const std::vector<MaterialNote>& answer_source =
+      use_tonal_answer ? out.material.tonal_answer : out.material.answer;
+  const Tick cs_start = barTick(first_bar + 4);
+  const Tick cs_end = barTick(first_bar + 8);
+  // Derive the line twice and keep the better one. The battuta-avoiding
+  // derivation is the stronger counterpoint, but this same line is what every
+  // later entry restates, and a line whose restatement no longer combines costs
+  // the fugue its one recurring counter-identity -- the worse loss of the two.
+  //
+  // Avoiding a battuta means taking a WIDER leap in place of the one that
+  // arrived at the octave, so the avoiding line reaches further than the plain
+  // one; a restatement has to octave-fit the whole line into a lower voice's
+  // band, and a line that reaches further stops fitting. The trial is therefore
+  // confined to the ambit the plain line already occupies, so it can only trade
+  // pitches inside that reach, never widen it. It is then adopted only when its
+  // degree-3 restatement still combines with the third entry it will meet.
+  bool battuta_free_adopted = false;
+  std::vector<MaterialNote> plain_cs;
+  ThemeToneRegistry plain_tones = asm_ctx.theme_tones;
+  appendScoredCountersubject(answer_source, 0, cs_start, cs_end, kBandLo[0], kBandHi[0], mode,
+                             plain_cs, plain_tones);
+  // Battutas the realized line forms against the entry it accompanies, read at
+  // the line's own onsets against whatever the entry sounds under them. The
+  // narrowed trial band changes the candidate set for EVERY note, not only the
+  // ones that arrived at an octave, so the trial is adopted only when it wins
+  // on the count it exists to lower.
+  const auto battuta_count = [&](const std::vector<MaterialNote>& counter) {
+    int count = 0;
+    int prev_counter = -1;
+    int prev_source = -1;
+    for (const MaterialNote& note : counter) {
+      const int source = soundingMaterialPitch(answer_source, note.start_tick);
+      const int pitch = static_cast<int>(note.pitch);
+      if (formsBattuta(prev_counter, pitch, prev_source, source)) {
+        ++count;
+      }
+      prev_counter = pitch;
+      prev_source = source;
+    }
+    return count;
+  };
+  if (!short_form && !plain_cs.empty()) {
+    int plain_lo = 127;
+    int plain_hi = 0;
+    for (const MaterialNote& note : plain_cs) {
+      plain_lo = std::min(plain_lo, static_cast<int>(note.pitch));
+      plain_hi = std::max(plain_hi, static_cast<int>(note.pitch));
+    }
+    // The reach the restatement can still absorb: it octave-fits the whole line
+    // into the accompaniment band, so what it cannot take is SPAN, not
+    // position. Whatever the plain line leaves unused of that span is the room
+    // the trial may spend on a wider leap away from an octave arrival.
+    const int slack = std::max(0, ((kBandHi[1] - kBandLo[1]) - (plain_hi - plain_lo)) / 2);
+    ThemeToneRegistry trial_tones = asm_ctx.theme_tones;
+    std::vector<MaterialNote> trial_cs;
+    appendScoredCountersubject(answer_source, 0, cs_start, cs_end,
+                               std::max(kBandLo[0], plain_lo - slack),
+                               std::min(kBandHi[0], plain_hi + slack), mode, trial_cs, trial_tones,
+                               /*avoid_battuta=*/true);
+    if (!trial_cs.empty() && battuta_count(trial_cs) < battuta_count(plain_cs)) {
+      const Tick origin = trial_cs.front().start_tick;
+      canonical_cs.clear();
+      for (const MaterialNote& src : trial_cs) {
+        MaterialNote note;
+        note.start_tick = src.start_tick - origin;
+        note.duration = src.duration;
+        note.pitch = src.pitch;
+        canonical_cs.push_back(note);
+      }
+      const Tick third_start = barTick(first_bar + 8);
+      std::vector<MaterialNote> restated;
+      if (build_restatement(3, 1, third_start, &restated) &&
+          restatement_compatible(restated, third_entry_seed_at(first_bar + 8), third_start)) {
+        out.material.countersubject.insert(out.material.countersubject.end(), trial_cs.begin(),
+                                           trial_cs.end());
+        asm_ctx.theme_tones = trial_tones;
+        battuta_free_adopted = true;
+      }
+      // The snapshot below rebuilds canonical_cs from whichever line landed.
+      canonical_cs.clear();
+    }
+  }
+  if (!battuta_free_adopted) {
+    out.material.countersubject.insert(out.material.countersubject.end(), plain_cs.begin(),
+                                       plain_cs.end());
+    asm_ctx.theme_tones = plain_tones;
+  }
   pushSpan(asm_ctx, 0, first_bar + 4, first_bar + 7, VoiceIntent::CountersubjectCarrier);
   // Snapshot the just-derived answer counterline (re-based to tick 0) as the
   // piece's canonical countersubject for every later restatement.
@@ -1096,17 +1202,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     pushSpan(asm_ctx, 2, first_bar + 8, first_bar + 11, VoiceIntent::SubjectCarrier);
     // V1 countersubject plus V0 figuration makes the third entry a real 3-voice
     // texture instead of a two-voice carrier with a resting middle voice.
-    std::vector<MaterialNote> third_entry_seed;
-    Tick third_cursor = barTick(first_bar + 8);
-    for (int note = 0; note < kSubjectNotes; ++note) {
-      MaterialNote mn;
-      mn.start_tick = third_cursor;
-      mn.duration = subj_rhythm[static_cast<std::size_t>(note)];
-      mn.pitch = static_cast<std::uint8_t>(std::clamp(
-          static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) - 12 + third_off, 0, 127));
-      third_entry_seed.push_back(mn);
-      third_cursor += mn.duration;
-    }
+    const std::vector<MaterialNote> third_entry_seed = third_entry_seed_at(first_bar + 8);
     // The canonical countersubject was derived against the ANSWER -- the
     // subject a fifth above the home statement -- so restating it against the
     // home-pitch third entry must shift by that same relative interval: up a

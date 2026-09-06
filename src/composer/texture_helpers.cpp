@@ -242,8 +242,8 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
 
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
-                                std::vector<MaterialNote>& destination,
-                                ThemeToneRegistry& registry) {
+                                std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
+                                bool avoid_battuta) {
   struct Anchor {
     Tick tick = 0;
     Tick duration = 0;
@@ -288,6 +288,16 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
         score += 4000;
       } else if (similar) {
         score += 200;
+      }
+      // Ottava battuta: contrary motion into an octave the pair was not on,
+      // this line leaping DOWN into it. Charged in the same units as the
+      // melodic distance above rather than as a veto -- the alternative is a
+      // WIDER leap in the same direction, and a term large enough to always win
+      // would buy the arrival at any leap at all. A third's worth of extra
+      // distance is the price the line pays; past that the battuta is the
+      // better note.
+      if (avoid_battuta && formsBattuta(previous_counter, pitch, previous_source, source_pitch)) {
+        score += 4;
       }
       if (repeats_previous && source_direction != 0) {
         score += 300;
