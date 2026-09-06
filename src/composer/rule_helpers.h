@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "composer/harmonic_plan.h"
+#include "composer/material.h"
+#include "composer/provenance.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -190,6 +192,62 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
 
 bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick);
+
+// Material queries.
+
+// Returns the cadence cell whose approach or cadence tick is exactly `tick`,
+// or nullptr when no cell touches it. Both candidate enumeration paths use it
+// to discover the forced approach/cadence pitch classes at a position.
+const CadenceCell* cadenceCellAt(const Material& material, Tick tick);
+
+// Provenance-bit helpers. Both share the same shape: OR the bits the named
+// idiom implies into `rules`, leaving every other bit untouched.
+
+// Functional-harmony helper: set the four functional-harmony provenance
+// bits on `rules` when the active chord opts into the strict regime
+// (has_degree=true). Caller passes `pc` (candidate pitch class) and
+// `is_chord_tone` so the helper doesn't recompute triad arithmetic.
+//
+//   ChordToneRoman  — set when the candidate is a chord tone of a
+//                     degree-tagged chord. Stricter sibling of
+//                     RuleBit::ChordTone (which fires regardless of
+//                     has_degree).
+//   InversionLabel  — set when the candidate's pitch class matches the
+//                     chord's declared bass pc (i.e. the candidate
+//                     could serve as the bass for the inversion). The
+//                     bit fires per-voice; whichever voice carries the
+//                     bass note will be the one that lights the bit.
+//   DoublingChecked — set unconditionally inside a has_degree chord
+//                     region: the doubling rules in the Validator (no
+//                     leading-tone double, no 7th double) sweep the
+//                     tick.
+//   SpacingChecked  — set unconditionally inside a has_degree chord
+//                     region: spacing rule sweeps the tick.
+void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone);
+
+// Modulation/tonicization helper: set the four corresponding provenance
+// bits when the surrounding context matches each idiom.
+//
+//   ModulationCommitted        — the active chord sits at or after a
+//                                ModulationEvent boundary (the plan has
+//                                committed to a new key area, and this
+//                                candidate's pitch is participating in
+//                                that area).
+//   SecondaryDominantResolved  — the active chord is the resolution of
+//                                a previous secondary dominant: the
+//                                most recent chord with has_secondary_of=
+//                                true (strictly before the active chord)
+//                                declares secondary_of equal to the
+//                                active chord's degree.
+//   PicardyThird               — the active chord is the final tonic
+//                                with is_picardy=true and the candidate
+//                                lands on the major third (root + 4).
+//   ModalMixture               — the active chord declares is_borrowed=
+//                                true (a parallel-mode loan) and the
+//                                candidate is a chord tone of that
+//                                chord.
+void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& chord,
+                 std::uint8_t pc, bool is_chord_tone);
 
 }  // namespace rule_helpers
 }  // namespace bach::composer

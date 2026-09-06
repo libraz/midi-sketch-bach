@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "composer/chord_voicing.h"
 #include "core/pitch_utils.h"
 
 namespace bach::composer::rule_helpers {
@@ -646,6 +647,54 @@ bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidat
     }
   }
   return false;
+}
+
+const CadenceCell* cadenceCellAt(const Material& material, Tick tick) {
+  for (const auto& cell : material.cadence_cells) {
+    if (cell.approach_tick == tick || cell.cadence_tick == tick)
+      return &cell;
+  }
+  return nullptr;
+}
+
+void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone) {
+  if (!chord.has_degree)
+    return;
+  rules |= ruleBitMask(RuleBit::DoublingChecked);
+  rules |= ruleBitMask(RuleBit::SpacingChecked);
+  if (is_chord_tone)
+    rules |= ruleBitMask(RuleBit::ChordToneRoman);
+  if (pc == bassPitchClassFor(chord))
+    rules |= ruleBitMask(RuleBit::InversionLabel);
+}
+
+void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& chord,
+                 std::uint8_t pc, bool is_chord_tone) {
+  for (const auto& mod : plan.modulations) {
+    if (mod.tick <= chord.start_tick) {
+      rules |= ruleBitMask(RuleBit::ModulationCommitted);
+      break;
+    }
+  }
+  const ChordEvent* prev = nullptr;
+  for (const auto& c : plan.chords) {
+    if (c.start_tick >= chord.start_tick)
+      break;
+    if (c.has_secondary_of)
+      prev = &c;
+  }
+  if (prev != nullptr && chord.has_degree && prev->secondary_of == chord.degree) {
+    rules |= ruleBitMask(RuleBit::SecondaryDominantResolved);
+  }
+  if (chord.is_picardy) {
+    const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
+    if (pc == major_third_pc) {
+      rules |= ruleBitMask(RuleBit::PicardyThird);
+    }
+  }
+  if (chord.is_borrowed && is_chord_tone) {
+    rules |= ruleBitMask(RuleBit::ModalMixture);
+  }
 }
 
 }  // namespace bach::composer::rule_helpers
