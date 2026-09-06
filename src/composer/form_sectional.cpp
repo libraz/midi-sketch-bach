@@ -859,10 +859,15 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // V0 >= V1 >= V2 register order is preserved. Identical scoring to the fugue
   // family's append_countersubject_from. Each note is recorded into the registry
   // so a later voice avoids a parallel against it.
+  // The battuta term is on here and off in the fugue family: this tail has no
+  // degree-shifted restatement of the countersubject, so the wider ambit that
+  // avoiding a battuta costs has nothing downstream that must still octave-fit
+  // it.
   auto append_countersubject_from = [&](const std::vector<MaterialNote>& source, int voice,
                                         Tick start, Tick end) {
     appendScoredCountersubject(source, static_cast<VoiceId>(voice), start, end, kBandLo[voice],
-                               kBandHi[voice], mode, out.material.countersubject, registry);
+                               kBandHi[voice], mode, out.material.countersubject, registry,
+                               /*avoid_battuta=*/true);
   };
   stamp_subject(first_bar + 0, v0_off, 0);
   out.material.canonical_subject_note_count = kSubjectNotes;
