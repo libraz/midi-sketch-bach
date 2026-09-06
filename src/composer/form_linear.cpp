@@ -1240,18 +1240,21 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // including a true parallel it could have traded for a hidden one.
   //
   // The battuta sits ABOVE the hidden perfect here, which is the opposite of
-  // the order every other guard in the product uses, and the reason is this
-  // voice's own measurements rather than a different reading of the theory.
-  // The pedal's band spans a thirteenth and a triad puts three tones in it, so
-  // the escape below is choosing between faults far more often than it is
-  // finding a clean tone -- which makes the order it chooses by the thing that
-  // decides this form's counterpoint profile. Measured against the reference
-  // corpus's three-voice group, this form writes hidden perfects at about the
-  // rate the corpus median does, with most of the distribution still above it,
-  // and contrary-motion octave arrivals at several times the rate any of those
-  // works reach. Trading the class with room for the class without it is what
-  // the general order prescribes here and what the corpus contradicts. Both
-  // strict classes stay worst; only the two payable ones swap.
+  // the order every other guard in the product uses. The pedal's band spans a
+  // thirteenth and a triad puts three tones in it, so the escape below is
+  // choosing between faults far more often than it is finding a clean tone --
+  // which makes the order it chooses by the thing that decides this form's
+  // counterpoint profile. Both strict classes stay worst; only the two payable
+  // ones swap.
+  //
+  // The reference corpus does not settle which way they should sit. Swapping
+  // them back was measured across every character, mode and seed against three
+  // defensible strata of the same repertoire, and the sign of the result
+  // changes with the stratum: the encoded three-voice group prefers this order,
+  // the organ group prefers the general one by a margin small enough that the
+  // worst single cell moves the other way. An order that only wins under one
+  // reading of the corpus is not evidence for changing the order, so this one
+  // stands on the ranking argument alone.
   constexpr int kPedalClean = 0;
   constexpr int kPedalAntiParallel = 1;
   constexpr int kPedalHidden = 2;
@@ -1386,6 +1389,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
               break;
             }
           }
+          // The candidates stay inside the bar's chord. The band spans a
+          // thirteenth, so each of the three degrees already appears at every
+          // octave it can reach and the list above is exhaustive; widening it
+          // means leaving the chord, and admitting the consonant diatonic tones
+          // between the degrees measurably costs more than it saves. It does
+          // clear the hidden perfects -- the extra room reaches the arrivals
+          // onto a bar head, which the downbeat root cannot answer for itself
+          // and only the beat before it can -- but it pays for them in contrary
+          // octave arrivals against whichever manual voice the repair was not
+          // looking at, and it pays more than it saves however the added tones
+          // are ordered, by pitch or by distance from the tone they replace.
         }
       }
       if (beat != 0 && pedal_prev >= 0 && pedal_fault_rank(pedal_prev, pitch, t) == kPedalParallel)
