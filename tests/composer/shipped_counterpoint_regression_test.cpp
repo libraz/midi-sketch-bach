@@ -604,7 +604,17 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // is spent, and an anchor is the register the bars after it start from, so
     // the tier ranks but never displaces off the chord. This column is what that
     // buys, and the battuta and hidden columns beside it are what it costs.
-    {FormType::Fugue, 0, 0, 45, 103, 35, 0, 3, 4, 2, 80723},
+    //
+    // The seam that hands a figuration span over to whatever follows it is
+    // relieved by its own pass, and that pass reads the same ranking. It used to
+    // fire on the true parallel alone, so a span could close by answering the
+    // voice beside it with the perfect interval they had just left, reached the
+    // other way round, and nothing downstream looked at the handover again. The
+    // two classes are ranked there rather than pooled, which is what lets a
+    // parallel seam still be relieved onto a contrary arrival -- strictly better
+    // than what it replaces -- while a contrary seam may only be relieved onto a
+    // tone free of both.
+    {FormType::Fugue, 0, 0, 49, 106, 16, 0, 3, 4, 2, 80723},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -627,7 +637,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // trade is worth taking because the reference corpus prices a contrary
     // arrival at several times a hidden one, writing the first far more
     // sparingly than the second in the same texture.
-    {FormType::PreludeAndFugue, 0, 0, 24, 36, 24, 0, 2, 2, 2, 38112},
+    // Its own contrary column is what the seam pass empties almost entirely: the
+    // form's remaining arrivals were one shape repeated across the sweep, the
+    // last figuration bar before the closing cadence handing over to it, and the
+    // cadence tones themselves cannot move -- each voice's band holds exactly one
+    // dominant, so the approach is the only end with a choice. The battuta and
+    // hidden columns take what it sheds, and the succession floor drops a little
+    // because a relieved tail sometimes lands where the next tone can be
+    // sustained rather than restruck.
+    {FormType::PreludeAndFugue, 0, 0, 30, 42, 3, 0, 2, 2, 1, 38106},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -959,14 +977,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // subdividing a beat into sixteenths is what a longer span gives the
     // countersubject builder more room to do, so it is also where more of the
     // unjudged arrivals were.
-    {FormType::Fugue, 0, 0, 233, 989, 262, 0, 6, 12, 5, 776462},
+    {FormType::Fugue, 0, 0, 258, 1052, 100, 0, 6, 12, 3, 776409},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
     // succession floor drops with it: an anchor that moves off a contrary
     // arrival sometimes lands where the next tone can be sustained rather than
     // restruck, which is one fewer pair of consecutive onsets.
-    {FormType::PreludeAndFugue, 0, 0, 179, 336, 206, 0, 3, 5, 4, 504109},
+    {FormType::PreludeAndFugue, 0, 0, 200, 392, 68, 0, 3, 6, 3, 504106},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
