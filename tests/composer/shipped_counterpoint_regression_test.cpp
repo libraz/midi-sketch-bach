@@ -622,7 +622,20 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // is by making two skeleton tones adjacent that an ornament had been sitting
     // between -- an unmasking, not a new fault, which is why the floor and the
     // columns have to be read together rather than either one alone.
-    {FormType::Fugue, 0, 0, 49, 106, 16, 0, 3, 4, 2, 79595},
+    //
+    // The chord this form's accompaniment is anchored on grew a fourth tone. A
+    // bar acting as the dominant of the bar after it is spelled with its seventh,
+    // and the anchor selector may take that tone and no longer reads the tritone
+    // it makes with the third as a clash to be avoided. The contrary column is
+    // where that shows: a bar head offering four pitch classes instead of three
+    // far less often finds its consonant set collapsed to the one tone the line
+    // just left, which is the condition that produced those arrivals. The battuta
+    // column is unmoved and one cell of it gains a single arrival; against the
+    // reference corpus, which prices a contrary arrival at several times a
+    // battuta, that is the cheap end of the trade. The floor drops by a handful
+    // of successions where a changed anchor lets a tone be sustained rather than
+    // restruck.
+    {FormType::Fugue, 0, 0, 46, 106, 7, 0, 3, 5, 2, 79580},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -657,7 +670,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // every fault column is unmoved: the exposition's subject and answer are the
     // densest ornament sites in the form, and none of what they carried was
     // counterpoint.
-    {FormType::PreludeAndFugue, 0, 0, 30, 42, 3, 0, 2, 2, 1, 37518},
+    //
+    // Both halves take the dominant seventh described on the fugue row, and the
+    // prelude half takes it on its own repeating pattern, where no related-key
+    // approach has to be held back to a triad. Here the trade runs the other way
+    // from the fugue's: the hidden column falls by nearly half and the battuta
+    // column takes most of what it sheds. That is payable in the same terms --
+    // the corpus writes a battuta more freely than a hidden perfect, so a rise
+    // in the cheaper class against a fall in the dearer one is a net gain -- and
+    // it is the prelude's thin two-voice texture that makes it happen: with only
+    // one line to answer, an anchor stepping off a hidden approach has few places
+    // to land that are not the octave below.
+    {FormType::PreludeAndFugue, 0, 0, 17, 56, 3, 0, 1, 2, 1, 37368},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1014,7 +1038,12 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // hidden approach that only becomes adjacent once its ornament is gone. It is
     // the cheapest of the four classes and the form scores clear of the reference
     // envelope with it, which is why the exposure is worth more than the cover.
-    {FormType::Fugue, 0, 0, 259, 1052, 100, 0, 6, 12, 3, 771684},
+    // The dominant seventh pays off hardest on this axis, because a stretched
+    // fugue passes through more dominants: all three fault columns fall together,
+    // and the contrary one -- the dearest of the three by the corpus -- falls by
+    // a fifth. Its worst cell comes down with it. What the form row pays as a
+    // single extra battuta arrival is not paid here at all.
+    {FormType::Fugue, 0, 0, 235, 999, 78, 0, 5, 12, 3, 771546},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1023,7 +1052,13 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // restruck, which is one fewer pair of consecutive onsets.
     // It drops again with the subject statements left bare, and unlike the fugue
     // row nothing is unmasked: this form's stretched fault columns all hold.
-    {FormType::PreludeAndFugue, 0, 0, 200, 392, 68, 0, 3, 6, 3, 499645},
+    // With the dominant spelled as a seventh the contrary column falls by nearly
+    // two thirds and both worst cells come down, at the price of nine battuta
+    // arrivals -- the same trade as the form row, at a far better rate, because
+    // length gives the prelude's anchor chain more places to break a hidden
+    // approach without answering it in the octave. The floor rises here rather
+    // than dropping: fewer sustained repeats means more onset pairs to judge.
+    {FormType::PreludeAndFugue, 0, 0, 194, 401, 27, 0, 3, 5, 2, 499729},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

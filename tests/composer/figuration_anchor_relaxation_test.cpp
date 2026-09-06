@@ -103,6 +103,36 @@ TEST(FigurationAnchorRelaxation, StaysUnusedUnderAVoiceThatOnlyThreatensParallel
   EXPECT_TRUE(section.relaxed_anchor_ticks.empty());
 }
 
+// --- The escape opens when the chord really is spent ------------------------
+
+TEST(FigurationAnchorRelaxation, OpensWhenEveryChordToneInBandIsBlocked) {
+  // Reachability of the exemption, proved on the mechanism rather than on the
+  // shipped surface, where the sweep below no longer reaches it. A bar head is
+  // built so that each C major tone inside the band fails for one of the three
+  // reasons the escape exists for, and no two fail the same way:
+  //   60  hidden fifth against V0's rising fifth (a perfect-motion fault),
+  //   64  tritone against V2's Bb (a clash the anchor may not sound),
+  //   67  parallel octave with V0 (the cardinal prohibition).
+  // Nothing is left, so the line takes the nearest free diatonic tone and
+  // records the exemption.
+  ThemeToneRegistry registry;
+  registry.record(/*tick=*/1800, /*voice=*/0, /*pitch=*/65, /*duration=*/120);
+  registry.record(/*tick=*/1920, /*voice=*/0, /*pitch=*/79, /*duration=*/480);
+  registry.record(/*tick=*/1800, /*voice=*/2, /*pitch=*/58, /*duration=*/120);
+  registry.record(/*tick=*/1920, /*voice=*/2, /*pitch=*/58, /*duration=*/480);
+
+  const detail::ChordSpec chord{0, false};
+  FigurationSection section;
+  int prev_anchor = 53;
+  appendFigurationWaveBar(registry, section, /*bar=*/1, /*voice=*/1, chord, detail::Mode::Major,
+                          /*notes_per_beat=*/1, /*offset=*/0, prev_anchor, /*band_lo=*/60,
+                          /*band_hi=*/67, /*num_voices=*/3);
+
+  ASSERT_FALSE(section.notes.empty());
+  EXPECT_FALSE(section.relaxed_anchor_ticks.empty())
+      << "no chord tone was playable and the line still did not take the escape";
+}
+
 // --- What the escape is allowed to ship -------------------------------------
 
 TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTexture) {
@@ -149,24 +179,19 @@ TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTextu
   // Emitted on every run so the current measurement is visible when the ceiling
   // below is tightened.
   std::printf("[figuration] relaxed anchors shipped: %zu\n", relaxed_notes);
-  // The escape has to be reachable, or the exemption in the rule is dead code
-  // guarding nothing, and it has to stay rare, or it has become a licence to
-  // leave the chord. RATCHET: this ceiling may only ever be LOWERED -- a rise
-  // means the builder is escaping where it should be finding a chord tone.
+  // The escape has to stay rare, or it has become a licence to leave the chord.
+  // RATCHET: this ceiling may only ever be LOWERED -- a rise means the builder
+  // is escaping where it should be finding a chord tone.
   //
-  // It was raised once. Ranking the contrary perfect arrival at every beat
-  // anchor rather than only at bar heads moves anchors inside the bar, and an
-  // anchor is the register the next bar head starts from, so a few more bar
-  // heads arrive at a chord whose every tone is blocked. That is the condition
-  // the escape exists for rather than a widening of it: at each firing a
-  // full-band scan was instrumented and every triad tone in the band formed a
-  // TRUE parallel, not a milder class the anchor should have accepted instead;
-  // and the firings occupy two distinct bar heads reproduced across seeds and
-  // characters, not a scatter of independent departures. The assertions above --
-  // bar-head placement, consonance against the whole sounding texture -- held
-  // unchanged at the new count.
-  EXPECT_GT(relaxed_notes, 0u) << "the escape never fired; the exemption is unreachable";
-  EXPECT_LE(relaxed_notes, 7u) << "the escape is firing more widely than measured";
+  // It reached zero, and the reason is that the chord grew a fourth tone. The
+  // escape opens only where every chord tone in the band is at once blocked, so
+  // a dominant that may offer its seventh has one more way not to be exhausted;
+  // the bar heads that used to escape now find that tone. Widening the sweep to
+  // 64 seeds per form and character does not reach it either, so the reachability
+  // of the exemption is proved on the mechanism instead --
+  // OpensWhenEveryChordToneInBandIsBlocked constructs the exhaustion directly.
+  EXPECT_EQ(relaxed_notes, 0u) << "the escape fired on the shipped surface, where the anchor "
+                                  "selector should be finding a chord tone";
 }
 
 }  // namespace

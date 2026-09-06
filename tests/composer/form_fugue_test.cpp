@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "composer/character_profile.h"
+#include "composer/chord_voicing.h"
 #include "composer/composer.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
@@ -467,6 +468,34 @@ int chordRootAt(const HarnessFixture& fx, Tick tick) {
   return root;
 }
 
+const ChordEvent* chordAt(const HarnessFixture& fx, Tick tick) {
+  const ChordEvent* active = nullptr;
+  for (const auto& chord : fx.harmony.chords) {
+    if (chord.start_tick <= tick) {
+      active = &chord;
+    }
+  }
+  return active;
+}
+
+// Chord-tone membership as the Validator spells it, seventh included. Tests that
+// judge a note against the harmony have to read the same set the rules do, or a
+// chord the plan declares with four tones is checked against three.
+bool isChordTone(const ChordEvent* chord, int pitch) {
+  if (chord == nullptr) {
+    return false;
+  }
+  std::size_t count = 0;
+  const auto tones = chordPitchClasses(*chord, &count);
+  const auto pcl = static_cast<std::uint8_t>(((pitch % 12) + 12) % 12);
+  for (std::size_t idx = 0; idx < count; ++idx) {
+    if (tones[idx] == pcl) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Collect the notes of the FigurationSection whose window matches [start_tick,
 // end_tick) on the given voice (the bass support is a verbatim Material section).
 std::vector<MaterialNote> bassSupportNotes(const HarnessFixture& fx, VoiceId voice, Tick start_tick,
@@ -611,11 +640,8 @@ TEST(FormFugueTest, MiddleEntrySupportCenterTracksChordRoot) {
           << "bass above band at bar " << start_bar;
     }
     // The bar downbeat anchor is a chord tone (figuration_harmonic_consistency).
-    const int pc = ((static_cast<int>(notes.front().pitch) % 12) + 12) % 12;
-    const int third = (pc == (root_pc + 3) % 12) ? 3 : 4;  // major or minor third.
-    const bool is_chord_tone =
-        pc == root_pc % 12 || pc == (root_pc + third) % 12 || pc == (root_pc + 7) % 12;
-    EXPECT_TRUE(is_chord_tone) << "bass downbeat not a chord tone at bar " << start_bar;
+    EXPECT_TRUE(isChordTone(chordAt(fx, span.start_tick), notes.front().pitch))
+        << "bass downbeat not a chord tone at bar " << start_bar;
   }
 
   EXPECT_TRUE(found_support);
@@ -1951,6 +1977,12 @@ TEST(FormFugueTest, CodaKeepsThreeVoiceTextureAndConsonantBass) {
 // of consecutive dissonant V1xV2 slots on the eighth-note grid. The pre-fix
 // build produced 4-slot dissonant chains; the bound below is tight enough to
 // have caught that (observed max on this seed is 1).
+//
+// A slot where BOTH tones belong to the chord in force is not a clash: over a
+// dominant seventh the third and the seventh sound a tritone for as long as the
+// harmony lasts, and counting that as an accumulating chain would make the
+// guard fire on the one sonority the dominant exists to state. The exclusion is
+// inert over a triad, where every pair of chord tones is already consonant.
 TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
@@ -1966,7 +1998,9 @@ TEST(FormFugueTest, DevelopmentAvoidsParallelDissonanceChains) {
   for (Tick tick = 0; tick < total; tick += kEighth) {
     const int alto = latestSoundingPitch(r.notes, 1, tick);
     const int bass = latestSoundingPitch(r.notes, 2, tick);
-    if (alto >= 0 && bass >= 0 && !consonantInterval(alto - bass)) {
+    const ChordEvent* active = chordAt(fx, tick);
+    const bool states_the_chord = isChordTone(active, alto) && isChordTone(active, bass);
+    if (alto >= 0 && bass >= 0 && !consonantInterval(alto - bass) && !states_the_chord) {
       ++run;
       max_run = std::max(max_run, run);
     } else {
