@@ -37,10 +37,12 @@ set(BACH_COMPOSER_SOURCES
   form_director.cpp
   form_ground_variations.cpp
   form_linear.cpp
+  form_trio_sonata.cpp
   form_cantus.cpp
   form_goldberg.cpp
   bar_material.cpp
   arrival_relief.cpp
+  cadenced_progression.cpp
   form_fugue.cpp
   form_sectional.cpp
   minor_material.cpp
