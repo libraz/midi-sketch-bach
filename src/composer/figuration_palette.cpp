@@ -1271,10 +1271,19 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           }
           return false;
         };
-        if (step_rank(next) < kStepHidden && wave_is_harsh(next)) {
+        // A replacement may not be worse on the fault ranking than the tone it
+        // replaces. The escape above has usually just settled that tone, and
+        // buying relief from a passing second with a perfect-motion fault
+        // inverts the order the whole selector is built on -- the same argument
+        // this file makes when it lets a clash stand rather than ship a
+        // parallel, applied to the milder classes. When the tone being replaced
+        // already carries a fault, a replacement carrying no more than the same
+        // one is still available, so the constrained onsets keep their escape.
+        const int harsh_rank = step_rank(next);
+        if (harsh_rank < kStepHidden && wave_is_harsh(next)) {
           ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
-          if (step_rank(reversed) < kStepHidden && !wave_is_harsh(reversed)) {
+          if (step_rank(reversed) <= harsh_rank && !wave_is_harsh(reversed)) {
             dir = -dir;
             next = reversed;
           } else {
@@ -1288,7 +1297,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               if (skip < wave_lo || skip > wave_hi) {
                 continue;
               }
-              if (step_rank(skip) < kStepHidden && !wave_is_harsh(skip)) {
+              if (step_rank(skip) <= harsh_rank && !wave_is_harsh(skip)) {
                 next = skip;
                 break;
               }
