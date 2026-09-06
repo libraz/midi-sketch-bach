@@ -77,6 +77,244 @@ constexpr int kPassV0CenterLift = 12;
 constexpr int kChaconneCycleBars = 4;
 constexpr int kPassacagliaCycleBars = 8;
 
+// A ground bass is recognised by its pitch sequence and by the metric positions
+// those pitches fall on, so a returning statement can be re-articulated without
+// ceasing to be the same ground. Every treatment below keeps each bar's
+// structural tone on the bar head at its own pitch and subdivides only the span
+// it fills: no tone moves, none is added, none is dropped. Attack counts rise
+// down the list and the statements take them in that order, so the ground is
+// announced whole and is progressively broken up as the variations accumulate
+// over it -- the diminution the form is named for, heard in the bass.
+enum class GroundArticulation {
+  kSustained,       // one dotted half: the ground as first stated.
+  kUpperNeighbour,  // the tone leaves the bar through the scale step above.
+  kLowerNeighbour,  // the tone leaves the bar through the scale step below.
+  kNeighbourTurn,   // the tone turns above and back before the ground steps on.
+};
+
+// The treatments the statements after the opening one rotate through, in rising
+// order of subdivision.
+constexpr GroundArticulation kGroundGrowth[3] = {GroundArticulation::kUpperNeighbour,
+                                                 GroundArticulation::kLowerNeighbour,
+                                                 GroundArticulation::kNeighbourTurn};
+
+/**
+ * @brief The articulation a ground statement takes.
+ * @param cycle Statement index in [0, cycle_count).
+ * @return kSustained for the opening statement -- the ground is heard whole
+ *         before it is broken up -- then the growth rotation.
+ */
+GroundArticulation groundArticulationFor(int cycle) {
+  if (cycle <= 0)
+    return GroundArticulation::kSustained;
+  return kGroundGrowth[static_cast<std::size_t>((cycle - 1) % 3)];
+}
+
+/**
+ * @brief Emit one bar of the ground under one articulation.
+ * @param out Receives the bar's notes, appended in time order.
+ * @param bar_start Tick of the bar head.
+ * @param pitch The bar's structural tone.
+ * @param articulation The treatment this statement takes.
+ * @param mode Diatonic mode the decorating tone is drawn from.
+ * @note The decorating tone is one diatonic scale degree from the structural
+ *       tone and the bar returns to that tone before the ground steps on, so
+ *       every interval the bar adds is a step and the skeleton still sounds on
+ *       the bar head and on the beat the ground leaves from.
+ */
+void appendGroundBar(std::vector<MaterialNote>& out, Tick bar_start, std::uint8_t pitch,
+                     GroundArticulation articulation, detail::Mode mode) {
+  const auto emit = [&](Tick offset, Tick duration, int tone) {
+    MaterialNote gnote;
+    gnote.start_tick = bar_start + offset;
+    gnote.duration = duration;
+    gnote.pitch = static_cast<std::uint8_t>(tone);
+    out.push_back(gnote);
+  };
+  const int tone = static_cast<int>(pitch);
+  const int above = detail::scaleUp(tone, 1, mode);
+  const int below = detail::scaleDown(tone, 1, mode);
+  // Every decorating tone falls inside the last beat. The structural tone holds
+  // every beat onset of the bar, which is where this form judges its verticals:
+  // the decoration is the ornamental approach to the ground's next step, not a
+  // tone the harmony has to account for.
+  constexpr Tick kDecorationStart = 2 * kTicksPerBeat + kTicksPerBeat / 2;
+  constexpr Tick kEighth = kTicksPerBeat / 2;
+  switch (articulation) {
+    case GroundArticulation::kUpperNeighbour:
+      emit(0, kDecorationStart, tone);
+      emit(kDecorationStart, kEighth, above);
+      break;
+    case GroundArticulation::kLowerNeighbour:
+      emit(0, kDecorationStart, tone);
+      emit(kDecorationStart, kEighth, below);
+      break;
+    case GroundArticulation::kNeighbourTurn:
+      emit(0, kDecorationStart, tone);
+      emit(kDecorationStart, kEighth / 2, above);
+      emit(kDecorationStart + kEighth / 2, kEighth / 2, tone);
+      break;
+    case GroundArticulation::kSustained:
+    default:
+      emit(0, kTicksPerBar34, tone);
+      break;
+  }
+}
+
+/**
+ * @brief Emit the ground bass for every statement of the piece.
+ *
+ * The material carries the whole line rather than one cycle for the replay
+ * branch to tile, because consecutive statements no longer share an
+ * articulation. The caller declares the emitted length as the replay period, so
+ * the period-tiled replay lays the line down exactly once.
+ *
+ * @param out Receives the ground, appended in time order.
+ * @param total_bars Bars in the piece.
+ * @param cycle_bars Bars per ground statement.
+ * @param ground_pitch The cycle-relative structural tones, one per bar.
+ * @param sustained_from_cycle First statement left sustained in the material.
+ *        The passacaglia hands its late statements to the replay branch's own
+ *        restatement device and stops decorating here; a form without that
+ *        device passes the statement count so every statement is treated here.
+ * @param sounding_bars Bars the ground carrier actually sounds for. Its last bar
+ *        stays sustained: the ground hands over to whatever follows -- for the
+ *        chaconne an authored cadential coda -- on a plain structural tone.
+ * @param mode Diatonic mode the decorating tones are drawn from.
+ */
+void appendGroundStatements(std::vector<MaterialNote>& out, int total_bars, int cycle_bars,
+                            const std::vector<std::uint8_t>& ground_pitch, int sustained_from_cycle,
+                            int sounding_bars, detail::Mode mode) {
+  const auto pitchAtBar = [&](int bar) {
+    return ground_pitch[static_cast<std::size_t>(bar % cycle_bars)];
+  };
+  for (int bar = 0; bar < total_bars; ++bar) {
+    const int cycle = bar / cycle_bars;
+    GroundArticulation articulation = cycle >= sustained_from_cycle ? GroundArticulation::kSustained
+                                                                    : groundArticulationFor(cycle);
+    // A bar whose successor restates the same tone stays held: the decoration
+    // closes by returning to the structural tone, so decorating this bar would
+    // put that tone against its own restatement across the bar line as a
+    // unison. The tone is held instead -- the phrase-end hold before the
+    // relaunch.
+    if (bar + 1 < total_bars && pitchAtBar(bar + 1) == pitchAtBar(bar))
+      articulation = GroundArticulation::kSustained;
+    if (bar + 1 >= sounding_bars)
+      articulation = GroundArticulation::kSustained;
+    appendGroundBar(out, static_cast<Tick>(bar) * kTicksPerBar34, pitchAtBar(bar), articulation,
+                    mode);
+  }
+}
+
+/**
+ * @brief The ground tone sounding on every beat of a window.
+ * @param ground The emitted ground line for the whole piece, in time order.
+ * @param start_tick First tick of the window.
+ * @param bars Bars in the window.
+ * @return Three tones per bar. A beat inside a held tone reports that tone, so
+ *         the voices written over the ground read it at the grain a decorated
+ *         statement moves at rather than at bar grain.
+ */
+std::vector<std::uint8_t> groundBeatTones(const std::vector<MaterialNote>& ground, Tick start_tick,
+                                          int bars) {
+  std::vector<std::uint8_t> tones(static_cast<std::size_t>(bars) * 3, 0);
+  std::uint8_t last = ground.empty() ? 0 : ground.front().pitch;
+  for (std::size_t idx = 0; idx < tones.size(); ++idx) {
+    const Tick tick = start_tick + static_cast<Tick>(idx) * kTicksPerBeat;
+    for (const MaterialNote& note : ground) {
+      if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+        last = note.pitch;
+    }
+    tones[idx] = last;
+  }
+  return tones;
+}
+
+/// @brief Whether the ground and one line above it reach a perfect interval by
+///        a forbidden motion anywhere in [from_tick, to_tick].
+///
+/// Sampled at the union of the two lines' onsets, which is the succession a
+/// listener hears and the pairing the counterpoint audit reads.
+bool formsPerfectMotionAgainst(const std::vector<MaterialNote>& ground,
+                               const std::vector<MaterialNote>& upper, Tick from_tick,
+                               Tick to_tick) {
+  std::vector<Tick> onsets;
+  for (const std::vector<MaterialNote>* line : {&ground, &upper}) {
+    for (const MaterialNote& note : *line) {
+      if (note.start_tick >= from_tick && note.start_tick <= to_tick)
+        onsets.push_back(note.start_tick);
+    }
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+  int prev_low = -1;
+  int prev_high = -1;
+  for (const Tick tick : onsets) {
+    const int low = soundingMaterialPitch(ground, tick);
+    const int high = soundingMaterialPitch(upper, tick);
+    if (low >= 0 && high >= 0 && prev_low >= 0 && prev_high >= 0 &&
+        (formsPerfectParallel(prev_high, high, prev_low, low) ||
+         formsAntiParallelPerfect(prev_high, high, prev_low, low) ||
+         formsBattuta(prev_high, high, prev_low, low))) {
+      return true;
+    }
+    prev_low = low;
+    prev_high = high;
+  }
+  return false;
+}
+
+/**
+ * @brief Withdraw a bar's diminution wherever it walks into a voice above it.
+ *
+ * The decoration is written before the voices over the ground, so those voices
+ * are vetted against a bass that already moves inside the bar. Withdrawing a
+ * decoration afterwards only leaves the bass more static under them, and a held
+ * tone moves obliquely against everything, so no placement this pass reverts can
+ * turn a clean succession into a fault. A withdrawn bar returns to the plain
+ * sustained statement.
+ *
+ * @param ground The emitted ground line, edited in place.
+ * @param upper The lines written above it.
+ * @param total_bars Bars in the piece.
+ */
+void withdrawClashingDiminution(std::vector<MaterialNote>& ground,
+                                const std::vector<const std::vector<MaterialNote>*>& upper,
+                                int total_bars) {
+  for (int bar = 0; bar < total_bars; ++bar) {
+    const Tick bar_start = static_cast<Tick>(bar) * kTicksPerBar34;
+    const Tick bar_end = bar_start + kTicksPerBar34;
+    std::size_t first = ground.size();
+    std::size_t last = 0;
+    for (std::size_t idx = 0; idx < ground.size(); ++idx) {
+      if (ground[idx].start_tick >= bar_start && ground[idx].start_tick < bar_end) {
+        first = std::min(first, idx);
+        last = std::max(last, idx);
+      }
+    }
+    if (first >= ground.size() || last == first)
+      continue;  // an undecorated bar has nothing to withdraw.
+    // One beat either side: the motions INTO the bar's first decorating tone and
+    // OUT of its last are as much successions as the ones inside it.
+    const Tick from_tick = bar_start >= kTicksPerBeat ? bar_start - kTicksPerBeat : 0;
+    const Tick to_tick = bar_end + kTicksPerBeat;
+    const auto clashes = [&](const std::vector<MaterialNote>& line) {
+      for (const std::vector<MaterialNote>* voice : upper) {
+        if (formsPerfectMotionAgainst(line, *voice, from_tick, to_tick))
+          return true;
+      }
+      return false;
+    };
+    if (!clashes(ground))
+      continue;
+    MaterialNote held = ground[first];
+    held.duration = kTicksPerBar34;
+    ground.erase(ground.begin() + static_cast<std::ptrdiff_t>(first),
+                 ground.begin() + static_cast<std::ptrdiff_t>(last) + 1);
+    ground.insert(ground.begin() + static_cast<std::ptrdiff_t>(first), held);
+  }
+}
+
 /**
  * @brief Map an arc density tier (already character-biased and clamped 0..3)
  *        to a notes-per-beat subdivision.
@@ -275,6 +513,9 @@ constexpr int kV0RepairCeiling = 91;
 ///        fault outright; in the three-voice passacaglia, whose counter
 ///        figuration is written after this scan, it measurably traded parallel
 ///        fifths for parallel octaves, which is the wrong direction.
+/// @param ground_pitch The ground tone sounding on every beat of this block,
+///        three entries per bar (groundBeatTones). A statement the diminution
+///        decorates moves inside the bar, so the reference is per beat.
 void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                           const std::vector<std::uint8_t>& ground_pitch,
                           const std::vector<CycleBar>& cycle_bar_plan, const HarmonicPlan& harmony,
@@ -285,7 +526,7 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
   // Realized V0 pitch per beat: the previous bar's (the chain reference, seeded
   // at the cycle seam with the caller's closing bar head) and this bar's.
   int prior_beat_pitch[3] = {preceding_v0_bar_head, -1, -1};
-  int prior_bar_ground = preceding_ground_pitch;
+  int prior_bar = -1;
   int beat_pitch[3] = {-1, -1, -1};
   int scanned_bar = -1;
   // The onset immediately before the one under test, with the ground tone held
@@ -307,14 +548,19 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
       if (scanned_bar >= 0) {
         for (int beat = 0; beat < 3; ++beat)
           prior_beat_pitch[beat] = beat_pitch[beat];
-        prior_bar_ground = static_cast<int>(ground_pitch[static_cast<std::size_t>(scanned_bar)]);
+        prior_bar = scanned_bar;
       }
       for (int& pitch_at_beat : beat_pitch)
         pitch_at_beat = -1;
       scanned_bar = bar;
     }
-    const int ground_now = static_cast<int>(ground_pitch[static_cast<std::size_t>(bar)]);
     const Tick tick_in_bar = offset - static_cast<Tick>(bar) * kTicksPerBar34;
+    // The ground is read at the grain it moves at. A statement the diminution
+    // decorates changes tone inside the bar, so a bar-grain reference would vet
+    // the figuration against a tone the bass has already left -- the succession
+    // the audit hears is the one against the tone actually sounding here.
+    const int ground_now = static_cast<int>(
+        ground_pitch[static_cast<std::size_t>(bar) * 3 + tick_in_bar / kTicksPerBeat]);
     const int pitch = static_cast<int>(notes[i].pitch);
     if (tick_in_bar % kTicksPerBeat != 0) {
       previous_onset_pitch = pitch;  // sub-beat fill: never an anchor position.
@@ -322,6 +568,11 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
       continue;
     }
     const int beat = static_cast<int>(tick_in_bar / kTicksPerBeat);
+    // Same beat of the previous bar, at the same grain.
+    const int prior_bar_ground =
+        prior_bar >= 0 ? static_cast<int>(ground_pitch[static_cast<std::size_t>(prior_bar) * 3 +
+                                                       static_cast<std::size_t>(beat)])
+                       : preceding_ground_pitch;
     // Either reference alone leaves a real chain in place: the bar-to-bar chain
     // is invisible to the preceding onset when the two are inside one held
     // ground tone, and the audited succession is invisible to the chain when the
@@ -895,27 +1146,28 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
 
-  // --- V2 ground bass: identical pitches / rhythm to the 2-voice form; only the
-  // voice assignment (set on the span below) moves to V2. ---
-  std::vector<MaterialNote>& ground = out.material.passacaglia_ground;
-  for (int bar = 0; bar < cycle_bars; ++bar) {
-    MaterialNote gnote;
-    gnote.start_tick = bar_tick(bar);
-    gnote.duration = kTicksPerBar34;
-    gnote.pitch = ground_pitch[static_cast<std::size_t>(bar)];
-    ground.push_back(gnote);
-  }
-  out.material.passacaglia_ground_period = period;
-
+  // --- V2 ground bass: identical pitches to the 2-voice form, statement by
+  // statement under the growth articulations; only the voice assignment (set on
+  // the span below) moves to V2. ---
+  //
   // Late-cycle rhythmic intensification (design value): from the final third
   // of the cycles on, the ground restates each bar as repeated same-pitch
-  // quarters (the BWV582-style martellato) instead of one dotted half. The
-  // pitches never change, so the bar-head skeleton stays immutable. At least
+  // quarters (the BWV582-style martellato) instead of one dotted half. That
+  // restatement is the replay branch's, so those statements stay sustained in
+  // the material and only the earlier ones are articulated here. The pitches
+  // never change either way, so the bar-head skeleton stays immutable. At least
   // one unsplit statement always opens the piece (cycles >= 2 guard).
-  if (cycles >= 2) {
-    const int split_cycle = cycles - (cycles + 2) / 3;
+  const int split_cycle = cycles >= 2 ? cycles - (cycles + 2) / 3 : cycles;
+  std::vector<MaterialNote>& ground = out.material.passacaglia_ground;
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, split_cycle, total_bars,
+                         mode);
+  out.material.passacaglia_ground_period = static_cast<Tick>(total_bars) * kTicksPerBar34;
+  out.material.passacaglia_ground_cycle = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  // The realized ground, read at beat grain: what the voices written over it
+  // are vetted against once a statement is decorated inside the bar.
+  const std::vector<std::uint8_t> ground_beats = groundBeatTones(ground, 0, total_bars);
+  if (cycles >= 2)
     out.material.passacaglia_ground_split_from = static_cast<Tick>(split_cycle) * period;
-  }
 
   // --- HarmonicPlan: one chord per bar; the final bar resolves to the tonic. ---
   out.harmony.tonic_pc = 0;
@@ -1103,8 +1355,14 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       }
       // The repair floor rides the arc's register shift with the figuration, so
       // a relocated onset can never land in the V1 counter-figuration's band.
-      scrubGroundParallels(v0_notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
-                           prev_v0_bar_head, cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1,
+      const std::size_t beat_base = static_cast<std::size_t>(cycle * cycle_bars) * 3;
+      const std::vector<std::uint8_t> cycle_beats(
+          ground_beats.begin() + static_cast<std::ptrdiff_t>(beat_base),
+          ground_beats.begin() +
+              static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
+      scrubGroundParallels(v0_notes, block_start, cycle_beats, cycle_bar_plan, out.harmony,
+                           prev_v0_bar_head,
+                           cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
                            prev_v0_last, kPassV0BandLo + point.register_shift,
                            /*every_voice_placed=*/false);
       if (!v0_notes.empty()) {
@@ -1288,6 +1546,15 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     out.material.trio_voices.push_back(std::move(counter_line));
   }
 
+  {
+    std::vector<const std::vector<MaterialNote>*> upper;
+    for (const auto& variation : out.material.passacaglia_variations)
+      upper.push_back(&variation.notes);
+    for (const TrioVoiceLine& line : out.material.trio_voices)
+      upper.push_back(&line.notes);
+    withdrawClashingDiminution(ground, upper, total_bars);
+  }
+
   // --- VoicePlan: 3 voices, register order V0 > V1 > V2. ---
   out.voice_plan.num_voices = 3;
   SpanId next_span_id = 0;
@@ -1387,21 +1654,25 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     out.registration_step_ticks.push_back(static_cast<Tick>(mid_wave_idx) * period);
   }
 
-  // --- V1 ground bass: one dotted-half (full-bar) note per bar, cycle-relative
-  // ticks. The replay branch period-tiles it across every cycle. ---
+  // --- V1 ground bass: the structural tone on every bar head, statement by
+  // statement under the growth articulations. The declared period is the whole
+  // line, so the replay branch lays it down once instead of tiling one cycle. ---
   std::vector<MaterialNote>& ground =
       passacaglia ? out.material.passacaglia_ground : out.material.ground_bass;
-  for (int bar = 0; bar < cycle_bars; ++bar) {
-    MaterialNote gnote;
-    gnote.start_tick = bar_tick(bar);
-    gnote.duration = kTicksPerBar34;  // dotted half in 3/4.
-    gnote.pitch = ground_pitch[static_cast<std::size_t>(bar)];
-    ground.push_back(gnote);
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, cycles,
+                         passacaglia ? total_bars : total_bars - 2, mode);
+  const Tick ground_line_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
+  const Tick ground_cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  if (passacaglia) {
+    out.material.passacaglia_ground_period = ground_line_ticks;
+    out.material.passacaglia_ground_cycle = ground_cycle_ticks;
+  } else {
+    out.material.ground_bass_period = ground_line_ticks;
+    out.material.ground_bass_cycle = ground_cycle_ticks;
   }
-  if (passacaglia)
-    out.material.passacaglia_ground_period = period;
-  else
-    out.material.ground_bass_period = period;
+  // The realized ground, read at beat grain: what the variation blocks are
+  // vetted against once a statement is decorated inside the bar.
+  const std::vector<std::uint8_t> ground_beats = groundBeatTones(ground, 0, total_bars);
 
   // --- HarmonicPlan: one chord per bar over every cycle. The final bar of the
   // whole piece resolves to the tonic (i / I) for a proper closing cadence,
@@ -1494,10 +1765,15 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         break;
     }
 
-    scrubGroundParallels(notes, block_start, ground_pitch, cycle_bar_plan, out.harmony,
+    const std::size_t beat_base = static_cast<std::size_t>(cycle * cycle_bars) * 3;
+    const std::vector<std::uint8_t> cycle_beats(
+        ground_beats.begin() + static_cast<std::ptrdiff_t>(beat_base),
+        ground_beats.begin() +
+            static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
+    scrubGroundParallels(notes, block_start, cycle_beats, cycle_bar_plan, out.harmony,
                          previous_v0_bar_head,
-                         cycle > 0 ? static_cast<int>(ground_pitch.back()) : -1, previous_v0_last,
-                         kV0RepairFloor, /*every_voice_placed=*/!passacaglia);
+                         cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
+                         previous_v0_last, kV0RepairFloor, /*every_voice_placed=*/!passacaglia);
 
     // Compact cadential landing on the piece's final bar. The chaconne coda
     // replaces the repeating dominant bass with a tonic, so its upper voice
@@ -1702,6 +1978,13 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
       var.notes = std::move(notes);
       out.material.variations.push_back(std::move(var));
     }
+  }
+
+  {
+    std::vector<const std::vector<MaterialNote>*> upper;
+    for (const auto& variation : out.material.variations)
+      upper.push_back(&variation.notes);
+    withdrawClashingDiminution(ground, upper, total_bars);
   }
 
   // --- VoicePlan: V1 ground carrier and V0 variation carrier per cycle. The

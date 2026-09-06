@@ -95,6 +95,21 @@ VoiceId groundVoice(FormType form) {
 }
 
 // Collect the ground note pitches (on `ground_voice`) in onset order.
+// Bar-head tones of the ground voice: the skeleton the ground is recognised by,
+// independent of how a statement decorates the rest of each bar.
+std::vector<std::uint8_t> groundBarHeads(const ComposeResult& r, VoiceId ground_voice) {
+  std::vector<std::pair<Tick, std::uint8_t>> heads;
+  for (const auto& n : r.notes) {
+    if (n.voice == ground_voice && n.start_tick % kTicksPerBar34 == 0)
+      heads.push_back({n.start_tick, n.pitch});
+  }
+  std::sort(heads.begin(), heads.end());
+  std::vector<std::uint8_t> out;
+  for (const auto& head : heads)
+    out.push_back(head.second);
+  return out;
+}
+
 std::vector<std::uint8_t> groundPitches(const ComposeResult& r, VoiceId ground_voice) {
   std::vector<std::pair<Tick, std::uint8_t>> ground;
   for (const auto& n : r.notes) {
@@ -198,9 +213,11 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     // Bar-head pitch skeleton of the ground voice. A late cycle may restate a
-    // bar as repeated same-pitch quarters (rhythm-only intensification), so the
-    // invariant is the per-bar skeleton, with every ground note inside a bar
-    // matching its bar-head pitch.
+    // bar as repeated same-pitch quarters (rhythm-only intensification) and a
+    // decorated statement approaches the ground's next step through a
+    // neighbour inside the bar's last beat, so the invariant is the per-bar
+    // skeleton, with every ground note inside a bar either holding its bar-head
+    // pitch or standing one diatonic step from it.
     const VoiceId gv = groundVoice(c.form);
     std::vector<int> head(static_cast<std::size_t>(resolvedBars(c.form, c.target_bars)), -1);
     for (const auto& n : r.notes) {
@@ -211,8 +228,9 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
       if (n.start_tick % kTicksPerBar34 == 0)
         head[bar] = n.pitch;
       else if (!(c.form == FormType::Chaconne && bar + 2 >= head.size()))
-        EXPECT_EQ(static_cast<int>(n.pitch), head[bar])
-            << "ground note inside bar " << bar << " differs from its bar-head pitch";
+        EXPECT_LE(std::abs(static_cast<int>(n.pitch) - head[bar]), 2)
+            << "ground note inside bar " << bar << " is neither its bar-head pitch nor a"
+            << " neighbour of it";
     }
     const std::size_t period = static_cast<std::size_t>(cycle_bars);
     for (std::size_t bar = 0; bar < head.size(); ++bar) {
@@ -322,7 +340,7 @@ void expectCongruentSeedsShareGround(FormType form) {
     const HarnessFixture fx_b = build(form, 4, minor, 0);
     const ComposeResult r_a = Composer{}.run(fx_a.material, fx_a.harmony, fx_a.voice_plan);
     const ComposeResult r_b = Composer{}.run(fx_b.material, fx_b.harmony, fx_b.voice_plan);
-    EXPECT_EQ(groundPitches(r_a, groundVoice(form)), groundPitches(r_b, groundVoice(form)))
+    EXPECT_EQ(groundBarHeads(r_a, groundVoice(form)), groundBarHeads(r_b, groundVoice(form)))
         << "form " << static_cast<int>(form) << " minor " << minor;
   }
 }
@@ -1033,18 +1051,30 @@ TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
     for (std::size_t bar = 0; bar < bars.size(); ++bar) {
       ASSERT_FALSE(bars[bar].empty()) << "seed " << seed << " bar " << bar;
       const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar34;
-      const std::uint8_t skeleton = fx.material.passacaglia_ground[bar % 8].pitch;
-      const std::uint8_t next_skeleton = fx.material.passacaglia_ground[(bar + 1) % 8].pitch;
+      // The material carries the whole ground line, one bar-head tone per bar,
+      // because consecutive statements no longer share a treatment.
+      const auto skeletonAt = [&](Tick tick) {
+        std::uint8_t pitch = 0;
+        for (const MaterialNote& mn : fx.material.passacaglia_ground) {
+          if (mn.start_tick == tick)
+            return mn.pitch;
+        }
+        return pitch;
+      };
+      const std::uint8_t skeleton = skeletonAt(bar_tick);
+      const std::uint8_t next_skeleton = skeletonAt(bar_tick + kTicksPerBar34);
       const bool successor_hammers =
           bar + 2 < bars.size() &&  // the successor is not the unsplit final bar
           static_cast<Tick>(bar + 1) * kTicksPerBar34 >= split_from;
       const bool sustained_seam = successor_hammers && next_skeleton == skeleton;
       if (bar_tick < split_from || bar + 1 == bars.size() || sustained_seam) {
         // Early cycles -- the final bar, whose ground joins the held closing
-        // chord, and the same-pitch seam into a hammering successor -- keep
-        // one dotted-half note per bar.
-        EXPECT_EQ(bars[bar].size(), 1u) << "seed " << seed << " bar " << bar;
-        EXPECT_EQ(bars[bar][0]->duration, kTicksPerBar34);
+        // chord, and the same-pitch seam into a hammering successor -- state the
+        // structural tone as one long note. A statement the diminution decorates
+        // approaches the ground's next step through a neighbour inside the bar's
+        // last beat, so the tone still holds every beat onset of the bar.
+        EXPECT_LE(bars[bar].size(), 3u) << "seed " << seed << " bar " << bar;
+        EXPECT_GE(bars[bar][0]->duration, 2 * kTicksPerBeat) << "seed " << seed << " bar " << bar;
       } else {
         // Late cycles: three same-pitch quarters (martellato).
         EXPECT_EQ(bars[bar].size(), 3u) << "seed " << seed << " bar " << bar;
