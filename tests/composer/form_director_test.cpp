@@ -269,22 +269,27 @@ TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
         HarnessFixture fixture;
         ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok)
             << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed;
-        ASSERT_EQ(fixture.material.suspension_patterns.size(), 1u)
+        // A ground form states the cadential figure once per cycle, so the
+        // count is a property of the form's length rather than a contract.
+        // What is contracted is that every declared suspension is a well-formed
+        // one: a check that reads only the first stops seeing the rest.
+        ASSERT_FALSE(fixture.material.suspension_patterns.empty())
             << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed;
-        const SuspensionPattern& pattern = fixture.material.suspension_patterns.front();
-        EXPECT_NE(pattern.type, SuspensionType::Sus2_3);
-        saw_four_three = saw_four_three || pattern.type == SuspensionType::Sus4_3;
-        saw_seven_six = saw_seven_six || pattern.type == SuspensionType::Sus7_6;
-        EXPECT_LT(static_cast<int>(
-                      rule_helpers::metricalStrengthAt(fixture.harmony, pattern.suspension_tick)),
-                  static_cast<int>(
-                      rule_helpers::metricalStrengthAt(fixture.harmony, pattern.preparation_tick)));
-        EXPECT_TRUE(std::any_of(fixture.voice_plan.spans.begin(), fixture.voice_plan.spans.end(),
-                                [&](const Span& span) {
-                                  return span.intent == VoiceIntent::SuspensionCarrier &&
-                                         span.voice == pattern.voice &&
-                                         span.start_tick == pattern.preparation_tick;
-                                }));
+        for (const SuspensionPattern& pattern : fixture.material.suspension_patterns) {
+          EXPECT_NE(pattern.type, SuspensionType::Sus2_3);
+          saw_four_three = saw_four_three || pattern.type == SuspensionType::Sus4_3;
+          saw_seven_six = saw_seven_six || pattern.type == SuspensionType::Sus7_6;
+          EXPECT_LT(static_cast<int>(
+                        rule_helpers::metricalStrengthAt(fixture.harmony, pattern.suspension_tick)),
+                    static_cast<int>(rule_helpers::metricalStrengthAt(fixture.harmony,
+                                                                      pattern.preparation_tick)));
+          EXPECT_TRUE(std::any_of(fixture.voice_plan.spans.begin(), fixture.voice_plan.spans.end(),
+                                  [&](const Span& span) {
+                                    return span.intent == VoiceIntent::SuspensionCarrier &&
+                                           span.voice == pattern.voice &&
+                                           span.start_tick == pattern.preparation_tick;
+                                  }));
+        }
 
         ComposeResult result =
             Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
@@ -293,24 +298,31 @@ TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
             << " first="
             << (result.validation.failures.empty() ? ""
                                                    : result.validation.failures.front().rule_id);
-        bool prepared = false;
-        bool resolved = false;
+        // Every one of them carries its own preparation and resolution bits --
+        // an interior cycle's figure is the same figure the close states.
         std::size_t resolution_index = result.notes.size();
-        for (std::size_t i = 0; i < result.notes.size(); ++i) {
-          if (result.notes[i].voice != pattern.voice)
-            continue;
-          if (result.notes[i].start_tick == pattern.preparation_tick)
-            prepared = (result.provenance[i].satisfied_rules &
-                        ruleBitMask(RuleBit::SuspensionPrepared)) != 0;
-          if (result.notes[i].start_tick == pattern.resolution_tick) {
-            resolved = (result.provenance[i].satisfied_rules &
-                        ruleBitMask(RuleBit::SuspensionResolved)) != 0;
-            resolution_index = i;
+        for (const SuspensionPattern& pattern : fixture.material.suspension_patterns) {
+          bool prepared = false;
+          bool resolved = false;
+          for (std::size_t i = 0; i < result.notes.size(); ++i) {
+            if (result.notes[i].voice != pattern.voice)
+              continue;
+            if (result.notes[i].start_tick == pattern.preparation_tick)
+              prepared = (result.provenance[i].satisfied_rules &
+                          ruleBitMask(RuleBit::SuspensionPrepared)) != 0;
+            if (result.notes[i].start_tick == pattern.resolution_tick) {
+              resolved = (result.provenance[i].satisfied_rules &
+                          ruleBitMask(RuleBit::SuspensionResolved)) != 0;
+              if (&pattern == &fixture.material.suspension_patterns.front())
+                resolution_index = i;
+            }
           }
+          EXPECT_TRUE(prepared) << "suspension_tick=" << pattern.suspension_tick;
+          EXPECT_TRUE(resolved) << "suspension_tick=" << pattern.suspension_tick;
         }
-        EXPECT_TRUE(prepared);
-        EXPECT_TRUE(resolved);
 
+        // Displacing one resolution has to be caught, which needs a single
+        // concrete note: the first pattern's is the one mutated here.
         ASSERT_LT(resolution_index, result.notes.size());
         result.notes[resolution_index].pitch =
             static_cast<std::uint8_t>(result.notes[resolution_index].pitch + 3);

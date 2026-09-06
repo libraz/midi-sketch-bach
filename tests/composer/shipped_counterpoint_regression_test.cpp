@@ -785,7 +785,17 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // then falls again with the shared beat anchor's new tier, and the worst
     // cell falls with it, which is what says the arrivals removed were reachable
     // rather than merely numerous.
-    {FormType::Passacaglia, 0, 0, 48, 26, 10, 0, 3, 1, 1, 27792},
+    // The cadential suspension is now stated at the close of every ground cycle
+    // rather than only the last, so the floor drops -- the figure ends in a rest
+    // that replaces onsets the variation would otherwise have struck. The
+    // contrary column falls again with it, because the suspension's own three
+    // motions against the immutable ground are vetted where the variation tone
+    // they replace was not. Its battuta column holds only because those motions
+    // are read for that class too: a rewrite that decides a bar head against a
+    // bass which cannot answer reaches a contrary unison as readily as it
+    // reaches a perfect interval in similar motion, and the interior cycles have
+    // no closing-gesture claim that would justify paying for one.
+    {FormType::Passacaglia, 0, 0, 48, 26, 7, 0, 3, 1, 1, 27392},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
