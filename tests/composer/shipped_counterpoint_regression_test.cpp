@@ -622,7 +622,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // strict figure below is the entire content of that one bar, which is what
     // says the octave column is one gesture repeated across the configurations
     // that reach it rather than a fault distributed over the form.
-    {FormType::ToccataAndFugue, 84, 84, 20, 163, 12, 7, 2, 7, 2, 33429},
+    // Its countersubject is scored against the ottava battuta as well as the
+    // similar-motion approach, which this tail can afford and the fugue family
+    // cannot: no later entry restates that line at a degree shift, so the wider
+    // ambit the avoidance costs has nothing downstream that must still
+    // octave-fit it. The battuta column buys the hidden and contrary ones, and
+    // those are the two the reference corpus prices lowest of the three -- it
+    // puts several of this form's configurations outside its battuta envelope,
+    // measures a hidden rate this form writes well under, and measures no
+    // contrary-arrival class at all. The succession floor drops with the
+    // battuta column: the arrivals that leave were pair motion, so the
+    // denominator loses them too.
+    {FormType::ToccataAndFugue, 84, 84, 28, 78, 18, 7, 2, 7, 2, 33408},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -648,8 +659,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the chord for a free diatonic tone once no triad tone in the band would
     // do. Both strict columns are empty; the anti-parallel column is where the
     // register ranking steps when clean is unreachable, and the corpus writes
-    // that class freely.
-    {FormType::FantasiaAndFugue, 0, 0, 23, 213, 31, 0, 2, 7, 2, 34875},
+    // that class freely. It shares the fugue tail's battuta-scored
+    // countersubject with the toccata and pays for it in the same two columns,
+    // for the reason given there. Its succession floor rises instead of
+    // falling: the avoiding line's wider intervals split sustains that had
+    // read as one motion.
+    {FormType::FantasiaAndFugue, 0, 0, 31, 123, 39, 0, 2, 7, 2, 34890},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
