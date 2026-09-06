@@ -566,7 +566,20 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the maximum, and its fifth rate is zero through the ninety-fifth -- while
     // hidden perfects are written freely in exactly this texture. There is no
     // quantity of true parallel that buys anything back.
-    {FormType::Fugue, 0, 0, 35, 306, 124, 0, 3, 8, 5, 80747},
+    // The battuta column is the one the countersubject builder now reads at the
+    // grain it ships at. That builder scores one anchor per source note and then
+    // realizes a beat as four sixteenths, so the tone preceding an anchor in the
+    // output is often one the scoring never saw: an arpeggio returning from its
+    // fifth can leap into an octave that the anchor it came from approached by
+    // step. Judging the emitted tone instead closes that gap here and in every
+    // form that shares the builder, and it moves the worst cell rather than only
+    // the total -- which is what says the arrivals removed were the reachable
+    // ones and not just the plentiful ones. The repair ranks and never pools:
+    // a candidate sounding a true parallel is refused whatever else it is clean
+    // of, and when nothing clears both the parallel-free tone stands and keeps
+    // its battuta. The hidden column pays a little for it, in the direction
+    // already argued above.
+    {FormType::Fugue, 0, 0, 37, 101, 123, 0, 3, 4, 5, 80723},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -578,10 +591,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the exposition derives that line twice and keeps the battuta-avoiding
     // derivation whenever the avoiding line still restates over the third
     // entry, so the arrivals that survive are the ones a restatable line cannot
-    // trade away. The succession floor drops with it by a rounding's worth --
-    // far less than the column did, so the column fell because the arrivals
-    // went, not because there is less music.
-    {FormType::PreludeAndFugue, 0, 0, 17, 143, 62, 0, 1, 5, 3, 38130},
+    // trade away. What is left after the realization-time repair described on
+    // the fugue row is that residue and little else, and here the hidden and
+    // contrary columns fall with it rather than paying for it.
+    {FormType::PreludeAndFugue, 0, 0, 15, 46, 58, 0, 1, 2, 3, 38130},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Its
     // hidden total over its succession floor is the densest hidden writing in
@@ -630,10 +643,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // those are the two the reference corpus prices lowest of the three -- it
     // puts several of this form's configurations outside its battuta envelope,
     // measures a hidden rate this form writes well under, and measures no
-    // contrary-arrival class at all. The succession floor drops with the
-    // battuta column: the arrivals that leave were pair motion, so the
-    // denominator loses them too.
-    {FormType::ToccataAndFugue, 84, 84, 28, 78, 18, 7, 2, 7, 2, 33408},
+    // contrary-arrival class at all. With the realization-time repair on the
+    // fugue row applied on top, the configurations that sat outside that
+    // envelope are inside it, and the hidden and contrary columns paid nothing
+    // further for the second step.
+    {FormType::ToccataAndFugue, 84, 84, 28, 22, 18, 7, 2, 3, 2, 33426},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -661,10 +675,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // register ranking steps when clean is unreachable, and the corpus writes
     // that class freely. It shares the fugue tail's battuta-scored
     // countersubject with the toccata and pays for it in the same two columns,
-    // for the reason given there. Its succession floor rises instead of
-    // falling: the avoiding line's wider intervals split sustains that had
-    // read as one motion.
-    {FormType::FantasiaAndFugue, 0, 0, 31, 123, 39, 0, 2, 7, 2, 34890},
+    // for the reason given there, and takes the realization-time repair with it.
+    // Its succession floor rises rather than falling: the avoiding line's wider
+    // intervals split sustains that had read as one motion.
+    {FormType::FantasiaAndFugue, 0, 0, 31, 31, 39, 0, 2, 3, 2, 34908},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -846,10 +860,15 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // strict columns stay empty however far the form is stretched; the battuta
     // and anti-parallel columns grow with the length, which is what a longer
     // piece of the same counterpoint looks like.
-    {FormType::Fugue, 0, 0, 201, 2640, 958, 0, 6, 28, 10, 776411},
+    // Both columns fall here for the reason given on the form axis, and the
+    // longer the piece the more of the fall is the realization-time repair:
+    // subdividing a beat into sixteenths is what a longer span gives the
+    // countersubject builder more room to do, so it is also where more of the
+    // unjudged arrivals were.
+    {FormType::Fugue, 0, 0, 205, 1014, 864, 0, 6, 13, 9, 776477},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length.
-    {FormType::PreludeAndFugue, 0, 0, 162, 967, 481, 0, 3, 10, 8, 504019},
+    {FormType::PreludeAndFugue, 0, 0, 162, 355, 484, 0, 3, 5, 8, 504121},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
