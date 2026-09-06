@@ -787,7 +787,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // classes here are motions the ear follows and forgets; the fourth is a
     // vertical it sits inside for as long as the bass holds, which is why the
     // trade goes this way at seventeen faults gained against nine hundred lost.
-    {FormType::Fugue, 0, 0, 59, 99, 7, 0, 3, 4, 1, 79763, 211},
+    {FormType::Fugue, 0, 0, 59, 99, 7, 0, 3, 4, 1, 79763, 204},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -979,14 +979,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // and one expansion was leaving a perfect interval only to reach it again the
     // other way round.
     //
-    // Two columns fall and none rises, but the bass-fourth column is the highest
-    // of any form and it is NOT a fault the ranking above declined to fix. This
-    // form's lowest voice is a pedal for most of its length -- a bass the texture
-    // sustains beneath running lines -- and standing a fourth over a pedal is
-    // what a pedal point is for. The ranking is therefore switched off at that
-    // voice by contract rather than by omission, and the column records the
-    // consequence so that a later change cannot quietly widen it.
-    {FormType::ToccataAndFugue, 84, 84, 26, 1, 6, 7, 2, 1, 1, 31906, 590},
+    // The bass-fourth column nearly halves. This form's lowest voice is struck
+    // once or twice a bar and holds while the manuals run, so almost every
+    // interval it forms arrives after its own onset -- and it used to be ranked
+    // against the one beat it was struck on. Read against the whole span it
+    // holds, it stops taking the chord's fifth where a running voice will state
+    // the root over it, which is the second inversion that column counts.
+    //
+    // The hidden column pays three for it, and the succession floor drops by
+    // twenty-one. Both are the same tone: a bass that declines the fifth arrives
+    // at the root more often, which is one more way to reach a perfect interval
+    // by similar motion, and it sustains a little longer where it used to
+    // re-articulate. The trade is priced against the reference corpus, where a
+    // hidden perfect costs a small fraction of what an unresolved second
+    // inversion does, and taken at a ratio of eighty-five to three.
+    {FormType::ToccataAndFugue, 84, 84, 29, 1, 6, 7, 2, 1, 1, 31885, 336},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1059,14 +1066,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // one, which is a register decision made before the surface exists and so is
     // untouched by what the surface stops adding.
     //
-    // The one row where the bass ranking is close to a wash: four contrary
-    // repeats gained against two hidden approaches, one battuta and 22 second
-    // inversions. Its bass is the same sustained pedal the toccata uses, so the
-    // ranking reaches only the manuals, and it reaches them only where the pedal
-    // is silent and a manual is briefly the lowest voice sounding. The contrary
-    // rise is real and is pinned rather than absorbed; the bass-fourth column
-    // beside it is what says the rise was not paid for nothing.
-    {FormType::FantasiaAndFugue, 0, 0, 29, 2, 36, 0, 2, 1, 2, 33418, 736},
+    // Its bass is the same sustained pedal the toccata uses and it answers the
+    // same way once that pedal is ranked against the whole span it holds rather
+    // than the beat it is struck on: the bass-fourth column falls by more than
+    // four hundred, and the hidden column pays three for it while the succession
+    // floor drops by nine. The reasoning and the price are the toccata's,
+    // recorded there.
+    {FormType::FantasiaAndFugue, 0, 0, 32, 2, 36, 0, 2, 1, 2, 33409, 427},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1296,7 +1302,13 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // half. A stretched fugue passes through more bars where the bass is free to
     // choose, so both sides of the trade are larger, and by the corpus weighting
     // the two classes that fall cost several times what the one that rises does.
-    {FormType::Fugue, 0, 0, 318, 846, 36, 0, 4, 9, 2, 773473, 2308},
+    // Reading a sustained bass across the span it holds rather than the beat it
+    // is struck on reaches this form only through the countersubject's seam
+    // arrival, which was the one anchor of a span that nothing judged. Every
+    // fault column holds; the second inversions come down and the floor moves by
+    // six pairs in three quarters of a million, which is the seam tone landing
+    // where the next one can be sustained instead of restruck.
+    {FormType::Fugue, 0, 0, 318, 846, 36, 0, 4, 9, 2, 773467, 2295},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1318,7 +1330,11 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // The bass ranking takes every total column down here and the floor up with
     // them, at the price of one stretched configuration's battuta count. That
     // single worst cell is the whole cost on this row.
-    {FormType::PreludeAndFugue, 0, 0, 184, 346, 10, 0, 3, 5, 1, 500847, 1082},
+    // The countersubject's seam arrival then reaches this form the way it
+    // reaches the fugue, and with the same shape: no fault column moves, the
+    // second inversions fall, and the floor gives up six pairs in half a
+    // million.
+    {FormType::PreludeAndFugue, 0, 0, 184, 346, 10, 0, 3, 5, 1, 500841, 1077},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
