@@ -425,6 +425,61 @@ int fitPcToBand(int pitch_class, int center, int lo, int hi) {
   return best;
 }
 
+// Severity of the worst perfect-interval fault a (prev -> curr) motion forms
+// against any concurrently sounding line. 0 clean, 1 battuta, 2 anti-parallel,
+// 3 parallel or hidden -- the ranking every displacement in this tree obeys.
+int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& motions) {
+  int worst = 0;
+  for (const ConcurrentMotion& motion : motions) {
+    if (formsPerfectParallel(prev, curr, motion.prev, motion.curr))
+      return 3;
+    if (formsAntiParallelPerfect(prev, curr, motion.prev, motion.curr))
+      worst = std::max(worst, 2);
+    else if (formsBattuta(prev, curr, motion.prev, motion.curr))
+      worst = std::max(worst, 1);
+  }
+  return worst;
+}
+
+// The weak-beat tone that connects two anchors a quarter apart.
+//
+// Every anchor of the walking bass is a tone of its bar chord, so the line
+// moves anchor to anchor by the intervals a triad offers -- thirds, fourths and
+// fifths -- and almost never by a step. Beats two and four of 4/4 are
+// metrically weak, which frees them to leave the chord: a tone approached AND
+// left by step there is a passing or neighbour tone, the ordinary way a
+// continuo bass fills the thirds of its own harmony.
+//
+// Returns the connecting tone, or -1 when the pair admits none: a gap wider
+// than a third has no single-step fill, and a candidate outside the bass band
+// would take the line out of its register.
+int connectingBassTone(int from, int to, Mode mode) {
+  const int gap = to - from;
+  const int span = std::abs(gap);
+  int candidate = -1;
+  if (span == 3 || span == 4) {
+    // A third: the scale degree between the two anchors passes through.
+    candidate = gap > 0 ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
+  } else if (span <= 2) {
+    // A step or a repeat: a neighbour on the far side keeps the beat moving,
+    // and it is still left by step. The lower neighbour is preferred so the
+    // fill leans away from the voices above rather than toward them.
+    for (const int direction : {-1, 1}) {
+      const int neighbour =
+          direction < 0 ? detail::scaleDown(from, 1, mode) : detail::scaleUp(from, 1, mode);
+      if (neighbour != to && std::abs(neighbour - from) <= 2 && std::abs(to - neighbour) <= 2) {
+        candidate = neighbour;
+        break;
+      }
+    }
+  }
+  if (candidate < kBassBandLo || candidate > kBassBandHi)
+    return -1;
+  if (std::abs(candidate - from) > 2 || std::abs(to - candidate) > 2)
+    return -1;
+  return candidate;
+}
+
 // Build the V2 walking bass over all `bars` bars and append it to `out_notes`.
 // Each bar opens on the bar chord's root (a quarter note on the downbeat),
 // fitted into the bass band nearest the running cursor. The remaining three
@@ -676,22 +731,43 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       cursor = pitch;
     }
   }
-}
 
-// Severity of the worst perfect-interval fault a (prev -> curr) motion forms
-// against any concurrently sounding line. 0 clean, 1 battuta, 2 anti-parallel,
-// 3 parallel or hidden -- the ranking every displacement in this tree obeys.
-int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& motions) {
-  int worst = 0;
-  for (const ConcurrentMotion& motion : motions) {
-    if (formsPerfectParallel(prev, curr, motion.prev, motion.curr))
-      return 3;
-    if (formsAntiParallelPerfect(prev, curr, motion.prev, motion.curr))
-      worst = std::max(worst, 2);
-    else if (formsBattuta(prev, curr, motion.prev, motion.curr))
-      worst = std::max(worst, 1);
+  // Fill the weak beats. The anchors above are chord tones by construction, so
+  // the line as it stands walks by thirds and fifths; beats two and four are
+  // metrically weak and may leave the chord, which is what turns those thirds
+  // into steps. Run as a second pass because the fill needs the anchor on BOTH
+  // sides of the beat -- a passing tone that is not left by step is an
+  // unprepared dissonance, not a fill -- and the anchor after it is not chosen
+  // until the beat itself has been placed.
+  //
+  // A substitution that would lock in a perfect parallel against either
+  // neighbouring arrival is refused and the chord tone stands: the fill is a
+  // melodic preference and the parallel is the cardinal prohibition.
+  const Tick weak_beats[2] = {kTicksPerBeat, 3 * kTicksPerBeat};
+  std::vector<ConcurrentMotion> into_beat;
+  std::vector<ConcurrentMotion> out_of_beat;
+  for (std::size_t idx = 1; idx + 1 < out_notes.size(); ++idx) {
+    const Tick position = out_notes[idx].start_tick % kTicksPerBar;
+    if (position != weak_beats[0] && position != weak_beats[1])
+      continue;
+    const int before = static_cast<int>(out_notes[idx - 1].pitch);
+    const int standing = static_cast<int>(out_notes[idx].pitch);
+    const int after = static_cast<int>(out_notes[idx + 1].pitch);
+    const int fill = connectingBassTone(before, after, mode);
+    if (fill < 0 || fill == standing)
+      continue;
+    const Tick beat_tick = out_notes[idx].start_tick;
+    const Tick next_tick = out_notes[idx + 1].start_tick;
+    registry.concurrentMotions(beat_tick - kSixteenth, beat_tick, /*voice=*/2, /*num_voices=*/3,
+                               into_beat);
+    registry.concurrentMotions(next_tick - kSixteenth, next_tick, /*voice=*/2, /*num_voices=*/3,
+                               out_of_beat);
+    if (perfectFaultRank(before, fill, into_beat) > perfectFaultRank(before, standing, into_beat))
+      continue;
+    if (perfectFaultRank(fill, after, out_of_beat) > perfectFaultRank(standing, after, out_of_beat))
+      continue;
+    out_notes[idx].pitch = static_cast<std::uint8_t>(fill);
   }
-  return worst;
 }
 
 // A line as the relief pass wants it: every note of one voice in tick order,
@@ -796,8 +872,14 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
 //
 // Every beat is an arrival, not only the bar head. The voice under this one
 // moves within the bar as well as at its head -- the bass states the bar chord
-// and then arpeggiates it -- so the two lines trace the same triad and reach a
-// perfect interval together off the downbeat as readily as on it.
+// and then walks through it -- so the two lines trace the same harmony and
+// reach a perfect interval together off the downbeat as readily as on it.
+//
+// `arrival_grain` is how often the voice below actually moves. A bass that
+// walks in eighths reaches a perfect interval on its own off-beats too, and a
+// beat-grain reading cannot see it: the pair it forms there is never sampled.
+// Reading finer than the bass moves only costs time, so the grain is the
+// caller's to state rather than a constant here.
 //
 // What moves is the onset immediately before the arrival, never the arrival
 // itself. At a bar head both ends are fixed: the bass band spans a single
@@ -815,13 +897,16 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
 // only where the tone it displaces already was (the eighth-note fills are
 // passing tones and dissonant by design).
 void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegistry& registry,
-                     VoiceId voice, VoiceId num_voices, int bars, Mode mode) {
-  constexpr int kBeatsPerBar = kTicksPerBar / kTicksPerBeat;
+                     VoiceId voice, VoiceId num_voices, int bars, Mode mode,
+                     Tick arrival_grain = kTicksPerBeat) {
+  const int arrival_count =
+      arrival_grain > 0 ? static_cast<int>(static_cast<Tick>(bars) * kTicksPerBar / arrival_grain)
+                        : 0;
   std::vector<ConcurrentMotion> into_head;
   std::vector<ConcurrentMotion> into_onset;
   std::vector<ConcurrentMotion> at_onset;
-  for (int beat = 1; beat < bars * kBeatsPerBar; ++beat) {
-    const Tick head = static_cast<Tick>(beat) * kTicksPerBeat;
+  for (int arrival_index = 1; arrival_index < arrival_count; ++arrival_index) {
+    const Tick head = static_cast<Tick>(arrival_index) * arrival_grain;
     std::size_t approach_idx = line.size();
     std::size_t arrival_idx = line.size();
     for (std::size_t idx = 0; idx < line.size(); ++idx) {
@@ -1656,16 +1741,41 @@ BarChord goldbergBarChord(std::uint8_t ground_pitch, Mode mode) {
 
 // The eight eighth-note positions of one aria-bass bar. Each bar articulates
 // its root, third and fifth and returns to the root on both structural accents,
-// so the bass does not merely hold the bar's root: it arpeggiates the bar chord
+// so the bass does not merely hold the bar's root: it states the bar chord
 // within the bar. Any voice above that figures the same triad therefore meets
 // it on a perfect interval off the downbeat as readily as on it, which is why
 // this shape is stated once and read by everything that has to answer for it.
+//
+// The first half connects the root to its third and back through the scale
+// degree between them, the way a continuo bass walks; the second half states
+// the triad downwards from the fifth into the next bar's root. A bar built
+// only from root, third and fifth moves by a third or a fifth at every one of
+// its eight positions, which is what makes a chain of same-direction thirds the
+// bass's whole vocabulary -- the melodic-interval cost the figuration above is
+// already written to keep down. Positions one and three carry the fill: both
+// are metrically weak, and both are approached and left by step, so the tone is
+// a passing/neighbour tone rather than an accented dissonance.
+//
+// `fill_thirds` is settled once for the whole piece from the ground itself, so
+// every reader of this shape sees the same bass.
 constexpr Tick kAriaBassUnit = kTicksPerBeat / 2;
-std::array<int, 8> goldbergAriaBassBar(int root, Mode mode) {
+std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds) {
   const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
   const int third = root + (chord.minor ? 3 : 4);
   const int fifth = root + 7;
-  return {root, third, fifth, third, root, fifth, third, root};
+  const std::array<int, 8> plain = {root, third, fifth, third, root, fifth, third, root};
+  if (!fill_thirds)
+    return plain;
+  // The scale degree between root and third, read under the bar's own harmony:
+  // over a minor-key dominant that is the raised sixth, which is the only tone
+  // that reaches the major third by step instead of by an augmented second.
+  const detail::ChordSpec spec{chord.root_pc, chord.minor};
+  const int fill = detail::melodicScaleStep(root, /*direction=*/1, mode, &spec);
+  // A ground tone whose third the scale cannot reach by a single step keeps the
+  // plain triad statement rather than inventing a chromatic passing tone.
+  if (fill <= root || fill >= third)
+    return plain;
+  return {root, fill, third, fill, root, fifth, third, root};
 }
 
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
@@ -1855,13 +1965,14 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 // simultaneities. A caller with its own terms to weigh interleaves them.
 std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
-                                       const std::array<std::uint8_t, 4>& ground, Mode mode) {
+                                       const std::array<std::uint8_t, 4>& ground, Mode mode,
+                                       bool fill_thirds) {
   std::vector<MaterialNote> bass;
   bass.reserve(32);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
     const std::array<int, 8> phrase =
-        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar % 4)], mode);
+        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar % 4)], mode, fill_thirds);
     for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
       bass.push_back(materialNote(barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit,
                                   kAriaBassUnit, phrase[pos]));
@@ -1930,6 +2041,10 @@ std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
 struct CanonDesign {
   std::array<int, 4> assignment{};
   std::array<bool, 4> rising = kCanonSoggettoParity;
+  // Whether the assembly kept is free of both a crossing and a true parallel.
+  // A block is built from the best assembly whether or not one was reachable,
+  // so this is what a caller asking "is this bass writable at all" reads.
+  bool clean = false;
 };
 
 // Choose the leader tones for a canon block, and where they cannot answer on
@@ -1950,7 +2065,7 @@ struct CanonDesign {
 // is scored and minimised: a block that never needed one keeps it exactly.
 CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                              const std::array<std::uint8_t, 4>& ground, int source_register_shift,
-                             int comes_shift, bool imitate_above) {
+                             int comes_shift, bool imitate_above, bool fill_thirds) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
@@ -1984,7 +2099,7 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                               mode, rising);
               const std::array<int, 6> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
-                  /*block_start_bar=*/0, ground, mode);
+                  /*block_start_bar=*/0, ground, mode, fill_thirds);
               // The leader's own bar-to-bar steps, which the comes inherits
               // exactly: a tritone or a seventh between adjacent bars is
               // unsingable however well it behaves against the other voices, so
@@ -2023,26 +2138,74 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
       }
     }
   }
+  // A clean assembly, where one exists, is always the one kept: the crossing
+  // and the true parallel are the first two terms of the score.
+  chosen.clean = clean;
   return chosen;
 }
 
-// Build one canonic variation block (a 4-bar window).
+// Everything about a canon block that follows from its imitation interval
+// alone. Derived in one place so the probe that asks whether a ground can be
+// written in canon at all and the builder that writes it read the same layout.
 //
 // Unison through fourth canons imitate below: physical V0 is the dux and V1 the
 // comes. Fifth and wider canons imitate above: physical V1 is the lower dux and
 // V0 the comes. This preserves the validator's V0 > V1 register convention
 // while making the wide canon's musical direction genuinely upward.
-void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
-                     int block_start_bar, int imitation_degrees, Mode mode,
-                     const std::array<std::uint8_t, 4>& ground) {
+struct CanonLayout {
+  bool imitate_above = false;
+  int source_register_shift = 0;
+  int comes_shift = 0;
+  int design_ceiling = 0;
+};
+
+CanonLayout canonLayout(int imitation_degrees, Mode mode) {
   const int imitation_semitones =
       transposeUp(kCanonLeaderBase, imitation_degrees, mode) - kCanonLeaderBase;
-  const bool imitate_above = imitation_degrees >= 4;
-  const int source_register_shift = imitate_above ? -12 : 12;
-  const int comes_shift = imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
-  const int design_ceiling = imitation_degrees >= 8 ? 70 : 72;
-  const CanonDesign designed = designCanonBlock(design_ceiling, mode, ground, source_register_shift,
-                                                comes_shift, imitate_above);
+  CanonLayout layout;
+  layout.imitate_above = imitation_degrees >= 4;
+  layout.source_register_shift = layout.imitate_above ? -12 : 12;
+  layout.comes_shift = layout.imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
+  layout.design_ceiling = imitation_degrees >= 8 ? 70 : 72;
+  return layout;
+}
+
+// The imitation intervals the form can reach: canon number c = variation
+// number / 3 runs 1..9 across the full BWV988 set, and the interval is c - 1
+// diatonic degrees above the unison.
+constexpr int kCanonImitationDegreeCount = 9;
+
+// Whether the walking aria bass leaves every canon interval writable. The
+// filled bass moves by step where the plain triad statement leapt, which gives
+// a canon's two voices one more chance to meet a perfect interval in parallel;
+// a ground that leaves some imitation interval with no assignment clearing both
+// a crossing and a true parallel takes the plain bass instead. The answer
+// follows from the ground alone, so it is settled once and the bass and every
+// reader of it agree for the whole piece.
+bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& ground) {
+  for (int imitation_degrees = 0; imitation_degrees < kCanonImitationDegreeCount;
+       ++imitation_degrees) {
+    const CanonLayout layout = canonLayout(imitation_degrees, mode);
+    const CanonDesign probe =
+        designCanonBlock(layout.design_ceiling, mode, ground, layout.source_register_shift,
+                         layout.comes_shift, layout.imitate_above, /*fill_thirds=*/true);
+    if (!probe.clean)
+      return false;
+  }
+  return true;
+}
+
+// Build one canonic variation block (a 4-bar window).
+void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
+                     int block_start_bar, int imitation_degrees, Mode mode,
+                     const std::array<std::uint8_t, 4>& ground, bool fill_thirds) {
+  const CanonLayout layout = canonLayout(imitation_degrees, mode);
+  const bool imitate_above = layout.imitate_above;
+  const int source_register_shift = layout.source_register_shift;
+  const int comes_shift = layout.comes_shift;
+  const CanonDesign designed =
+      designCanonBlock(layout.design_ceiling, mode, ground, source_register_shift, comes_shift,
+                       imitate_above, fill_thirds);
   const CanonLines lines = layOutCanon(designed.assignment, block_start_bar, source_register_shift,
                                        comes_shift, mode, designed.rising);
 
@@ -2081,9 +2244,10 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
+  const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground);
   for (int bar = 0; bar < kCycleBars; ++bar) {
     const std::array<int, 8> phrase =
-        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar)], mode);
+        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar)], mode, fill_thirds);
     for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
       out.material.goldberg_aria_bass.push_back(materialNote(
           barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit, kAriaBassUnit, phrase[pos]));
@@ -2101,6 +2265,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // voices), so no soft-fail is introduced.
   std::vector<MaterialNote> inner_voice;
   std::vector<int> inner_blocks;
+  // The canon blocks alone, whose variation line may not be re-aimed.
+  std::vector<int> canon_blocks;
 
   // Per-bar harmony (ground cycle, tiled). Drives the variation downbeat anchor.
   // The final bar is an explicit tonic arrival rather than one more aria-bass
@@ -2195,8 +2361,10 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int canon_number = static_cast<int>(variation_number / 3);
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
-        buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground);
+        buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground,
+                        fill_thirds);
         inner_blocks.push_back(blk);
+        canon_blocks.push_back(blk);
         break;
       }
       case GoldbergVariationKind::Quodlibet: {
@@ -2239,8 +2407,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 6> score =
-              goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode);
+          const std::array<int, 6> score = goldbergBlockFaults(
+              var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds);
           if (rotation == 0 || score < best_score) {
             best_score = score;
             tune = std::move(candidate);
@@ -2369,12 +2537,14 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // tone from that one root, so they arrive congruently by construction rather
   // than by accident. Nothing in the variation loop can see this, because the
   // Goldberg builder keeps no registry of the voices it has already placed.
-  // The congruence is not confined to the bar head either: the aria bass
-  // arpeggiates that same root through the bar while the variation figures the
-  // same triad above it, so the two lines meet on a perfect interval off the
-  // downbeat as well. Relieved here, where the whole texture is finally known,
-  // on the same terms as the chorale prelude: the tone that moves is the onset
-  // before each arrival.
+  // The congruence is not confined to the bar head either: the aria bass walks
+  // that same triad through the bar while the variation figures it above, so
+  // the two lines meet on a perfect interval off the downbeat as well.
+  // Relieved here, where the whole texture is finally known, on the same terms
+  // as the chorale prelude: the tone that moves is the onset before each
+  // arrival. Read at the eighth, because that is how often the aria bass moves
+  // -- both lines are predominantly stepwise, so they run into a perfect
+  // interval together on the bass's own off-beats and not only on the beats.
   {
     ThemeToneRegistry relief_registry;
     const Tick ground_period = out.material.goldberg_aria_bass_period;
@@ -2391,13 +2561,15 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     for (const MaterialNote& note : out.material.goldberg_inner_voice)
       relief_registry.record(note.start_tick, /*voice=*/1, static_cast<int>(note.pitch),
                              note.duration);
-    // Canon and quodlibet blocks are excluded. Their variation line is the
-    // canon LEADER, and the follower on V1 is that leader plus one fixed
-    // imitation interval; moving a leader tone without moving its comes breaks
-    // the imitation the block exists to state. The blocks that remain carry
-    // free figuration, where a tone answers to nothing but its own line.
+    // Canon blocks are excluded. Their variation line is the canon LEADER, and
+    // the follower on V1 is that leader plus one fixed imitation interval;
+    // moving a leader tone without moving its comes breaks the imitation the
+    // block exists to state. The quodlibet block also carries a second line on
+    // V1, but that one is a free chord-tone tune rather than a copy of the
+    // variation, so its figuration answers to nothing but its own line and is
+    // relieved like any other -- against the tune, which the registry holds.
     std::vector<bool> imitative(out.material.goldberg_variations.size(), false);
-    for (int blk : inner_blocks) {
+    for (int blk : canon_blocks) {
       if (blk >= 0 && static_cast<std::size_t>(blk) < imitative.size())
         imitative[static_cast<std::size_t>(blk)] = true;
     }
@@ -2408,7 +2580,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         blocks.push_back(&out.material.goldberg_variations[idx].notes);
     }
     relieveArrivals(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
-                    /*num_voices=*/3, bars, mode);
+                    /*num_voices=*/3, bars, mode, /*arrival_grain=*/kAriaBassUnit);
   }
 
   Span coda_span;
