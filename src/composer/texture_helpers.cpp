@@ -336,8 +336,22 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
     previous_source = source_pitch;
   }
 
+  // Span seam. The repair below returns its argument untouched while there is no
+  // emitted predecessor, so with the line started at -1 the one anchor left
+  // unjudged is the span's FIRST -- and that is the seam arrival, the onset where
+  // this voice and the entry it accompanies both move at once. Seeded from what
+  // this voice sounds a sixteenth before the span, the motion the pass could
+  // never see becomes the first one it judges.
   int previous_emitted = -1;
   Tick previous_tick = 0;
+  constexpr Tick kSeamLookback = kTicksPerBeat / 4;  // one sixteenth.
+  if (start >= kSeamLookback) {
+    const int seam_pitch = registry.soundingPitchInVoice(voice, start - kSeamLookback);
+    if (seam_pitch >= 0) {
+      previous_emitted = seam_pitch;
+      previous_tick = start - kSeamLookback;
+    }
+  }
   // Realization-time repair, and the only place in this function that reads the
   // tone actually emitted. Pass 1 scores one anchor per source note, so a beat
   // realized as four sixteenths hands the next anchor a predecessor the scorer
@@ -488,7 +502,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches,
-                       bool parallel_free_over_consonant, bool held_bass) {
+                       bool parallel_free_over_consonant, bool sustained_bass) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -660,10 +674,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     bool sharp_vs_theme = false;  // strikes ic 1/6/11 against a theme tone.
     // True when this candidate would sound below every already-placed voice, so
     // the intervals it forms are bass intervals rather than upper-voice ones.
-    // A held bass is exempt outright: the pedal point is the grammar's own
-    // licence for the fourth above it, so leaving that line out of the ranking
-    // below is not a relaxation but the rule stated correctly.
-    const bool is_bass = !held_bass && pitch < lowest_placed;
+    const bool is_bass = pitch < lowest_placed;
     // Whether the candidate leaves a fourth above itself while it is the bass --
     // an unresolved second inversion. Not a clash: a clash moves the candidate
     // between preference tiers, and the tiers here rank parallel-freedom, which
@@ -714,8 +725,25 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
         add_clash(motion.curr, /*is_theme=*/false);
       }
     }
+    // The second inversion the onset test above refuses can just as well arrive
+    // a beat later: this tone is still sounding when the voices above it attack
+    // again, so a bass ranked against its onset alone is ranked against a
+    // fraction of what it actually supports. What carries over unchanged is that
+    // the fourth is a dissonance in one position only -- lying under SOME voice
+    // is not being the bass, and above a lower voice the fourth is a consonance
+    // like any other -- so the reading needs the candidate to be lowest at the
+    // onset and to stay lowest for as long as it holds.
+    bool bass_through_window = sustained_bass && is_bass;
+    for (int sounding : window_pitches) {
+      bass_through_window = bass_through_window && pitch < sounding;
+    }
     int window_clashes = 0;
     for (int sounding : window_pitches) {
+      if (bass_through_window && isConsonantIc(pitch - sounding) &&
+          !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(sounding),
+                                              static_cast<std::uint8_t>(pitch))) {
+        bass_fourth = true;
+      }
       if (!isConsonantIc(pitch - sounding) && !(is_chord_tone(pitch) && is_chord_tone(sounding))) {
         ++window_clashes;
       }

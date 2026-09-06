@@ -10,6 +10,7 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
@@ -250,6 +251,27 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // pitch and how many identical onsets precede the next one.
   int last_pedal_pitch = -1;
   int pedal_run = 0;
+  // Every beat the bar's pedal tone is still sounding at, read from the V0
+  // figuration already placed above it. The pedal is struck once or twice a bar
+  // while that line attacks four or more times, so the interval that decides
+  // whether the vertical is a second inversion almost never falls where the
+  // pedal is struck -- a reading taken at the onset alone sees a fraction of
+  // what the tone supports.
+  std::vector<int> window_pitches;
+  std::vector<int> beat_pitches;
+  // Whether a candidate leaves a fourth above itself anywhere it sounds. The
+  // walking escape below draws on the chord's fifth, and a fifth in the bass
+  // under a figuration line stating the root is an unresolved second inversion,
+  // so the escape needs to see it or it trades a static run for one.
+  const auto leaves_bass_fourth = [&](int cand) {
+    const auto is_fourth_above = [&](int sounding) {
+      return cand < sounding && isConsonantIc(cand - sounding) &&
+             !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(sounding),
+                                                 static_cast<std::uint8_t>(cand));
+    };
+    return std::any_of(theme_pitches.begin(), theme_pitches.end(), is_fourth_above) ||
+           std::any_of(window_pitches.begin(), window_pitches.end(), is_fourth_above);
+  };
   // How badly a candidate pedal tone reads against the voices already sounding
   // above it. The perfect approaches are ranked, not pooled: the band, the triad
   // and those voices constrain the candidate set at once, so a tone free of every
@@ -303,14 +325,18 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     }
     for (int accept = kPedalClean; accept < start_rank; ++accept) {
       int best = -1;
-      int best_dist = 1 << 30;
+      int best_key = 1 << 30;
       for (int alt : candidates) {
         if (alt < kFreeV2Lo || alt > kFreeV2Hi || alt == root || pedal_fault_rank(alt) > accept) {
           continue;
         }
-        const int dist = std::abs(alt - last_pedal_pitch);
-        if (dist < best_dist) {
-          best_dist = dist;
+        // Conjunct still decides between two tones that read alike; the second
+        // inversion only outranks it, so the escape reaches for the third before
+        // the fifth when both are equally free of a perfect approach.
+        const int key =
+            (leaves_bass_fourth(alt) ? (1 << 12) : 0) + std::abs(alt - last_pedal_pitch);
+        if (key < best_key) {
+          best_key = key;
           best = alt;
         }
       }
@@ -342,10 +368,15 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // (and the ear) pairs the two at the onset just before the bar head.
     registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/2,
                                /*num_voices=*/3, motions);
-    int root = consonantChordTone(chord, /*voice=*/2, kFreeV2Lo, kFreeV2Hi, centre, theme_pitches,
-                                  last_pedal_pitch, motions, mode, /*downbeat=*/true,
-                                  /*window_pitches=*/{},
-                                  /*parallel_free_over_consonant=*/false, /*held_bass=*/true);
+    window_pitches.clear();
+    for (Tick beat = kTicksPerBeat; beat < kTicksPerBar; beat += kTicksPerBeat) {
+      registry.concurrentThemePitches(bar_start + beat, /*voice=*/2, beat_pitches);
+      window_pitches.insert(window_pitches.end(), beat_pitches.begin(), beat_pitches.end());
+    }
+    int root =
+        consonantChordTone(chord, /*voice=*/2, kFreeV2Lo, kFreeV2Hi, centre, theme_pitches,
+                           last_pedal_pitch, motions, mode, /*downbeat=*/true, window_pitches,
+                           /*parallel_free_over_consonant=*/false, /*sustained_bass=*/true);
     if (bar == free_bars - 1) {
       // The free section's declared half cadence needs the actual lowest voice
       // on V, not merely an arbitrary member of the dominant triad. Which V is
@@ -742,7 +773,12 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     section.is_pedal_prep = true;  // exempt the held tone from the downbeat check.
     std::vector<int> theme_pitches;
     std::vector<ConcurrentMotion> motions;
-    int line_prev = -1;
+    // Section seam: this span has no threaded previous tone, but the voice may
+    // have sounded right up to its first bar in an earlier span (a theme entry
+    // or an earlier support run). Left at -1 every parallel predicate below
+    // short-circuits, so the one onset where this line arrives against voices
+    // already in motion is the one onset it cannot refuse a perfect approach at.
+    int line_prev = registry.soundingPitchInVoice(voice, barTick(first) - kSixteenth);
     const int centre = (kBandLo[voice] + kBandHi[voice]) / 2;
     // Ranked rather than pooled, and read at the grain the other lines move at.
     // This support tone is the one note per bar the lowest voice contributes,
@@ -769,15 +805,27 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       }
       return worst;
     };
+    // Every beat this tone is still sounding at, read from the voices already
+    // placed above it. It is struck once and holds while they attack three or
+    // more times, so its onset is the smallest part of what it supports: the
+    // interval that decides whether the vertical is a second inversion almost
+    // never falls on the beat the bass is struck.
+    std::vector<int> window_pitches;
+    std::vector<int> beat_pitches;
     for (int bar = first; bar <= last; ++bar) {
       const Tick bar_start = barTick(bar);
       registry.concurrentThemePitches(bar_start, voice, theme_pitches);
       registry.concurrentMotions(bar_start - kSixteenth, bar_start, voice, kTailVoices, motions);
+      window_pitches.clear();
+      for (Tick beat = kTicksPerBeat; beat < pulse_duration; beat += kTicksPerBeat) {
+        registry.concurrentThemePitches(bar_start + beat, voice, beat_pitches);
+        window_pitches.insert(window_pitches.end(), beat_pitches.begin(), beat_pitches.end());
+      }
       int pitch =
           consonantChordTone(plan[static_cast<std::size_t>(bar)], voice, kBandLo[voice],
                              kBandHi[voice], centre, theme_pitches, line_prev, motions, mode,
-                             /*downbeat=*/true, /*window_pitches=*/{},
-                             /*parallel_free_over_consonant=*/false, /*held_bass=*/true);
+                             /*downbeat=*/true, window_pitches,
+                             /*parallel_free_over_consonant=*/false, /*sustained_bass=*/true);
       const int design_rank = support_fault_rank(pitch);
       if (design_rank != kSupportClean && line_prev >= 0) {
         // The concurrent voices are all above this one, so a substitute has to
