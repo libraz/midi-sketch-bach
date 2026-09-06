@@ -1480,40 +1480,49 @@ TEST(FormFugueTest, LongDevelopmentShipsAugmentationDiminutionAndVariantProvenan
 
 namespace {
 
-// Scale-degree index of a home-scale (C major) diatonic pitch: seven degrees
-// per octave plus the pitch class's position in the scale. Both committed
-// restatements and reactive fallbacks are home-diatonic, so every
-// countersubject note maps to a degree.
-int majorDegreeIndex(int pitch) {
-  static const std::array<int, 12> kPosInScale = {0, -1, 1, -1, 2, 3, -1, 4, -1, 5, -1, 6};
-  const int pc = ((pitch % 12) + 12) % 12;
-  const int pos = kPosInScale[static_cast<std::size_t>(pc)];
-  if (pos < 0) {
+// Scale-degree index of a pitch in the home key: seven degrees per octave above
+// its tonic plus the pitch's degree in it.
+//
+// A tone re-spelled for a stated key area is read back at the degree it was
+// carried from. The re-spelling moves a tone to the nearest member of the local
+// key without leaving the degree it occupies, and it raises rather than lowers,
+// so the home tone a semitone BELOW is the one it stands for. Both readings
+// then live in one degree space, which is what lets a window spelled in a
+// station's key be compared with the home-key line it restates.
+int homeDegreeIndex(int pitch, const KeyContext& home) {
+  const int carried_from = degreeInKey(pitch, home) >= 0 ? pitch : pitch - 1;
+  const int degree = degreeInKey(carried_from, home);
+  if (degree < 0) {
     return -1;
   }
-  return 7 * (pitch / 12) + pos;
+  const int relative = carried_from - static_cast<int>(home.tonic_pc);
+  const int octave = relative >= 0 ? relative / 12 : (relative - 11) / 12;
+  return 7 * octave + degree;
 }
 
-// Degree-space interval sequence between consecutive notes. Degree shifting the
-// canonical line by a constant number of degrees plus whole octaves preserves
-// this sequence, so a committed restatement matches the canonical exactly.
-std::vector<int> degreeIntervals(const std::vector<int>& pitches) {
+// Degree-space interval sequence between consecutive notes. Carrying the
+// canonical line to a station -- a constant number of degrees plus whole
+// octaves, then the transposition into that station's key -- preserves this
+// sequence, so a committed restatement matches the canonical exactly.
+std::vector<int> degreeIntervals(const HarnessFixture& fx, const std::vector<MaterialNote>& notes) {
+  const KeyContext home{static_cast<std::uint8_t>(fx.harmony.tonic_pc % 12), fx.harmony.is_minor};
   std::vector<int> intervals;
-  for (std::size_t idx = 1; idx < pitches.size(); ++idx) {
-    intervals.push_back(majorDegreeIndex(pitches[idx]) - majorDegreeIndex(pitches[idx - 1]));
+  for (std::size_t idx = 1; idx < notes.size(); ++idx) {
+    intervals.push_back(homeDegreeIndex(notes[idx].pitch, home) -
+                        homeDegreeIndex(notes[idx - 1].pitch, home));
   }
   return intervals;
 }
 
 // Countersubject notes whose onset falls in [start, end).
-std::vector<int> countersubjectPitchesIn(const HarnessFixture& fx, Tick start, Tick end) {
-  std::vector<int> pitches;
+std::vector<MaterialNote> countersubjectNotesIn(const HarnessFixture& fx, Tick start, Tick end) {
+  std::vector<MaterialNote> notes;
   for (const auto& note : fx.material.countersubject) {
     if (note.start_tick >= start && note.start_tick < end) {
-      pitches.push_back(static_cast<int>(note.pitch));
+      notes.push_back(note);
     }
   }
-  return pitches;
+  return notes;
 }
 
 }  // namespace
@@ -1531,7 +1540,7 @@ TEST(FormFugueTest, RecurringCountersubjectRestatesCanonicalIdentity) {
     const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 64);
     // Canonical countersubject = the exposition answer counterline (V0, bars 4-8).
     const std::vector<int> canonical_intervals =
-        degreeIntervals(countersubjectPitchesIn(fx, 4 * kBar, 8 * kBar));
+        degreeIntervals(fx, countersubjectNotesIn(fx, 4 * kBar, 8 * kBar));
     ASSERT_FALSE(canonical_intervals.empty()) << "seed " << seed << ": no canonical countersubject";
 
     for (const auto& span : fx.voice_plan.spans) {
@@ -1540,7 +1549,7 @@ TEST(FormFugueTest, RecurringCountersubjectRestatesCanonicalIdentity) {
       }
       ++total_windows;
       const std::vector<int> window_intervals =
-          degreeIntervals(countersubjectPitchesIn(fx, span.start_tick, span.end_tick));
+          degreeIntervals(fx, countersubjectNotesIn(fx, span.start_tick, span.end_tick));
       if (window_intervals == canonical_intervals) {
         ++total_committed;
       }
@@ -1764,26 +1773,36 @@ TEST(FormFuguePreludeAndFugueTest, PreludeBeatsAreChordToneAnchored) {
 
 TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
   // The scalar-wave figuration walks scaleUp / scaleDown, so every figuration
-  // note must stay inside the diatonic set. A descending walk expressed as the
-  // negation trick -scaleUp(-pitch) walked the inverted (non-diatonic) pitch
-  // class set and emitted chromatic runs (D#/C#/A#/G# in C major); this pins
-  // the diatonic contract across seeds and modes. In minor the bar chords come
-  // from kHarmonyPatternsMinor whose major dominant contributes the harmonic
-  // leading tone (pc 11), so that single chromatic degree is admitted; the
-  // held Picardy third (pc 4) in the final bar's inner voice is likewise a
+  // note must stay inside the diatonic set of the key its bar belongs to. A
+  // descending walk expressed as the negation trick -scaleUp(-pitch) walked the
+  // inverted (non-diatonic) pitch class set and emitted chromatic runs
+  // (D#/C#/A#/G# in C major); this pins the diatonic contract across seeds and
+  // modes. A stated key area re-spells part of the accompaniment in its own
+  // collection, so a note is admitted when it belongs to the key of its bar OR
+  // to the home key -- what the contract forbids is a tone that belongs to
+  // neither, which is what the negation trick produced. In minor the bar chords
+  // come from kHarmonyPatternsMinor whose major dominant contributes the
+  // harmonic leading tone, so that single chromatic degree is admitted for the
+  // home key and for the key of the bar alike;
+  // the held Picardy third (pc 4) in the final bar's inner voice is likewise a
   // sanctioned chromatic colour.
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : {false, true}) {
       const std::uint16_t bars = naturalBars(FormType::PreludeAndFugue);
       const HarnessFixture fx = buildFixture(FormType::PreludeAndFugue, seed, minor, bars);
-      const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
       const Tick last_bar_tick = static_cast<Tick>(bars - 1) * kBar;
       for (const auto& section : fx.material.figuration_sections) {
         for (const auto& note : section.notes) {
+          const KeyContext key = localKeyAt(fx.harmony, note.start_tick);
+          const KeyContext home{static_cast<std::uint8_t>(fx.harmony.tonic_pc % 12),
+                                fx.harmony.is_minor};
           const bool picardy_third =
               minor && note.pitch % 12 == 4 && note.start_tick >= last_bar_tick;
-          const bool diatonic = detail::inScale(note.pitch, mode) ||
-                                (minor && note.pitch % 12 == 11) || picardy_third;
+          const bool leading_tone =
+              (home.is_minor && note.pitch % 12 == (home.tonic_pc + 11) % 12) ||
+              (key.is_minor && note.pitch % 12 == (key.tonic_pc + 11) % 12);
+          const bool diatonic =
+              inKey(note.pitch, key) || inKey(note.pitch, home) || leading_tone || picardy_third;
           EXPECT_TRUE(diatonic) << "seed " << seed << (minor ? " minor" : " major")
                                 << " figuration note pitch " << note.pitch << " (pc "
                                 << note.pitch % 12 << ") at tick " << note.start_tick

@@ -18,6 +18,7 @@
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -132,10 +133,13 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
   return inverted;
 }
 
-// Major-mode middle entries rotate V / vi / IV. In minor, a degree shift of
-// the selected minor subject stays inside the home minor collection while its
-// declared stations rotate v / III / iv; this avoids importing the major
-// catalog's A/B/E naturals into a C-minor fugue.
+// Major-mode middle entries rotate V / vi / IV; minor-mode entries rotate
+// v / III / iv. Major stations are spelled as keys -- the entry is transposed
+// into the station's own collection and arrives with its accidentals. Minor
+// stations are not: the shared middle-entry rule holds every note of a
+// minor-mode entry inside the home minor context, so those lines are
+// degree-shifted to the station's level and the station states its chord
+// rather than its key.
 constexpr std::array<std::uint8_t, 3> kVoiceKeyPc = {7, 9, 5};       // V0->V, V1->vi, V2->IV.
 constexpr std::array<int, 3> kVoiceKeySemis = {7, 9, 5};             // diatonic offsets.
 constexpr std::array<std::uint8_t, 3> kMinorVoiceKeyPc = {7, 3, 5};  // V0->v, V1->III, V2->iv.
@@ -146,11 +150,12 @@ std::uint8_t middleEntryKeyPc(int voice, Mode mode) {
   return mode == Mode::Minor ? kMinorVoiceKeyPc[index] : kVoiceKeyPc[index];
 }
 
-// Diatonic degree shift (never a raw semitone transposition) that restates the
-// canonical countersubject in a middle entry's related key, keyed by the
-// carrying voice. V0->V is up a fifth (+4 degrees), V1->vi up a sixth (+5),
-// V2->IV up a fourth (+3): degree shifting keeps the line home-diatonic, so it
-// forms no cross-relation against the home-scale texture around the entry.
+// Degree shift that carries the canonical countersubject to an unspelled
+// station's level inside the home collection, keyed by the carrying voice:
+// V0 up a fifth (+4 degrees), V1 up a sixth (+5), V2 up a fourth (+3). A
+// station spelled as a key needs no shift -- the transposition into that key
+// is the same step -- so this table is read only where the entry above the
+// line was itself degree-shifted.
 constexpr std::array<int, 3> kCountersubjectDegreeShift = {4, 5, 3};
 
 struct DevelopmentWindow {
@@ -409,15 +414,34 @@ int fifthAboveRoot(int root_pc, Mode mode) {
   }
 }
 
+/// @brief Whether a related key is itself minor (the relative minor station).
+bool isRelatedKeyMinor(std::uint8_t key_pc, Mode mode) {
+  if (mode == Mode::Minor) {
+    return key_pc == 5;
+  }
+  return key_pc == 9;
+}
+
 /// @brief 4-bar harmonic progression for an entry window, keyed by the entry's
-/// related key (home / V / vi / IV), spelled in home-key diatonic chords.
+/// related key (home / V / vi / IV).
 ///
-/// Outer bars carry the entry key's tonic function; the inner bars add its
-/// subdominant/dominant colour from inside the home vocabulary, so the
-/// accompaniment states the entry's key without leaving the working scale.
-/// The minor-mode vi entry (a degree-shifted line whose pitch set is the home
-/// MAJOR scale) gets dominant-set support: V is the only minor-vocabulary
-/// triad fully inside that line's pitch world.
+/// A spelled station opens on the tonic both keys share (so the bar still
+/// serves as the pivot), passes through a pre-dominant, and reaches the
+/// station's OWN dominant before returning to it. That dominant is the only
+/// chord in the window that distinguishes the station from the home key:
+/// supporting the entry entirely out of the home vocabulary leaves the whole
+/// window inside the intersection of the two keys, where nothing says which one
+/// is sounding, and the entry's accidentals then have to carry the modulation
+/// alone against an accompaniment that contradicts them. Its root stays inside
+/// the home scale, so the chord is still labelled as a degree of the home key
+/// -- a secondary dominant, which is what it is.
+///
+/// The minor stations keep their home-vocabulary support: their entries are
+/// degree-shifted inside the home collection, so a chord from the station's own
+/// key would sound against a line that never left home. The minor-mode vi entry
+/// (a degree-shifted line whose pitch set is the home MAJOR scale) gets
+/// dominant-set support: V is the only minor-vocabulary triad fully inside that
+/// line's pitch world.
 std::array<ChordSpec, 4> entryProgression(std::uint8_t key_pc, Mode mode) {
   if (mode == Mode::Minor) {
     switch (key_pc) {
@@ -440,11 +464,11 @@ std::array<ChordSpec, 4> entryProgression(std::uint8_t key_pc, Mode mode) {
   }
   switch (key_pc) {
     case 7:
-      return {{{7, false}, {0, false}, {9, true}, {7, false}}};
+      return {{{7, false}, {0, false}, {2, false}, {7, false}}};
     case 9:
-      return {{{9, true}, {2, true}, {4, true}, {9, true}}};
+      return {{{9, true}, {2, true}, {4, false}, {9, true}}};
     case 5:
-      return {{{5, false}, {0, false}, {2, true}, {5, false}}};
+      return {{{5, false}, {2, true}, {0, false}, {5, false}}};
     default:
       return {{{0, false}, {5, false}, {7, false}, {0, false}}};
   }
@@ -551,13 +575,6 @@ bool isPivotCapableRelatedKey(std::uint8_t key_pc, Mode mode) {
     return key_pc == 7 || key_pc == 5;
   }
   return key_pc == 7 || key_pc == 9 || key_pc == 5;
-}
-
-bool isRelatedKeyMinor(std::uint8_t key_pc, Mode mode) {
-  if (mode == Mode::Minor) {
-    return key_pc == 5;
-  }
-  return key_pc == 9;
 }
 
 RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
@@ -809,6 +826,35 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     }
   }
 
+  // The station's own dominant, inside the window. Its root is a degree of the
+  // home key but its third is not, so the quality-blind label the plan would
+  // otherwise carry (a major triad read as the minor degree on that root) would
+  // misname the one chord that says which key is sounding. Naming it V/X and
+  // the bar it resolves to X keeps the label and the spelling agreeing.
+  if (mode != Mode::Minor) {
+    for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
+      const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
+      const std::uint8_t key_pc = middleEntryKeyPc(cycle % 3, mode);
+      if (!window.has_entry || cycle == pedal_cycle || !isPivotCapableRelatedKey(key_pc, mode)) {
+        continue;
+      }
+      const Tick dominant_tick = barTick(first_bar + window.entry_start + 2);
+      const Tick resolution_tick = dominant_tick + kTicksPerBar;
+      for (ChordEvent& chord : out.harmony.chords) {
+        if (chord.start_tick == dominant_tick) {
+          chord.degree = RomanNumeral::V;
+          chord.function = HarmonicFunction::D;
+          chord.has_degree = true;
+          chord.has_secondary_of = true;
+          chord.secondary_of = relatedKeyDegree(key_pc, mode);
+        } else if (chord.start_tick == resolution_tick) {
+          chord.degree = relatedKeyDegree(key_pc, mode);
+          chord.has_degree = true;
+        }
+      }
+    }
+  }
+
   // Related-key statements begin on a harmony shared by the home key and the
   // local key (V/I for G, vi/i for A, IV/i for F). Declare that actual pivot
   // and restore the home key when the four-bar entry closes, so downstream
@@ -832,10 +878,39 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                                          mode == Mode::Minor, ModulationType::Phrase});
     }
   }
+  // The answer is the subject moved by a fifth, so the exposition's second
+  // entry already sounds in the dominant key, in either mode -- the real answer
+  // carries that key's accidentals with it. Declaring the area is what lets the
+  // countersubject above it and the bass below it be spelled there too; left
+  // undeclared they keep the home scale and contradict the answer's own leading
+  // tone. Nothing prepares the entry, so the boundary is the phrase rather than
+  // a pivot chord.
+  if (bars > 8) {
+    constexpr std::uint8_t kDominantPc = 7;
+    const bool minor = mode == Mode::Minor;
+    out.harmony.modulations.push_back(
+        {barTick(first_bar + 4), 0, kDominantPc, minor, minor, ModulationType::Phrase});
+    out.harmony.modulations.push_back(
+        {barTick(first_bar + 8), kDominantPc, 0, minor, minor, ModulationType::Phrase});
+  }
   std::stable_sort(out.harmony.modulations.begin(), out.harmony.modulations.end(),
                    [](const ModulationEvent& left, const ModulationEvent& right) {
                      return left.tick < right.tick;
                    });
+
+  // The collections the piece's material is spelled in. The composer runs
+  // C-internal, so the home collection is the one every catalog line arrives
+  // in; a station's key is a second collection the material is restated in,
+  // and it is the only way an accidental can enter -- the scale helpers below
+  // this layer are all written on a fixed C tonic, so a line that is only ever
+  // degree-shifted cannot leave the home collection however far its stations
+  // travel. A minor station returns the home collection because the shared
+  // middle-entry rule admits nothing else there.
+  const KeyContext home_key{static_cast<std::uint8_t>(out.harmony.tonic_pc % 12),
+                            mode == Mode::Minor};
+  const auto station_key = [&](std::uint8_t key_pc) {
+    return mode == Mode::Minor ? home_key : KeyContext{key_pc, isRelatedKeyMinor(key_pc, mode)};
+  };
 
   // === EXPOSITION ===========================================================
   // Each thematic statement carries the subject in ONE voice band; at most ONE
@@ -864,13 +939,18 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // track, instead of a fresh reactive counterline per entry.
   std::vector<MaterialNote> canonical_cs;
 
-  // Degree-shift the canonical countersubject into an entry key, then octave-fit
-  // the whole line (one offset, a multiple of 12) into the accompaniment voice
-  // band. Returns false -- so the caller falls back to a reactive counterline --
-  // when there is no canonical line yet or the shifted line is wider than the
-  // band (a voice-band violation the strict register order forbids).
-  auto build_restatement = [&](int degree_offset, int voice, Tick anchor_start,
-                               std::vector<MaterialNote>* dst) -> bool {
+  // Carry the canonical countersubject to an entry: a degree shift inside the
+  // home collection, then the transposition into the entry's key (the identity
+  // when the entry is a home-key restatement), then an octave fit of the whole
+  // line (one offset, a multiple of 12) into the accompaniment voice band.
+  // Spelling the line in the entry's key is what keeps it from contradicting
+  // the entry note for note; a home-collection line under a transposed entry
+  // sounds the two spellings of the same degree together. Returns false -- so
+  // the caller falls back to a reactive counterline -- when there is no
+  // canonical line yet or the carried line is wider than the band (a voice-band
+  // violation the strict register order forbids).
+  auto build_restatement = [&](int degree_offset, const KeyContext& to, int voice,
+                               Tick anchor_start, std::vector<MaterialNote>* dst) -> bool {
     dst->clear();
     if (canonical_cs.empty()) {
       return false;
@@ -882,8 +962,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     int sum = 0;
     for (const auto& note : canonical_cs) {
       const int base = static_cast<int>(note.pitch);
-      const int pitch = (degree_offset >= 0) ? scaleUp(base, degree_offset, mode)
-                                             : scaleDown(base, -degree_offset, mode);
+      const int shifted_base = (degree_offset >= 0) ? scaleUp(base, degree_offset, mode)
+                                                    : scaleDown(base, -degree_offset, mode);
+      const int pitch = transposeIntoKey(shifted_base, home_key, to);
       shifted.push_back(pitch);
       lo = std::min(lo, pitch);
       hi = std::max(hi, pitch);
@@ -1000,12 +1081,13 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // it when the static combination check passes, otherwise fall back to the
   // reactive consonant/contrary counterline derived from the entry itself. The
   // caller pushes the CountersubjectCarrier span in both cases.
-  auto emit_recurring_countersubject = [&](int degree_offset, int acc_voice, int win_start_bar,
+  auto emit_recurring_countersubject = [&](int degree_offset, const KeyContext& to, int acc_voice,
+                                           int win_start_bar,
                                            const std::vector<MaterialNote>& entry_line) {
     const Tick win_start = barTick(win_start_bar);
     const Tick win_end = barTick(win_start_bar + kSubjectBars);
     std::vector<MaterialNote> restated;
-    if (build_restatement(degree_offset, acc_voice, win_start, &restated) &&
+    if (build_restatement(degree_offset, to, acc_voice, win_start, &restated) &&
         restatement_compatible(restated, entry_line, win_start)) {
       for (const auto& note : restated) {
         addNote(out.material.countersubject, note.start_tick, note.duration,
@@ -1158,7 +1240,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
       const Tick third_start = barTick(first_bar + 8);
       std::vector<MaterialNote> restated;
-      if (build_restatement(3, 1, third_start, &restated) &&
+      if (build_restatement(3, home_key, 1, third_start, &restated) &&
           restatement_compatible(restated, third_entry_seed_at(first_bar + 8), third_start)) {
         out.material.countersubject.insert(out.material.countersubject.end(), trial_cs.begin(),
                                            trial_cs.end());
@@ -1243,7 +1325,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     // flipping half the consonances into sustained sevenths. Restating it here
     // makes the countersubject's identity audible from the exposition on; the
     // static check falls back to a reactive line if dissonant.
-    emit_recurring_countersubject(3, 1, first_bar + 8, third_entry_seed);
+    emit_recurring_countersubject(3, home_key, 1, first_bar + 8, third_entry_seed);
     pushSpan(asm_ctx, 1, first_bar + 8, first_bar + 11, VoiceIntent::CountersubjectCarrier);
     // V0 figuration rides above the V2 third entry. The exposition's section
     // cadence lands on this span's final bar, so its second half closes on a
@@ -1420,11 +1502,13 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
     if (!half_cycle) {
       // --- Middle entry (4 bars): the selected form subject restated in the
-      //     carrying voice. Major pieces retain the V / vi / IV realization;
-      //     minor pieces move the minor catalog by home-minor scale degrees to
-      //     v / III / iv, preserving the minor pitch collection. ---
+      //     carrying voice, in the station's key where that key can be spelled
+      //     (V / vi / IV) and at the station's degree inside the home minor
+      //     collection where it cannot (v / III / iv). ---
       const int me_start = first_bar + window.entry_start;  // absolute.
       const int key_semis = kVoiceKeySemis[static_cast<std::size_t>(carry_voice)];
+      const std::uint8_t entry_key_pc = middleEntryKeyPc(carry_voice, mode);
+      const KeyContext entry_key = station_key(entry_key_pc);
       // The inverted development cycle mirrors the selected catalog line in
       // degree space before its related-key realization.
       std::array<std::uint8_t, 16> me_pat = subj_pat;
@@ -1434,6 +1518,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       if (inverted_here) {
         me_pat = invertDiatonicLine(me_pat, mode);
       }
+      // Station realization. A spelled station is a real transposition that
+      // preserves the degree each note occupies, so the line arrives with that
+      // key's accidentals -- the audible half of the modulation. An unspelled
+      // station keeps the line inside the home collection at the station's own
+      // degree.
       std::array<std::uint8_t, 16> me_real;
       for (int note = 0; note < kSubjectNotes; ++note) {
         const int base = static_cast<int>(me_pat[static_cast<std::size_t>(note)]);
@@ -1442,13 +1531,14 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                 ? detail::scaleUp(base,
                                   kMinorVoiceDegreeShift[static_cast<std::size_t>(carry_voice)],
                                   Mode::Minor)
-                : (carry_voice == 1 ? detail::scaleUp(base, 5, Mode::Major) : base + key_semis);
-        me_real[static_cast<std::size_t>(note)] = static_cast<std::uint8_t>(realized);
+                : transposeIntoKey(base, home_key, entry_key);
+        me_real[static_cast<std::size_t>(note)] =
+            static_cast<std::uint8_t>(std::clamp(realized, 0, 127));
       }
       const int me_off = octaveOffsetForBand(me_real, 0, carry_voice, kBandLo, kBandHi);
       MiddleEntryDecl& decl = middle_decls[static_cast<std::size_t>(carry_voice)];
       decl.voice = static_cast<VoiceId>(carry_voice);
-      decl.related_key_pc = middleEntryKeyPc(carry_voice, mode);
+      decl.related_key_pc = entry_key_pc;
       Tick me_cursor = barTick(me_start);
       const Tick me_end = barTick(me_start + kSubjectBars);
       int note = 0;
@@ -1687,16 +1777,21 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                           first_bar, mode, density, fig_offset);
       } else {
         // The ONE canonical countersubject rides in the highest non-carrying
-        // voice, restated by octave-invertible degree shift into the entry key
-        // (V0->V, V1->vi, V2->IV) so the same line recurs against every entry
-        // and the ear tracks a single countersubject identity through the
-        // development. When the restatement combines dissonantly with the entry
-        // line (the static check fails), the window falls back to a reactive
-        // consonant/contrary counterline derived FROM the entry, which the
-        // constraint-hostile entry window is guaranteed to admit.
+        // voice, carried octave-invertibly to the entry's station (V0->V,
+        // V1->vi, V2->IV) so the same line recurs against every entry and the
+        // ear tracks a single countersubject identity through the development.
+        // A spelled station carries it by the transposition into that key,
+        // which is the same step as the station's degree shift and additionally
+        // spells the key's accidentals -- without them the line would
+        // contradict the entry it accompanies. When the restatement combines
+        // dissonantly with the entry line (the static check fails), the window
+        // falls back to a reactive consonant/contrary counterline derived FROM
+        // the entry, which the constraint-hostile entry window is guaranteed to
+        // admit.
+        const bool station_spelled = entry_key.tonic_pc != home_key.tonic_pc;
         emit_recurring_countersubject(
-            kCountersubjectDegreeShift[static_cast<std::size_t>(carry_voice)], acc_voice, me_start,
-            decl.notes);
+            station_spelled ? 0 : kCountersubjectDegreeShift[static_cast<std::size_t>(carry_voice)],
+            entry_key, acc_voice, me_start, decl.notes);
         pushSpan(asm_ctx, static_cast<VoiceId>(acc_voice), me_start, me_start + 3,
                  VoiceIntent::CountersubjectCarrier);
       }
@@ -2106,6 +2201,325 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   }
 }
 
+/// @brief One tone moved after the span holding it was built.
+struct PlacedTone {
+  Tick start = 0;
+  Tick duration = 0;
+  VoiceId voice = 0;
+  int pitch = 0;
+};
+
+/// @brief Spell the free lines of every stated key area in that key.
+///
+/// A key area is heard only when the lines AROUND the statement follow it. An
+/// entry transposed into the dominant while the figuration, the countersubject
+/// and the episode keep the home scale does not sound like a modulation: it
+/// sounds like a cross relation, the two spellings of one degree striking
+/// together. Bending the free lines into the local key removes the
+/// contradiction instead of removing the accidental.
+///
+/// Three things are held back. The statement itself is verbatim thematic
+/// material and is never touched here. A tone the bar's chord names is harmony
+/// rather than scale and stays whatever key it belongs to, so the bar-downbeat
+/// anchors keep satisfying their chord and no bend lands a semitone from a
+/// chord tone the local key does not own. And an area whose own statement does
+/// not fit its declared key is skipped: a station that states its chord rather
+/// than its key leaves the material in the home collection, and re-spelling
+/// around it would manufacture the very clash this pass exists to remove.
+///
+/// @param asm_ctx Assembly whose material is re-spelled in place.
+/// @return Every tone this pass moved, so a later pass reading the placement
+///         registry (which keeps the authored tone) can see the current one.
+std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
+  HarnessFixture& out = *asm_ctx.out;
+  const HarmonicPlan& plan = out.harmony;
+  std::vector<PlacedTone> respelled;
+  const KeyContext home{static_cast<std::uint8_t>(plan.tonic_pc % 12), plan.is_minor};
+
+  struct KeyArea {
+    Tick start = 0;
+    Tick end = 0;
+    KeyContext key;
+  };
+  Tick piece_end = 0;
+  for (const Span& span : out.voice_plan.spans) {
+    piece_end = std::max(piece_end, span.end_tick);
+  }
+  std::vector<KeyArea> areas;
+  for (std::size_t idx = 0; idx < plan.modulations.size(); ++idx) {
+    const ModulationEvent& modulation = plan.modulations[idx];
+    const KeyContext key{static_cast<std::uint8_t>(modulation.to_tonic_pc % 12),
+                         modulation.to_is_minor};
+    if (key.tonic_pc == home.tonic_pc && key.is_minor == home.is_minor) {
+      continue;  // the home key is not an area.
+    }
+    const Tick end =
+        (idx + 1 < plan.modulations.size()) ? plan.modulations[idx + 1].tick : piece_end;
+    areas.push_back(KeyArea{modulation.tick, end, key});
+  }
+  if (areas.empty()) {
+    return respelled;
+  }
+
+  // A raised leading tone belongs to a minor key's dominant harmony rather than
+  // to its collection, so it does not count against a statement's fit.
+  const auto agrees = [](int pitch, const KeyContext& key) {
+    const int pitch_class = ((pitch % 12) + 12) % 12;
+    return inKey(pitch, key) ||
+           (key.is_minor && pitch_class == (static_cast<int>(key.tonic_pc) + 11) % 12);
+  };
+  const auto states_key = [&](const KeyArea& area) {
+    const auto fits = [&](const std::vector<MaterialNote>& notes) {
+      for (const MaterialNote& note : notes) {
+        if (note.start_tick + note.duration <= area.start || note.start_tick >= area.end) {
+          continue;
+        }
+        if (!agrees(static_cast<int>(note.pitch), area.key)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (!fits(out.material.subject) ||
+        !fits(out.material.use_tonal_answer ? out.material.tonal_answer : out.material.answer)) {
+      return false;
+    }
+    for (const MiddleEntryDecl& entry : out.material.middle_entries) {
+      if (!fits(entry.notes)) {
+        return false;
+      }
+    }
+    for (const StrettoDecl& stretto : out.material.stretto_entries) {
+      if (!fits(stretto.follower_notes)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const auto chord_at = [&](Tick tick) -> const ChordEvent* {
+    const ChordEvent* active = nullptr;
+    for (const ChordEvent& chord : plan.chords) {
+      if (chord.start_tick <= tick &&
+          (active == nullptr || chord.start_tick >= active->start_tick)) {
+        active = &chord;
+      }
+    }
+    return active;
+  };
+  const auto harmony_holds = [&](const ChordEvent* chord, int pitch, int bent,
+                                 const KeyContext& key) {
+    if (chord == nullptr) {
+      return false;
+    }
+    std::size_t tone_count = 0;
+    const auto tones = chordPitchClasses(*chord, &tone_count);
+    const int pitch_class = ((pitch % 12) + 12) % 12;
+    const int bent_class = ((bent % 12) + 12) % 12;
+    for (std::size_t tone = 0; tone < tone_count; ++tone) {
+      if (tones[tone] == pitch_class) {
+        return true;  // the tone IS the harmony; its spelling outranks the scale.
+      }
+      if (tones[tone] == bent_class) {
+        return false;  // the bend lands ON the harmony, which is where it belongs.
+      }
+    }
+    for (std::size_t tone = 0; tone < tone_count; ++tone) {
+      const int tone_class = tones[tone];
+      if (inKey(tone_class, key)) {
+        continue;
+      }
+      const int distance = ((tone_class - bent_class) % 12 + 12) % 12;
+      if (distance == 1 || distance == 11) {
+        return true;  // bending here would clash with the chord's own foreign tone.
+      }
+    }
+    return false;
+  };
+  const auto carrier_voice = [&](Tick tick) {
+    for (const Span& span : out.voice_plan.spans) {
+      if (span.intent == VoiceIntent::CountersubjectCarrier && span.start_tick <= tick &&
+          tick < span.end_tick) {
+        return span.voice;
+      }
+    }
+    return static_cast<VoiceId>(0);
+  };
+
+  // The pitch a voice sounds at a tick, latest move first: the placement
+  // registry keeps the authored tone, so a tone this pass has already moved is
+  // read back from its own list.
+  const auto sounding = [&](VoiceId voice, Tick tick) {
+    for (auto moved = respelled.rbegin(); moved != respelled.rend(); ++moved) {
+      if (moved->voice == voice && tick >= moved->start && tick < moved->start + moved->duration) {
+        return moved->pitch;
+      }
+    }
+    return asm_ctx.theme_tones.soundingPitchInVoice(voice, tick);
+  };
+  // Perfect-motion classes, ranked. A re-spelling moves a tone by a semitone,
+  // which is enough to turn a clean succession into a parallel, and only the
+  // motion into the onset can tell: the classes below are all defined by the
+  // pair of onsets, so a check that reads one onset cannot see any of them.
+  // The lowest tier is not a violation and no motion rule names it: landing on
+  // a perfect class the pair was not already on. It is the material every
+  // motion rule is made of, and it is invisible to all of them whenever the
+  // other voice sustains -- a held theme tone makes every motion rule report
+  // None at this onset, and the parallel is then born at the NEXT onset, which
+  // this guard does not evaluate. Ranking the arrival itself is what closes
+  // that.
+  constexpr int kFaultPerfectArrival = 1;
+  constexpr int kFaultBattuta = 2;
+  constexpr int kFaultHidden = 3;
+  constexpr int kFaultAntiParallel = 4;
+  constexpr int kFaultParallel = 5;
+  const auto motion_fault = [](int prev, int curr, int other_prev, int other_curr) {
+    if (prev < 0 || curr < 0 || other_prev < 0 || other_curr < 0) {
+      return 0;
+    }
+    // Which line is the upper one is read from the arrival, as the classifiers
+    // themselves read it.
+    const bool above = curr >= other_curr;
+    const int upper_prev = above ? prev : other_prev;
+    const int upper_curr = above ? curr : other_curr;
+    const int lower_prev = above ? other_prev : prev;
+    const int lower_curr = above ? other_curr : curr;
+    switch (classifyPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+      case PerfectMotionKind::ParallelFifth:
+      case PerfectMotionKind::ParallelOctave:
+        return kFaultParallel;
+      case PerfectMotionKind::HiddenFifth:
+      case PerfectMotionKind::HiddenOctave:
+        return kFaultHidden;
+      default:
+        break;
+    }
+    if (isAntiParallelPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+      return kFaultAntiParallel;
+    }
+    if (isBattutaMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+      return kFaultBattuta;
+    }
+    const int arrival_class = std::abs(upper_curr - lower_curr) % 12;
+    const int previous_class = std::abs(upper_prev - lower_prev) % 12;
+    if ((arrival_class == 0 || arrival_class == 7) && arrival_class != previous_class) {
+      return kFaultPerfectArrival;
+    }
+    return 0;
+  };
+
+  for (const KeyArea& area : areas) {
+    if (!states_key(area)) {
+      continue;
+    }
+    const auto respell = [&](MaterialNote& note, VoiceId voice, Tick next_tick, int next_pitch) {
+      if (note.start_tick < area.start || note.start_tick >= area.end) {
+        return;
+      }
+      const int pitch = static_cast<int>(note.pitch);
+      if (inKey(pitch, area.key)) {
+        return;
+      }
+      const int bent = bendIntoKey(pitch, area.key);
+      if (bent == pitch || bent < 0 || bent > 127) {
+        return;
+      }
+      if (harmony_holds(chord_at(note.start_tick), pitch, bent, area.key)) {
+        return;
+      }
+      // A moved tone is one end of two successions -- the arrival at it and the
+      // departure from it -- and either can be the one that turns perfect. Both
+      // are read one tick before their onset, which is where every voice still
+      // sounds what it brought into it, the same reading the counterpoint audit
+      // takes at its own previous onset.
+      const auto worsens = [&](Tick tick, int bent_prev, int bent_curr, int held_prev,
+                               int held_curr) {
+        if (bent_prev < 0 || bent_curr < 0) {
+          return false;
+        }
+        const Tick before = tick > 0 ? tick - 1 : Tick{0};
+        int bent_fault = 0;
+        int held_fault = 0;
+        for (VoiceId other = 0; other < kFugueVoices; ++other) {
+          if (other == voice) {
+            continue;
+          }
+          const int other_prev = sounding(other, before);
+          const int other_curr = sounding(other, tick);
+          bent_fault =
+              std::max(bent_fault, motion_fault(bent_prev, bent_curr, other_prev, other_curr));
+          held_fault =
+              std::max(held_fault, motion_fault(held_prev, held_curr, other_prev, other_curr));
+        }
+        return bent_fault > held_fault;
+      };
+      const int previous_pitch =
+          sounding(voice, note.start_tick > 0 ? note.start_tick - 1 : Tick{0});
+      if (bent == previous_pitch || bent == next_pitch) {
+        return;  // a step re-spelled onto its neighbour is a repeat, not a line.
+      }
+      if (worsens(note.start_tick, previous_pitch, bent, previous_pitch, pitch)) {
+        return;  // the spelling is not worth a worse arrival.
+      }
+      if (worsens(next_tick, bent, next_pitch, pitch, next_pitch)) {
+        return;  // nor a worse departure.
+      }
+      // Nor a vertical the tone it replaces did not have: the same order of
+      // preference the accompaniment's own anchor guard uses one layer down.
+      bool held_consonant = true;
+      bool bent_consonant = true;
+      for (VoiceId other = 0; other < kFugueVoices; ++other) {
+        if (other == voice) {
+          continue;
+        }
+        const int concurrent = sounding(other, note.start_tick);
+        if (concurrent < 0) {
+          continue;
+        }
+        held_consonant = held_consonant && isConsonantPair(pitch, concurrent);
+        bent_consonant = bent_consonant && isConsonantPair(bent, concurrent);
+      }
+      if (held_consonant && !bent_consonant) {
+        return;
+      }
+      note.pitch = static_cast<std::uint8_t>(bent);
+      respelled.push_back(PlacedTone{note.start_tick, note.duration, voice, bent});
+    };
+    const auto respell_line = [&](std::vector<MaterialNote>& notes, VoiceId single_voice,
+                                  bool voice_from_span) {
+      for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+        const bool has_next = idx + 1 < notes.size();
+        const Tick next_tick = has_next ? notes[idx + 1].start_tick : Tick{0};
+        const int next_pitch = has_next ? static_cast<int>(notes[idx + 1].pitch) : -1;
+        const VoiceId voice = voice_from_span ? carrier_voice(notes[idx].start_tick) : single_voice;
+        respell(notes[idx], voice, next_tick, next_pitch);
+      }
+    };
+    for (FigurationSection& section : out.material.figuration_sections) {
+      respell_line(section.notes, section.voice, /*voice_from_span=*/false);
+    }
+    for (SequenceTemplate& sequence : out.material.sequence_templates) {
+      std::vector<MaterialNote> notes;
+      notes.reserve(sequence.seed_pitches.size());
+      Tick cursor = sequence.target_start_tick;
+      for (std::size_t idx = 0; idx < sequence.seed_pitches.size(); ++idx) {
+        MaterialNote note;
+        note.start_tick = cursor;
+        note.duration = sequence.seed_durations[idx];
+        note.pitch = sequence.seed_pitches[idx];
+        notes.push_back(note);
+        cursor += note.duration;
+      }
+      respell_line(notes, sequence.voice, /*voice_from_span=*/false);
+      for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+        sequence.seed_pitches[idx] = notes[idx].pitch;
+      }
+    }
+    respell_line(out.material.countersubject, 0, /*voice_from_span=*/true);
+  }
+  return respelled;
+}
+
 /// @brief Re-aim the tone an accompaniment span hands over with.
 ///
 /// A span boundary is the one place in this form where two voices can both
@@ -2128,17 +2542,12 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 /// a dissonance only where the tone it replaces was consonant and no consonant
 /// tone improves on the fault, which is the same order of preference the
 /// accompaniment's own anchor guard uses one layer down.
-void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
-  struct Replacement {
-    Tick start = 0;
-    Tick duration = 0;
-    VoiceId voice = 0;
-    int pitch = 0;
-  };
-  // A seam can hand over in two voices at once, and the registry cannot be
-  // amended in place (its lookup keeps the earliest matching onset), so a tone
-  // already re-aimed here is read back from this list rather than from it.
-  std::vector<Replacement> replaced;
+///
+/// @param asm_ctx Assembly whose figuration tails are re-aimed in place.
+/// @param replaced Tones already moved after their span was built (the local-key
+///        respelling), seeded into the read-back list below for the same reason
+///        the pass keeps its own: the registry cannot be amended in place.
+void relieveFigurationSeams(FugueAssembly& asm_ctx, std::vector<PlacedTone> replaced) {
   // A figuration tone authored on a bar downbeat is the bar's harmonic anchor
   // and may only be exchanged for another tone of the same chord; anywhere else
   // in the bar the line is free to any scale tone. The chord tone set is the
@@ -2163,10 +2572,12 @@ void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
     }
     return false;
   };
+  // Latest move wins: a tone respelled for its key area and then re-aimed here
+  // must read back as the tone it ended on.
   auto sounding = [&](VoiceId voice, Tick tick) {
-    for (const Replacement& rep : replaced) {
-      if (rep.voice == voice && tick >= rep.start && tick < rep.start + rep.duration)
-        return rep.pitch;
+    for (auto rep = replaced.rbegin(); rep != replaced.rend(); ++rep) {
+      if (rep->voice == voice && tick >= rep->start && tick < rep->start + rep->duration)
+        return rep->pitch;
     }
     return asm_ctx.theme_tones.soundingPitchInVoice(voice, tick);
   };
@@ -2229,8 +2640,12 @@ void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
     const int exit_ceiling = std::max(12, std::abs(own_next - original));
 
     const bool anchors_harmony = tail.start_tick % kTicksPerBar == 0;
+    // The replacement stays in the scale the bar belongs to, which is the home
+    // one everywhere except inside a stated key area: a seam relieved onto a
+    // home-scale tone there would undo the area's spelling one note at a time.
+    const KeyContext seam_key = localKeyAt(asm_ctx.out->harmony, tail.start_tick);
     auto admissible = [&](int cand, bool allow_dissonance) {
-      if (cand < kBandLo[voice] || cand > kBandHi[voice] || !detail::inScale(cand, mode))
+      if (cand < kBandLo[voice] || cand > kBandHi[voice] || !inKey(cand, seam_key))
         return false;
       if (anchors_harmony && !anchors_bar_harmony(tail.start_tick, cand))
         return false;
@@ -2330,7 +2745,7 @@ HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   SpanId next_id = 0;
   FugueAssembly asm_ctx{&out, &next_id, {}};
   appendFugueSection(asm_ctx, /*first_bar=*/0, static_cast<int>(req.bars), req);
-  relieveFigurationSeams(asm_ctx, req.mode);
+  relieveFigurationSeams(asm_ctx, spellFreeLinesInLocalKey(asm_ctx));
   retractUnsupportedSevenths(asm_ctx);
   return out;
 }
@@ -2405,7 +2820,7 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // --- FUGUE (bars prelude_bars .. total-1). Reuse the full fugue assembly at
   //     a bar offset; span ids continue from the prelude (shared next_id). ---
   appendFugueSection(asm_ctx, prelude_bars, fugue_bars, req);
-  relieveFigurationSeams(asm_ctx, req.mode);
+  relieveFigurationSeams(asm_ctx, spellFreeLinesInLocalKey(asm_ctx));
   retractUnsupportedSevenths(asm_ctx);
 
   // Keep the concatenated HarmonicPlan chords in tick order.
