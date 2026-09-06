@@ -373,11 +373,15 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // The figure preference walks with bar AND cycle: a plain bar % 4 stride
     // is 4-periodic and would hand every cycle's first bar (the 4-bar grid)
     // the same figure, freezing the cycle-opening contour the rotation
-    // exists to vary.
-    // Unsigned remainder for the same reason as the cell rotation above: a
+    // exists to vary. The character orders the four figures before the
+    // rotation walks them, so the same bar reaches for a different texture
+    // per character; the uniform sixteenth flow is the form's identity, so
+    // texture is the only axis on which the characters can differ here.
+    // Unsigned arithmetic for the same reason as the cell rotation above: a
     // negative preference would leave every figure branch unmatched.
-    const int pref = static_cast<int>(
-        (req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)) % 4u);
+    const int pref = static_cast<int>(detail::figureChoice(
+        req.character, 4,
+        req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)));
     auto try_figures = [&]() {
       for (int attempt = 0; attempt < 4; ++attempt) {
         switch ((pref + attempt) % 4) {

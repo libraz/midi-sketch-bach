@@ -15,9 +15,7 @@ namespace bach::composer::detail {
 struct CharacterProfile {
   std::int8_t density_bias;       // -1/0/+1 applied to the arc density tier (clamped 0..3).
   bool prefer_dotted;             // Noble: dotted figures.
-  bool prefer_syncopation;        // Playful: off-beat onsets.
-  bool prefer_chromatic_runs;     // Restless: chromatic passing-tone density in figuration.
-  std::uint8_t ornament_density;  // 0..2, consumed by the upcoming ornament pass.
+  std::uint8_t ornament_density;  // 0..2, consumed by the ornament pass.
 };
 
 /**
@@ -43,6 +41,27 @@ const CharacterProfile& characterProfile(SubjectCharacter character);
  * @return An index into kSubjectCatalogMajor / kSubjectCatalogMinor.
  */
 std::uint8_t subjectIndexFor(SubjectCharacter character, bool minor_mode, std::uint32_t seed);
+
+/**
+ * @brief Pick which figure of a form's figuration palette a cycle reaches for.
+ *
+ * The per-form builders hold a small palette of figuration idioms and walk it
+ * with a seed-driven rotation, which varies the piece across seeds but leaves
+ * every character on the same idiom sequence. This orders the palette by the
+ * character's idiom preference first, so the character decides which figure a
+ * cycle takes while the seed still decides the sequence. The four preferences
+ * are distinct permutations and stay distinct once truncated to a three-figure
+ * palette, so no two characters walk the same idiom sequence; a two-figure
+ * palette only admits two orders and necessarily pairs them. Severe's
+ * preference is the palette's own order, which makes it the plain reference.
+ *
+ * @param character The subject character (selects the preference order).
+ * @param palette_size Number of figures in the form's palette (>= 1).
+ * @param rotation The builder's seed-driven rotation counter.
+ * @return An index in [0, palette_size).
+ */
+std::uint8_t figureChoice(SubjectCharacter character, std::uint8_t palette_size,
+                          std::uint32_t rotation);
 
 }  // namespace bach::composer::detail
 
