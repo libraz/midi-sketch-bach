@@ -871,8 +871,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The contrary repeat -- leaving a perfect interval and reaching the same
     // one again the other way round -- is the one class the corpus is not
     // divided about, and the pedal ranks it at the bottom of what it will pay
-    // rather than the first thing it reaches for. That column is zero and stays
-    // there.
+    // rather than the first thing it reaches for. It is the last thing the ladder
+    // spends, so the column reads two across the whole sweep and one in the
+    // worst configuration.
     //
     // The other two then fall together, because the pedal stopped being boxed.
     // Its escape had only the bar's three chord tones to offer and the band
@@ -902,7 +903,37 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourth tone in the set puts the next anchor a smaller interval away, so the
     // guard finds a clean rung more often and the line restrikes where it used to
     // sustain across a wider skip.
-    {FormType::TrioSonata, 0, 0, 126, 16, 0, 0, 5, 2, 0, 34837, 90},
+    //
+    // The pedal now walks the bar instead of marking its chord, and the whole row
+    // moves with it. It reaches down to the pedalboard's own low C rather than
+    // stopping a fourth above: with the roots sitting near the bottom of a
+    // thirteenth almost every tone the guard could offer approached them from
+    // ABOVE, so the arrival was similar motion whenever the manuals descended,
+    // which is where this voice spent its hidden perfects. An octave of room
+    // underneath is what lets it arrive from below. Two conditions follow from
+    // the walk itself: the connecting eighth is optional, so it is held to the
+    // plain quarter it replaces and judged over both of its motions rather than
+    // only the one into it; and a repair that would reach past an octave has
+    // stopped repairing the line and started replacing it, so the band's new
+    // width is not spendable as a leap. Where the walk still ends up boxed the
+    // onset is handed to the middle manual, which is the voice still free to move
+    // there -- and it is handed over for a hidden perfect and not only for a true
+    // parallel, because a pedal written last against two settled lines is out of
+    // room in both cases alike.
+    //
+    // The bass fourth column is the largest fall in this table and the plainest:
+    // a bass that restates its tone under a changing upper pair leaves the fourth
+    // standing, and one that steps walks out from underneath it. Two columns rise
+    // in exchange. Contrary octave arrivals by downward leap nearly double,
+    // which is what a bass that moves is for -- the reference corpus writes them
+    // at a median rate this form stays under in every configuration but one, and
+    // that one sits just past the ninety-fifth percentile while its counterpoint
+    // profile as a whole reads inside the envelope. The contrary repeat leaves
+    // zero for the first time, at a rate the corpus tolerates several times over.
+    // The floor falls by a few dozen successions because the eighth that used to
+    // be written wherever it fit is now refused wherever it costs more than the
+    // quarter, so there are marginally fewer onsets to examine.
+    {FormType::TrioSonata, 0, 0, 119, 31, 2, 0, 4, 2, 1, 34800, 9},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
