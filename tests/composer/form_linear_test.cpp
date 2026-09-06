@@ -391,7 +391,12 @@ TEST(FormLinearTrio, IsDeterministic) {
   }
 }
 
-TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalIsLowQuarters) {
+// The continuo states the harmony where it is heard and walks between those
+// points: a chord-tone onset on every beat, and the gaps a single diatonic tone
+// bridges filled with a connecting eighth. So its rhythm is quarters plus
+// eighth pairs -- never anything longer inside the piece, never more than one
+// connecting tone in a beat, and never a beat without an onset of its own.
+TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalWalksLow) {
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : kMinorFlags) {
       for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
@@ -408,27 +413,88 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalIsLowQuarters) {
         EXPECT_TRUE(seen[0] && seen[1] && seen[2])
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
 
-        // Pedal voice (V2): every note is a quarter note (kTicksPerBeat) in the
-        // low register (<= G3 = 55), except the final bar where the pedal
-        // joins the held closing chord with one whole-note root.
-        const Tick final_bar_tick = static_cast<Tick>(realizedBars(fx) - 1) * kTicksPerBar;
+        const int realized = realizedBars(fx);
+        const Tick final_bar_tick = static_cast<Tick>(realized - 1) * kTicksPerBar;
+        constexpr Tick kEighth = kTicksPerBeat / 2;
+        std::map<Tick, int> onsets_at;
         int pedal_notes = 0;
         for (const NoteEvent& note : r.notes) {
           if (note.voice != 2)
             continue;
           ++pedal_notes;
+          ++onsets_at[note.start_tick];
           if (note.start_tick >= final_bar_tick) {
             EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBar))
                 << "pedal final note not held; seed=" << seed;
           } else {
-            EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBeat))
-                << "pedal not a quarter; seed=" << seed;
+            EXPECT_TRUE(note.duration == static_cast<Tick>(kTicksPerBeat) ||
+                        note.duration == kEighth)
+                << "pedal note is neither a quarter nor an eighth; seed=" << seed
+                << " tick=" << note.start_tick << " duration=" << note.duration;
+            EXPECT_EQ(note.start_tick % kEighth, 0u)
+                << "pedal onset off the eighth grid; seed=" << seed;
           }
           EXPECT_LE(note.pitch, 55) << "pedal out of low register; seed=" << seed;
         }
-        // One quarter per beat, except the held final bar (one whole note).
-        EXPECT_EQ(pedal_notes, 4 * (realizedBars(fx) - 1) + 1)
+        // Every beat of the walking region carries exactly one onset, and any
+        // off-beat onset is the connecting eighth of the beat it follows.
+        for (Tick tick = 0; tick < final_bar_tick; tick += kEighth) {
+          const int count = onsets_at.count(tick) ? onsets_at[tick] : 0;
+          if (tick % kTicksPerBeat == 0) {
+            EXPECT_EQ(count, 1) << "beat without a single pedal onset at tick " << tick
+                                << "; seed=" << seed << " minor=" << minor << " bars=" << bars;
+          } else {
+            EXPECT_LE(count, 1) << "two pedal onsets on one off-beat at tick " << tick;
+          }
+        }
+        // At least one per beat plus the held final bar, and at most one
+        // connecting tone per beat on top of that.
+        EXPECT_GE(pedal_notes, 4 * (realized - 1) + 1)
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+        EXPECT_LE(pedal_notes, 8 * (realized - 1) + 1)
+            << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// The continuo is a melodic line, not a harmonic marker: a clear majority of
+// its motion is by step or by the third the connecting tone bridges, and it
+// does not restate a pitch where a line would move. Both shares are read on the
+// shipped notes, which is where the earlier root-fifth-root cell showed up as a
+// bass that stepped almost nowhere and repeated nearly a third of its onsets.
+TEST(FormLinearTrio, PedalWalksByStepInsteadOfMarkingTheChord) {
+  for (std::uint32_t seed : kSeeds) {
+    for (bool minor : kMinorFlags) {
+      for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+        const ComposeResult r = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+        std::vector<NoteEvent> pedal;
+        for (const NoteEvent& note : r.notes) {
+          if (note.voice == 2)
+            pedal.push_back(note);
+        }
+        std::stable_sort(pedal.begin(), pedal.end(),
+                         [](const NoteEvent& lhs, const NoteEvent& rhs) {
+                           return lhs.start_tick < rhs.start_tick;
+                         });
+        ASSERT_GE(pedal.size(), 2u);
+        int steps = 0;
+        int repeats = 0;
+        for (std::size_t idx = 1; idx < pedal.size(); ++idx) {
+          const int interval =
+              std::abs(static_cast<int>(pedal[idx].pitch) - static_cast<int>(pedal[idx - 1].pitch));
+          if (interval >= 1 && interval <= 2)
+            ++steps;
+          if (interval == 0)
+            ++repeats;
+        }
+        const int intervals = static_cast<int>(pedal.size()) - 1;
+        EXPECT_GE(steps * 100, intervals * 30)
+            << "pedal steps in only " << steps << "/" << intervals << " intervals; seed=" << seed
+            << " minor=" << minor << " bars=" << bars;
+        EXPECT_LE(repeats * 100, intervals * 15)
+            << "pedal repeats a pitch in " << repeats << "/" << intervals
+            << " intervals; seed=" << seed << " minor=" << minor << " bars=" << bars;
       }
     }
   }

@@ -1202,21 +1202,33 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   out.material.trio_voices.push_back(std::move(v0));
   out.material.trio_voices.push_back(std::move(v1));
 
-  // V2 (Pedal): one quarter-note per beat outlining the bar's chord root and
-  // fifth, the slow harmonic foundation. The bar OPENS and CLOSES on the root
-  // (beats 1 and 4) with the fifth on the two inner beats (2, 3), so the bar's
-  // last pedal note is the root, a small step from the next bar's root -- no
-  // octave-plus boundary leap (the cadence-boundary root jump that previously
-  // produced > octave drops). The fifth is realized a perfect fourth BELOW the
-  // root so the whole voice stays compact and low (<= F3 = 53 < the mid voice's
-  // floor), preserving the V2 < V1 < V0 register banding. The root register is
-  // voice-led near the previous bar's root so successive roots move by a small
-  // interval.
+  // V2 (Pedal): the continuo, and a continuo is a LINE. Every beat carries a
+  // chord tone -- the downbeat the bar's root, the closing beat the tone that
+  // leads into the next bar's root -- and the gaps a single diatonic tone can
+  // bridge are filled with a connecting eighth. So the harmony is stated where
+  // it is sampled (the beat onsets stay chord tones, which is what keeps the
+  // strong-beat vertical reading consonant) while the motion between those
+  // points is stepwise, which is the difference between a bass that walks and
+  // one that marks the chord with repeated and leaping quarters.
+  //
+  // Every tone is realized inside one narrow band, so the whole voice stays low
+  // (<= F3 = 53 < the mid voice's floor) and the V2 < V1 < V0 register banding
+  // holds; the root register is voice-led near the previous bar's root so
+  // successive bars' roots move by a small interval rather than an octave jump.
   TrioVoiceLine v2;
   v2.voice = 2;
-  v2.manual = 3;                   // Pedal (low register).
-  constexpr int kPedalFloor = 41;  // F2: roots live in [F2, F3), fifths a 4th below.
-  constexpr int kPedalCeil = 53;   // F3.
+  v2.manual = 3;  // Pedal (low register).
+  // The walk lives in [C2, F3]. The floor is the organ pedalboard's own low
+  // register, not a convenience: a triad inside a thirteenth puts three tones in
+  // reach and no more, and the guard below has to choose the tone that arrives
+  // at the next bar head without moving in a perfect class with either manual.
+  // With the roots sitting near the bottom of a narrow band, almost every tone
+  // it can offer approaches them from ABOVE, so the arrival is similar motion
+  // whenever the manuals descend -- which is where this voice used to spend its
+  // hidden perfects. An octave of room below the roots is what lets it arrive
+  // from underneath instead.
+  constexpr int kPedalFloor = 36;  // C2.
+  constexpr int kPedalCeil = 53;   // F3: still clear of the mid voice's floor.
 
   // The manual voices are final when the pedal is laid down, so every pedal
   // tone can be judged against their audible-grain motion (sampling one
@@ -1286,10 +1298,16 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // guard is willing to pay rather than the top, where it used to be the first
   // thing reached for.
   constexpr int kPedalClean = 0;
-  constexpr int kPedalHidden = 1;
-  constexpr int kPedalBattuta = 2;
-  constexpr int kPedalAntiParallel = 3;
-  constexpr int kPedalParallel = 4;
+  // A restated tone is not a fault -- an oblique voice forms no perfect motion
+  // with anything -- so it sits between clean and the cheapest real one. It has
+  // a price because a bass that restates its way out of every bind stops being
+  // a line, and it is below the faults because the corpus writes a continuo
+  // holding its tone constantly and a hidden perfect sparingly.
+  constexpr int kPedalRepeat = 1;
+  constexpr int kPedalHidden = 2;
+  constexpr int kPedalBattuta = 3;
+  constexpr int kPedalAntiParallel = 4;
+  constexpr int kPedalParallel = 5;
   const auto pedal_fault_rank = [&](int from, int cand, Tick t) {
     int worst = kPedalClean;
     for (const TrioVoiceLine& manual : out.material.trio_voices) {
@@ -1309,6 +1327,25 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     return worst;
   };
 
+  // How a gap between two adjacent bass tones reads as a line. A third is the
+  // cheapest because one diatonic tone bridges it into two steps; a fourth or a
+  // fifth is an ordinary walking leap; anything wider breaks the line, and a
+  // repeated tone is what stops it being a line at all.
+  const auto gap_cost = [](int from, int to) {
+    const int gap = std::abs(to - from);
+    if (gap == 0)
+      return 8;
+    if (gap <= 2)
+      return 2;
+    if (gap <= 4)
+      return 0;
+    if (gap <= 7)
+      return 3;
+    if (gap <= 12)
+      return 6;
+    return 40;  // wider than an octave: not a step this line takes at all.
+  };
+
   // Onsets where the pedal ran out of room: its band spans a thirteenth and a
   // triad puts exactly three tones in it, so a bar can arrive where all three
   // read as a true parallel against one manual or the other and the design tone
@@ -1318,7 +1355,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   std::vector<Tick> pedal_boxed_ticks;
   int prev_root = 48;  // seed near C3.
   for (int bar = 0; bar < bars; ++bar) {
-    const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
+    const ChordSpec& bar_chord = chords[static_cast<std::size_t>(bar)];
+    const int root_pc = bar_chord.root_pc % 12;
     // Root in the pedal register nearest the previous bar's root, so successive
     // bars' roots move by a small interval (no octave-plus boundary leap).
     int root_midi = kPedalFloor + (((root_pc - kPedalFloor) % 12) + 12) % 12;
@@ -1327,7 +1365,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       root_midi += 12;
     if (bar == bars - 1) {
       // Final bar: the pedal joins the held closing chord with a whole-note
-      // tonic root instead of the root/fifth quarters.
+      // tonic root instead of walking.
       MaterialNote held;
       held.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
       held.duration = kTicksPerBar;
@@ -1336,40 +1374,161 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       prev_root = root_midi;
       continue;
     }
-    const int fifth_midi = root_midi - 5;  // a perfect fourth below the root (a fifth).
-    // Chord third in the pedal register, voiced nearest the root. Walking
-    // root - fifth - third - root removes the repeated inner fifth (a repeated
-    // bass pair every bar saturates the interval surface with unisons the
-    // reference corpus almost never writes) and widens the pedal's pitch-class
-    // palette; the third is a chord tone, so every sampled beat stays
-    // consonant against the chord-tone manual voices above.
-    const int third_pc = (root_pc + (chords[static_cast<std::size_t>(bar)].minor ? 3 : 4)) % 12;
-    int third_midi = kPedalFloor + (((third_pc - kPedalFloor) % 12) + 12) % 12;
-    while (third_midi + 12 <= kPedalCeil &&
-           std::abs((third_midi + 12) - root_midi) < std::abs(third_midi - root_midi))
-      third_midi += 12;
-    // The two inner beats rotate their chord-tone order per bar (fifth-third /
-    // third-fifth / third-upper-fifth): a single fixed walking cell repeated
-    // every bar stamps the same two interval bigrams across the whole pedal
-    // line, a concentration the reference corpus never writes. The outer
-    // beats stay on the root, so the bar still closes a small step from the
-    // next bar's root and every beat remains a chord tone.
-    const int fifth_up = (root_midi + 7 <= kPedalCeil) ? root_midi + 7 : fifth_midi;
-    int inner_a = fifth_midi;
-    int inner_b = third_midi;
-    switch (bar % 3) {
-      case 1:
-        inner_a = third_midi;
-        inner_b = fifth_midi;
-        break;
-      case 2:
-        inner_a = third_midi;
-        inner_b = fifth_up;
-        break;
-      default:
-        break;
+
+    // The bar's triad tones realized inside the pedal band, ascending: the
+    // stations the walk steps between, and the tones a displaced beat may be
+    // moved to. The band spans a thirteenth, so a triad normally puts three of
+    // them within reach, a third and a fourth apart.
+    std::array<int, 8> station{};
+    int stations = 0;
+    {
+      const int third_pc = (root_pc + (bar_chord.minor ? 3 : 4)) % 12;
+      const int fifth_pc = (root_pc + 7) % 12;
+      for (int cand = kPedalFloor; cand <= kPedalCeil && stations < 8; ++cand) {
+        const int pc = cand % 12;
+        if (pc == root_pc || pc == third_pc || pc == fifth_pc) {
+          station[static_cast<std::size_t>(stations)] = cand;
+          ++stations;
+        }
+      }
     }
-    int beat_pitch[4] = {root_midi, inner_a, inner_b, root_midi};
+
+    // The next bar's root, which the closing beats walk into. The downbeat is
+    // the harmonic anchor and is never displaced, so it is fixed before this
+    // bar's own tones are chosen; it depends on this bar's root only, which no
+    // displacement below changes.
+    int next_root = -1;
+    if (bar + 1 < bars) {
+      const int next_pc = chords[static_cast<std::size_t>(bar + 1)].root_pc % 12;
+      next_root = kPedalFloor + (((next_pc - kPedalFloor) % 12) + 12) % 12;
+      while (next_root + 12 <= kPedalCeil &&
+             std::abs((next_root + 12) - root_midi) < std::abs(next_root - root_midi))
+        next_root += 12;
+    }
+
+    // Closing beat: the chord tone that leads best into the next bar's root --
+    // a third away wherever the band holds one, so the connecting eighth steps
+    // through the gap into the downbeat. The next root itself is the dearest
+    // choice of all: a bar that ends on the pitch it is about to restate marks
+    // the harmony instead of arriving at it, which is where the old
+    // root-on-both-outer-beats cell spent most of its repeated notes.
+    int approach = root_midi;
+    if (next_root >= 0) {
+      int best = 1 << 20;
+      for (int idx = 0; idx < stations; ++idx) {
+        const int cand = station[static_cast<std::size_t>(idx)];
+        const int cost = gap_cost(cand, next_root) * 16 + std::abs(cand - root_midi);
+        if (cost < best) {
+          best = cost;
+          approach = cand;
+        }
+      }
+    }
+
+    // The two inner beats walk from the root to the closing tone through the
+    // bar's own stations. A route is scored by how its four gaps read as a
+    // line, plus a penalty for every reversal of direction, so the bar travels
+    // rather than rocking between two tones. Ties rotate per bar: successive
+    // bars over the same chord would otherwise trace an identical contour, and
+    // a bass whose every bar is the same cell is what a listener hears as a
+    // figured-bass accompaniment rather than a part.
+    const auto route_cost = [&](int first, int second) {
+      const int walk[5] = {root_midi, first, second, approach,
+                           next_root >= 0 ? next_root : approach};
+      int cost = 0;
+      int prev_dir = 0;
+      for (int leg = 0; leg + 1 < 5; ++leg) {
+        cost += gap_cost(walk[leg], walk[leg + 1]);
+        const int dir = (walk[leg + 1] > walk[leg]) ? 1 : (walk[leg + 1] < walk[leg] ? -1 : 0);
+        if (dir != 0) {
+          if (prev_dir != 0 && dir != prev_dir)
+            ++cost;
+          prev_dir = dir;
+        }
+      }
+      return cost;
+    };
+    int inner_a = root_midi;
+    int inner_b = approach;
+    {
+      int best = 1 << 20;
+      int matches = 0;
+      for (int first = 0; first < stations; ++first) {
+        for (int second = 0; second < stations; ++second) {
+          const int cost = route_cost(station[static_cast<std::size_t>(first)],
+                                      station[static_cast<std::size_t>(second)]);
+          if (cost < best) {
+            best = cost;
+            matches = 1;
+          } else if (cost == best) {
+            ++matches;
+          }
+        }
+      }
+      const int pick = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) %
+                                        static_cast<std::uint32_t>(std::max(matches, 1)));
+      int seen = 0;
+      for (int first = 0; first < stations; ++first) {
+        for (int second = 0; second < stations; ++second) {
+          if (route_cost(station[static_cast<std::size_t>(first)],
+                         station[static_cast<std::size_t>(second)]) != best)
+            continue;
+          if (seen == pick) {
+            inner_a = station[static_cast<std::size_t>(first)];
+            inner_b = station[static_cast<std::size_t>(second)];
+          }
+          ++seen;
+        }
+      }
+    }
+
+    // How much of the bar the continuo fills with eighths: a budget rather than
+    // fixed slots, because only a gap of a third holds a tone that steps into
+    // both of its ends, and which beats offer one depends on the chord. The
+    // calm tiers keep two, the livelier ones three, so the movement's own
+    // density curve reaches the bass; the pedal still articulates well under
+    // either manual line, which is what keeps the trio's three rhythms apart.
+    const std::size_t pedal_cycle = static_cast<std::size_t>(bar / 4);
+    const ArcPoint pedal_arc = req.arc(std::min(pedal_cycle, req.cycle_count - 1));
+    int pedal_tier = static_cast<int>(pedal_arc.density_tier) + profile.density_bias;
+    pedal_tier = std::max(0, std::min(3, pedal_tier));
+    const int link_budget = (pedal_tier >= 2) ? 3 : 2;
+    int links_placed = 0;
+    // The penultimate bar writes no connecting tone: the cadence contract
+    // restores the dominant root on its closing beat after this loop has run,
+    // so any eighth derived from the tone that beat carried here would be left
+    // standing against a tone that is no longer there.
+    const bool cadence_bar = (bar == bars - 2);
+
+    // The diatonic tone that steps into BOTH ends of a gap, i.e. the passing
+    // tone of a third. It is tried from either end because a scale step taken
+    // from the upper side of a minor-key dominant lands on the natural seventh,
+    // a semitone under that chord's own leading tone. No such tone means the
+    // beat keeps its plain quarter: a connecting tone left by leap is not a
+    // passing tone, it is an unprepared dissonance.
+    const auto connecting_tones = [&](int from, int to, int* out) {
+      int count = 0;
+      if (from == to)
+        return count;
+      const int dir = (to > from) ? 1 : -1;
+      const int cands[2] = {detail::melodicScaleStep(from, dir, mode, &bar_chord),
+                            detail::melodicScaleStep(to, -dir, mode, &bar_chord)};
+      for (const int cand : cands) {
+        if (cand < kPedalFloor || cand > kPedalCeil)
+          continue;
+        if (std::abs(cand - from) < 1 || std::abs(cand - from) > 2)
+          continue;
+        if (std::abs(to - cand) < 1 || std::abs(to - cand) > 2)
+          continue;
+        if (count == 1 && out[0] == cand)
+          continue;
+        out[count] = cand;
+        ++count;
+      }
+      return count;
+    };
+
+    const int beat_pitch[4] = {root_midi, inner_a, inner_b, approach};
     // Audible-grain parallel guard. The downbeat root is the harmonic anchor
     // and is never displaced; a parallel INTO it is owned by the previous
     // bar's closing beat (guarded on its own turn below, including the
@@ -1380,40 +1539,95 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     for (int beat = 0; beat < 4; ++beat) {
       const Tick t =
           static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
+      const bool boundary = (beat == 3);
+      // The tone this beat walks into: the next beat's anchor, or the next
+      // bar's root at the barline, which is the only one already fixed.
+      const int follows = boundary ? next_root : beat_pitch[beat + 1];
+      // The barline arrival is the walking gesture itself, so the closing beat
+      // always keeps a slot; the inner beats share what is left of the budget.
+      const bool wants_link =
+          follows >= 0 && !cadence_bar &&
+          (boundary ? links_placed < link_budget : links_placed < link_budget - 1);
       int pitch = beat_pitch[beat];
-      // Next bar's root (the landing of the closing beat's boundary step),
-      // recomputed exactly: it depends on this bar's root only, which a
-      // displacement never changes.
-      int next_root = -1;
-      if (beat == 3 && bar + 1 < bars) {
-        const int next_pc = chords[static_cast<std::size_t>(bar + 1)].root_pc % 12;
-        next_root = kPedalFloor + (((next_pc - kPedalFloor) % 12) + 12) % 12;
-        while (next_root + 12 <= kPedalCeil &&
-               std::abs((next_root + 12) - root_midi) < std::abs(next_root - root_midi))
-          next_root += 12;
-      }
       // Both ends of the beat, worst first: the motion into it and, on the
       // closing beat, the boundary motion into the next bar's fixed root. The
       // second is the reason a repair here cannot look only backwards -- the
       // bar head it lands on cannot move, so a tone that clears its own arrival
-      // and ruins that one has traded a fault for a fault.
+      // and ruins that one has traded a fault for a fault. A filled closing
+      // beat is judged as a whole figure, anchor and connecting eighth
+      // together: a figure is only as good as its worse tone, and an anchor
+      // that clears its own arrival while forcing the eighth into a parallel
+      // has made the same bad trade one subdivision later.
       const auto beat_rank = [&](int cand) {
-        int worst = 0;
+        int worst = kPedalClean;
         if (beat != 0 && pedal_prev >= 0)
           worst = std::max(worst, pedal_fault_rank(pedal_prev, cand, t));
-        if (next_root >= 0)
-          worst = std::max(worst, pedal_fault_rank(cand, next_root, t + kTicksPerBeat));
-        return worst;
+        if (!boundary || next_root < 0)
+          return worst;
+        const int plain = pedal_fault_rank(cand, next_root, t + kTicksPerBeat);
+        int link[2];
+        const int link_count = wants_link ? connecting_tones(cand, next_root, link) : 0;
+        int best_figure = plain;  // the fill is optional, so the plain quarter is the floor.
+        for (int idx = 0; idx < link_count; ++idx) {
+          best_figure = std::min(
+              best_figure, std::max(pedal_fault_rank(cand, link[idx], t + kEighth),
+                                    pedal_fault_rank(link[idx], next_root, t + kTicksPerBeat)));
+        }
+        return std::max(worst, best_figure);
       };
-      const int design_rank = beat_rank(pitch);
-      if (design_rank != 0) {
+      // Restating the tone the pedal has just sounded is not free, and the
+      // guard used to treat it as though it were: an oblique repeat can form no
+      // perfect motion with anything, so it cleared every rank trivially and
+      // the escape took it several beats running -- which is how a bass line
+      // turns back into a bar-long marker of one pitch. Pricing it above clean
+      // means the walk moves wherever a chord tone is available to move to.
+      // Pricing it BELOW the faults means it stalls rather than paying one: the
+      // reference corpus writes a continuo holding its tone constantly and a
+      // hidden perfect at a tenth of the rate this voice would reach if a
+      // repeat outranked one. The downbeat is exempt: it carries the bar's root
+      // whatever the previous bar closed on.
+      const auto escape_rank = [&](int cand) {
+        const int rank = beat_rank(cand);
+        if (beat != 0 && cand == pedal_prev)
+          return std::max(rank, kPedalRepeat);
+        return rank;
+      };
+      const int design_rank = escape_rank(pitch);
+      if (design_rank != kPedalClean) {
+        // Chord tones nearest the design tone first, so a displaced beat moves
+        // as little as the fault allows and the bar's contour survives the
+        // repair rather than being redrawn by whichever tone happens to sit
+        // lowest in the band.
+        std::array<int, 8> order{};
+        for (int idx = 0; idx < stations; ++idx)
+          order[static_cast<std::size_t>(idx)] = station[static_cast<std::size_t>(idx)];
+        for (int idx = 1; idx < stations; ++idx) {
+          const int cand = order[static_cast<std::size_t>(idx)];
+          int slot = idx;
+          while (slot > 0 && std::abs(order[static_cast<std::size_t>(slot - 1)] - pitch) >
+                                 std::abs(cand - pitch)) {
+            order[static_cast<std::size_t>(slot)] = order[static_cast<std::size_t>(slot - 1)];
+            --slot;
+          }
+          order[static_cast<std::size_t>(slot)] = cand;
+        }
+        // A bass does not leap more than an octave, and the band is now wide
+        // enough to offer one that would: a repair reaching past an octave has
+        // stopped repairing the line and started replacing it. The bar head it
+        // walks into is fixed, so the reach is measured at both ends.
+        constexpr int kPedalLeapCeiling = 12;
+        const auto within_reach = [&](int cand) {
+          if (pedal_prev >= 0 && std::abs(cand - pedal_prev) > kPedalLeapCeiling)
+            return false;
+          return !boundary || next_root < 0 || std::abs(cand - next_root) <= kPedalLeapCeiling;
+        };
         bool placed = false;
-        for (int accept = 0; accept < design_rank && !placed; ++accept) {
-          for (const int cand : {fifth_midi, third_midi, fifth_up, root_midi, root_midi - 12,
-                                 fifth_midi + 12, third_midi + 12}) {
-            if (cand < kPedalFloor || cand > kPedalCeil || cand == pitch)
+        for (int accept = kPedalClean; accept < design_rank && !placed; ++accept) {
+          for (int idx = 0; idx < stations; ++idx) {
+            const int cand = order[static_cast<std::size_t>(idx)];
+            if (cand == pitch || !within_reach(cand))
               continue;
-            if (beat_rank(cand) <= accept) {
+            if (escape_rank(cand) <= accept) {
               pitch = cand;
               placed = true;
               break;
@@ -1442,18 +1656,26 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           // Nearest to the design tone first, so the walk moves as little as the
           // fault allows.
           //
+          // The borrowed tone answers the two STRICT classes only. Every beat
+          // onset of this voice is where the harmony is sampled, so leaving the
+          // chord there is paid for in vertical dissonance, and a hidden
+          // perfect or a battuta is not worth that price -- those the walk pays
+          // on its own chord tones. A true or anti-parallel is: it is the fault
+          // the corpus is strict about, this voice is written last, and a fault
+          // it cannot leave is one the piece ships.
+          //
           // Neither end of a borrowed tone may be a leap. The design tones are
-          // the ones entitled to travel -- they are the chord, and the bar
-          // closes on the root for the sake of the boundary step -- so a tone
+          // the ones entitled to travel -- they are the chord -- so a tone
           // borrowed from between them has to be walked to and walked away
           // from, or it reads as the line breaking off rather than passing
           // through. A fifth is the widest either end may be.
           constexpr int kPedalBorrowedReach = 7;
+          if (design_rank < kPedalAntiParallel)
+            continue;
           const auto walkable = [&](int cand) {
             if (pedal_prev >= 0 && std::abs(cand - pedal_prev) > kPedalBorrowedReach)
               return false;
-            const int next = (beat < 3) ? beat_pitch[beat + 1] : next_root;
-            return next < 0 || std::abs(next - cand) <= kPedalBorrowedReach;
+            return follows < 0 || std::abs(follows - cand) <= kPedalBorrowedReach;
           };
           for (int away = 1; away <= kPedalBorrowedReach && !placed; ++away) {
             for (const int cand : {pitch - away, pitch + away}) {
@@ -1461,7 +1683,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                 continue;
               if (!detail::inScale(cand, mode) || !walkable(cand))
                 continue;
-              if (beat_rank(cand) <= accept) {
+              if (escape_rank(cand) <= accept) {
                 pitch = cand;
                 placed = true;
                 break;
@@ -1470,18 +1692,61 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           }
         }
       }
-      if (beat != 0 && pedal_prev >= 0 && pedal_fault_rank(pedal_prev, pitch, t) == kPedalParallel)
+      // The connecting eighth, derived from the tone actually placed rather than
+      // from the design tone the guard may have moved off. The fill is optional,
+      // so it is held to the beat it replaces: a connecting tone that walks into
+      // a perfect class the plain quarter would have avoided has bought its step
+      // with a fault, and the step is not worth that. Judged over both of its
+      // motions -- into the tone and out of it -- because inserting an onset
+      // changes the arrival at the next one as well.
+      int link_pitch = -1;
+      if (wants_link && follows >= 0) {
+        int link[2];
+        const int link_count = connecting_tones(pitch, follows, link);
+        const int plain_rank = pedal_fault_rank(pitch, follows, t + kTicksPerBeat);
+        int best_rank = 1 << 20;
+        for (int idx = 0; idx < link_count; ++idx) {
+          const int rank = std::max(pedal_fault_rank(pitch, link[idx], t + kEighth),
+                                    pedal_fault_rank(link[idx], follows, t + kTicksPerBeat));
+          if (rank < best_rank) {
+            best_rank = rank;
+            link_pitch = link[idx];
+          }
+        }
+        if (best_rank > plain_rank || best_rank >= kPedalParallel)
+          link_pitch = -1;
+      }
+      // Onsets where this voice ran out of room, handed to the middle manual by
+      // the closing repair. A hidden perfect is running out of room just as a
+      // true parallel is: the pedal is written last against two settled lines,
+      // its band holds a handful of chord tones, and whatever it leaves standing
+      // is what ships. The middle voice is the one still free to move at those
+      // onsets, and it judges the same two classes there.
+      if (beat != 0 && pedal_prev >= 0 && pedal_fault_rank(pedal_prev, pitch, t) >= kPedalHidden)
         pedal_boxed_ticks.push_back(t);
-      if (next_root >= 0 && pedal_fault_rank(pitch, next_root, t + kTicksPerBeat) == kPedalParallel)
-        pedal_boxed_ticks.push_back(t + kTicksPerBeat);
+      if (link_pitch >= 0 && pedal_fault_rank(pitch, link_pitch, t + kEighth) >= kPedalHidden) {
+        pedal_boxed_ticks.push_back(t + kEighth);
+      }
+      if (next_root >= 0) {
+        const int leaves = (link_pitch >= 0) ? link_pitch : pitch;
+        if (pedal_fault_rank(leaves, next_root, t + kTicksPerBeat) >= kPedalHidden)
+          pedal_boxed_ticks.push_back(t + kTicksPerBeat);
+      }
       MaterialNote mn;
       mn.start_tick = t;
-      mn.duration = kTicksPerBeat;
-      // Root on the outer beats (1, 4): the bar closes on the root for a small
-      // boundary step into the next bar's root.
+      mn.duration = (link_pitch >= 0) ? kEighth : kTicksPerBeat;
       mn.pitch = static_cast<std::uint8_t>(pitch);
       v2.notes.push_back(mn);
       pedal_prev = pitch;
+      if (link_pitch >= 0) {
+        MaterialNote link_note;
+        link_note.start_tick = t + kEighth;
+        link_note.duration = kEighth;
+        link_note.pitch = static_cast<std::uint8_t>(link_pitch);
+        v2.notes.push_back(link_note);
+        pedal_prev = link_pitch;
+        ++links_placed;
+      }
     }
     prev_root = root_midi;
   }
@@ -1600,7 +1865,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         // Reject a formula whose own onsets would ship a true parallel; the next
         // suspension type (or the next bar offset) is tried instead. The bass is
         // exempt at the resolution: the rewrite immediately below pins it to the
-        // suspended bar's tone, so it moves obliquely there by construction.
+        // suspended bar's tone AND flattens the beat that leads into it, so it
+        // moves obliquely there by construction.
         if (strict_against(upper, middle_before, prep_pitch, preparation_tick) ||
             strict_against(bass, middle_before, prep_pitch, preparation_tick) ||
             strict_against(upper, prep_pitch, sus_pitch, suspension_tick) ||
@@ -1620,9 +1886,38 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
             strict_against(upper, held_bass, bass_departure, departure_tick)) {
           continue;
         }
-        for (MaterialNote& note : bass) {
-          if (note.start_tick == resolution_tick)
-            note.pitch = static_cast<std::uint8_t>(held_bass);
+        // The bass is oblique into the resolution only if it also LEAVES the
+        // suspended beat on the tone it entered on. A walking pedal splits that
+        // beat into a quarter and a connecting eighth, and the eighth steps
+        // away, so the pitch immediately before the resolution is the
+        // connector's rather than the held one and the exemption above would be
+        // resting on a motion that is not there. Collapse the pair back into the
+        // plain quarter the walk writes wherever it cannot fill a gap; because
+        // the resolution is one beat after the suspension, that quarter is
+        // held_bass by construction.
+        for (std::size_t idx = 0; idx + 1 < bass.size(); ++idx) {
+          if (bass[idx].start_tick != suspension_tick || bass[idx].duration >= kTicksPerBeat)
+            continue;
+          if (bass[idx + 1].start_tick >= resolution_tick)
+            break;
+          bass[idx].duration = kTicksPerBeat;
+          bass.erase(bass.begin() + static_cast<std::ptrdiff_t>(idx) + 1);
+          break;
+        }
+        for (std::size_t idx = 0; idx < bass.size(); ++idx) {
+          if (bass[idx].start_tick != resolution_tick)
+            continue;
+          bass[idx].pitch = static_cast<std::uint8_t>(held_bass);
+          // The rewritten beat no longer carries the tone its connecting eighth
+          // was derived from, so that eighth would be stepping out of a pitch
+          // that is not there any more. Collapse the pair back into the plain
+          // quarter the pedal writes wherever the walk cannot fill the gap.
+          if (bass[idx].duration < kTicksPerBeat && idx + 1 < bass.size() &&
+              bass[idx + 1].start_tick < resolution_tick + kTicksPerBeat) {
+            bass[idx].duration = kTicksPerBeat;
+            bass.erase(bass.begin() + static_cast<std::ptrdiff_t>(idx) + 1);
+          }
+          break;
         }
         installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
         if (installed) {
