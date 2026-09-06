@@ -251,14 +251,18 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   int last_pedal_pitch = -1;
   int pedal_run = 0;
   // How badly a candidate pedal tone reads against the voices already sounding
-  // above it. The true parallel and the hidden perfect are ranked, not pooled:
-  // the band, the triad and those voices constrain the candidate set at once, so
-  // a tone free of every perfect approach frequently does not exist, and a guard
-  // that demanded one would keep whatever it started from -- including the true
-  // parallel it was called to remove.
+  // above it. The perfect approaches are ranked, not pooled: the band, the triad
+  // and those voices constrain the candidate set at once, so a tone free of every
+  // perfect approach frequently does not exist, and a guard that demanded one
+  // would keep whatever it started from -- including the true parallel it was
+  // called to remove. The contrary arrival at the same perfect class sits just
+  // under the true parallel rather than beside the hidden: per unit rate it costs
+  // the corpus roughly four times what a hidden approach does, near what a true
+  // octave costs, so it is the dearest fault this bass may still pay.
   constexpr int kPedalClean = 0;
   constexpr int kPedalHidden = 1;
-  constexpr int kPedalParallel = 2;
+  constexpr int kPedalAntiParallel = 2;
+  constexpr int kPedalParallel = 3;
   const auto pedal_fault_rank = [&](int cand) {
     if (last_pedal_pitch < 0) {
       return kPedalClean;
@@ -272,7 +276,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
         return kPedalParallel;
       }
       if (formsPerfectParallel(last_pedal_pitch, cand, motion.prev, motion.curr)) {
-        worst = kPedalHidden;
+        worst = std::max(worst, kPedalHidden);
+      } else if (formsAntiParallelPerfect(last_pedal_pitch, cand, motion.prev, motion.curr)) {
+        worst = std::max(worst, kPedalAntiParallel);
       }
     }
     return worst;
