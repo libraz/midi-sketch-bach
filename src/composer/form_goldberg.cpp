@@ -649,6 +649,202 @@ void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>&
   }
 }
 
+// --- The middle voice through the free variations ---------------------------
+
+// The band the middle voice is written in. Its ceiling sits clear of the
+// figuration's C5 anchor; the band is one octave deep below that, so it always
+// holds all three tones of a triad and the line never has to leave it.
+//
+// A block whose figuration descends into the band cannot also be filled there:
+// the ceiling follows the figuration down until the band would reach the aria
+// bass's own ceiling (the fifth above its highest ground tone), and a block that
+// would push it further keeps its two voices. The space the middle voice exists
+// to fill is already occupied there.
+constexpr int kInnerBandCeiling = 67;     // G4.
+constexpr int kInnerBandMinCeiling = 64;  // Lowest ceiling clearing the bass.
+
+// Fold a pitch class into the inner band, which is the octave ending on
+// `ceiling`.
+int goldbergInnerBandTone(int pitch_class, int ceiling) {
+  int pitch = 60 + ((pitch_class - 60) % 12 + 12) % 12;
+  while (pitch > ceiling)
+    pitch -= 12;
+  return pitch;
+}
+
+// The band ceiling a block admits, or -1 when the block keeps two voices
+// because its figuration has come down into the middle register itself.
+int goldbergInnerBandCeilingFor(const std::vector<MaterialNote>& upper) {
+  int lowest = kInnerBandCeiling + 1;
+  for (const MaterialNote& note : upper)
+    lowest = std::min(lowest, static_cast<int>(note.pitch));
+  const int ceiling = std::min(kInnerBandCeiling, lowest - 1);
+  return ceiling >= kInnerBandMinCeiling ? ceiling : -1;
+}
+
+// The three tones each bar of the ground cycle offers the middle voice: the
+// chord tones of that bar's triad, one representative of each inside the band.
+std::array<std::array<int, 3>, 4> innerBandCandidates(int ceiling, Mode mode,
+                                                      const std::array<std::uint8_t, 4>& ground) {
+  std::array<std::array<int, 3>, 4> tones{};
+  for (std::size_t local = 0; local < 4; ++local) {
+    const BarChord chord = goldbergBarChord(ground[local], mode);
+    const int third = chord.minor ? 3 : 4;
+    tones[local] = {goldbergInnerBandTone(chord.root_pc, ceiling),
+                    goldbergInnerBandTone(chord.root_pc + third, ceiling),
+                    goldbergInnerBandTone(chord.root_pc + 7, ceiling)};
+  }
+  return tones;
+}
+
+// How one bar of the middle voice is laid out.
+//
+// Every surface fills its bar completely and none of them moves faster than the
+// half note. A middle voice taking the figuration's pace would be a second
+// figuration; one that never re-articulated would be a pedal. What is varied
+// between them is how the held harmony is struck, which is the same thing the
+// aria bass varies underneath.
+enum class InnerSurface {
+  Held,         // One whole note: the bar's harmony taken as a single tone.
+  Pulsed,       // The same tone struck again at the half bar.
+  Approaching,  // Held to the last beat, then out to meet the next bar.
+};
+
+// Rotated over the blocks that carry a middle voice rather than over the block
+// index, so two consecutive filled blocks never state the harmony the same way
+// however many two-voice blocks separate them.
+constexpr std::array<InnerSurface, 3> kInnerSurfaces = {
+    {InnerSurface::Held, InnerSurface::Pulsed, InnerSurface::Approaching}};
+
+void appendInnerBar(std::vector<MaterialNote>& out, int bar, int tone, int exit_tone,
+                    InnerSurface surface) {
+  const Tick base = barTick(bar);
+  switch (surface) {
+    case InnerSurface::Pulsed:
+      out.push_back(materialNote(base, kHalf, tone));
+      out.push_back(materialNote(base + kHalf, kHalf, tone));
+      break;
+    case InnerSurface::Approaching:
+      out.push_back(materialNote(base, kTicksPerBar - kTicksPerBeat, tone));
+      out.push_back(materialNote(base + kTicksPerBar - kTicksPerBeat, kTicksPerBeat, exit_tone));
+      break;
+    case InnerSurface::Held:
+    default:
+      out.push_back(materialNote(base, kTicksPerBar, tone));
+      break;
+  }
+}
+
+// The tone the bar leaves on: another chord tone of the same bar -- so the exit
+// is as consonant with the bass as the tone it left -- chosen as the closest one
+// to where the next bar begins.
+int innerExitTone(const std::array<int, 3>& candidates, int tone, int target) {
+  int exit_tone = tone;
+  int best = -1;
+  for (const int candidate : candidates) {
+    if (candidate == tone)
+      continue;
+    const int distance = std::abs(candidate - target);
+    if (best < 0 || distance < best) {
+      best = distance;
+      exit_tone = candidate;
+    }
+  }
+  return exit_tone;
+}
+
+// Write the middle voice of one free variation block.
+//
+// The block above it is already settled, the aria bass under it is immutable, so
+// the whole three-voice surface follows from the four tones chosen here and is
+// read before any of them is committed -- the same closed reading the canon
+// blocks are designed by, at the same grain. Exhaustive over the three tones in
+// each of four bars: a bar's tone answers for its own bar and for how the next
+// one is reached, so it cannot be settled left to right.
+//
+// Ranked worst first: a crossing is a rule and a true parallel is the cardinal
+// prohibition, then a bar stated twice inside one block -- which is a variation
+// set failing at the one thing it is for -- then a voice touching the ground or
+// the figuration, the weaker perfect approaches, the dissonances, and last the
+// distance travelled, because the closest voice leading is the one an inner
+// voice is written with.
+std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper, int ceiling,
+                                          int block_start_bar, Mode mode,
+                                          const std::array<std::uint8_t, 4>& ground,
+                                          bool fill_thirds, AriaBassSurface bass_surface,
+                                          InnerSurface surface) {
+  const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
+  std::vector<MaterialNote> chosen;
+  std::array<int, 8> best{};
+  bool have_best = false;
+  std::array<std::size_t, 4> pick{};
+  for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
+    for (pick[1] = 0; pick[1] < 3; ++pick[1]) {
+      for (pick[2] = 0; pick[2] < 3; ++pick[2]) {
+        for (pick[3] = 0; pick[3] < 3; ++pick[3]) {
+          std::array<int, 4> tones{};
+          for (std::size_t local = 0; local < 4; ++local)
+            tones[local] = candidates[local][pick[local]];
+          std::array<int, 4> exits{};
+          std::vector<MaterialNote> line;
+          line.reserve(8);
+          for (std::size_t local = 0; local < 4; ++local) {
+            // The ground cycle is four bars long and the blocks are aligned to
+            // it, so the bar after the block's last one carries the block's
+            // first harmony: the line leads back into the tone it opened on.
+            const int target = tones[(local + 1) % 4];
+            exits[local] = innerExitTone(candidates[local], tones[local], target);
+            appendInnerBar(line, block_start_bar + static_cast<int>(local), tones[local],
+                           exits[local], surface);
+          }
+          const std::array<int, 6> faults = goldbergBlockFaults(
+              upper, line, block_start_bar, ground, mode, fill_thirds, bass_surface);
+          // Every bar of a block is laid out on the same surface, so two of them
+          // that state the same tones are the same bar. A block that repeats a
+          // bar verbatim is not varying anything, which is why this is weighed
+          // among the faults rather than after them: it outranks the taste terms
+          // and the count of passing clashes with the figuration, and yields
+          // only to the crossing and the true parallel.
+          int repeated = 0;
+          int travel = 0;
+          for (std::size_t local = 0; local < 4; ++local) {
+            for (std::size_t other = local + 1; other < 4; ++other) {
+              if (tones[local] == tones[other] &&
+                  (surface != InnerSurface::Approaching || exits[local] == exits[other]))
+                ++repeated;
+            }
+            if (local > 0)
+              travel += std::abs(tones[local] - tones[local - 1]);
+          }
+          const std::array<int, 8> score = {faults[0], faults[1], repeated,  faults[2],
+                                            faults[3], faults[4], faults[5], travel};
+          if (!have_best || score < best) {
+            best = score;
+            chosen = std::move(line);
+            have_best = true;
+          }
+        }
+      }
+    }
+  }
+  return chosen;
+}
+
+// Whether the middle voice steps aside for this variation block.
+//
+// A variation set breathes, so the third voice is not a wall. It withdraws for
+// the block before every imitative one, and the canon's pair -- or the
+// quodlibet's second tune -- then enters against a texture that has just thinned
+// to the two outer lines. The aria and its da capo keep their own two-voice
+// scoring: that is how the set begins and how it must return.
+bool innerVoiceWithdraws(int blk, int num_blocks, int da_capo_block) {
+  const int next = blk + 1;
+  if (next >= num_blocks || next == da_capo_block)
+    return false;
+  return goldbergVariationKind(static_cast<std::size_t>(next - 1)) !=
+         GoldbergVariationKind::Figuration;
+}
+
 }  // namespace
 
 HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
@@ -699,16 +895,19 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   out.material.goldberg_aria_bass_period = final_bar_tick;
   out.material.goldberg_aria_bass_cycle = static_cast<Tick>(kCycleBars) * kTicksPerBar;
 
-  // Canon follower line (V1). Populated only for canonic variation blocks; the
-  // follower notes for every canon block are appended here in time order (one
-  // block at a time), then handed to a single TrioVoiceLine on V1. V1 is silent
-  // outside canon blocks (no notes), keeping the texture clean and the validator
-  // quiet for the figuration / aria blocks. The follower carries the
-  // TrioVoiceIndependent bit, but because it is the ONLY voice carrying that bit
-  // the voice_independence_threshold rule stays inert (it needs >= 2 such
-  // voices), so no soft-fail is introduced.
+  // Middle voice (V1). It carries the canon follower through the canon blocks,
+  // the second tune through the quodlibet, and a held harmony line through the
+  // free variations -- so what the set is heard in is three voices, not an outer
+  // pair with an occasional companion. Its notes are appended here in block
+  // order, which is also tick order, and handed to one span per filled block; it
+  // rests through the aria, the da capo and the blocks that withdraw before an
+  // imitative one. The line carries the TrioVoiceIndependent bit, but because it
+  // is the ONLY voice carrying that bit the voice_independence_threshold rule
+  // stays inert (it needs >= 2 such voices), so no soft-fail is introduced.
   std::vector<MaterialNote> inner_voice;
   std::vector<int> inner_blocks;
+  // Which surface the next free-variation block states its harmony on.
+  std::size_t inner_surface_slot = 0;
   // The canon blocks alone, whose variation line may not be re-aimed.
   std::vector<int> canon_blocks;
 
@@ -794,8 +993,15 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     const std::size_t variation_number = variation_index + 1;  // 1-based (1..K).
     const int cycle = cycle_count > 0 ? (blk * cycle_count) / num_blocks : 0;
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
+    const GoldbergVariationKind kind = goldbergVariationKind(variation_index);
+    // A free variation is filled unless it is the block that thins out before an
+    // imitative one. Settled before the block is written and read afterwards,
+    // because the middle voice answers to the figuration as finally laid out --
+    // the piece's last block still has its cadential landing to come.
+    const bool fill_middle_voice = kind == GoldbergVariationKind::Figuration &&
+                                   !innerVoiceWithdraws(blk, num_blocks, da_capo_block);
 
-    switch (goldbergVariationKind(variation_index)) {
+    switch (kind) {
       case GoldbergVariationKind::Canon: {
         // Canon number c = variation_number / 3 (1..9 across the full set);
         // imitation interval = (c - 1) diatonic degrees above unison (unison,
@@ -844,9 +1050,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
             for (std::size_t beat = 0; beat < theme_pcs.size(); ++beat) {
               const int pc =
                   theme_pcs[(beat + static_cast<std::size_t>(rotation)) % theme_pcs.size()];
-              int pitch = 60 + ((pc - 60) % 12 + 12) % 12;
-              while (pitch > 67)
-                pitch -= 12;
+              const int pitch = goldbergInnerBandTone(pc, kInnerBandCeiling);
               candidate.push_back(materialNote(
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
@@ -944,14 +1148,26 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                              /*prefer_descending=*/false, /*lift_to_context=*/true);
     }
 
+    if (fill_middle_voice) {
+      const int ceiling = goldbergInnerBandCeilingFor(var.notes);
+      if (ceiling > 0) {
+        const std::vector<MaterialNote> line = designInnerLine(
+            var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds,
+            bass_surface_of_block(blk), kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()]);
+        ++inner_surface_slot;
+        inner_voice.insert(inner_voice.end(), line.begin(), line.end());
+        inner_blocks.push_back(blk);
+      }
+    }
+
     out.material.goldberg_variations.push_back(var);
   }
 
   out.material.goldberg_inner_voice = std::move(inner_voice);
 
   // VoicePlan (3 voices, strictly ordered by register so voice_crossing never
-  // fires): V0 = principal variation, V1 = canon/quodlibet inner line, and V2
-  // = the immutable aria-bass phrase. All use dedicated Goldberg carriers.
+  // fires): V0 = principal variation, V1 = the middle voice, and V2 = the
+  // immutable aria-bass phrase. All use dedicated Goldberg carriers.
   out.voice_plan.num_voices = 3;
   SpanId next_span_id = 0;
 
@@ -1055,7 +1271,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     out.voice_plan.spans.push_back(var_span);
   }
 
-  // V1 inner line: canon followers plus the variation-30 Quodlibet tune.
+  // V1 middle voice: one span per filled block -- canon followers, the
+  // Quodlibet tune, and the held harmony of the free variations.
   for (int blk : inner_blocks) {
     Span follower_span;
     follower_span.id = next_span_id++;

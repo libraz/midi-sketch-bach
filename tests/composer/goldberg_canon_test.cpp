@@ -295,28 +295,85 @@ TEST(GoldbergCanon, EveryCanonHasADistinctPitchSequence) {
   EXPECT_EQ(pitch_sequences.size(), 9u);
 }
 
-// V1 sounds only in canon blocks and the dedicated Quodlibet slot.
-TEST(GoldbergCanon, V1SoundsOnlyInCanonAndQuodlibetBlocks) {
+// The middle voice carries the canon follower, the Quodlibet's second tune and
+// the held harmony of the free variations, so the set is heard in three voices
+// rather than as an outer pair with an occasional companion.
+//
+// It is not a wall either. It rests through the aria and its da capo -- the two
+// blocks that frame the set -- and steps aside for the block before each
+// imitative one, so a canon's pair enters against a texture that has just
+// thinned. Both halves are asserted: a filled block that fell silent and a
+// resting block that started sounding are each a departure from that design.
+TEST(GoldbergCanon, MiddleVoiceFillsEveryBlockButTheFrameAndTheOnesThatWithdraw) {
+  constexpr int kBlocks = 32;  // 128 / 4.
+  constexpr int kDaCapo = 31;  // Present at >= 24 bars.
+  auto isImitative = [](int blk) {
+    if (blk < 1 || blk > 30)
+      return false;
+    return (blk % 3 == 0 && blk < 30) || blk == 30;  // Canons 3..27, Quodlibet 30.
+  };
+  auto expectsMiddleVoice = [&](int blk) {
+    if (blk == 0 || blk == kDaCapo)
+      return false;  // The aria frame keeps its own two-voice scoring.
+    if (isImitative(blk))
+      return true;
+    return !isImitative(blk + 1);  // Withdraw before an imitative entry.
+  };
+
   const HarnessFixture fx = build(false, 128, 1);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
-  // Canon block windows (variations 3,6,...,27 => blocks 3,6,...,27).
-  auto inInnerVoiceBlock = [](Tick t) -> bool {
-    for (int v = 3; v < 30; v += 3) {
-      if (t >= blockStart(v) && t < blockStart(v + 1))
-        return true;
-    }
-    return t >= blockStart(30) && t < blockStart(31);
-  };
-  int v1_notes = 0;
+  std::array<int, kBlocks> v1_per_block{};
   for (const auto& n : r.notes) {
     if (n.voice != 1)
       continue;
-    ++v1_notes;
-    EXPECT_TRUE(inInnerVoiceBlock(n.start_tick))
-        << "V1 note outside canon/Quodlibet blocks at tick " << n.start_tick;
+    const int blk = static_cast<int>(n.start_tick / (static_cast<Tick>(kCycleBars) * kTicksPerBar));
+    ASSERT_GE(blk, 0);
+    ASSERT_LT(blk, kBlocks);
+    ++v1_per_block[static_cast<std::size_t>(blk)];
   }
-  EXPECT_GT(v1_notes, 0) << "the full set must contain canon-follower notes on V1";
+  int filled = 0;
+  for (int blk = 0; blk < kBlocks; ++blk) {
+    const int notes = v1_per_block[static_cast<std::size_t>(blk)];
+    if (expectsMiddleVoice(blk)) {
+      EXPECT_GT(notes, 0) << "block " << blk << " lost its middle voice";
+      ++filled;
+    } else {
+      EXPECT_EQ(notes, 0) << "block " << blk << " must stay in two voices";
+    }
+  }
+  // Aria, da capo and the ten blocks that withdraw are the two-voice blocks.
+  EXPECT_EQ(filled, 20);
+}
+
+// The middle voice sounds for a clear majority of the set, at every length and
+// on both modes.
+//
+// A three-voice texture whose middle voice rests through most of it is heard as
+// two voices, so the share of the piece that voice is sounding for is the thing
+// to hold, not the count of blocks that declare it. Measured as duration rather
+// than note count: the middle voice holds long tones by design and would score
+// well on a count while filling nothing.
+TEST(GoldbergCanon, MiddleVoiceSoundsForAClearMajorityOfTheSet) {
+  constexpr double kSoundingFloor = 0.50;
+  for (bool minor : {false, true}) {
+    for (std::uint16_t bars : {12, 20, 64, 128}) {
+      for (std::uint32_t seed : kSeeds) {
+        const HarnessFixture fx = build(minor, bars, seed);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        Tick sounding = 0;
+        for (const auto& note : r.notes) {
+          if (note.voice == 1)
+            sounding += note.duration;
+        }
+        const Tick total = static_cast<Tick>(bars) * kTicksPerBar;
+        const double share = static_cast<double>(sounding) / static_cast<double>(total);
+        EXPECT_GE(share, kSoundingFloor)
+            << "minor=" << minor << " bars=" << bars << " seed=" << seed
+            << " middle voice sounds for only " << share << " of the set";
+      }
+    }
+  }
 }
 
 // The immutable aria ground (V2) returns its four-bar harmonic cycle bar for bar
@@ -471,8 +528,24 @@ TEST(GoldbergCanon, MinimumSizeHasNoCanonAndGracefulDegrade) {
     // Variations 1 and 2 only; neither is a canon.
     EXPECT_EQ(goldbergVariationKind(0u), GoldbergVariationKind::Figuration);
     EXPECT_EQ(goldbergVariationKind(1u), GoldbergVariationKind::Figuration);
-    // No canon => no follower line.
-    EXPECT_TRUE(fx.material.goldberg_inner_voice.empty()) << "minor=" << minor;
+    // No canon, so nothing on the middle voice may move at a follower's pace.
+    // The soggetto a canon imitates states six notes to the bar; the held
+    // harmony of a free variation states at most two, and never before the aria
+    // is over. Both are asserted, because the middle voice is one line carrying
+    // whichever material its block calls for -- an empty line no longer says
+    // "no follower here", but a line that never moves faster than the half note
+    // still does.
+    ASSERT_FALSE(fx.material.goldberg_inner_voice.empty()) << "minor=" << minor;
+    std::map<Tick, int> inner_per_bar;
+    for (const auto& note : fx.material.goldberg_inner_voice) {
+      EXPECT_GE(note.start_tick, blockStart(1))
+          << "minor=" << minor << " the aria must keep its two voices";
+      ++inner_per_bar[note.start_tick / kTicksPerBar];
+    }
+    for (const auto& [bar, count] : inner_per_bar) {
+      EXPECT_LE(count, 2) << "minor=" << minor << " bar " << bar
+                          << " states the middle voice at a canon follower's pace";
+    }
 
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
