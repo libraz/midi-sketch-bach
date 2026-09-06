@@ -496,6 +496,14 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     }
     return false;
   };
+  auto is_anti_parallel = [&](int cand) {
+    for (const ConcurrentMotion& motion : motions) {
+      if (formsAntiParallelPerfect(line_prev, cand, motion.prev, motion.curr)) {
+        return true;
+      }
+    }
+    return false;
+  };
   // Voice-ordering window: a lower-indexed voice sounds higher (V0 highest).
   // The anchor must stay at or below every concurrent lower-index voice and at
   // or above every concurrent higher-index voice, so the per-tick order
@@ -537,6 +545,31 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   // whole selection is unchanged.
   int consonant_battuta = -1;
   int consonant_battuta_key = 1 << 20;
+  // Consonant, free of every same-direction perfect, but sounding a perfect
+  // interval its pair was ALREADY on, reached the other way round. Its own tier
+  // BELOW the battuta, which is the one place in this selector where a milder-
+  // sounding fault outranks a harsher-sounding one. The reference corpus is
+  // what decides it: measured as overshoot scaled by the spread each class
+  // occupies in the corpus, the contrary repeat costs several times what the
+  // battuta does, because the works themselves write it far more sparingly.
+  // Without this tier the contrary repeat is invisible here and rides in the
+  // fully clean tier, which is how a beat anchor comes to answer a rising line
+  // by leaping down onto the octave it just left.
+  //
+  // The tier applies on the downbeat only. That is where the arrivals are --
+  // the harmony turns at the bar line and the bass moves by a fourth or a fifth
+  // into it -- and it is also the only onset this selector holds to the chord,
+  // so it has the fewest candidates and is where the contrary repeat is most
+  // likely to be the last tone standing. Off the downbeat the whole scale is
+  // admissible and the selector already has room; ranking there displaces
+  // anchors that had a choice, and an anchor is the register the bars after it
+  // start from, so the displacement surfaces later as bar heads with no
+  // playable chord tone left. Measured over the figurated forms that is a loss
+  // rather than a wash: the off-downbeat half removes more contrary arrivals
+  // than the downbeat half does, and pays for them by nearly doubling how often
+  // a bar head has to leave its chord entirely.
+  int consonant_anti = -1;
+  int consonant_anti_key = 1 << 20;
   int free_any = -1;  // parallel-free, mildest clash profile (second).
   int free_any_key = 1 << 28;
   int consonant_any = -1;  // consonant, parallel allowed (third).
@@ -608,6 +641,11 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
             consonant_battuta_key = key;
             consonant_battuta = pitch;
           }
+        } else if (downbeat && is_anti_parallel(pitch)) {
+          if (key < consonant_anti_key) {
+            consonant_anti_key = key;
+            consonant_anti = pitch;
+          }
         } else if (key < consonant_free_key) {
           consonant_free_key = key;
           consonant_free = pitch;
@@ -641,6 +679,9 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   }
   if (consonant_battuta >= 0) {
     return consonant_battuta;
+  }
+  if (consonant_anti >= 0) {
+    return consonant_anti;
   }
   // Tier order between "parallel-free but clashing" and "consonant but
   // parallel" is a per-form contract: fugue-family figuration prefers the
