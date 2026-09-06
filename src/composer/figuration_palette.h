@@ -54,6 +54,13 @@ struct CycleBar {
   bool minor;
   int low_tone;            // lowest variation tone (C4-C5 region) for this bar.
   std::uint8_t ground_pc;  // pitch class of the sustained ground note this bar.
+  // The chord sounds its minor seventh (root + 10) as a fourth chord tone. This
+  // is the one anchor a ground form cannot reach by the consonance rule the rest
+  // of the plan is built on: the chord root tracks the ground, so the seventh is
+  // dissonant against the very bass it belongs to. That dissonance IS the
+  // dominant, and without it a form built on a repeating bass states its
+  // harmonic tension nowhere.
+  bool seventh = false;
 };
 
 /**
@@ -92,11 +99,14 @@ int fitPitchClass(int pitch_class, int center);
  * The anchors are the bar's chord tones (root / third / fifth), each consonant
  * with the held ground (the chord root tracks the ground pitch class). In minor
  * the leading tone B natural (pc 11) is filtered out so the line stays in
- * natural minor and no Ab->B augmented 2nd can arise.
+ * natural minor and no Ab->B augmented 2nd can arise. A bar that declares a
+ * seventh contributes it as a fourth anchor, exempt from the consonance filter:
+ * the ground is the bass of the chord it belongs to, so the interval it makes
+ * with the ground is the harmony rather than a clash against it.
  *
  * @param bar The bar's harmonic data.
  * @param mode Diatonic mode (selects the third quality filter behaviour).
- * @return Up to three consonant chord-tone pitch classes (always non-empty).
+ * @return Up to four chord-tone pitch classes, the seventh last (non-empty).
  */
 std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode);
 

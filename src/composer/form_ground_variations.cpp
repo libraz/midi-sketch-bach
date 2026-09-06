@@ -213,6 +213,32 @@ std::vector<CycleBar> planFromGround(const std::uint8_t* ground, std::size_t bar
   return plan;
 }
 
+/// @brief Spell the cycle's dominant with its seventh.
+///
+/// The ground repeats, so the plan is read as a cycle: the closing bar's
+/// successor is the bar that opens the next statement. That wrap is exactly
+/// where a ground bass puts its dominant -- every table here ends on the fifth
+/// degree and restarts on the tonic -- so reading the plan linearly, as a
+/// through-composed section is read, would find no dominant at all.
+///
+/// `triad_only_bars` are cycle-relative. A bar that already carries a declared
+/// suspension is one of them: the suspension is this form's accented dissonance,
+/// authored with its own preparation and resolution and verified as a pattern,
+/// and the search that installs it picks the tone under it from the bar's chord.
+/// Spelling that same bar with a seventh moves the figuration the search reads
+/// and can leave the cadence with no admissible suspension at all -- trading a
+/// prepared dissonance the form is built on for an unprepared one it is not.
+void markCycleDominantSevenths(std::vector<CycleBar>& plan, detail::Mode mode,
+                               const std::vector<int>& triad_only_bars) {
+  std::vector<detail::ChordSpec> spelling;
+  spelling.reserve(plan.size());
+  for (const CycleBar& bar : plan)
+    spelling.push_back({bar.root_pc, bar.minor});
+  markDominantSevenths(spelling, triad_only_bars, mode, /*cyclic=*/true);
+  for (std::size_t bar = 0; bar < plan.size(); ++bar)
+    plan[bar].seventh = spelling[bar].seventh;
+}
+
 // Compass the ground-parallel repair may relocate a V0 onset into: the C4
 // region, where the variation sits above every lower voice, up to the top of
 // the register the ornament pass can decorate. A cycle whose figuration is
@@ -337,8 +363,25 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
 
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
     const int chord_third = plan.minor ? 3 : 4;
-    const int triad_pc[3] = {plan.root_pc % 12, (plan.root_pc + chord_third) % 12,
-                             (plan.root_pc + 7) % 12};
+    // The relocation targets are the bar's chord tones, the declared seventh
+    // among them. Reading a bare triad here leaves the repair a strictly
+    // narrower set than the emitters it is repairing were given, and on a
+    // dominant bar the tone it is missing is the one that clears a fault the
+    // triad cannot: every triad tone of a dominant sits a perfect interval or a
+    // third from the ground it is the bass of, while the seventh sits a seventh
+    // away and so can never itself arrive as a perfect.
+    const int chord_pc[4] = {
+        plan.root_pc % 12, (plan.root_pc + chord_third) % 12, (plan.root_pc + 7) % 12,
+        detail::chordSeventhPc(detail::ChordSpec{plan.root_pc, plan.minor, true})};
+    const int chord_tones = plan.seventh ? 4 : 3;
+    const auto isRelocationTarget = [&](int candidate) {
+      const int pitch_class = ((candidate % 12) + 12) % 12;
+      for (int tone = 0; tone < chord_tones; ++tone) {
+        if (pitch_class == chord_pc[tone])
+          return true;
+      }
+      return false;
+    };
     const int melodic_prev = i > 0 ? static_cast<int>(notes[i - 1].pitch) : -1;
     const int next_pitch = (i + 1 < notes.size()) ? static_cast<int>(notes[i + 1].pitch) : -1;
     bool placed = false;
@@ -363,12 +406,15 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
     for (int accept = 0; accept < original_rank && !placed; ++accept) {
       for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
         for (int cand : {pitch + dist, pitch - dist}) {
-          const int pc = ((cand % 12) + 12) % 12;
-          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          if (!isRelocationTarget(cand)) {
             continue;
           }
+          // The declared seventh is the one chord tone whose dissonance against
+          // the ground is the harmony rather than a fault, so it is the one
+          // relocation target the consonance filter must not reject.
+          const bool is_declared_seventh = plan.seventh && ((cand % 12) + 12) % 12 == chord_pc[3];
           if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
-              !rule_helpers::isConsonantInterval(cand - ground_now)) {
+              (!is_declared_seventh && !rule_helpers::isConsonantInterval(cand - ground_now))) {
             continue;
           }
           if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
@@ -486,30 +532,39 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     detail::ChordSpec chord;
     chord.root_pc = plan.root_pc;
     chord.minor = plan.minor;
-    // Nearest DIFFERENT triad tone in band (prefer above): shared by the
+    chord.seventh = plan.seventh;
+    // Nearest DIFFERENT chord tone in band (prefer above): shared by the
     // anti-stall escape and the off-beat oscillation below. Out-of-scale triad
     // tones flatten to the scale tone a semitone below (matching the V0
     // anchor policy in barAnchorPitchClasses) so the counter-line never sounds
     // a chromatic tone against the natural-minor V0 figuration (a B against
-    // V0's Bb).
+    // V0's Bb). The declared seventh joins the set: reading a bare triad here
+    // while the beat anchor reads four tones would let the escape push the line
+    // off a seventh the selector deliberately placed, or judge the chord spent
+    // while one of its tones was still free.
     const int chord_third = chord.minor ? 3 : 4;
-    int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
-                       (chord.root_pc + 7) % 12};
-    for (int& pc : triad_pc) {
+    int chord_pc[4] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
+                       (chord.root_pc + 7) % 12, detail::chordSeventhPc(chord)};
+    for (int& pc : chord_pc) {
       if (!detail::inScale(pc, mode))
         pc = (pc + 11) % 12;
     }
-    auto is_triad = [&](int midi) {
+    const int chord_tones = chord.seventh ? 4 : 3;
+    auto is_chord_tone = [&](int midi) {
       const int pcl = ((midi % 12) + 12) % 12;
-      return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+      for (int tone = 0; tone < chord_tones; ++tone) {
+        if (pcl == chord_pc[tone])
+          return true;
+      }
+      return false;
     };
-    auto nearest_other_triad_tone = [&](int from) {
+    auto nearest_other_chord_tone = [&](int from) {
       for (int dist = 1; dist <= 12; ++dist) {
         const int above = from + dist;
         const int below = from - dist;
-        if (above <= band_hi && is_triad(above))
+        if (above <= band_hi && is_chord_tone(above))
           return above;
-        if (below >= band_lo && is_triad(below))
+        if (below >= band_lo && is_chord_tone(below))
           return below;
       }
       return from;
@@ -539,7 +594,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         for (int dist = 1; dist <= 12; ++dist) {
           bool placed = false;
           for (int cand : {anchor + dist, anchor - dist}) {
-            if (cand < band_lo || cand > band_hi || !is_triad(cand))
+            if (cand < band_lo || cand > band_hi || !is_chord_tone(cand))
               continue;
             bool consonant = true;
             for (int upper : theme_pitches) {
@@ -684,7 +739,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         }
       }
       if (osc < 0)
-        osc = nearest_other_triad_tone(anchor);
+        osc = nearest_other_chord_tone(anchor);
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
@@ -732,7 +787,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           for (int accept = kOscClean; accept < design_rank; ++accept) {
             bool placed = false;
             for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode),
-                             nearest_other_triad_tone(anchor), anchor}) {
+                             nearest_other_chord_tone(anchor), anchor}) {
               if (cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
               if (!isConsonantIc(cand - plan.ground_pc))
@@ -875,7 +930,11 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       chord.quality = (picardy || !minor) ? ChordQuality::Major : ChordQuality::Minor;
     } else {
       chord.root_pc = plan.root_pc;
-      chord.quality = plan.minor ? ChordQuality::Minor : ChordQuality::Major;
+      if (plan.seventh) {
+        chord.quality = plan.minor ? ChordQuality::Minor7 : ChordQuality::Dominant7;
+      } else {
+        chord.quality = plan.minor ? ChordQuality::Minor : ChordQuality::Major;
+      }
     }
     out.harmony.chords.push_back(chord);
   }
@@ -1363,7 +1422,11 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
       chord.quality = (picardy || !minor) ? ChordQuality::Major : ChordQuality::Minor;
     } else {
       chord.root_pc = plan.root_pc;
-      chord.quality = plan.minor ? ChordQuality::Minor : ChordQuality::Major;
+      if (plan.seventh) {
+        chord.quality = plan.minor ? ChordQuality::Minor7 : ChordQuality::Dominant7;
+      } else {
+        chord.quality = plan.minor ? ChordQuality::Minor : ChordQuality::Major;
+      }
     }
     out.harmony.chords.push_back(chord);
   }
@@ -1766,6 +1829,7 @@ HarnessFixture buildChaconneForm(const ResolvedRequest& req) {
   } else {
     plan = planFromGround(table.data(), table.size(), minor);
   }
+  markCycleDominantSevenths(plan, req.mode, /*triad_only_bars=*/{});
 
   return buildGroundVariationForm(req, kChaconneCycleBars, ground_pitch, plan,
                                   /*passacaglia=*/false);
@@ -1805,7 +1869,12 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
   // held ground; the variation start tone is the ground pitch lifted by octaves
   // into the C4-C5 region. For variant 0 this reproduces the historical plan
   // bar for bar.
-  const std::vector<CycleBar> plan = planFromGround(table.data(), table.size(), minor);
+  std::vector<CycleBar> plan = planFromGround(table.data(), table.size(), minor);
+  // Every cycle closes with the cadential suspension installed below, always on
+  // the same cycle-relative bar, and that is also the only bar of these grounds
+  // whose root falls a fifth. The suspension has the prior claim on it.
+  markCycleDominantSevenths(plan, req.mode,
+                            /*triad_only_bars=*/{kPassacagliaCycleBars - 2});
 
   HarnessFixture out = buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
 

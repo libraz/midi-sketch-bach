@@ -111,6 +111,20 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
                                       plan.ground_pc)
                 : 0;
     const int choices = static_cast<int>(pcs.size());
+    // A bar the plan spells as a dominant states its seventh, on the bar's last
+    // beat: the chord this dominant falls to opens the next bar, and its nearest
+    // tone to the seventh is its own third a step below, so the placement is the
+    // one that resolves. Leaving it to the rotation instead reaches the seventh
+    // on one beat in four, which for a bar that recurs once per ground cycle
+    // means most statements of the dominant never sound it at all.
+    //
+    // Only that one beat is pinned. Pinning the beat before it to the root, so
+    // the seventh were also prepared by step from above, is what the figure
+    // wants melodically and is wrong here for a reason particular to a ground
+    // form: the chord root tracks the ground, so the root IS the bass pitch
+    // class, and writing it into the upper voice puts an octave with the bass on
+    // a beat -- the interval this form spends the rest of its machinery avoiding.
+    const int seventh_beat = plan.seventh ? 2 : -1;
     for (int beat = 0; beat < 3; ++beat) {
       // Realize one anchor class against the running pitch. All candidates for a
       // beat are fitted from the SAME running pitch, so the choice below cannot
@@ -137,10 +151,11 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
           fit += 12;
         return fit;
       };
+      // The seventh is offered last by barAnchorPitchClasses.
+      const int base = (beat == seventh_beat) ? choices - 1 : (anchor_rotation + beat) % choices;
       int fit = 0;
       for (int offset = 0; offset < choices; ++offset) {
-        const int anchor_pc =
-            pcs[static_cast<std::size_t>((anchor_rotation + beat + offset) % choices)];
+        const int anchor_pc = pcs[static_cast<std::size_t>((base + offset) % choices)];
         const int candidate = realizeAnchor(anchor_pc);
         if (offset == 0)
           fit = candidate;  // the rotation's own class, kept when no alternative is clean.
@@ -240,7 +255,7 @@ int fitPitchClass(int pitch_class, int center) {
 std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
   const int third = bar.minor ? 3 : 4;
   std::vector<int> anchors;
-  anchors.reserve(3);
+  anchors.reserve(4);
   for (int interval : {0, third, 7}) {
     int pitch_class = (bar.root_pc + interval) % 12;
     // Flatten out-of-scale triad tones to the scale tone a semitone below
@@ -260,6 +275,17 @@ std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
     if (std::find(anchors.begin(), anchors.end(), pitch_class) != anchors.end())
       continue;
     anchors.push_back(pitch_class);
+  }
+  // The seventh is exempt from the consonance filter above, and it is the only
+  // tone that ever is. Every other anchor earns its place by being consonant
+  // with the held ground; the seventh earns its place by being a tone of the
+  // chord the ground is the bass of, which is a different claim and the stronger
+  // one. Filtering it would take the dominant's own defining interval away from
+  // the only voice able to state it. It joins the rotation last so a bar still
+  // opens on a triad tone at rotation zero.
+  if (bar.seventh) {
+    const detail::ChordSpec chord{bar.root_pc, bar.minor, true};
+    anchors.push_back(detail::chordSeventhPc(chord));
   }
   if (anchors.empty())
     anchors.push_back(bar.root_pc % 12);  // defensive: root is always consonant.
@@ -362,8 +388,23 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
         // surface (thirds and sixths over the ground are as clean as chord
         // tones), and at low density tiers those forced skips dominate the
         // melodic surface.
-        if (sub == 0 &&
-            !isConsonantIc(degreeToMidi(degree, mode) - static_cast<int>(plan.ground_pc))) {
+        // The one dissonance against the ground that is not snapped away is the
+        // seventh of a bar the plan spells as a dominant: there the ground is
+        // the bass of the chord the tone belongs to, so the interval is the
+        // harmony rather than a wave tone that wandered off it. Snapping it
+        // would take the dominant's defining tone back out of the only voice
+        // sounding above the ground.
+        const int wave_midi = degreeToMidi(degree, mode);
+        const bool holds_declared_seventh =
+            plan.seventh && ((wave_midi % 12) == detail::chordSeventhPc(detail::ChordSpec{
+                                                     plan.root_pc, plan.minor, true}));
+        // A bar the plan spells as a dominant snaps whatever the wave tone is
+        // doing, not only when it clashes with the ground. Everywhere else the
+        // wave's contract is negative -- do not contradict the bass -- and a
+        // consonant free tone satisfies it; a dominant is a harmony that has to
+        // be STATED, and a wave that merely avoids the ground states nothing.
+        if (sub == 0 && !holds_declared_seventh &&
+            (plan.seventh || !isConsonantIc(wave_midi - static_cast<int>(plan.ground_pc)))) {
           const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
           const int cur_midi = degreeToMidi(degree, mode);
           int best_midi = cur_midi;
