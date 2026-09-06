@@ -33,6 +33,7 @@ set(BACH_COMPOSER_SOURCES
   figuration.cpp
   figuration_palette.cpp
   harness_fixture.cpp
+  harness_phase_spec.cpp
   form_director.cpp
   form_ground_variations.cpp
   form_linear.cpp
