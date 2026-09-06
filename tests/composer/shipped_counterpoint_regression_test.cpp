@@ -680,7 +680,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // quarters moves three times inside a bar, so the cadential suspension that
     // rewrites one of those tones after the scrub has passed it re-reads the
     // beat-grain reference rather than the bar head it would otherwise inherit.
-    {FormType::Passacaglia, 0, 0, 56, 65, 13, 0, 3, 3, 1, 27735},
+    // Its counter figuration's beat anchor is displaced off a contrary octave
+    // arrival as well as off a same-direction one, but only toward a tone free
+    // of every approach fault -- the relaxing pass that accepts a hidden perfect
+    // stays reserved for stepping off a true parallel, because this anchor is
+    // load-bearing and every off-beat tone of its beat derives from it. Both
+    // strict columns stay empty with it in, and the hidden and contrary columns
+    // fall alongside the battuta rather than paying for it; the one figure that
+    // rises is a single configuration's contrary count.
+    {FormType::Passacaglia, 0, 0, 48, 26, 12, 0, 3, 1, 2, 27792},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
