@@ -556,30 +556,30 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   // fully clean tier, which is how a beat anchor comes to answer a rising line
   // by leaping down onto the octave it just left.
   //
-  // The tier applies on the downbeat only. That is where the arrivals are --
-  // the harmony turns at the bar line and the bass moves by a fourth or a fifth
-  // into it -- and it is also the only onset this selector holds to the chord,
-  // so it has the fewest candidates and is where the contrary repeat is most
-  // likely to be the last tone standing. Off the downbeat the whole scale is
-  // admissible and the selector already has room; ranking there displaces
-  // anchors that had a choice, and an anchor is the register the bars after it
-  // start from, so the displacement surfaces later as bar heads with no
-  // playable chord tone left. Measured over the figurated forms that is a loss
-  // rather than a wash: the off-downbeat half removes more contrary arrivals
-  // than the downbeat half does, and pays for them by nearly doubling how often
-  // a bar head has to leave its chord entirely.
+  // Every onset ranks the contrary repeat, but what an onset will PAY to avoid
+  // one depends on where it falls, so the tier sits on a different rung of the
+  // chain below.
   //
-  // The tier also sits BELOW the parallel-free escape, and that placement is
-  // what makes it reach anything. On a bar head the chord offers three pitch
-  // classes and a sounding theme tone routinely leaves exactly one of them
-  // consonant, so the contrary repeat is not one candidate among several -- it
-  // is the whole consonant set, and a tier above the escape would return it
-  // every time. Below the escape the anchor takes the diatonic tone that brushes
-  // the theme instead. That is a real trade and it is paid in the dissonance the
-  // corpus counterpoint model has no component for, so it was measured on its
-  // own terms: over the whole sweep the share of beat onsets carrying a sounding
-  // second, seventh or tritone moves by less than a fifth of a percentage point,
-  // against a contrary column that falls by well over half.
+  // On the downbeat it sits BELOW the parallel-free escape, and that placement
+  // is what makes it reach anything. A bar head is the only onset this selector
+  // holds to the chord: three pitch classes, and a sounding theme tone routinely
+  // leaves exactly one of them consonant, so the contrary repeat is not one
+  // candidate among several -- it is the whole consonant set, and a tier above
+  // the escape would return it every time. Below the escape the anchor takes the
+  // diatonic tone that brushes the theme instead. That is a real trade and it is
+  // paid in the dissonance the corpus counterpoint model has no component for,
+  // so it was measured on its own terms: over the whole sweep the share of beat
+  // onsets carrying a sounding second, seventh or tritone moves by less than a
+  // fifth of a percentage point, against a contrary column that falls by well
+  // over half.
+  //
+  // Off the downbeat it sits ABOVE the escape instead. The whole scale is
+  // admissible there, so demoting the contrary repeat below a clean tone costs
+  // nothing when one exists and the tier is pure gain; but letting it fall past
+  // the escape would send an anchor off the chord for a fault that only ever
+  // arises when the chord is already spent -- and an anchor is the register the
+  // bars after it start from, so that displacement surfaces later as bar heads
+  // with no playable chord tone left.
   int consonant_anti = -1;
   int consonant_anti_key = 1 << 20;
   int free_any = -1;  // parallel-free, mildest clash profile (second).
@@ -653,7 +653,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
             consonant_battuta_key = key;
             consonant_battuta = pitch;
           }
-        } else if (downbeat && is_anti_parallel(pitch)) {
+        } else if (is_anti_parallel(pitch)) {
           if (key < consonant_anti_key) {
             consonant_anti_key = key;
             consonant_anti = pitch;
@@ -691,6 +691,9 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   }
   if (consonant_battuta >= 0) {
     return consonant_battuta;
+  }
+  if (!downbeat && consonant_anti >= 0) {
+    return consonant_anti;
   }
   // Tier order between "parallel-free but clashing" and "consonant but
   // parallel" is a per-form contract: fugue-family figuration prefers the
