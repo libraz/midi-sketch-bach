@@ -221,29 +221,50 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
       report.failures.push_back(failure);
     }
   };
+  // The cycle rather than the replay period is what this check reads. A ground
+  // that states its cycle on a different surface each time it returns declares
+  // the whole line and is laid down once, so its period is the piece; reading
+  // that period here would compare every bar head only with itself and the rule
+  // would stop saying anything about the return. The cycle keeps each statement
+  // measured against the first one. A declaration that is one cycle leaves the
+  // field at zero and falls back to its period, which is the same tick count.
+  const auto groundCycle = [](Tick cycle, Tick period) { return cycle > 0 ? cycle : period; };
   // Solo String Arch (BWV1004 Chaconne).
-  checkImmutableGround(material.ground_bass, material.ground_bass_period,
+  checkImmutableGround(material.ground_bass,
+                       groundCycle(material.ground_bass_cycle, material.ground_bass_period),
                        RuleBit::GroundBassReplayed, "ground_bass_immutable");
   // Organ Passacaglia.
-  checkImmutableGround(material.passacaglia_ground, material.passacaglia_ground_period,
-                       RuleBit::PassacagliaGroundReplayed, "passacaglia_ground_immutable");
-  // Goldberg's compressed aria-bass phrase is a dedicated 32-tone declaration,
-  // not a passacaglia bar-head ground. Every declared onset/duration/pitch must
-  // recur exactly in every four-bar variation block. A terminal CodaCarrier
-  // may replace the final bar with a tonic cadence; that explicit extension is
-  // outside the immutable aria-bass declaration.
+  checkImmutableGround(
+      material.passacaglia_ground,
+      groundCycle(material.passacaglia_ground_cycle, material.passacaglia_ground_period),
+      RuleBit::PassacagliaGroundReplayed, "passacaglia_ground_immutable");
+  // Goldberg's aria bass takes the same bar-head skeleton check. The exact
+  // onset/duration/pitch match below says the declared line reaches the output
+  // unchanged; this says the cycle under that line still comes back.
+  checkImmutableGround(
+      material.goldberg_aria_bass,
+      groundCycle(material.goldberg_aria_bass_cycle, material.goldberg_aria_bass_period),
+      RuleBit::GoldbergBassReplayed, "goldberg_aria_bass_immutable");
+  // Goldberg's aria bass is a dedicated declaration, not a passacaglia bar-head
+  // ground: every declared onset/duration/pitch must be emitted exactly. A
+  // terminal CodaCarrier may replace the ground's last return with a tonic
+  // cadence, so a CodaCommitted note inside the score's final period ends the
+  // immutable region there. When the period is not shorter than the score there
+  // is no trailing return to give up -- the line is declared right up to the
+  // coda -- so nothing is exempt, and a coda tone earlier in the piece must not
+  // be able to shorten what this rule reads.
   if (!material.goldberg_aria_bass.empty() && material.goldberg_aria_bass_period > 0) {
     Tick score_end = 0;
     for (const auto& note : notes)
       score_end = std::max(score_end, note.start_tick + note.duration);
     Tick immutable_end = score_end;
-    const Tick terminal_window = score_end > material.goldberg_aria_bass_period
-                                     ? score_end - material.goldberg_aria_bass_period
-                                     : 0;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-      if (notes[i].start_tick >= terminal_window &&
-          hasRuleBit(provenance, i, RuleBit::CodaCommitted)) {
-        immutable_end = std::min(immutable_end, notes[i].start_tick);
+    if (score_end > material.goldberg_aria_bass_period) {
+      const Tick terminal_window = score_end - material.goldberg_aria_bass_period;
+      for (std::size_t i = 0; i < notes.size(); ++i) {
+        if (notes[i].start_tick >= terminal_window &&
+            hasRuleBit(provenance, i, RuleBit::CodaCommitted)) {
+          immutable_end = std::min(immutable_end, notes[i].start_tick);
+        }
       }
     }
     bool any = false;

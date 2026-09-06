@@ -603,6 +603,13 @@ struct Material {
   // tiled every `ground_bass_period` ticks. `variations` feed VariationCarrier.
   std::vector<MaterialNote> ground_bass;
   Tick ground_bass_period = 0;
+  // How often the ground's harmonic cycle comes back, which is not always how
+  // often the declaration is laid down: a declaration that states the cycle on
+  // a different surface each time it returns spans the whole line and is
+  // replayed once, while its skeleton still returns every cycle. The replay
+  // needs the period; only the immutability rule needs the cycle. 0 = the
+  // declaration is one cycle, so the two are the same.
+  Tick ground_bass_cycle = 0;
   std::vector<VariationDecl> variations;
   // Organ Prelude (free sectional form). Populated only by the OrganPrelude
   // organ-prelude fixture. Each section is replayed verbatim by a
@@ -640,6 +647,7 @@ struct Material {
   // change, so the bar-head skeleton stays immutable.
   std::vector<MaterialNote> passacaglia_ground;  // immutable 8-bar bass, cycle-relative ticks.
   Tick passacaglia_ground_period = 0;
+  Tick passacaglia_ground_cycle = 0;  // see ground_bass_cycle.
   Tick passacaglia_ground_split_from = 0;
   std::vector<PassacagliaVariation> passacaglia_variations;
   // Goldberg Variations. This is deliberately separate from Passacaglia:
@@ -647,6 +655,7 @@ struct Material {
   // is mapped unchanged through aria, 30 variation slots, and da capo.
   std::vector<MaterialNote> goldberg_aria_bass;
   Tick goldberg_aria_bass_period = 0;
+  Tick goldberg_aria_bass_cycle = 0;  // see ground_bass_cycle.
   std::vector<PassacagliaVariation> goldberg_variations;
   std::vector<MaterialNote> goldberg_inner_voice;
   // Organ Trio Sonata. The (up to three) independent voice lines of a trio
