@@ -1843,10 +1843,21 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // descent would clamp into band-edge plateaus, so wide head intervals
       // keep their pitch-class contour an octave closer.
       constexpr std::array<int, 13> kSemisToDegrees = {0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6, 7};
+      // A returning episode spins the NEXT four-note limb of the subject, the
+      // limbs taken in order and wrapping after the fourth, so the fourth
+      // episode is a fresh Fortspinnung on a fresh segment of the theme rather
+      // than the opening limb stated over again. Restating the same limb is not
+      // fixable by transposing the return: the model is nine diatonic degrees
+      // deep in a V0 band ten degrees wide, so it has exactly two positions,
+      // and the stride ladder inside every episode already steps through both
+      // -- any transposed return would land on a rung an earlier episode had
+      // just stated. Intervals are measured against the limb's OWN first note,
+      // so each limb still opens the model on its stride's chord tone.
+      const int limb_base = 4 * (cycle % (kSubjectNotes / 4));
       std::array<int, 4> head_deg{};
       for (int note = 0; note < 4; ++note) {
-        const int rel = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) -
-                        static_cast<int>(subj_pat[0]);
+        const int rel = static_cast<int>(subj_pat[static_cast<std::size_t>(limb_base + note)]) -
+                        static_cast<int>(subj_pat[static_cast<std::size_t>(limb_base)]);
         const int degrees = kSemisToDegrees[static_cast<std::size_t>(std::min(std::abs(rel), 12))];
         int folded = (rel >= 0) ? degrees : -degrees;
         while (folded > 3) {
@@ -1861,8 +1872,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // is the downbeat-facing part that the accompaniment is pre-voiced
       // against; replacing it with a countersubject/inversion raised the
       // score-level vertical-dissonance rate. The closing turn rotates among
-      // three contours instead, so episodes remain distinct without breaking
-      // their chord-tone-oriented opening.
+      // three contours, so consecutive episodes part company at their close as
+      // well as at their subject limb.
       const int episode_model = cycle % 3;
       // 2-bar Fortspinnung model: the head (the only leaps in the model --
       // they ARE the motif) in eighths, a sixteenth Spielfigur descent to the
@@ -2048,9 +2059,15 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   const int coda_start = first_bar + bars - coda_bars;  // absolute first coda bar.
   Tick coda_cursor = barTick(coda_start);
   const Tick coda_subject_end = barTick(coda_start + 2);
+  // The final entry is a peroration, not a reprise of the opening bars: it
+  // states the head of the subject in AUGMENTATION, at double note values, so
+  // the theme broadens as it arrives home instead of returning note for note as
+  // the exposition first sounded it. Two bars of doubled values reach the head
+  // only, which is what makes the close weighty rather than hurried.
+  constexpr Tick kCodaAugmentation = 2;
   for (int note = 0; note < kSubjectNotes && coda_cursor < coda_subject_end; ++note) {
-    const Tick dur =
-        std::min(subj_rhythm[static_cast<std::size_t>(note)], coda_subject_end - coda_cursor);
+    const Tick full = subj_rhythm[static_cast<std::size_t>(note)] * kCodaAugmentation;
+    const Tick dur = std::min(full, coda_subject_end - coda_cursor);
     // addNote clamps the pitch into [0,127]; record the identical clamped value
     // into theme_tones so the V1/V2 figuration anchors below can see the V0
     // subject head and stay consonant / parallel-free against it.
@@ -2058,7 +2075,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         std::clamp(static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + v0_off, 0, 127);
     addNote(out.material.subject, coda_cursor, dur, pitch);
     asm_ctx.theme_tones.record(coda_cursor, 0, pitch, dur);
-    coda_cursor += subj_rhythm[static_cast<std::size_t>(note)];
+    coda_cursor += full;
   }
   pushSpan(asm_ctx, 0, coda_start, coda_start + 1, VoiceIntent::SubjectCarrier);
   // V1 alto support keeps the three-voice texture through the final entry; placed
