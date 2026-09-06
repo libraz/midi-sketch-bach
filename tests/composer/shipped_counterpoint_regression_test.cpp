@@ -623,22 +623,25 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // hidden perfect below a true one it steps onto the hidden approach rather
     // than keep the parallel it began with.
     //
-    // That pedal now also ranks the contrary-motion octave arrival ABOVE the
-    // hidden perfect, inverting for this one voice the order the rest of the
-    // product uses, and the two columns below are the result. The reason is a
-    // per-work measurement rather than a sweep-wide ratio: read one piece at a
-    // time against the reference corpus's three-voice group, this form was
-    // several times over the rate any of those works reach on the contrary
-    // arrival while sitting near the middle of the same distribution on the
-    // hidden perfect. The pedal's band spans a thirteenth and a triad puts three
-    // tones in it, so that guard is choosing between faults far more often than
-    // it is finding a clean tone -- which makes the order it chooses by the thing
-    // that decides this form's profile, and spending the class with room to buy
-    // back the class without it the wrong way round. The hidden ceiling is
-    // deliberately loosened for it. Where the pedal was not making that trade
-    // the output is byte-identical, so the loosening buys the arrivals and
+    // That pedal ranks the battuta ABOVE the hidden perfect, inverting for this
+    // one voice the order the rest of the product uses, and the hidden ceiling
+    // here is deliberately loosened for it. Its band spans a thirteenth and a
+    // triad puts three tones in it, so the guard is choosing between faults far
+    // more often than it is finding a clean tone, which makes the order it
+    // chooses by the thing that decides this form's profile. The reference
+    // corpus does not settle which way the two should sit: measured across every
+    // character, mode and seed, the sign of the comparison changes with which
+    // stratum of the same repertoire is read, so the order stands on the ranking
+    // argument rather than a measurement. Where the pedal was not making the
+    // trade the output is byte-identical, so the loosening buys the arrivals and
     // nothing else.
-    {FormType::TrioSonata, 0, 0, 279, 33, 10, 0, 8, 3, 3, 34770},
+    //
+    // The contrary repeat -- leaving a perfect interval and reaching the same
+    // one again the other way round -- is the one class the corpus is not
+    // divided about, and the pedal now ranks it at the bottom of what it will
+    // pay rather than the first thing it reaches for. That column goes to zero
+    // and stays there; the two payable columns take a few arrivals each for it.
+    {FormType::TrioSonata, 0, 0, 283, 35, 0, 0, 8, 3, 0, 34770},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
