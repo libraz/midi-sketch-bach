@@ -1286,37 +1286,6 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     return worst;
   };
 
-  // A tone the bar's chord does not contain may still sound against the manuals
-  // if it is passed through: stepped into from the tone before it and stepped
-  // out of into the tone after. That is the walking bass's own figure, and it is
-  // the only shape in which this voice may sound a second or a seventh against a
-  // manual. The departure is read from the design array rather than from what
-  // ships, which is what the following beat will be asked to place; a later
-  // displacement of that beat can only move it to another chord tone, and the
-  // downbeat it may instead be measured against never moves at all.
-  const auto pedal_passing = [](int cand, int beat, int prev, const int(&design)[4],
-                                int next_design) {
-    if (prev < 0 || std::abs(cand - prev) > 2)
-      return false;
-    const int next = (beat < 3) ? design[beat + 1] : next_design;
-    return next >= 0 && std::abs(next - cand) <= 2;
-  };
-
-  // Vertical test for a pedal tone that is not a chord tone of the bar, used to
-  // decide whether it may be reached by leap. A tone failing it may still be
-  // stepped through as a passing tone.
-  const auto pedal_bass_consonant = [&](int cand, Tick t) {
-    for (const TrioVoiceLine& manual : out.material.trio_voices) {
-      const int curr = upper_sounding(manual.notes, t);
-      if (curr < 0)
-        continue;
-      const int ivc = (((curr - cand) % 12) + 12) % 12;
-      if (!isConsonantIc(ivc))
-        return false;
-    }
-    return true;
-  };
-
   // Onsets where the pedal ran out of room: its band spans a thirteenth and a
   // triad puts exactly three tones in it, so a bar can arrive where all three
   // read as a true parallel against one manual or the other and the design tone
@@ -1435,10 +1404,20 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           // passing tone in a walking bass is idiomatic here in a way a
           // displaced root is not, so the widening is worth its harmonic cost.
           //
-          // A borrowed tone reached without a step on either side must be
-          // consonant against every manual sounding over it; one that is not may
-          // still be passed through. Nearest to the design tone first, so the
-          // walk moves as little as the fault allows.
+          // The borrowed tone is not held to consonance against the manuals.
+          // Requiring it kept nearly the whole fault: the onsets where the chord
+          // is spent are the same onsets where a manual is sounding across the
+          // beat, so the tone that would have been clean is usually the one that
+          // brushes it. What that requirement bought was measured on the axis it
+          // trades into -- the share of beat onsets carrying a sounding second,
+          // seventh or tritone -- and without the requirement this voice still
+          // runs at about half the rate of the sparest three-voice organ work in
+          // the reference corpus, and well inside the ceiling the form's own
+          // vertical test holds it to.
+          // The perfect approach is the fault the corpus is strict about; the
+          // passing second is one it writes constantly in the same texture.
+          // Nearest to the design tone first, so the walk moves as little as the
+          // fault allows.
           //
           // Neither end of a borrowed tone may be a leap. The design tones are
           // the ones entitled to travel -- they are the chord, and the bar
@@ -1458,9 +1437,6 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
               if (cand < kPedalFloor || cand > kPedalCeil)
                 continue;
               if (!detail::inScale(cand, mode) || !walkable(cand))
-                continue;
-              if (!pedal_bass_consonant(cand, t) &&
-                  !pedal_passing(cand, beat, pedal_prev, beat_pitch, next_root))
                 continue;
               if (beat_rank(cand) <= accept) {
                 pitch = cand;
