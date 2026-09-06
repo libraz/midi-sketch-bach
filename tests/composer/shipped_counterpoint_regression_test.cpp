@@ -1300,7 +1300,24 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // onsets the decorations add. Its ground is short enough that a statement
     // returns four times in a piece, so the rotation of figures is heard as a
     // rotation rather than as four unrelated bars.
-    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7644, 31},
+    //
+    // The form ships three voices now: a middle line between the variation and
+    // the ground, realising the harmony the ground implies. It withdraws from
+    // any statement whose register leaves it no clean room, so it sounds around
+    // two thirds of the time rather than always. The floor rises by half again,
+    // which is the new line's own successions.
+    //
+    // Every perfect-motion column holds exactly where it was, and the fourths
+    // are the one that moves. A line sitting between a running variation and the
+    // ground sounds fourths over that ground, and the tone selector it shares
+    // with the passacaglia reads a consonance table that admits the fourth --
+    // correct between upper voices, wrong against a bass. Excluding the fourth
+    // there was tried and rejected on measurement: as a filter rather than a
+    // ranking it pushed the line onto tones that were worse, taking this column
+    // to 55 and the passacaglia's contrary repeats from 5 to 14. The column is
+    // pinned at what a three-voice chaconne actually costs until that selector
+    // ranks rather than filters.
+    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 18698, 48},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1339,7 +1356,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // was one, and hidden falls by a third: the returns no longer arrive at the
     // same approach from the same rhythmic place four times over. Both contrary
     // columns hold, and every cardinal column stays at zero.
-    {FormType::GoldbergVariations, 0, 0, 8, 8, 8, 0, 1, 1, 1, 17919, 0},
+    //
+    // The middle voice now sounds through the figuration blocks as well as the
+    // canons, so the set is heard in three voices rather than as a two-voice
+    // loop. It states one chord tone of the bar per bar and never moves faster
+    // than the half note, and it withdraws for the aria, the da capo and the
+    // block before every imitative one. The floor rises by two thirds, which is
+    // that line's own successions.
+    //
+    // The fourths stay at zero, which is worth reading: the line takes chord
+    // tones of a bar whose root the bass is already stating, so the third and
+    // the fifth are what it has to choose from and neither is a fourth over
+    // that root. Battuta triples and its worst cell doubles -- a held tone
+    // approached from above arrives contrary by definition, and this line is
+    // held tones almost throughout. Hidden moves by one.
+    {FormType::GoldbergVariations, 0, 0, 9, 25, 8, 0, 1, 2, 1, 29028, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
