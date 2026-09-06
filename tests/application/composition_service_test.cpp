@@ -757,5 +757,104 @@ TEST(CompositionServiceTest, GeneratedJsonCarriesPerPieceWaveVetoCounters) {
   EXPECT_EQ(second.final_validation.wave_veto.total(), total);
 }
 
+// The composed piece for one request, or an empty vector when the form refuses
+// the character outright.
+std::vector<NoteEvent> composedNotes(FormType form, SubjectCharacter character, Key key, bool minor,
+                                     std::uint32_t seed) {
+  CompositionRequest request;
+  request.form = form;
+  request.key = {key, minor};
+  request.character = character;
+  request.scale = DurationScale::Short;
+  request.bpm = 100;
+  request.seed = seed;
+  CompositionProduct product;
+  if (compose(request, &product) != CompositionStatus::Ok)
+    return {};
+  return std::move(product.composition.notes);
+}
+
+// Whether two pieces are the same music as notated: same tones, entering at the
+// same places in the same voices. Duration is deliberately out of the
+// comparison. The touch shortens every note by a character-dependent amount, so
+// including it would make any two characters differ whatever the composer wrote
+// -- the question here is whether the character reached the notes.
+bool sameNotatedTones(const std::vector<NoteEvent>& lhs, const std::vector<NoteEvent>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  for (std::size_t idx = 0; idx < lhs.size(); ++idx) {
+    if (lhs[idx].start_tick != rhs[idx].start_tick || lhs[idx].pitch != rhs[idx].pitch ||
+        lhs[idx].voice != rhs[idx].voice) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A character the form accepts must change the notes. Accepting a character and
+// then composing the identical piece is the worst of the three outcomes: the
+// request was honoured on paper and discarded in the output. A form that cannot
+// differentiate a character refuses it instead, which the caller can see in the
+// status. Read on the composed product, not on the composer's own result: the
+// ornament pass is part of the piece and carries some of the differentiation.
+//
+// The three forms below are the open exceptions, each for the same reason: they
+// derive their figuration from a palette walked by a seed rotation, and the
+// levers that would let a character walk that palette differently move their
+// counterpoint ceilings the wrong way. Their gap is pinned rather than waived --
+// the check below fails if one of them starts separating its characters, so the
+// exception cannot outlive its cause.
+TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
+  constexpr std::array<FormType, 10> kAllForms = {{
+      FormType::Fugue,
+      FormType::PreludeAndFugue,
+      FormType::TrioSonata,
+      FormType::ChoralePrelude,
+      FormType::ToccataAndFugue,
+      FormType::Passacaglia,
+      FormType::FantasiaAndFugue,
+      FormType::CelloPrelude,
+      FormType::Chaconne,
+      FormType::GoldbergVariations,
+  }};
+  constexpr std::array<SubjectCharacter, 4> kCharacters = {
+      {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+       SubjectCharacter::Restless}};
+  const auto is_open_gap = [](FormType form) {
+    return form == FormType::Passacaglia || form == FormType::Chaconne ||
+           form == FormType::GoldbergVariations;
+  };
+  for (FormType form : kAllForms) {
+    bool saw_identical_pair = false;
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed : {1u, 2u, 7u, 42u}) {
+        std::array<std::vector<NoteEvent>, 4> streams;
+        for (std::size_t idx = 0; idx < kCharacters.size(); ++idx)
+          streams[idx] = composedNotes(form, kCharacters[idx], Key::C, minor, seed);
+        for (std::size_t lhs = 0; lhs < kCharacters.size(); ++lhs) {
+          if (streams[lhs].empty())
+            continue;
+          for (std::size_t rhs = lhs + 1; rhs < kCharacters.size(); ++rhs) {
+            if (streams[rhs].empty())
+              continue;
+            if (!sameNotatedTones(streams[lhs], streams[rhs]))
+              continue;
+            saw_identical_pair = true;
+            EXPECT_TRUE(is_open_gap(form))
+                << "form " << static_cast<int>(form) << ", minor=" << minor << ", seed=" << seed
+                << ", " << subjectCharacterToString(kCharacters[lhs])
+                << " == " << subjectCharacterToString(kCharacters[rhs]);
+          }
+        }
+      }
+    }
+    if (is_open_gap(form)) {
+      EXPECT_TRUE(saw_identical_pair)
+          << "form " << static_cast<int>(form)
+          << " now separates every character it accepts; drop it from the open-gap list";
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach::application
