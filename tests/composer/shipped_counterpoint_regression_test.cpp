@@ -801,7 +801,23 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The floor falls by a few dozen successions because a re-spelled tone
     // sometimes lands on the pitch its neighbour already sounds, and a repeat
     // is one onset where there were two.
-    {FormType::Fugue, 0, 0, 66, 99, 7, 0, 3, 4, 1, 79742, 216},
+    //
+    // Two returns are now stated differently from the material they return to.
+    // A returning episode spins the next four-note limb of the subject instead
+    // of the opening one, and the final entry states the head in augmentation
+    // rather than replaying the exposition's first bars note for note. The
+    // floor drops by about a thousand successions, and that fall is the
+    // augmentation itself: doubled note values are half as many onsets, so the
+    // coda offers fewer pairs to examine. Battuta and the unresolved fourths
+    // fall well past what that loss accounts for -- a fresh limb opens each
+    // episode on a different chord tone, so the sequences stop arriving at the
+    // same approach four times over. Hidden approaches and the worst hidden
+    // cell rise: a subject tone held twice as long sits across more of the
+    // accompaniment's motion beneath it, and every one of those crossings is a
+    // new pair. The cardinal columns stay at zero and the rate stays an order
+    // of magnitude under the reference corpus, which is what makes the weightier
+    // close worth its approaches.
+    {FormType::Fugue, 0, 0, 78, 78, 7, 0, 4, 4, 1, 78767, 191},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -863,7 +879,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // floor move, and both for the same reason -- a bass tone re-spelled for the
     // area it sounds in resolves its fourth one step later, or lands on the
     // pitch it already sounded and stops being a second onset.
-    {FormType::PreludeAndFugue, 0, 0, 24, 47, 3, 0, 1, 2, 1, 37605, 71},
+    //
+    // The episode and coda devices from the fugue row reach this form's fugue
+    // half too, and here they only give: hidden falls by a fifth, battuta by a
+    // quarter, the fourths with them. The one column that rises is the worst
+    // hidden cell, which is the augmented final entry concentrated into the one
+    // configuration whose coda is longest -- the total fell while its worst cell
+    // rose, so the approaches did not multiply, they gathered. The floor drops
+    // with the doubled note values, as on the fugue.
+    {FormType::PreludeAndFugue, 0, 0, 19, 34, 3, 0, 2, 2, 1, 36621, 69},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1096,7 +1120,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     //
     // The floor falls because a re-spelled tone sometimes lands on the pitch its
     // neighbour already sounds, which merges two onsets into one.
-    {FormType::ToccataAndFugue, 84, 84, 38, 12, 11, 7, 2, 1, 2, 31768, 332},
+    //
+    // Two returns are now stated on a different surface. The free section's
+    // pedal alternates its two densities so a returning pedal tone is not the
+    // same bar twice, and the stretto leader treads a dotted derivation of the
+    // subject rhythm rather than the exposition's own values. The floor rises,
+    // because a struck pedal is two onsets where a held one was one, and the
+    // hidden column falls with the pedal that stops answering the same tone the
+    // same way. The unresolved fourths rise: dotting the leader holds its longer
+    // value across the bass's next move, so a fourth that used to resolve within
+    // the pair now waits for the following one. The doubled line and both
+    // cardinal columns are untouched at 84.
+    {FormType::ToccataAndFugue, 84, 84, 35, 12, 11, 7, 2, 1, 2, 31831, 342},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1143,7 +1178,17 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Byte-identical under the bass ranking: this form's lowest voice is the
     // ground, and the ground is immutable. Its bass-fourth column is pinned at
     // what the ground table itself produces.
-    {FormType::Passacaglia, 0, 0, 48, 23, 5, 0, 3, 1, 1, 27338, 190},
+    // The ground now decorates the last beat of a bar with a diatonic neighbour,
+    // rotating the figure so no two statements come back on the same surface.
+    // Battuta halves: the contrary arrival by downward leap was the bass leaping
+    // from one bar's held tone into the next, and a neighbour on the way out of
+    // the bar turns that leap into a step. The bass repair pass that vets the
+    // voices above now reads the ground at beat grain rather than one tone per
+    // bar, which is what lets it see the decorated tone at all -- at bar grain it
+    // was vetting against a tone the bass had already left. The floor gives up
+    // forty pairs where a decoration is withdrawn for reaching a perfect interval
+    // and the bar falls back to its plain statement.
+    {FormType::Passacaglia, 0, 0, 48, 11, 5, 0, 3, 1, 1, 27298, 190},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1188,7 +1233,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourth is sometimes the one the local key re-spells, so the resolution
     // arrives a step later than the sample window looks. The hidden column moves
     // with the same three tones.
-    {FormType::FantasiaAndFugue, 0, 0, 35, 0, 23, 0, 2, 0, 2, 33409, 501},
+    //
+    // The free-section pedal and the stretto leader now vary their surface on a
+    // return, the same two devices the toccata row describes. This form takes
+    // only gains from them: hidden falls by a sixth, the contrary repeat by one,
+    // and the floor rises with the struck pedal's extra onsets. The fourths hold
+    // exactly where they were, so the dotted leader costs this form nothing --
+    // its bass moves under the leader more often than the toccata's does, and a
+    // fourth that has somewhere to go resolves inside the pair.
+    {FormType::FantasiaAndFugue, 0, 0, 29, 0, 22, 0, 2, 0, 2, 33588, 501},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1204,7 +1257,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // interval over a bass tracking the chord root, so every beat it occupies is
     // a beat the hidden approach had no way to reach. The floor rises by two
     // where a changed anchor restrikes.
-    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7509, 31},
+    // The same decorated returns as the passacaglia row, and this form takes
+    // them for nothing: every fault column holds and the floor rises by the
+    // onsets the decorations add. Its ground is short enough that a statement
+    // returns four times in a piece, so the rotation of figures is heard as a
+    // rotation rather than as four unrelated bars.
+    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7644, 31},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1231,10 +1289,19 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     //
     // Where the ground leaves no canon interval writable against the walking
     // bass the plain triad statement ships instead, for the whole piece: the
-    // aria bass is one period replayed verbatim, so the choice cannot be made
-    // block by block, and a canon whose two voices can clear neither a
-    // crossing nor a true parallel is the harder constraint.
-    {FormType::GoldbergVariations, 0, 0, 12, 8, 8, 0, 1, 1, 1, 15366, 0},
+    // answer follows from the ground alone, so it is settled once and every
+    // reader of the bass agrees, and a canon whose two voices can clear neither
+    // a crossing nor a true parallel is the harder constraint.
+    //
+    // The bass now states its four-bar cycle on a different surface each time it
+    // returns -- plainly in the aria, then dotted, then with its beat heads
+    // re-articulated, then gathering into the canon block -- while the cycle's
+    // pitches and bar heads stay exactly what the aria laid down. The floor
+    // rises by a sixth because re-articulating a tone is two onsets where there
+    // was one, and hidden falls by a third: the returns no longer arrive at the
+    // same approach from the same rhythmic place four times over. Both contrary
+    // columns hold, and every cardinal column stays at zero.
+    {FormType::GoldbergVariations, 0, 0, 8, 8, 8, 0, 1, 1, 1, 17919, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -1450,7 +1517,16 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // and the contrary octave arrival tightens by twenty-five. A longer piece
     // spends more of itself in the home key, because the key areas are anchored
     // to the exposition and the development rather than scaled with the form.
-    {FormType::Fugue, 0, 0, 324, 821, 36, 0, 4, 9, 2, 773362, 2354},
+    //
+    // The varied returns read differently across the lengths than they do at the
+    // natural one. Hidden and the fourths fall here where they rose there,
+    // because a stretched fugue holds more episodes than the subject has limbs,
+    // so the rotation spreads over material that used to repeat many times over
+    // rather than four. What rises is the contrary pair -- battuta, the contrary
+    // repeat, and both their worst cells -- which is the augmented final entry:
+    // one long tone per length, and the longer the piece the more accompaniment
+    // moves beneath it. The floor drops by the onsets that augmentation removes.
+    {FormType::Fugue, 0, 0, 315, 847, 40, 0, 6, 11, 2, 768892, 2293},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1480,7 +1556,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // hundred and eighty, and the contrary octave arrival tightens by seven. The
     // prelude half carries no key area at all, so half of every piece here is
     // untouched however long it runs.
-    {FormType::PreludeAndFugue, 0, 0, 186, 339, 10, 0, 3, 5, 1, 500832, 1103},
+    //
+    // The varied returns take hidden down by a twelfth and battuta by a twentieth
+    // across the lengths, and leave the contrary repeat and every worst cell
+    // where they stood. The fourths are the one column that rises, and by the
+    // same amount the form row's does: the augmented final entry holds its tone
+    // across the bass's next move, so a fourth beneath it waits a pair longer to
+    // resolve. The floor falls with the onsets augmentation removes.
+    {FormType::PreludeAndFugue, 0, 0, 171, 322, 10, 0, 3, 5, 1, 496757, 1194},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
