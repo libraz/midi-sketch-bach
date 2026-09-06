@@ -588,7 +588,15 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           }
           return false;
         };
-        if (anchor_is_parallel(anchor)) {
+        auto anchor_has_battuta = [&](int cand) {
+          for (const ConcurrentMotion& motion : motions) {
+            if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr)) {
+              return true;
+            }
+          }
+          return false;
+        };
+        if (anchor_is_parallel(anchor) || anchor_has_battuta(anchor)) {
           // Two passes over the same candidates. The first demands full
           // parallel-freedom. The second runs only when the anchor is a TRUE
           // parallel and nothing was fully free, and then accepts a hidden
@@ -599,11 +607,14 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           // out for a free tone there keeps the true parallel; taking the
           // hidden one steps off the fault the ear actually tracks.
           //
-          // Battuta is deliberately not ranked in here. This anchor chain is
-          // load-bearing -- every off-beat tone of the beat is derived from it
-          // -- so displacing it reverberates through the whole beat, and moving
-          // it for the mildest of the three approach faults measurably costs
-          // more true parallels downstream than the battutas it removes.
+          // The battuta joins the first pass but not the second. This anchor
+          // chain is load-bearing -- every off-beat tone of the beat derives
+          // from it -- so it is displaced for a contrary arrival only when a
+          // tone free of every approach fault is available; an anchor whose
+          // only fault is the battuta never reaches the relaxing pass, which
+          // stays reserved for stepping off a true parallel. Both strict
+          // columns hold empty across the sweep with it in, and the hidden and
+          // contrary columns fall rather than pay.
           bool displaced = false;
           for (int pass = 0; pass < 2 && !displaced; ++pass) {
             if (pass == 1 && !anchor_is_true_parallel(anchor))
@@ -630,7 +641,8 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                 }
                 if (!consonant)
                   continue;
-                if (pass == 0 ? anchor_is_parallel(cand) : anchor_is_true_parallel(cand))
+                if (pass == 0 ? (anchor_is_parallel(cand) || anchor_has_battuta(cand))
+                              : anchor_is_true_parallel(cand))
                   continue;
                 anchor = cand;
                 displaced = true;
