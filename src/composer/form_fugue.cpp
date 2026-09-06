@@ -2087,13 +2087,17 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 /// here rather than while the span is built, because the boundary's other side
 /// does not exist until every voice is placed.
 ///
-/// Only a TRUE parallel is repaired: the weaker perfect approaches are what a
-/// re-aim over fixed heads trades into, and paying for one with another buys
-/// nothing. The replacement keeps the span's band and its scale, and holds to
-/// the leaps the displaced tone already spanned; it may take a dissonance only
-/// where the tone it replaces was consonant and no consonant tone clears the
-/// parallel, which is the same order of preference the accompaniment's own
-/// anchor guard uses one layer down.
+/// Two classes are repaired, ranked: the TRUE parallel, and the contrary
+/// arrival at the perfect class the pair had just left. The hidden approach is
+/// not among them -- it is what a re-aim over fixed heads trades into, and
+/// paying for one with another buys nothing -- but the contrary arrival does not
+/// belong in that group. The reference corpus writes it far more sparingly than
+/// the hidden approach, and scaled by the spread each class occupies there it
+/// costs several times as much. The replacement keeps the span's band and its
+/// scale, and holds to the leaps the displaced tone already spanned; it may take
+/// a dissonance only where the tone it replaces was consonant and no consonant
+/// tone improves on the fault, which is the same order of preference the
+/// accompaniment's own anchor guard uses one layer down.
 void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
   struct Replacement {
     Tick start = 0;
@@ -2158,17 +2162,33 @@ void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
       continue;  // the voice rests after the span: nothing hands over.
     }
 
-    auto seam_is_parallel = [&](int cand) {
+    // How badly the handover reads, ranked rather than pooled. The true parallel
+    // is the cardinal prohibition; the contrary arrival at the same perfect class
+    // is the next thing down, and the reference corpus prices it at several times
+    // a hidden approach because the works write it far more sparingly. Ranking
+    // the two is what lets a parallel seam still be relieved onto a contrary
+    // arrival -- strictly better than what it replaces -- while a contrary seam
+    // may only be relieved onto a tone free of both. Pooling them would let a
+    // parallel go unrelieved whenever the only escape was a contrary one.
+    constexpr int kSeamClean = 0;
+    constexpr int kSeamAntiParallel = 1;
+    constexpr int kSeamParallel = 2;
+    auto seam_fault = [&](int cand) {
+      int worst = kSeamClean;
       for (VoiceId other = 0; other < kFugueVoices; ++other) {
         if (other == voice)
           continue;
-        if (formsStrictPerfectParallel(cand, own_next, sounding(other, seam - 1),
-                                       sounding(other, seam)))
-          return true;
+        const int other_prev = sounding(other, seam - 1);
+        const int other_curr = sounding(other, seam);
+        if (formsStrictPerfectParallel(cand, own_next, other_prev, other_curr))
+          return kSeamParallel;
+        if (formsAntiParallelPerfect(cand, own_next, other_prev, other_curr))
+          worst = std::max(worst, kSeamAntiParallel);
       }
-      return false;
+      return worst;
     };
-    if (!seam_is_parallel(original)) {
+    const int original_fault = seam_fault(original);
+    if (original_fault == kSeamClean) {
       continue;
     }
 
@@ -2204,7 +2224,7 @@ void relieveFigurationSeams(FugueAssembly& asm_ctx, Mode mode) {
                                        at_tail))
           return false;
       }
-      return !seam_is_parallel(cand);
+      return seam_fault(cand) < original_fault;
     };
 
     const int reach = std::max(entry_ceiling, exit_ceiling);
