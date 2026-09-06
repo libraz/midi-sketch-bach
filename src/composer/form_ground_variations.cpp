@@ -271,8 +271,15 @@ bool formsPerfectMotionAgainst(const std::vector<MaterialNote>& ground,
  * are vetted against a bass that already moves inside the bar. Withdrawing a
  * decoration afterwards only leaves the bass more static under them, and a held
  * tone moves obliquely against everything, so no placement this pass reverts can
- * turn a clean succession into a fault. A withdrawn bar returns to the plain
- * sustained statement.
+ * turn a clean succession into a fault WITHIN the bar. A withdrawn bar returns
+ * to the plain sustained statement.
+ *
+ * That guarantee stops at the bar line. The decoration is the last tone of its
+ * bar, so it is also what the next bar's first onset is heard against; taking it
+ * back changes that reference and can turn a clean seam into a fault. A voice
+ * written over the ground must therefore be vetted against the bar-head
+ * skeleton -- what the bar keeps whether or not its decoration survives -- and
+ * not against the decorated surface.
  *
  * @param ground The emitted ground line, edited in place.
  * @param upper The lines written above it.
@@ -483,6 +490,10 @@ void markCycleDominantSevenths(std::vector<CycleBar>& plan, detail::Mode mode,
 // lifted by the arc raises the floor with it (see the repair's band_lo).
 constexpr int kV0RepairFloor = 60;
 constexpr int kV0RepairCeiling = 91;
+
+// The chaconne coda's dominant bass (G2): the tone the bass steps to on the
+// penultimate bar's closing beat before stating the tonic under the final bar.
+constexpr int kCodaBassDominant = 43;
 
 /// @brief Displace V0 beat onsets that form a moving-ground parallel perfect.
 ///
@@ -718,9 +729,11 @@ int pitchAtBarHead(const std::vector<MaterialNote>& notes, Tick tick) {
 }
 
 // ---------------------------------------------------------------------------
-// Passacaglia-only 3-voice machinery (BWV582 model). The chaconne path is left
-// byte-for-byte unchanged; everything below this banner is reached ONLY from the
-// passacaglia branch of buildGroundVariationForm.
+// Middle-voice machinery. Both ground forms carry a line between the variation
+// and the ground that realises the harmony the ground implies;
+// appendCounterFiguration writes it, and each form supplies its own register
+// band. The passacaglia's three-voice assembly (resolveVoiceSchedule and
+// buildPassacagliaThreeVoice) is reached only from buildPassacagliaForm.
 // ---------------------------------------------------------------------------
 
 // Register band for the passacaglia principal variation (V0): C4-C5 region, well
@@ -750,16 +763,15 @@ constexpr int kPassV1BandHi = 59;  // B3.
  * @param registry Inter-voice read-back (already holds V0 + ground tones).
  * @param block_start Absolute start tick of the cycle.
  * @param cycle_bar_plan Per-bar harmony for the ground cycle.
- * @param register_shift Semitone register lift from the arc.
+ * @param band_lo Lowest pitch the line may take (above every voice under it).
+ * @param band_hi Highest pitch the line may take (below every voice over it).
  * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
  * @param mode Diatonic mode (Major / Minor) selecting the scale.
  */
 void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry& registry,
                              Tick block_start, const std::vector<CycleBar>& cycle_bar_plan,
-                             int register_shift, int notes_per_beat, detail::Mode mode) {
+                             int band_lo, int band_hi, int notes_per_beat, detail::Mode mode) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
-  const int band_lo = kPassV1BandLo + register_shift;
-  const int band_hi = kPassV1BandHi + register_shift;
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
 
   int line_prev = -1;
@@ -1072,6 +1084,274 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       cursor = anchor;
     }
   }
+}
+
+// The chaconne middle voice hangs from its ceiling rather than standing on its
+// floor: the form realises its chords close under the melody, the way a violin
+// stops them, not spread thinly over the bass. The line therefore takes the
+// octave immediately below the variation and only reaches further down when the
+// ground leaves it no room.
+constexpr int kChaconneMiddleSpan = 12;
+
+// A statement leaving less room than this between the variation and the ground
+// stays two-voice. A middle voice confined to three scale tones can only
+// circle them, which reads as a drone rather than as a voice.
+constexpr int kChaconneMiddleMinSpan = 5;
+
+/**
+ * @brief Build the chaconne's middle voice: the line that realises the chords
+ *        the ground implies, one statement at a time.
+ *
+ * The opening statement stays two-voice -- the ground is announced whole under
+ * a plain variation before anything fills the harmony in. It is written after
+ * the variation and the ground, so each beat anchor is chosen against both, and
+ * it subdivides at half the variation's rate: the variation stays the line the
+ * ear follows.
+ *
+ * The band is resolved per statement from the two lines the middle voice has to
+ * fit between, so it tracks the arc's register shifts without a constant of its
+ * own and no onset can cross either neighbour.
+ *
+ * A statement the line cannot take cleanly is left in two voices. The band a
+ * statement offers can be narrow enough that every admissible tone reaches a
+ * perfect interval against the variation, and there the line has no escape: it
+ * holds the fault. A variation set breathes anyway -- a statement stated by the
+ * outer pair alone is one of the form's own textures -- so the line is offered
+ * each statement and withdraws from the ones it cannot sit in.
+ *
+ * @param notes Receives the middle line, appended in time order.
+ * @param variations The variation statements, one per cycle, already final.
+ * @param ground The emitted ground line for the whole piece.
+ * @param cycle_bar_plan Per-bar harmony for one ground statement.
+ * @param variation_notes_per_beat The variation's subdivision, one per cycle.
+ * @param mode Diatonic mode the line is drawn from.
+ * @param out_present Receives, per cycle, whether the middle voice sounds.
+ */
+void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
+                               const std::vector<VariationDecl>& variations,
+                               const std::vector<MaterialNote>& ground,
+                               const std::vector<CycleBar>& cycle_bar_plan,
+                               const std::vector<int>& variation_notes_per_beat, detail::Mode mode,
+                               std::vector<bool>& out_present) {
+  const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
+  const std::size_t cycles = variations.size();
+  out_present.assign(cycles, false);
+  // The variation as one continuous line, so a statement is read against the
+  // tone the variation actually left off on rather than starting blind at its
+  // own first onset.
+  std::vector<MaterialNote> variation_line;
+  for (const VariationDecl& variation : variations)
+    variation_line.insert(variation_line.end(), variation.notes.begin(), variation.notes.end());
+  // The ground's bar-head skeleton: the tone each bar keeps whether or not its
+  // diminution survives the withdrawal pass that runs after this one.
+  std::vector<MaterialNote> structural_ground;
+  for (const MaterialNote& note : ground) {
+    if (note.start_tick % kTicksPerBar34 != 0)
+      continue;
+    MaterialNote bar_tone = note;
+    bar_tone.duration = kTicksPerBar34;
+    structural_ground.push_back(bar_tone);
+  }
+  for (std::size_t cycle = 1; cycle < cycles; ++cycle) {
+    const Tick block_start = static_cast<Tick>(cycle) * period;
+    const Tick block_end = block_start + period;
+    int variation_low = 128;
+    for (const MaterialNote& note : variations[cycle].notes) {
+      if (note.start_tick >= block_start && note.start_tick < block_end)
+        variation_low = std::min(variation_low, static_cast<int>(note.pitch));
+    }
+    // The ground is read with its diminution still in place. The withdrawal
+    // pass runs after this one and only ever replaces a decorating tone with
+    // the structural tone below it, so a ceiling clear of the decorated line is
+    // clear of the plain one too.
+    int ground_high = -1;
+    for (const MaterialNote& note : ground) {
+      if (note.start_tick >= block_start && note.start_tick < block_end)
+        ground_high = std::max(ground_high, static_cast<int>(note.pitch));
+    }
+    if (variation_low > 127 || ground_high < 0)
+      continue;
+    const int band_hi = variation_low - 1;
+    const int band_lo = std::max(ground_high + 1, band_hi - kChaconneMiddleSpan + 1);
+    if (band_hi - band_lo < kChaconneMiddleMinSpan)
+      continue;
+
+    ThemeToneRegistry registry;
+    for (const MaterialNote& note : variations[cycle].notes)
+      registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
+    // The variation's closing tone and the ground's preceding bar: without them
+    // the statement's first beat has no motion to judge and both parallel tests
+    // there pass on an undefined pair.
+    if (!variations[cycle - 1].notes.empty()) {
+      const MaterialNote& tail = variations[cycle - 1].notes.back();
+      registry.record(tail.start_tick, /*voice=*/0, static_cast<int>(tail.pitch), tail.duration);
+    }
+    // The ground is recorded at bar grain -- each bar's structural tone held
+    // through the bar -- rather than at the surface a decorated statement
+    // actually sounds. The withdrawal pass runs after this one and can take a
+    // decoration back; that changes the tone sounding at the end of its bar,
+    // which is the reference the next bar's first onset is heard against. A
+    // line vetted against a decoration that is later withdrawn is left walking
+    // into the structural tone in parallel across the statement seam, so the
+    // reference here is the tone the bar keeps either way.
+    for (const MaterialNote& note : structural_ground) {
+      if (note.start_tick >= block_start - kTicksPerBar34 && note.start_tick < block_end)
+        registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch), note.duration);
+    }
+    const int variation_rate = variation_notes_per_beat[cycle];
+    const std::size_t before = notes.size();
+    appendCounterFiguration(notes, registry, block_start, cycle_bar_plan, band_lo, band_hi,
+                            variation_rate > 1 ? variation_rate / 2 : 1, mode);
+    // Bar by bar, the line is offered the statement and withdraws from what it
+    // cannot hold. A bar is dropped when the line reaches a perfect interval
+    // against either neighbour by a forbidden motion, or when its bar head --
+    // this form's structural arrival, where the chord changes and both outer
+    // lines state it -- meets the variation as a dissonance. Onsets inside a bar
+    // are left to the line's own selector: a passing dissonance between two
+    // running figurations is the style, a dissonant arrival is not.
+    //
+    // The bars are judged in order and a dropped one is removed before the next
+    // is judged, so a fault a bar carried into its successor goes with it. Each
+    // window opens a beat early and closes on the next bar's head: the motions
+    // into a bar's first tone and out of its last are as much successions as the
+    // ones inside it.
+    bool sounds_anywhere = false;
+    for (int bar = 0; bar < cycle_bars; ++bar) {
+      const Tick bar_start = block_start + static_cast<Tick>(bar) * kTicksPerBar34;
+      const Tick bar_end = bar_start + kTicksPerBar34;
+      const Tick from_tick = bar_start >= kTicksPerBeat ? bar_start - kTicksPerBeat : 0;
+      bool drop = formsPerfectMotionAgainst(notes, variation_line, from_tick, bar_end) ||
+                  formsPerfectMotionAgainst(structural_ground, notes, from_tick, bar_end);
+      if (!drop) {
+        const int above = soundingMaterialPitch(variation_line, bar_start);
+        const int head = soundingMaterialPitch(notes, bar_start);
+        drop = above >= 0 && head >= 0 && !isConsonantIc(above - head);
+      }
+      if (!drop) {
+        sounds_anywhere = true;
+        continue;
+      }
+      notes.erase(std::remove_if(notes.begin() + static_cast<std::ptrdiff_t>(before), notes.end(),
+                                 [&](const MaterialNote& note) {
+                                   return note.start_tick >= bar_start && note.start_tick < bar_end;
+                                 }),
+                  notes.end());
+    }
+    out_present[cycle] = sounds_anywhere;
+  }
+}
+
+/**
+ * @brief Land the chaconne's middle voice on the closing cadence.
+ *
+ * The coda replaces the ground's last return: the bass holds its support tone
+ * through the penultimate bar, steps to its dominant on that bar's closing beat
+ * and states the tonic under the final bar. The counter-figuration is written
+ * from the statement's own bar chords, which no longer describe either of
+ * those, so the line stops at the approach beat and states the cadence itself
+ * -- a dominant tone under the variation's own dominant, then the tone that
+ * completes the closing triad. Both are taken under the variation and over the
+ * bass, so the close keeps the register order the rest of the piece holds.
+ *
+ * @param notes The middle line, edited in place.
+ * @param final_variation The closing variation statement.
+ * @param total_bars Bars in the piece.
+ * @param coda_support The bass tone held through the penultimate bar.
+ * @param coda_dominant The bass tone on the penultimate bar's closing beat.
+ * @param coda_tonic The bass tone under the final bar.
+ * @param major_close Whether the closing triad takes a major third.
+ */
+void closeChaconneMiddleVoice(std::vector<MaterialNote>& notes,
+                              const std::vector<MaterialNote>& final_variation, int total_bars,
+                              int coda_support, int coda_dominant, int coda_tonic,
+                              bool major_close) {
+  const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+  const Tick approach_tick = final_bar_tick - kTicksPerBeat;
+  int previous = -1;
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick < approach_tick)
+      previous = static_cast<int>(note.pitch);
+  }
+  if (previous < 0)
+    return;  // the closing statement carries no middle voice to land.
+  notes.erase(
+      std::remove_if(notes.begin(), notes.end(),
+                     [&](const MaterialNote& note) { return note.start_tick >= approach_tick; }),
+      notes.end());
+
+  int variation_prev = -1;
+  for (const MaterialNote& note : final_variation) {
+    if (note.start_tick < approach_tick)
+      variation_prev = static_cast<int>(note.pitch);
+  }
+  const int variation_approach = soundingMaterialPitch(final_variation, approach_tick);
+  const int variation_head = soundingMaterialPitch(final_variation, final_bar_tick);
+  int variation_final = 128;
+  for (const MaterialNote& note : final_variation) {
+    if (note.start_tick >= final_bar_tick)
+      variation_final = std::min(variation_final, static_cast<int>(note.pitch));
+  }
+
+  // Ranked, not filtered: the cadence is stated whatever the register offers,
+  // so a tone is chosen for being the least compromised rather than rejected
+  // for being compromised at all. A true parallel outranks a clash with the
+  // variation, which outranks taking a less characteristic chord tone, which
+  // outranks distance from the tone just sounded.
+  const auto pick = [](const int(&chord_pcs)[3], int floor_excl, int ceiling_incl, int line_prev,
+                       const std::vector<int>& against, int other_prev, int other_curr,
+                       int bass_prev, int bass_curr) {
+    int best = -1;
+    int best_key = 1 << 24;
+    for (int idx = 0; idx < 3; ++idx) {
+      for (int cand = line_prev - 12; cand <= line_prev + 12; ++cand) {
+        if (cand <= floor_excl || cand > ceiling_incl || cand % 12 != chord_pcs[idx])
+          continue;
+        int key = std::abs(cand - line_prev) + idx * (1 << 6);
+        for (const int other : against) {
+          if (other >= 0 && !isConsonantIc(cand - other))
+            key += 1 << 12;
+        }
+        if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr) ||
+            formsStrictPerfectParallel(line_prev, cand, bass_prev, bass_curr))
+          key += 1 << 18;
+        if (key < best_key) {
+          best_key = key;
+          best = cand;
+        }
+      }
+    }
+    return best;
+  };
+
+  // The dominant, third first: the outer pair takes the root and the fifth
+  // between them, so the leading tone is the tone the chord is still missing.
+  static constexpr int kDominantPcs[3] = {11, 2, 7};
+  const int approach_pitch = pick(
+      kDominantPcs, coda_dominant, variation_approach >= 0 ? variation_approach : 127, previous,
+      {variation_approach}, variation_prev, variation_approach, coda_support, coda_dominant);
+  if (approach_pitch < 0)
+    return;
+  MaterialNote approach;
+  approach.start_tick = approach_tick;
+  approach.duration = kTicksPerBeat;
+  approach.pitch = static_cast<std::uint8_t>(approach_pitch);
+  notes.push_back(approach);
+
+  // The closing triad, third first for the same reason: the variation lands on
+  // the tonic over a tonic bass, so the third is what makes the chord a triad.
+  const int tonic_pcs[3] = {major_close ? 4 : 3, 7, 0};
+  const int final_pitch =
+      pick(tonic_pcs, coda_tonic, variation_final <= 127 ? variation_final : 127, approach_pitch,
+           {variation_head, variation_final}, variation_approach, variation_head, coda_dominant,
+           coda_tonic);
+  if (final_pitch < 0)
+    return;
+  MaterialNote last;
+  last.start_tick = final_bar_tick;
+  last.duration = kTicksPerBar34;
+  last.pitch = static_cast<std::uint8_t>(final_pitch);
+  notes.push_back(last);
 }
 
 /**
@@ -1408,7 +1688,8 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int v1_tier = (cycle_tier > 0) ? cycle_tier - 1 : 0;
       const int notes_per_beat = notesPerBeatForTier(v1_tier);
       appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
-                              point.register_shift, notes_per_beat, mode);
+                              kPassV1BandLo + point.register_shift,
+                              kPassV1BandHi + point.register_shift, notes_per_beat, mode);
     }
 
     carry_v0_valid = !v0_notes.empty();
@@ -1708,6 +1989,10 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // variation_role_ornament_constraint stays satisfied. ---
   int previous_v0_bar_head = -1;
   int previous_v0_last = -1;
+  // The variation's subdivision per statement: the middle voice written below
+  // takes half of it, so the variation stays the line the ear follows.
+  std::vector<int> variation_notes_per_beat;
+  variation_notes_per_beat.reserve(static_cast<std::size_t>(cycles));
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
     // Cycle 0 is the sparse Ground-role establishing statement (quarters).
@@ -1719,6 +2004,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
                          climax_idx, mid_wave_idx, climax_tier, prev_wave_tier);
     prev_wave_tier = tier;
     int notes_per_beat = ground_role ? 1 : notesPerBeatForTier(tier);
+    variation_notes_per_beat.push_back(notes_per_beat);
     // Anchor rotation: which chord tone opens each bar's anchor group rotates by
     // (seed + cycle), so consecutive cycles trace different anchor contours.
     const int anchor_rotation =
@@ -1793,10 +2079,9 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
       if (!passacaglia) {
         const Tick approach_tick =
             static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat;
-        // The V1 pair this tone is heard against: the coda's held support tone
+        // The bass pair this tone is heard against: the coda's held support tone
         // moving to its dominant. Both are design values written further below,
         // so they are recomputed here rather than read back.
-        constexpr int kCodaBassDominant = 43;  // G2.
         const int bass_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(
             (total_bars - 2) % static_cast<int>(ground_pitch.size()))]);
         MaterialNote* approach_note = nullptr;
@@ -1980,17 +2265,44 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     }
   }
 
+  // --- V1 middle voice: the line that realises the chords the ground implies,
+  // written after both outer lines so every tone is chosen against them. ---
+  std::vector<bool> middle_present(static_cast<std::size_t>(cycles), false);
+  if (!passacaglia) {
+    std::vector<MaterialNote> middle_notes;
+    appendChaconneMiddleVoice(middle_notes, out.material.variations, ground, cycle_bar_plan,
+                              variation_notes_per_beat, mode, middle_present);
+    if (!out.material.variations.empty()) {
+      closeChaconneMiddleVoice(middle_notes, out.material.variations.back().notes, total_bars,
+                               static_cast<int>(ground_pitch[static_cast<std::size_t>(
+                                   (total_bars - 2) % static_cast<int>(ground_pitch.size()))]),
+                               kCodaBassDominant, static_cast<int>(ground_pitch.front()),
+                               picardy || !minor);
+    }
+    if (!middle_notes.empty()) {
+      TrioVoiceLine middle_line;
+      middle_line.voice = 1;
+      middle_line.manual = 1;  // documentary (Swell): V1 = the middle line.
+      middle_line.notes = std::move(middle_notes);
+      out.material.trio_voices.push_back(std::move(middle_line));
+    }
+  }
+
   {
     std::vector<const std::vector<MaterialNote>*> upper;
     for (const auto& variation : out.material.variations)
       upper.push_back(&variation.notes);
+    for (const TrioVoiceLine& line : out.material.trio_voices)
+      upper.push_back(&line.notes);
     withdrawClashingDiminution(ground, upper, total_bars);
   }
 
-  // --- VoicePlan: V1 ground carrier and V0 variation carrier per cycle. The
-  // chaconne replaces the final ground bar with an explicitly declared coda;
-  // V0 (C4-C5) stays above V1 (C2-C3) so no voice crossing occurs. ---
-  out.voice_plan.num_voices = 2;
+  // --- VoicePlan: V2 ground carrier, V1 middle voice per statement and V0
+  // variation carrier per statement. The chaconne replaces the final ground bar
+  // with an explicitly declared coda; the register order V0 > V1 > V2 holds at
+  // every shared tick, so no voice crossing occurs. ---
+  out.voice_plan.num_voices = passacaglia ? 2 : 3;
+  const VoiceId ground_voice = passacaglia ? 1 : 2;
 
   Span ground_span;
   ground_span.id = 0;
@@ -1999,14 +2311,14 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
   ground_span.end_tick = passacaglia ? static_cast<Tick>(total_bars) * kTicksPerBar34
                                      : final_bar_tick - kTicksPerBar34;
-  ground_span.voice = 1;
+  ground_span.voice = ground_voice;
   ground_span.intent = passacaglia ? VoiceIntent::PassacagliaGround : VoiceIntent::GroundCarrier;
   ground_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
   out.voice_plan.spans.push_back(ground_span);
 
   if (!passacaglia) {
     CodaDecl coda;
-    coda.voice = 1;
+    coda.voice = ground_voice;
     MaterialNote support;
     support.start_tick = final_bar_tick - kTicksPerBar34;
     support.duration = kTicksPerBar34 - kTicksPerBeat;
@@ -2029,7 +2341,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     coda_span.id = static_cast<SpanId>(1 + cycles);
     coda_span.start_tick = support.start_tick;
     coda_span.end_tick = tonic.start_tick + tonic.duration;
-    coda_span.voice = 1;
+    coda_span.voice = ground_voice;
     coda_span.intent = VoiceIntent::CodaCarrier;
     coda_span.subdivision = Subdivision::Quarter;
     out.voice_plan.spans.push_back(coda_span);
@@ -2055,6 +2367,22 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         passacaglia ? VoiceIntent::PassacagliaVariation : VoiceIntent::VariationCarrier;
     var_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
     out.voice_plan.spans.push_back(var_span);
+  }
+
+  // The middle voice's statements, after the ids the ground, the coda and the
+  // variation statements already hold.
+  SpanId next_span_id = static_cast<SpanId>(2 + cycles);
+  for (int cycle = 0; cycle < cycles; ++cycle) {
+    if (!middle_present[static_cast<std::size_t>(cycle)])
+      continue;
+    Span middle_span;
+    middle_span.id = next_span_id++;
+    middle_span.start_tick = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
+    middle_span.end_tick = middle_span.start_tick + period;
+    middle_span.voice = 1;
+    middle_span.intent = VoiceIntent::TrioVoiceCarrier;
+    middle_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
+    out.voice_plan.spans.push_back(middle_span);
   }
 
   return out;

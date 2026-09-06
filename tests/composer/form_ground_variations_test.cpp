@@ -87,11 +87,10 @@ std::uint16_t resolvedBars(FormType form, std::uint16_t target_bars) {
   return resolveBars(form, DurationScale::Short, target_bars);
 }
 
-// The ground bass lives on a different voice per form: the chaconne keeps the
-// 2-voice layout (ground = V1), the passacaglia is the 3-voice uplift (V0
-// principal variation, V1 counter-figuration, V2 = ground).
-VoiceId groundVoice(FormType form) {
-  return form == FormType::Passacaglia ? 2 : 1;
+// Both ground forms are laid out V0 principal variation, V1 middle voice,
+// V2 ground, so the ground is the same voice in either.
+VoiceId groundVoice(FormType) {
+  return 2;
 }
 
 // Collect the ground note pitches (on `ground_voice`) in onset order.
@@ -134,8 +133,8 @@ void expectValidatesOk(FormType form) {
         << " bars " << c.target_bars << " first failure="
         << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
-    // Chaconne keeps the 2-voice layout; the passacaglia is the 3-voice uplift.
-    EXPECT_EQ(fx.voice_plan.num_voices, form == FormType::Passacaglia ? 3 : 2);
+    // Both ground forms realise their harmony in three voices.
+    EXPECT_EQ(fx.voice_plan.num_voices, 3);
     ASSERT_FALSE(r.notes.empty());
   }
 }
@@ -274,7 +273,7 @@ TEST(GroundVariationChaconne, TerminalCadenceResolvesGroundToTonic) {
     const NoteEvent* bass = nullptr;
     const NoteEvent* upper = nullptr;
     for (const auto& note : r.notes) {
-      if (note.voice == 1 && note.start_tick == final_bar)
+      if (note.voice == 2 && note.start_tick == final_bar)
         bass = &note;
       if (note.voice == 0 && note.start_tick <= final_bar + kTicksPerBar34 / 2 &&
           note.start_tick + note.duration > final_bar + kTicksPerBar34 / 2)
@@ -285,7 +284,7 @@ TEST(GroundVariationChaconne, TerminalCadenceResolvesGroundToTonic) {
     EXPECT_EQ(bass->pitch % 12u, 0u);
     bool coda_committed = false;
     for (std::size_t idx = 0; idx < r.notes.size() && idx < r.provenance.size(); ++idx) {
-      if (r.notes[idx].voice == 1 && r.notes[idx].start_tick == final_bar)
+      if (r.notes[idx].voice == 2 && r.notes[idx].start_tick == final_bar)
         coda_committed =
             (r.provenance[idx].satisfied_rules & ruleBitMask(RuleBit::CodaCommitted)).any();
     }
@@ -839,24 +838,78 @@ TEST(GroundVariationPassacaglia, HasNoGroundBarHeadParallelPerfects) {
   expectNoGroundBarHeadParallels(FormType::Passacaglia);
 }
 
-// The 3-voice passacaglia uplift must NOT bleed into the chaconne: the chaconne
-// keeps its 2-voice layout (V0 variation over V1 ground) on every seed/mode/
-// length, so its output stays byte-stable against the passacaglia change.
-TEST(GroundVariationChaconne, StaysTwoVoiceWithGroundOnVoiceOne) {
+// A chaconne is a chordal variation form: the ground carries a progression that
+// wants realising, and two voices cannot state it. Every seed, mode and length
+// therefore ships three voices -- the variation on V0, the middle voice that
+// realises the harmony on V1, the ground on V2 -- and the middle voice sounds
+// for a substantial part of the piece rather than a token entry.
+//
+// The share is bounded rather than pinned exactly: the middle voice withdraws
+// from a statement whose register offers it no fault-free placement, so how much
+// it sounds is a property of the statement, not a constant.
+TEST(GroundVariationChaconne, ShipsThreeVoicesWithASoundingMiddleVoice) {
   for (const Case& c : casesFor(FormType::Chaconne)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
-    EXPECT_EQ(fx.voice_plan.num_voices, 2);
+    EXPECT_EQ(fx.voice_plan.num_voices, 3);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    bool saw_voice_two = false;
-    bool saw_ground_v1 = false;
-    for (const auto& n : r.notes) {
-      if (n.voice >= 2)
-        saw_voice_two = true;
-      if (n.voice == 1)
-        saw_ground_v1 = true;
+    ASSERT_FALSE(r.notes.empty());
+    Tick piece_end = 0;
+    Tick middle_sounding = 0;
+    bool saw_ground_v2 = false;
+    for (const auto& note : r.notes) {
+      piece_end = std::max(piece_end, note.start_tick + note.duration);
+      if (note.voice == 1)
+        middle_sounding += note.duration;
+      if (note.voice == 2)
+        saw_ground_v2 = true;
     }
-    EXPECT_FALSE(saw_voice_two) << "chaconne must not introduce a third voice";
-    EXPECT_TRUE(saw_ground_v1) << "chaconne ground must stay on voice 1";
+    EXPECT_TRUE(saw_ground_v2) << "chaconne ground must sit under both upper voices on voice 2";
+    ASSERT_GT(piece_end, 0);
+    const double share = static_cast<double>(middle_sounding) / static_cast<double>(piece_end);
+    EXPECT_GE(share, 0.25) << "seed " << c.seed << " minor " << c.is_minor << " bars "
+                           << c.target_bars << " middle-voice share " << share;
+    EXPECT_LE(share, 1.0) << "seed " << c.seed << " minor " << c.is_minor << " bars "
+                          << c.target_bars << " middle-voice share " << share;
+  }
+}
+
+// The middle voice must be a voice, not a doubling: it never states the tone
+// either neighbour is stating at the same onset, and it moves less often than
+// the variation above it.
+TEST(GroundVariationChaconne, MiddleVoiceIsNeitherADoublingNorTheBusiestLine) {
+  for (const Case& c : casesFor(FormType::Chaconne)) {
+    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    std::size_t variation_onsets = 0;
+    std::size_t middle_onsets = 0;
+    for (const auto& note : r.notes) {
+      if (note.voice == 0)
+        ++variation_onsets;
+      if (note.voice == 1)
+        ++middle_onsets;
+    }
+    EXPECT_LT(middle_onsets, variation_onsets)
+        << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars;
+    const auto pitch_at = [&r](VoiceId voice, Tick tick) {
+      int pitch = -1;
+      for (const auto& note : r.notes) {
+        if (note.voice == voice && note.start_tick <= tick &&
+            tick < note.start_tick + note.duration)
+          pitch = static_cast<int>(note.pitch);
+      }
+      return pitch;
+    };
+    for (const auto& note : r.notes) {
+      if (note.voice != 1)
+        continue;
+      const int middle = static_cast<int>(note.pitch);
+      const int above = pitch_at(0, note.start_tick);
+      const int below = pitch_at(2, note.start_tick);
+      if (above >= 0)
+        EXPECT_NE(middle, above) << "middle voice doubles the variation at " << note.start_tick;
+      if (below >= 0)
+        EXPECT_NE(middle, below) << "middle voice doubles the ground at " << note.start_tick;
+    }
   }
 }
 
