@@ -622,9 +622,11 @@ TEST(FormCantusChorale, EmbellishedCantusFirmusRepeatedRunBounded) {
 
 // --- Goldberg structural contracts ------------------------------------------
 
-// The 32-tone aria bass tiles exactly with a four-bar period on V2 until the
-// explicit final-bar tonic coda.
-TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
+// The aria bass returns its four-bar harmonic cycle on V2 until the explicit
+// final-bar tonic coda. Every bar of the piece but that last one carries a bass
+// head, and that head is the ground tone the aria itself stated at the same
+// cycle position -- what a return may change is the surface, never the skeleton.
+TEST(FormCantusGoldberg, GroundReturnsItsCycleUntilTheTerminalCoda) {
   for (bool minor : {false, true}) {
     for (std::uint32_t seed : kSeeds) {
       for (std::uint16_t bars : sweepBars(FormType::GoldbergVariations)) {
@@ -635,13 +637,15 @@ TEST(FormCantusGoldberg, GroundTilesExactlyWithFourBarPeriod) {
         std::map<Tick, std::uint8_t> ground;
         for (std::size_t i = 0; i < r.notes.size(); ++i) {
           if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed))
-            ground[r.notes[i].start_tick] = r.notes[i].pitch;
+            ground.emplace(r.notes[i].start_tick, r.notes[i].pitch);
         }
-        ASSERT_EQ(static_cast<int>(ground.size()), (bars - 1) * 8 - 2)
+        // At least the plain eighth-note statement's worth of tones per bar; a
+        // return that re-articulates its tones carries more.
+        ASSERT_GE(static_cast<int>(ground.size()), (bars - 1) * 8 - 2)
             << "minor=" << minor << " seed=" << seed << " bars=" << bars;
-        // The canonical period is the first 4 ground tones; every non-coda bar
-        // must match its period-4 counterpart.
-        ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
+        // The aria (block 0) states the cycle plainly, so its bar heads are the
+        // skeleton every later return must come back to.
+        ASSERT_GE(fx.material.goldberg_aria_bass.size(), 32u);
         for (int bar = 0; bar < bars - 1; ++bar) {
           const auto it = ground.find(static_cast<Tick>(bar) * kTicksPerBar);
           ASSERT_NE(it, ground.end()) << "bar " << bar;
@@ -707,7 +711,7 @@ TEST(FormCantusGoldberg, GroundFollowsSeedVariant) {
     for (std::size_t variant = 0; variant < detail::kGroundVariantCount; ++variant) {
       const HarnessFixture fx = build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe,
                                       0, probe_seed[variant]);
-      ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
+      ASSERT_GE(fx.material.goldberg_aria_bass.size(), 32u);
       const auto& expected =
           minor ? detail::kGoldbergGroundsMinor[variant] : detail::kGoldbergGroundsMajor[variant];
       for (std::size_t bar = 0; bar < 4; ++bar) {

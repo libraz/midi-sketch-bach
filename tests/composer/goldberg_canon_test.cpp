@@ -80,7 +80,9 @@ TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
     EXPECT_TRUE(fx.material.passacaglia_ground.empty());
     EXPECT_TRUE(fx.material.passacaglia_variations.empty());
     EXPECT_TRUE(fx.material.trio_voices.empty());
-    ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
+    // The aria bass is declared as one line covering every bar but the terminal
+    // coda's, so it holds at least the four-bar cycle's worth of tones.
+    ASSERT_GE(fx.material.goldberg_aria_bass.size(), 32u);
 
     // Variation v (1-based) == block v. v % 3 == 0 && v < 30 is a canon.
     for (int v = 1; v <= 30; ++v) {
@@ -317,21 +319,24 @@ TEST(GoldbergCanon, V1SoundsOnlyInCanonAndQuodlibetBlocks) {
   EXPECT_GT(v1_notes, 0) << "the full set must contain canon-follower notes on V1";
 }
 
-// The immutable aria ground (V2) tiles its four-bar period until the final
-// bar, which is deliberately replaced by the terminal tonic coda.
-TEST(GoldbergCanon, GroundTilesExactlyUntilTerminalCoda) {
+// The immutable aria ground (V2) returns its four-bar harmonic cycle bar for bar
+// until the final bar, which is deliberately replaced by the terminal tonic
+// coda. The surface a return is stated on changes; the skeleton under it does
+// not, so every bar head is still the ground tone of its cycle position.
+TEST(GoldbergCanon, GroundReturnsItsCycleUntilTerminalCoda) {
   for (bool minor : {false, true}) {
     const HarnessFixture fx = build(minor, 128, 1);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     std::map<Tick, std::uint8_t> ground;
     for (std::size_t i = 0; i < r.notes.size(); ++i) {
       if (r.provenance[i].satisfied_rules & bit(RuleBit::GoldbergBassReplayed)) {
-        ground[r.notes[i].start_tick] = r.notes[i].pitch;
+        ground.emplace(r.notes[i].start_tick, r.notes[i].pitch);
         EXPECT_EQ(r.notes[i].voice, 2) << "ground must be the lowest voice V2";
       }
     }
-    ASSERT_EQ(static_cast<int>(ground.size()), 127 * 8 - 2) << "minor=" << minor;
-    ASSERT_EQ(fx.material.goldberg_aria_bass.size(), 32u);
+    ASSERT_FALSE(fx.material.goldberg_aria_bass.empty());
+    // The aria states the cycle plainly in the first four bars, so its bar heads
+    // at index (bar % 4) * 8 are the skeleton every later return comes back to.
     for (int bar = 0; bar < 127; ++bar) {
       const auto it = ground.find(static_cast<Tick>(bar) * kTicksPerBar);
       ASSERT_NE(it, ground.end()) << "bar " << bar;
@@ -339,6 +344,27 @@ TEST(GoldbergCanon, GroundTilesExactlyUntilTerminalCoda) {
                 fx.material.goldberg_aria_bass[static_cast<std::size_t>(bar % 4) * 8].pitch)
           << "minor=" << minor << " bar " << bar;
     }
+  }
+}
+
+// A return of the aria bass is not a byte copy of the statement four bars
+// earlier: consecutive four-bar blocks are laid out on different surfaces, so
+// the same cycle position comes back articulated differently.
+TEST(GoldbergCanon, ConsecutiveGroundReturnsDifferInSurface) {
+  const HarnessFixture fx = build(false, 128, 1);
+  auto bar_signature = [&](int bar) {
+    std::vector<std::array<Tick, 3>> shape;
+    const Tick start = static_cast<Tick>(bar) * kTicksPerBar;
+    for (const auto& note : fx.material.goldberg_aria_bass) {
+      if (note.start_tick >= start && note.start_tick < start + kTicksPerBar) {
+        shape.push_back({note.start_tick - start, note.duration, static_cast<Tick>(note.pitch)});
+      }
+    }
+    return shape;
+  };
+  for (int bar = 0; bar + 4 < 127; bar += 4) {
+    EXPECT_NE(bar_signature(bar), bar_signature(bar + 4))
+        << "bars " << bar << " and " << (bar + 4) << " state the cycle identically";
   }
 }
 

@@ -98,6 +98,9 @@ BarChord goldbergBarChord(std::uint8_t ground_pitch, Mode mode) {
 // `fill_thirds` is settled once for the whole piece from the ground itself, so
 // every reader of this shape sees the same bass.
 constexpr Tick kAriaBassUnit = kTicksPerBeat / 2;
+// The finest the aria bass ever moves: a return may dot or re-articulate its
+// tones, which halves the eighth the skeleton is written on.
+constexpr Tick kAriaBassFinestUnit = kTicksPerBeat / 4;
 std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds) {
   const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
   const int third = root + (chord.minor ? 3 : 4);
@@ -115,6 +118,87 @@ std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds) {
   if (fill <= root || fill >= third)
     return plain;
   return {root, fill, third, fill, root, fifth, third, root};
+}
+
+// The surface one four-bar statement of the aria bass is laid out on.
+//
+// A variation set holds its harmonic skeleton still and varies only the surface,
+// so a return states the same eight tones in the same order under the same bar
+// chord and departs from the statement before it in exactly one respect: how the
+// tones are spread through the bar, or how densely each is articulated. No
+// departure moves a tone to another octave -- the bass already sits on the floor
+// of the compass, and carrying it up an octave would put it through the canon
+// follower, whose band is fixed by the imitation interval.
+enum class AriaBassSurface {
+  Plain,          // eight equal eighths: the statement every return answers to
+  Dotted,         // rhythm: long-short inside each beat
+  PulsedAccents,  // density: the beat-head tones re-articulated as sixteenths
+  Gathering,      // rhythm: each half-bar accelerates into the next
+};
+
+// The departures the returns rotate through. The aria itself and its da capo
+// state the bass plainly -- the aria returns as it began -- so no departure is
+// ever the plain statement and a return can never meet the aria's own surface.
+//
+// Deliberately a short list, and reused rather than extended. A set whose bass
+// wore a fresh surface on every cycle would not be varying anything: what the
+// ear follows through a variation set is one bass recognised again under a
+// treatment it has heard before, so the departures come back around.
+constexpr std::array<AriaBassSurface, 3> kAriaBassDepartures = {
+    {AriaBassSurface::Dotted, AriaBassSurface::PulsedAccents, AriaBassSurface::Gathering}};
+
+AriaBassSurface goldbergAriaBassSurface(int block_index, bool is_aria_block) {
+  if (is_aria_block || block_index <= 0)
+    return AriaBassSurface::Plain;
+  const std::size_t slot = static_cast<std::size_t>(block_index - 1) % kAriaBassDepartures.size();
+  return kAriaBassDepartures[slot];
+}
+
+// Lay one aria-bass bar out on its surface. The eight skeleton tones keep their
+// order, so the bar head is still the ground tone and every structural accent
+// still belongs to the bar chord; only their placement and articulation move.
+void appendAriaBassBar(std::vector<MaterialNote>& out, int bar, int root, Mode mode,
+                       bool fill_thirds, AriaBassSurface surface) {
+  const std::array<int, 8> phrase = goldbergAriaBassBar(root, mode, fill_thirds);
+  const Tick base = barTick(bar);
+  constexpr Tick kSixteenth = kAriaBassFinestUnit;
+  constexpr Tick kDottedEighth = kAriaBassUnit + kSixteenth;
+  switch (surface) {
+    case AriaBassSurface::Dotted:
+      for (std::size_t beat = 0; beat < 4; ++beat) {
+        const Tick head = base + static_cast<Tick>(beat) * kTicksPerBeat;
+        out.push_back(materialNote(head, kDottedEighth, phrase[beat * 2]));
+        out.push_back(materialNote(head + kDottedEighth, kSixteenth, phrase[beat * 2 + 1]));
+      }
+      break;
+    case AriaBassSurface::PulsedAccents:
+      for (std::size_t beat = 0; beat < 4; ++beat) {
+        const Tick head = base + static_cast<Tick>(beat) * kTicksPerBeat;
+        out.push_back(materialNote(head, kSixteenth, phrase[beat * 2]));
+        out.push_back(materialNote(head + kSixteenth, kSixteenth, phrase[beat * 2]));
+        out.push_back(materialNote(head + kAriaBassUnit, kAriaBassUnit, phrase[beat * 2 + 1]));
+      }
+      break;
+    case AriaBassSurface::Gathering:
+      for (std::size_t half = 0; half < 2; ++half) {
+        const Tick head = base + static_cast<Tick>(half) * kHalf;
+        const std::size_t first = half * 4;
+        out.push_back(materialNote(head, kTicksPerBeat, phrase[first]));
+        out.push_back(materialNote(head + kTicksPerBeat, kAriaBassUnit, phrase[first + 1]));
+        out.push_back(
+            materialNote(head + kTicksPerBeat + kAriaBassUnit, kSixteenth, phrase[first + 2]));
+        out.push_back(materialNote(head + kTicksPerBeat + kAriaBassUnit + kSixteenth, kSixteenth,
+                                   phrase[first + 3]));
+      }
+      break;
+    case AriaBassSurface::Plain:
+    default:
+      for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
+        out.push_back(materialNote(base + static_cast<Tick>(pos) * kAriaBassUnit, kAriaBassUnit,
+                                   phrase[pos]));
+      }
+      break;
+  }
 }
 
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
@@ -290,7 +374,8 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 // Read a laid-out four-bar block against the aria bass it will sound over.
 //
 // A block whose upper voices are settled here is a closed system. The aria bass
-// repeats on exactly the four-bar period the block spans, it is immutable by
+// returns its four-bar harmonic cycle over exactly the block the caller names,
+// on the surface the caller names, it is immutable by
 // contract, and the relief pass that answers for the free figuration elsewhere
 // deliberately skips the imitative blocks -- the canon pair cannot be re-aimed
 // one end at a time without dissolving the imitation. So the whole three-voice
@@ -305,17 +390,13 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode,
-                                       bool fill_thirds) {
+                                       bool fill_thirds, AriaBassSurface surface) {
   std::vector<MaterialNote> bass;
-  bass.reserve(32);
+  bass.reserve(64);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
-    const std::array<int, 8> phrase =
-        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar % 4)], mode, fill_thirds);
-    for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
-      bass.push_back(materialNote(barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit,
-                                  kAriaBassUnit, phrase[pos]));
-    }
+    appendAriaBassBar(bass, bar, ground[static_cast<std::size_t>(bar % 4)], mode, fill_thirds,
+                      surface);
   }
   // Register order, highest first, matching the physical voice indices.
   const std::vector<MaterialNote>* voices[3] = {&upper, &inner, &bass};
@@ -404,7 +485,8 @@ struct CanonDesign {
 // is scored and minimised: a block that never needed one keeps it exactly.
 CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                              const std::array<std::uint8_t, 4>& ground, int source_register_shift,
-                             int comes_shift, bool imitate_above, bool fill_thirds) {
+                             int comes_shift, bool imitate_above, bool fill_thirds,
+                             AriaBassSurface surface) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
@@ -438,7 +520,7 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                               mode, rising);
               const std::array<int, 6> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
-                  /*block_start_bar=*/0, ground, mode, fill_thirds);
+                  /*block_start_bar=*/0, ground, mode, fill_thirds, surface);
               // The leader's own bar-to-bar steps, which the comes inherits
               // exactly: a tritone or a seventh between adjacent bars is
               // unsingable however well it behaves against the other voices, so
@@ -514,6 +596,14 @@ CanonLayout canonLayout(int imitation_degrees, Mode mode) {
 // diatonic degrees above the unison.
 constexpr int kCanonImitationDegreeCount = 9;
 
+// The block a canon at `imitation_degrees` occupies: canon number c is
+// imitation_degrees + 1, it is variation number 3c, and the block index equals
+// the variation number. Read here so the probe below and the builder ask for the
+// same bass surface.
+int canonBlockIndex(int imitation_degrees) {
+  return 3 * (imitation_degrees + 1);
+}
+
 // Whether the walking aria bass leaves every canon interval writable. The
 // filled bass moves by step where the plain triad statement leapt, which gives
 // a canon's two voices one more chance to meet a perfect interval in parallel;
@@ -525,9 +615,10 @@ bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& 
   for (int imitation_degrees = 0; imitation_degrees < kCanonImitationDegreeCount;
        ++imitation_degrees) {
     const CanonLayout layout = canonLayout(imitation_degrees, mode);
-    const CanonDesign probe =
-        designCanonBlock(layout.design_ceiling, mode, ground, layout.source_register_shift,
-                         layout.comes_shift, layout.imitate_above, /*fill_thirds=*/true);
+    const CanonDesign probe = designCanonBlock(
+        layout.design_ceiling, mode, ground, layout.source_register_shift, layout.comes_shift,
+        layout.imitate_above, /*fill_thirds=*/true,
+        goldbergAriaBassSurface(canonBlockIndex(imitation_degrees), /*is_aria_block=*/false));
     if (!probe.clean)
       return false;
   }
@@ -537,14 +628,15 @@ bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& 
 // Build one canonic variation block (a 4-bar window).
 void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
                      int block_start_bar, int imitation_degrees, Mode mode,
-                     const std::array<std::uint8_t, 4>& ground, bool fill_thirds) {
+                     const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
+                     AriaBassSurface surface) {
   const CanonLayout layout = canonLayout(imitation_degrees, mode);
   const bool imitate_above = layout.imitate_above;
   const int source_register_shift = layout.source_register_shift;
   const int comes_shift = layout.comes_shift;
   const CanonDesign designed =
       designCanonBlock(layout.design_ceiling, mode, ground, source_register_shift, comes_shift,
-                       imitate_above, fill_thirds);
+                       imitate_above, fill_thirds, surface);
   const CanonLines lines = layOutCanon(designed.assignment, block_start_bar, source_register_shift,
                                        comes_shift, mode, designed.rising);
 
@@ -575,24 +667,37 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   const bool da_capo = bars >= 24;
   const int da_capo_block = da_capo ? num_blocks - 1 : -1;
 
-  // Dedicated compressed aria-bass phrase: 32 structural tones across four
-  // bars (eight eighth-note positions per bar). Each bar articulates its root,
-  // third, and fifth while returning to the root on both structural accents.
-  // The complete phrase is repeated unchanged through every variation and da
-  // capo; it is not represented as Passacaglia material.
+  // The immutable aria bass runs to the last bar, which the explicit tonic coda
+  // takes over; both ticks are read here because the bass declaration below is
+  // sized against them.
+  const Tick final_bar_tick = barTick(bars - 1);
+  const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
+
+  // Dedicated aria-bass declaration: the whole line, written out bar by bar. Its
+  // harmonic skeleton is a four-bar cycle -- each bar articulates the root, third
+  // and fifth of its ground chord and returns to the root on both structural
+  // accents -- and that cycle recurs unchanged through every variation and the da
+  // capo. What the declaration adds over a tiled period is the surface: a return
+  // states the same tones over the same chords, laid out differently, which is
+  // what makes the set a set of variations rather than a loop. The line is
+  // declared once and replayed verbatim; it is not represented as Passacaglia
+  // material.
   const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
   const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground);
-  for (int bar = 0; bar < kCycleBars; ++bar) {
-    const std::array<int, 8> phrase =
-        goldbergAriaBassBar(ground[static_cast<std::size_t>(bar)], mode, fill_thirds);
-    for (std::size_t pos = 0; pos < phrase.size(); ++pos) {
-      out.material.goldberg_aria_bass.push_back(materialNote(
-          barTick(bar) + static_cast<Tick>(pos) * kAriaBassUnit, kAriaBassUnit, phrase[pos]));
-    }
+  auto bass_surface_of_block = [&](int blk) {
+    return goldbergAriaBassSurface(blk, /*is_aria_block=*/blk == 0 || blk == da_capo_block);
+  };
+  for (int bar = 0; bar + 1 < bars; ++bar) {
+    appendAriaBassBar(out.material.goldberg_aria_bass, bar,
+                      ground[static_cast<std::size_t>(bar % kCycleBars)], mode, fill_thirds,
+                      bass_surface_of_block(bar / kCycleBars));
   }
-  out.material.goldberg_aria_bass_period = static_cast<Tick>(kCycleBars) * kTicksPerBar;
+  // One statement, so the period spans the whole declaration: the carrier lays
+  // the line down once instead of tiling a cycle of it.
+  out.material.goldberg_aria_bass_period = final_bar_tick;
+  out.material.goldberg_aria_bass_cycle = static_cast<Tick>(kCycleBars) * kTicksPerBar;
 
   // Canon follower line (V1). Populated only for canonic variation blocks; the
   // follower notes for every canon block are appended here in time order (one
@@ -701,7 +806,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
         buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground,
-                        fill_thirds);
+                        fill_thirds, bass_surface_of_block(blk));
         inner_blocks.push_back(blk);
         canon_blocks.push_back(blk);
         break;
@@ -746,8 +851,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 6> score = goldbergBlockFaults(
-              var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds);
+          const std::array<int, 6> score =
+              goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds,
+                                  bass_surface_of_block(blk));
           if (rotation == 0 || score < best_score) {
             best_score = score;
             tune = std::move(candidate);
@@ -852,8 +958,6 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   Span ground_span;
   ground_span.id = next_span_id++;
   ground_span.start_tick = 0;
-  const Tick final_bar_tick = barTick(bars - 1);
-  const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
   ground_span.end_tick = final_approach_tick;
   ground_span.voice = 2;
   ground_span.intent = VoiceIntent::GoldbergBassCarrier;
@@ -881,18 +985,16 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // the two lines meet on a perfect interval off the downbeat as well.
   // Relieved here, where the whole texture is finally known, on the same terms
   // as the chorale prelude: the tone that moves is the onset before each
-  // arrival. Read at the eighth, because that is how often the aria bass moves
-  // -- both lines are predominantly stepwise, so they run into a perfect
-  // interval together on the bass's own off-beats and not only on the beats.
+  // arrival. Read at the sixteenth, because that is the finest the aria bass
+  // moves once a return dots or re-articulates its tones -- both lines are
+  // predominantly stepwise, so they run into a perfect interval together on the
+  // bass's own off-beats and not only on the beats.
   {
     ThemeToneRegistry relief_registry;
-    const Tick ground_period = out.material.goldberg_aria_bass_period;
-    for (Tick offset_tick = 0; offset_tick < final_approach_tick; offset_tick += ground_period) {
-      for (const MaterialNote& note : out.material.goldberg_aria_bass) {
-        const Tick start = offset_tick + note.start_tick;
-        if (start < final_approach_tick)
-          relief_registry.record(start, /*voice=*/2, static_cast<int>(note.pitch), note.duration);
-      }
+    for (const MaterialNote& note : out.material.goldberg_aria_bass) {
+      if (note.start_tick < final_approach_tick)
+        relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
+                               note.duration);
     }
     for (const MaterialNote& note : out.material.coda_extensions.back().notes)
       relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
@@ -919,7 +1021,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         blocks.push_back(&out.material.goldberg_variations[idx].notes);
     }
     relieveArrivals(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
-                    /*num_voices=*/3, bars, mode, /*arrival_grain=*/kAriaBassUnit);
+                    /*num_voices=*/3, bars, mode, /*arrival_grain=*/kAriaBassFinestUnit);
   }
 
   Span coda_span;
