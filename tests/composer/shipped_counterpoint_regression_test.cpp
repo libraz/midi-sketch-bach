@@ -817,7 +817,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // new pair. The cardinal columns stay at zero and the rate stays an order
     // of magnitude under the reference corpus, which is what makes the weightier
     // close worth its approaches.
-    {FormType::Fugue, 0, 0, 78, 78, 7, 0, 4, 4, 1, 78767, 191},
+    //
+    // The exposition now accumulates its voices: a voice that has not yet
+    // stated the subject does not sound, so the third voice's four bars of free
+    // figuration under the answer are gone. The floor falls by those bars. What
+    // that filler was doing is visible in the columns it took with it -- the
+    // contrary repeat drops by nearly half and battuta by a tenth, because the
+    // voice that formed them was one the exposition should never have had.
+    //
+    // It also uncovered something the filler had been hiding. With nothing
+    // under it, the answer becomes the lowest sounding voice, and the fourths
+    // the countersubject leaves above it stop being fourths between upper
+    // voices and become second inversions. The countersubject derivation is now
+    // told when its source is the lowest voice and ranks that fourth below a
+    // consonance, which takes the column past where it stood before the
+    // exposition rule at the price of six hidden approaches.
+    {FormType::Fugue, 0, 0, 77, 71, 4, 0, 3, 4, 1, 74479, 180},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -887,7 +902,16 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // configuration whose coda is longest -- the total fell while its worst cell
     // rose, so the approaches did not multiply, they gathered. The floor drops
     // with the doubled note values, as on the fugue.
-    {FormType::PreludeAndFugue, 0, 0, 19, 34, 3, 0, 2, 2, 1, 36621, 69},
+    //
+    // The exposition rule and the bass-aware countersubject reach this form's
+    // fugue half unchanged. Hidden falls by a third and the fourths by nearly a
+    // quarter of what they were before the exposition was corrected at all: a
+    // form whose fugue half is short spends proportionally more of itself in
+    // the exposition, so a rule that only touches the exposition shows up here
+    // most. The contrary repeat is the one column that rises, by two, and it is
+    // the same trade the fugue row pays -- a countersubject kept off the fourth
+    // sometimes reaches its tone from the other side.
+    {FormType::PreludeAndFugue, 0, 0, 12, 32, 5, 0, 2, 2, 1, 31885, 53},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1131,7 +1155,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // value across the bass's next move, so a fourth that used to resolve within
     // the pair now waits for the following one. The doubled line and both
     // cardinal columns are untouched at 84.
-    {FormType::ToccataAndFugue, 84, 84, 35, 12, 11, 7, 2, 1, 2, 31831, 342},
+    //
+    // The exposition rule reaches the fugue half here too, and this form had the
+    // most to gain from it: its third voice was sounding from the second bar of
+    // the opening statement, six bars before its own entry, and its coverage was
+    // ragged besides. Hidden falls to a third of what it was, the contrary
+    // repeat by half, the worst contrary cell to one, and the fourths by a
+    // third. The floor falls by the filler bars. Both cardinal columns stand at
+    // the same 84, which remains the deliberate octave doubling.
+    {FormType::ToccataAndFugue, 84, 84, 13, 12, 6, 7, 2, 1, 1, 28019, 210},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1241,7 +1273,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // exactly where they were, so the dotted leader costs this form nothing --
     // its bass moves under the leader more often than the toccata's does, and a
     // fourth that has somewhere to go resolves inside the pair.
-    {FormType::FantasiaAndFugue, 0, 0, 29, 0, 22, 0, 2, 0, 2, 33588, 501},
+    //
+    // Same exposition rule, and this row moves furthest of the four. Hidden
+    // falls to a quarter, the contrary repeat by a third, both worst cells to
+    // one, and the fourths by two fifths -- this form kept the largest contrary
+    // column in the table, and a good part of it turns out to have been the
+    // third voice answering an entry it had no business accompanying.
+    {FormType::FantasiaAndFugue, 0, 0, 7, 0, 14, 0, 1, 0, 1, 28643, 290},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1526,7 +1564,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // repeat, and both their worst cells -- which is the augmented final entry:
     // one long tone per length, and the longer the piece the more accompaniment
     // moves beneath it. The floor drops by the onsets that augmentation removes.
-    {FormType::Fugue, 0, 0, 315, 847, 40, 0, 6, 11, 2, 768892, 2293},
+    //
+    // Across the lengths the exposition rule gives and takes nothing: every
+    // column falls, the contrary repeat by nearly a third and both worst cells
+    // with it. A stretched fugue has the same one exposition as a short one, so
+    // the rule's reach does not scale with the form -- what scales is the
+    // development around it, which is why the proportional gain here is smaller
+    // than on the form row while the direction is the same.
+    {FormType::Fugue, 0, 0, 311, 803, 28, 0, 5, 8, 1, 752412, 2210},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1563,7 +1608,13 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // same amount the form row's does: the augmented final entry holds its tone
     // across the bass's next move, so a fourth beneath it waits a pair longer to
     // resolve. The floor falls with the onsets augmentation removes.
-    {FormType::PreludeAndFugue, 0, 0, 171, 322, 10, 0, 3, 5, 1, 496757, 1194},
+    //
+    // Same again, and every column falls here too. The fourths come down by
+    // seven per cent of where they stood, which is the bass-aware
+    // countersubject reaching every length rather than only the natural one:
+    // the exposition it is derived in is the same exposition however long the
+    // piece runs, and the line it produces is restated at every later entry.
+    {FormType::PreludeAndFugue, 0, 0, 150, 320, 9, 0, 3, 5, 1, 478198, 1110},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
