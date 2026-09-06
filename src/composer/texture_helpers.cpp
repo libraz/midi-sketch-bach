@@ -488,7 +488,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches,
-                       bool parallel_free_over_consonant) {
+                       bool parallel_free_over_consonant, bool held_bass) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -634,6 +634,20 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   // window (a concurrent voice already outside this band's order) falls back to
   // the band so a candidate always exists.
   const bool order_window_usable = order_floor <= order_ceiling;
+  // Lowest pitch any already-placed voice sounds at this onset. A candidate
+  // below it is the bass of the vertical, which is the only position where the
+  // perfect fourth counts as a dissonance; above it the fourth is a consonance
+  // and nothing here changes.
+  constexpr int kAbovePitchRange = 128;
+  int lowest_placed = kAbovePitchRange;
+  for (int theme : theme_pitches) {
+    lowest_placed = std::min(lowest_placed, theme);
+  }
+  for (const ConcurrentMotion& motion : motions) {
+    if (motion.curr >= 0) {
+      lowest_placed = std::min(lowest_placed, motion.curr);
+    }
+  }
   for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
     if (!is_anchor_tone(pitch)) {
       continue;
@@ -644,7 +658,31 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     int clashes = 0;
     int weighted_clashes = 0;     // sharp ic 1/6/11 clashes count double.
     bool sharp_vs_theme = false;  // strikes ic 1/6/11 against a theme tone.
+    // True when this candidate would sound below every already-placed voice, so
+    // the intervals it forms are bass intervals rather than upper-voice ones.
+    // A held bass is exempt outright: the pedal point is the grammar's own
+    // licence for the fourth above it, so leaving that line out of the ranking
+    // below is not a relaxation but the rule stated correctly.
+    const bool is_bass = !held_bass && pitch < lowest_placed;
+    // Whether the candidate leaves a fourth above itself while it is the bass --
+    // an unresolved second inversion. Not a clash: a clash moves the candidate
+    // between preference tiers, and the tiers here rank parallel-freedom, which
+    // must not be traded for an inversion. It rides in the ordering key instead,
+    // so a bass free of the fourth beats one that carries it whenever both are
+    // otherwise equally admissible, and the fourth is still written where the
+    // chord and the voice order leave nothing else -- which is how a passing or
+    // cadential six-four survives.
+    bool bass_fourth = false;
     auto add_clash = [&](int sounding, bool is_theme) {
+      // Detected before the tests below, both of which would wave it through:
+      // the interval class is consonant, and the pair that spells it -- the
+      // chord's fifth under its root -- is two tones of the same chord.
+      if (is_bass && isConsonantIc(pitch - sounding) &&
+          !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(sounding),
+                                              static_cast<std::uint8_t>(pitch))) {
+        bass_fourth = true;
+        return;
+      }
       if (isConsonantIc(pitch - sounding)) {
         return;
       }
@@ -690,9 +728,13 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     // sixth or more is audibly worse than tolerating a mid-window passing
     // clash near the line (the bass otherwise flees to a clash-free tone a
     // tenth away whenever a faster upper line brushes the near candidates).
+    // The second inversion sits between the two: worse than a passing clash
+    // inside the window, better than that lurch -- the fourth is one interval
+    // the ear resolves against the harmony, while a sixth-wide jump rewrites
+    // the line.
     // Admissibility -- consonance, parallels, voice order -- is unaffected.
-    const int far_stride = (dist > 7) ? (1 << 12) : 0;
-    const int key = far_stride + window_clashes * 128 + dist;
+    const int far_stride = (dist > 7) ? (1 << 13) : 0;
+    const int key = far_stride + (bass_fourth ? (1 << 12) : 0) + window_clashes * 128 + dist;
     if (clashes == 0) {
       if (key < consonant_any_key) {
         consonant_any_key = key;
@@ -722,16 +764,23 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       // m2/M7/tritone against it is more audible than the perfect-interval
       // parallel this tier exists to dodge -- such a candidate may only
       // survive as the last-resort fallback.
-      const int free_key = weighted_clashes * (1 << 14) + key;
+      const int free_key = weighted_clashes * (1 << 15) + key;
       if (free_key < free_any_key) {
         free_any_key = free_key;
         free_any = pitch;
       }
     }
     // The clash stride must dominate the packed key even with the far-anchor
-    // demotion folded in (key < 1<<13), so the last resort still minimizes
-    // dissonance first and distance second.
-    const int score = clashes * (1 << 13) + key;
+    // demotion and the second-inversion rung folded in (key < 1<<14), so the
+    // last resort still minimizes dissonance first and distance second.
+    //
+    // Between tones that tie on dissonance it takes the one free of a perfect
+    // parallel. Every tier above this one refuses a parallel outright, so an
+    // onset that reaches here has none of them available -- and nothing further
+    // down the chain re-examines the choice. A last resort blind to the cardinal
+    // prohibition is therefore the one path by which an exhausted onset ships a
+    // parallel fifth or octave it had an equally dissonant alternative to.
+    const int score = clashes * (1 << 17) + (is_parallel(pitch) ? (1 << 15) : 0) + key;
     if (score < fallback_score) {
       fallback_score = score;
       fallback = pitch;

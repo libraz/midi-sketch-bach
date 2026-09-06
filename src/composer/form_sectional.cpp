@@ -343,7 +343,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/2,
                                /*num_voices=*/3, motions);
     int root = consonantChordTone(chord, /*voice=*/2, kFreeV2Lo, kFreeV2Hi, centre, theme_pitches,
-                                  last_pedal_pitch, motions, mode, /*downbeat=*/true);
+                                  last_pedal_pitch, motions, mode, /*downbeat=*/true,
+                                  /*window_pitches=*/{},
+                                  /*parallel_free_over_consonant=*/false, /*held_bass=*/true);
     if (bar == free_bars - 1) {
       // The free section's declared half cadence needs the actual lowest voice
       // on V, not merely an arbitrary member of the dominant triad. Which V is
@@ -774,7 +776,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       int pitch =
           consonantChordTone(plan[static_cast<std::size_t>(bar)], voice, kBandLo[voice],
                              kBandHi[voice], centre, theme_pitches, line_prev, motions, mode,
-                             /*downbeat=*/true);
+                             /*downbeat=*/true, /*window_pitches=*/{},
+                             /*parallel_free_over_consonant=*/false, /*held_bass=*/true);
       const int design_rank = support_fault_rank(pitch);
       if (design_rank != kSupportClean && line_prev >= 0) {
         // The concurrent voices are all above this one, so a substitute has to

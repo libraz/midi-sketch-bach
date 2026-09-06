@@ -327,12 +327,20 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
 ///        candidates the one with fewer window clashes wins. Tie-breaker only:
 ///        onset consonance always dominates, so an empty vector (the default)
 ///        reproduces the previous behaviour exactly.
+/// @param held_bass True when this line is a bass the texture SUSTAINS beneath
+///        running voices (a pedal point, or one long support tone per bar)
+///        rather than one that moves with the harmony. Over a held bass the
+///        grammar licenses the fourth above it -- that is what a pedal point is
+///        -- so the selector stops preferring tones that avoid it. Everywhere
+///        else a fourth above the lowest sounding voice is an unresolved second
+///        inversion, and among otherwise equally admissible tones the one
+///        without it wins.
 /// @return A chord-tone (downbeat) or diatonic (off-beat) MIDI pitch in band.
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches = {},
-                       bool parallel_free_over_consonant = false);
+                       bool parallel_free_over_consonant = false, bool held_bass = false);
 
 /// @brief Replace a line's closing two bars with the shared cadential landing.
 ///
