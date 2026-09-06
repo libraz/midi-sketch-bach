@@ -769,11 +769,19 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
     const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
     registry.concurrentThemePitches(beat_tick, static_cast<VoiceId>(voice), theme_pitches);
     // Sample the earlier voices one sixteenth (the finest stride any line uses)
-    // before the onset: that reproduces the union-onset note pair the validator
-    // judges. A beat-wide window reads a sixteenth-note voice four notes back
-    // and can miss (or invent) the audible motion into this onset. The line's
-    // own "from" is likewise the last emitted sub-beat note when one exists,
-    // not the previous beat anchor.
+    // before the onset. A beat-wide window reads a sixteenth-note voice four
+    // notes back and can miss (or invent) the audible motion into this onset.
+    // The line's own "from" is likewise the last emitted sub-beat note when one
+    // exists, not the previous beat anchor.
+    //
+    // A sixteenth is the finest stride, not the finest onset grid: material laid
+    // on the subject's own rhythm attacks between sixteenths, and the vertical
+    // rules read the union of every voice's onsets. At those few places this
+    // names a motion nothing downstream looks at, while the pair that does ship
+    // goes unjudged. The union onset is the faithful reading and it is not free:
+    // taking it moves every anchor in the fugue family, and by the reference
+    // corpus's own per-class rates the hidden perfects and anti-parallels that
+    // costs outweigh the second inversions it removes.
     registry.concurrentMotions(beat_tick - kSixteenth, beat_tick, static_cast<VoiceId>(voice),
                                num_voices, motions);
     const int audible_from = (prev_emitted >= 0) ? prev_emitted : line_prev_anchor;
