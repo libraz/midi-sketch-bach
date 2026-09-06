@@ -662,16 +662,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // holds every octave of each, so when they were all faulty the guard was out
     // of chord rather than out of judgement -- and at about one such onset in
     // six a diatonic tone between them would have been clean. It may now take
-    // one: where it stays consonant against the manuals, and otherwise only as a
-    // passing tone, stepped into and stepped out of, which is the one shape in
-    // which a walking bass may sound a second against the parts above. Either
-    // way both ends are held to a fifth, so a borrowed tone is walked to and
-    // walked away from rather than jumped at.
-    // The dissonance condition is what binds this row, not the reach. Dropping
-    // it takes the hidden column almost to zero, and the arrivals that would
-    // remove are the ones the bass can only reach by leaping onto a note the
-    // chord does not contain -- which is why they stay.
-    {FormType::TrioSonata, 0, 0, 263, 21, 0, 0, 8, 2, 0, 34776},
+    // one, held only to a fifth at either end so that a borrowed tone is walked
+    // to and walked away from rather than jumped at.
+    //
+    // It is NOT held to consonance against the manuals. That condition was what
+    // bound this row: the onsets where the chord is spent are the same onsets
+    // where a manual sounds across the beat, so the tone that would have been
+    // clean is usually the one that brushes it, and requiring consonance kept
+    // nearly the whole column. Dropping it halves the column and takes the worst
+    // configuration down with it. The trade was measured on the axis it moves --
+    // the share of beat onsets carrying a sounding second, seventh or tritone --
+    // and this voice runs at half the rate of the sparest three-voice organ work
+    // in the reference corpus with the condition dropped, well inside the ceiling
+    // the form's own vertical test holds it to. The perfect approach is the fault
+    // the corpus is strict about; the passing second is one it writes constantly
+    // in the same texture.
+    {FormType::TrioSonata, 0, 0, 127, 19, 0, 0, 5, 2, 0, 34770},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
