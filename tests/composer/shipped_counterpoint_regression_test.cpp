@@ -646,10 +646,25 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     //
     // The contrary repeat -- leaving a perfect interval and reaching the same
     // one again the other way round -- is the one class the corpus is not
-    // divided about, and the pedal now ranks it at the bottom of what it will
-    // pay rather than the first thing it reaches for. That column goes to zero
-    // and stays there; the two payable columns take a few arrivals each for it.
-    {FormType::TrioSonata, 0, 0, 283, 35, 0, 0, 8, 3, 0, 34770},
+    // divided about, and the pedal ranks it at the bottom of what it will pay
+    // rather than the first thing it reaches for. That column is zero and stays
+    // there.
+    //
+    // The other two then fall together, because the pedal stopped being boxed.
+    // Its escape had only the bar's three chord tones to offer and the band
+    // holds every octave of each, so when they were all faulty the guard was out
+    // of chord rather than out of judgement -- and at about one such onset in
+    // six a diatonic tone between them would have been clean. It may now take
+    // one: where it stays consonant against the manuals, and otherwise only as a
+    // passing tone, stepped into and stepped out of, which is the one shape in
+    // which a walking bass may sound a second against the parts above. Either
+    // way both ends are held to a fifth, so a borrowed tone is walked to and
+    // walked away from rather than jumped at.
+    // The dissonance condition is what binds this row, not the reach. Dropping
+    // it takes the hidden column almost to zero, and the arrivals that would
+    // remove are the ones the bass can only reach by leaping onto a note the
+    // chord does not contain -- which is why they stay.
+    {FormType::TrioSonata, 0, 0, 263, 21, 0, 0, 8, 2, 0, 34776},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
