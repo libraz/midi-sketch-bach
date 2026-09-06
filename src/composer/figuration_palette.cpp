@@ -782,9 +782,23 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       // made the displacement find nothing admissible at exactly those onsets
       // and keep the true parallel it was called to remove -- the worse of the
       // two faults, held in order to avoid the milder one.
+      //
+      // The contrary classes are on the scale for the same reason. This
+      // displacement is called to remove a same-direction perfect and it reaches
+      // its replacement by moving the tone, which regularly turns the motion
+      // round rather than removing it -- so a scale that stopped at the
+      // same-direction classes would let the repair answer a rising line by
+      // leaping down onto the perfect it had just left, and count that clean.
+      // The beat-anchor selector one call above refuses exactly that, and this
+      // pass would then undo the refusal. The contrary repeat sits worst of the
+      // three payable classes and the battuta cheapest, which is the order the
+      // reference corpus gives them once each overshoot is scaled by the spread
+      // its class occupies there.
       constexpr int kAnchorClean = 0;
-      constexpr int kAnchorHidden = 1;
-      constexpr int kAnchorParallel = 2;
+      constexpr int kAnchorBattuta = 1;
+      constexpr int kAnchorHidden = 2;
+      constexpr int kAnchorAntiParallel = 3;
+      constexpr int kAnchorParallel = 4;
       auto anchor_fault_rank = [&](int cand) {
         int worst = kAnchorClean;
         for (const ConcurrentMotion& motion : motions) {
@@ -792,7 +806,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             return kAnchorParallel;
           }
           if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
-            worst = kAnchorHidden;
+            worst = std::max(worst, kAnchorHidden);
+          } else if (formsAntiParallelPerfect(audible_from, cand, motion.prev, motion.curr)) {
+            worst = std::max(worst, kAnchorAntiParallel);
+          } else if (formsBattuta(audible_from, cand, motion.prev, motion.curr)) {
+            worst = std::max(worst, kAnchorBattuta);
           }
         }
         return worst;
