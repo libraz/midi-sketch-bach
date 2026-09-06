@@ -449,16 +449,15 @@ TEST(FormSectionalTest, FugueTailDevelopmentAlternatesGrainOverPulsedBass) {
     bool saw_eighth_bar = false;
     bool saw_sixteenth_bar = false;
     bool saw_pulsed_bass = false;
-    bool saw_exposition_support = false;
+    // The bass carries no accompaniment before its own third entry: the
+    // exposition accumulates one voice per entry window.
+    bool saw_bass_before_its_entry = false;
 
     for (const FigurationSection& section : fx.material.figuration_sections) {
       const int first_bar = static_cast<int>(section.start_tick / kBar);
       const int last_bar = static_cast<int>(section.end_tick / kBar) - 1;
-      if (section.voice == 2 && section.is_pedal_prep && first_bar >= free_bars &&
-          first_bar < free_bars + 12) {
-        for (const MaterialNote& note : section.notes) {
-          saw_exposition_support = saw_exposition_support || note.duration >= kTicksPerBar;
-        }
+      if (section.voice == 2 && first_bar >= free_bars && first_bar < free_bars + 8) {
+        saw_bass_before_its_entry = true;
       }
       if (first_bar < free_bars + 12 || last_bar >= cadence_start) {
         continue;
@@ -494,7 +493,7 @@ TEST(FormSectionalTest, FugueTailDevelopmentAlternatesGrainOverPulsedBass) {
     EXPECT_TRUE(saw_eighth_bar) << formName(form) << " seed " << seed;
     EXPECT_TRUE(saw_sixteenth_bar) << formName(form) << " seed " << seed;
     EXPECT_TRUE(saw_pulsed_bass) << formName(form) << " seed " << seed;
-    EXPECT_TRUE(saw_exposition_support) << formName(form) << " seed " << seed;
+    EXPECT_FALSE(saw_bass_before_its_entry) << formName(form) << " seed " << seed;
   }
 }
 
@@ -1032,12 +1031,13 @@ TEST(FormSectionalTest, FugueTailStaysWithinParallelCeiling) {
   }
 }
 
-// The rewired tail caps the monophonic solo to the opening subject-entry bars
-// only: every later tail bar sounds at least two voices (between-stretto fills
-// carry a V2 support, the answer entry a V2 support, the cadence a V1 inner
-// voice). At most the first two tail bars (the subject head's solo gesture) are
-// monophonic.
-TEST(FormSectionalTest, FugueTailIsAtLeastTwoVoicesExceptOpeningEntry) {
+// The tail is monophonic only while the dux is the sole voice that has spoken.
+// The subject statement that opens the exposition is heard alone for its whole
+// four-bar length, because no other voice may sound before its own entry; from
+// the answer onward every tail bar carries at least two voices (the answer plus
+// its countersubject, the between-stretto fills with their V2 support, the
+// cadence with its V1 inner voice).
+TEST(FormSectionalTest, FugueTailIsAtLeastTwoVoicesAfterTheDuxStatement) {
   for (FormType form : kForms) {
     for (std::uint32_t seed : kSeeds) {
       const std::uint16_t bars = 32;
@@ -1057,10 +1057,61 @@ TEST(FormSectionalTest, FugueTailIsAtLeastTwoVoicesExceptOpeningEntry) {
           ++thin_tail_bars;
         }
       }
-      // Only the opening subject-entry gesture (capped at two bars) may be thin.
-      EXPECT_LE(thin_tail_bars, 2)
+      // Only the dux statement (one four-bar entry window) may be thin.
+      EXPECT_LE(thin_tail_bars, 4)
           << formName(form) << " seed " << seed << " has " << thin_tail_bars
-          << " monophonic tail bars (expected <= 2 opening-entry bars)";
+          << " monophonic tail bars (expected <= 4 dux-statement bars)";
+    }
+  }
+}
+
+// A fugue exposition is heard as an accumulation: a voice is silent until it
+// states the theme, so its first sounding note inside the fugue is its own
+// subject or answer entry. The free toccata / fantasia section before the fugue
+// boundary legitimately sounds its full texture, so the window opens at the
+// boundary; the reserved closing cadence is a full-texture chordal close rather
+// than exposition writing, so it is outside the window too.
+TEST(FormSectionalTest, ExpositionVoicesEnterWithTheirOwnTheme) {
+  for (FormType form : kForms) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : {false, true}) {
+        for (std::uint16_t bars : kBarLengths) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const ComposeResult res = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          ASSERT_EQ(res.notes.size(), res.provenance.size());
+          const Tick fugue_start = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+          const Tick cadence_start = static_cast<Tick>(bars - 2) * kBar;
+          // Earliest note index per voice inside the window; the note list is
+          // grouped by span, so the first sounding note has to be searched for
+          // rather than read off the front.
+          std::array<std::size_t, 3> first_idx = {res.notes.size(), res.notes.size(),
+                                                  res.notes.size()};
+          for (std::size_t idx = 0; idx < res.notes.size(); ++idx) {
+            const NoteEvent& note = res.notes[idx];
+            if (note.voice >= 3 || note.start_tick < fugue_start ||
+                note.start_tick >= cadence_start) {
+              continue;
+            }
+            const std::size_t best = first_idx[note.voice];
+            if (best == res.notes.size() || note.start_tick < res.notes[best].start_tick) {
+              first_idx[note.voice] = idx;
+            }
+          }
+          for (VoiceId voice = 0; voice < 3; ++voice) {
+            const std::size_t idx = first_idx[voice];
+            if (idx == res.notes.size()) {
+              continue;  // This voice does not sound in the fugue at all.
+            }
+            const VoiceIntent intent = res.provenance[idx].voice_intent;
+            EXPECT_TRUE(intent == VoiceIntent::SubjectCarrier ||
+                        intent == VoiceIntent::AnswerCarrier)
+                << formName(form) << " seed " << seed << (minor ? " minor" : " major") << " bars "
+                << bars << ": voice " << static_cast<int>(voice)
+                << " first sounds in the fugue at bar " << (res.notes[idx].start_tick / kBar + 1)
+                << " as " << voiceIntentToString(intent) << ", before stating the theme";
+          }
+        }
+      }
     }
   }
 }

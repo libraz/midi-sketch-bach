@@ -980,7 +980,8 @@ void bendAccompanimentIntoLocalKeys(HarnessFixture& out, const std::vector<Chord
 // assembly). Layout (relative to first_bar):
 //   exposition: V0 subject (0-3), V1 answer -P4 (4-7), V2 re-entry -P8 (8-11)
 //               when bars >= 12, else a compressed 2-entry exposition.
-//   counterline: band-confined figuration in the non-thematic voices.
+//   counterline: band-confined figuration in the non-thematic voices, never
+//                before that voice's own entry (see `voice_entry_bar`).
 //   stretto: two overlapping subject statements <= 1 bar apart near the end
 //            (only when bars >= 12); aligned to the climax cycle when possible.
 //   cadence: a 2-bar V0 Picardy close on the home tonic.
@@ -1018,6 +1019,25 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // exposition is used.
   const bool full_exposition = (first_bar + 11) < cadence_start;
 
+  // A voice's first sound in the exposition is its own entry. Until a voice has
+  // stated the subject or the answer it is silent, so the texture accumulates
+  // one voice per entry window the way a fugue exposition is heard: V0 alone,
+  // then V1 arriving with the answer, then V2 with the third entry. Past its
+  // entry window a voice has spoken and is free to accompany, which is why the
+  // rule reads as a per-voice earliest bar rather than a section-wide gate --
+  // the same bound also releases V2 at the end of a compressed two-entry
+  // exposition, where it has no thematic statement to wait for.
+  const std::array<int, kTailVoices> voice_entry_bar = {first_bar + 0, first_bar + 4,
+                                                        first_bar + 8};
+
+  // --- Clip an accompaniment span forward to the voice's own entry. ---
+  // Returns false when the span lies wholly before the entry and must be
+  // dropped: a voice yet to speak contributes nothing, not a thinner line.
+  auto clip_to_entry = [&](VoiceId voice, int& first, int last) {
+    first = std::max(first, voice_entry_bar[voice]);
+    return first <= last;
+  };
+
   // --- Stamp a 16-note subject statement transposed by `semis` into `voice`. ---
   // `rhythm` carries the values the statement treads; every statement but the
   // stretto leader uses the catalog row unchanged.
@@ -1040,6 +1060,9 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // note is recorded so a later voice avoids a parallel against it.
   auto add_counterline = [&](VoiceId voice, int first, int last, int notes_per_beat,
                              int alternate_notes_per_beat = 0) {
+    if (!clip_to_entry(voice, first, last)) {
+      return;
+    }
     FigurationSection section;
     section.voice = voice;
     section.start_tick = barTick(first);
@@ -1065,6 +1088,9 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // adding a second running figuration line.
   auto add_sustained_support = [&](VoiceId voice, int first, int last,
                                    Tick pulse_duration = kTicksPerBar) {
+    if (!clip_to_entry(voice, first, last)) {
+      return;
+    }
     FigurationSection section;
     section.voice = voice;
     section.start_tick = barTick(first);
@@ -1228,12 +1254,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   stamp_subject(first_bar + 0, v0_off, 0, subj_rhythm);
   out.material.canonical_subject_note_count = kSubjectNotes;
   pushSpan(asm_ctx, 0, first_bar + 0, first_bar + 3, VoiceIntent::SubjectCarrier);
-  // Texture thickening of the solo subject entry: the subject head enters alone
-  // (authentic fugue rhetoric) for its first two bars, then a V2 sustained
-  // chord-tone support joins for the remaining two bars so only the opening
-  // gesture is monophonic (capping the tail's solo contribution to the piece
-  // mono ratio at two bars instead of four).
-  add_sustained_support(2, first_bar + 2, first_bar + 3);
+  // The dux is heard alone for its whole statement: no voice accompanies it,
+  // because no other voice has entered yet.
 
   // V1 real answer (subject - P4) in the V1 band, entering one entry-window
   // (4 bars) after the subject. For a short (8-bar) fugue tail the answer is
@@ -1278,12 +1300,9 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   append_countersubject_from(use_tonal_answer ? out.material.tonal_answer : out.material.answer, 0,
                              barTick(answer_first), answer_end);
   pushSpan(asm_ctx, 0, answer_first, answer_last, VoiceIntent::CountersubjectCarrier);
-  // V2 sustained chord-tone support under the answer entry, built last so it
-  // reads the V1 answer and V0 countersubject from the registry and stays
-  // consonant and parallel-free below them. This makes the answer bar-group a
-  // full three-voice exposition texture (matching the fugue family) instead of
-  // the two-voice answer + countersubject that left the bass register empty.
-  add_sustained_support(2, answer_first, answer_last);
+  // The answer bar-group stays two-voiced (comes plus countersubject): the bass
+  // register is empty here because V2 has not yet stated the subject, and it
+  // fills only when the third entry arrives.
 
   // Imitation entry declaration (subject leads, answer follows at one entry
   // window). The validator compares the actual first-note pitches, so the
