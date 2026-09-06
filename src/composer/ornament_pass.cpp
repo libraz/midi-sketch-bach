@@ -775,10 +775,29 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     const bool cadence_resolution = std::binary_search(
         declared_cadence_ticks.begin(), declared_cadence_ticks.end(), note.start_tick);
 
+    // A subject statement is the one line the ear is asked to match against
+    // itself. An ornament here is not decoration but a different set of notes,
+    // and because the grammar below fires on whatever local shape a given entry
+    // happens to present, the third entry stops answering the first. Bach's own
+    // subjects do carry mordents -- written into the subject, so every entry
+    // states the same ones. This exemption reads the span's intent rather than
+    // its voice: the subject travels through every voice in turn, so the
+    // voice-level exempt list above cannot express it at all. The transformed
+    // statements are included because the ear is still matching them, and an
+    // augmentation's long notes are otherwise the pass's prime targets. Middle
+    // entries are left decorable -- already transposed and developmental, they
+    // are where a fugue varies its material rather than restates it.
+    const bool subject_statement = prov.voice_intent == VoiceIntent::SubjectCarrier ||
+                                   prov.voice_intent == VoiceIntent::AnswerCarrier ||
+                                   prov.voice_intent == VoiceIntent::StrettoCarrier ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierAugmented ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierDiminished ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierInverted;
+
     // Eighth notes are admitted as mordent candidates at the phrase-boundary
     // sites only (the per-rule conditions below re-narrow longer figures to
     // quarter+); sixteenths and shorter are never ornamented.
-    if (!already_ornament && !suspension_carrier && !cadence_resolution &&
+    if (!already_ornament && !suspension_carrier && !cadence_resolution && !subject_statement &&
         note.duration >= kEighth && !isExempt(params.exempt_voices, note.voice) &&
         !skeleton_plain && note.start_tick != last_onset[note.voice]) {
       const int bar = static_cast<int>(note.start_tick / tpb);
