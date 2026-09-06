@@ -5,7 +5,7 @@ The load-bearing guard: the bachlib.mirror TRIO_SONATA mirror constants
 densities) must match the C++ TrioSonata fixture source (the kBarRoot[4] /
 kBarMinor[4] initialisers and the V0/V1/V2 base / notes_per_beat literals in
 buildTrioSonataFixture, src/composer/harness_fixture.cpp), the validator's
-voice_independence_threshold soft threshold (0.6) must match validator.cpp, and
+voice_independence_threshold soft threshold (0.6) must match the validator, and
 the TrioVoiceIndependent RuleBit number (62) must match provenance.h. A renamed
 constant or an altered progression / register that the Python predictor still
 claims would make structural_ok diverge from the CLI output; this drift guard
@@ -28,8 +28,20 @@ if str(SCRIPTS_DIR) not in sys.path:
 import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
-VALIDATOR_CPP = REPO_ROOT / "src" / "composer" / "validator.cpp"
+# The validator's rules are spelled across two translation units: the
+# counterpoint rules every voice obeys, and the idiomatic conditions each
+# individual form must satisfy. A guard that reads only one of them goes silent
+# the moment its rule is spelled in the other.
+VALIDATOR_SOURCES = (
+    REPO_ROOT / "src" / "composer" / "validator.cpp",
+    REPO_ROOT / "src" / "composer" / "form_idiom_rules.cpp",
+)
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
+
+
+def _validator_source() -> str:
+    """Return every translation unit the validator spells its rules in."""
+    return "\n".join(path.read_text(encoding="utf-8") for path in VALIDATOR_SOURCES)
 
 
 def _trioSonata_body() -> str:
@@ -139,7 +151,7 @@ class TrioSonataValidatorThresholdTest(unittest.TestCase):
     """The voice_independence_threshold soft cut-off must stay at 0.6."""
 
     def test_threshold_is_0_6(self) -> None:
-        src = VALIDATOR_CPP.read_text(encoding="utf-8")
+        src = _validator_source()
         # Anchor on the rule body: the section runs from the rule's comment
         # header through to the failure.rule_id assignment. The < 0.6 soft
         # cut-off must appear inside that window.
@@ -151,7 +163,7 @@ class TrioSonataValidatorThresholdTest(unittest.TestCase):
         self.assertIn(
             "mean_independence < 0.6",
             body,
-            "voice_independence_threshold soft cut-off drifted from 0.6 in validator.cpp",
+            "voice_independence_threshold soft cut-off drifted from 0.6",
         )
 
 

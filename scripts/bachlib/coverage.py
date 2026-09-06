@@ -6,7 +6,8 @@ estimate. Loads scripts/technique_catalog.json and cross-checks every cited
 evidence token against the live source of truth:
 
   rule_bits       -> RuleBit enum         (src/composer/provenance.h)
-  validator_rules -> failure.rule_id lits  (src/composer/validator.cpp)
+  validator_rules -> failure.rule_id lits  (src/composer/validator.cpp,
+                                            src/composer/form_idiom_rules.cpp)
   voice_intents   -> VoiceIntent enum      (src/composer/voice_intent.h)
 
 A catalog entry that claims a RuleBit / Validator rule / VoiceIntent which no
@@ -32,7 +33,14 @@ from bachlib.common import REPO_ROOT
 CATALOG_PATH = REPO_ROOT / "scripts" / "technique_catalog.json"
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
 VOICE_INTENT_H = REPO_ROOT / "src" / "composer" / "voice_intent.h"
-VALIDATOR_CPP = REPO_ROOT / "src" / "composer" / "validator.cpp"
+# The validator reports through one rule_id vocabulary spelled across two
+# translation units: the counterpoint rules every voice obeys, and the
+# idiomatic conditions each individual form must satisfy. Both must be read or
+# the catalog sees half the vocabulary and reports the other half as drift.
+VALIDATOR_SOURCES = (
+    REPO_ROOT / "src" / "composer" / "validator.cpp",
+    REPO_ROOT / "src" / "composer" / "form_idiom_rules.cpp",
+)
 
 VALID_STATUS = ("implemented", "partial", "unimplemented")
 # Coverage weight per status; partial counts as half an implemented technique.
@@ -60,12 +68,16 @@ def extract_voice_intents(source: str | None = None) -> set[str]:
 
 
 def extract_validator_rules(source: str | None = None) -> set[str]:
-    """rule_id string literals assigned to ``failure.rule_id`` in validator.cpp.
+    """rule_id string literals assigned to ``failure.rule_id`` by the validator.
 
     Handles both plain assignments and ternaries by pulling every string
     literal out of each ``rule_id = ... ;`` statement.
     """
-    src = source if source is not None else VALIDATOR_CPP.read_text(encoding="utf-8")
+    src = (
+        source
+        if source is not None
+        else "\n".join(path.read_text(encoding="utf-8") for path in VALIDATOR_SOURCES)
+    )
     rules: set[str] = set()
     for stmt in re.findall(r"rule_id\s*=\s*(.*?);", src, re.S):
         rules.update(re.findall(r'"([a-z][a-z0-9_]+)"', stmt))

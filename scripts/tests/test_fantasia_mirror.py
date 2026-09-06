@@ -6,7 +6,7 @@ densities / register bases) must match the C++ Fantasia fixture source (the
 kBarRoot[4] / kBarMinor[4] initialisers and the kSpecs[4] section table in
 buildFantasiaFixture, src/composer/harness_fixture.cpp), the validator's
 section_contrast_required margins (2 notes/bar, 5 semitones) must match
-validator.cpp, and the FantasiaSectionContrast RuleBit number (63) must match
+the validator, and the FantasiaSectionContrast RuleBit number (63) must match
 provenance.h. A renamed constant or an altered progression / section table that
 the Python predictor still claims would make structural_ok diverge from the CLI
 output; this drift guard fails instead. The Fantasia figuration reuses the OrganPrelude
@@ -29,8 +29,20 @@ if str(SCRIPTS_DIR) not in sys.path:
 import bachlib as rpc  # noqa: E402
 
 FIXTURE_CPP = REPO_ROOT / "src" / "composer" / "harness_fixture.cpp"
-VALIDATOR_CPP = REPO_ROOT / "src" / "composer" / "validator.cpp"
+# The validator's rules are spelled across two translation units: the
+# counterpoint rules every voice obeys, and the idiomatic conditions each
+# individual form must satisfy. A guard that reads only one of them goes silent
+# the moment its rule is spelled in the other.
+VALIDATOR_SOURCES = (
+    REPO_ROOT / "src" / "composer" / "validator.cpp",
+    REPO_ROOT / "src" / "composer" / "form_idiom_rules.cpp",
+)
 PROVENANCE_H = REPO_ROOT / "src" / "composer" / "provenance.h"
+
+
+def _validator_source() -> str:
+    """Return every translation unit the validator spells its rules in."""
+    return "\n".join(path.read_text(encoding="utf-8") for path in VALIDATOR_SOURCES)
 
 
 def _fantasia_body() -> str:
@@ -143,19 +155,19 @@ class FantasiaValidatorMarginsTest(unittest.TestCase):
     """The section_contrast_required margins must stay at 2 notes/bar, 5 st."""
 
     def test_margins_match_cpp(self) -> None:
-        src = VALIDATOR_CPP.read_text(encoding="utf-8")
+        src = _validator_source()
         parts = src.split("section_contrast_required")
         self.assertGreaterEqual(len(parts), 2)
         body = parts[1]
         self.assertIn(
             f"kMinDensityMargin = {rpc.FANTASIA_MIN_DENSITY_MARGIN}",
             body,
-            "section_contrast_required density margin drifted from 2 in validator.cpp",
+            "section_contrast_required density margin drifted from 2",
         )
         self.assertIn(
             f"kMinRegisterMargin = {rpc.FANTASIA_MIN_REGISTER_MARGIN}",
             body,
-            "section_contrast_required register margin drifted from 5 in validator.cpp",
+            "section_contrast_required register margin drifted from 5",
         )
 
 
