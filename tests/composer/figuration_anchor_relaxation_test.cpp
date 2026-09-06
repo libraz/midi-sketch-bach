@@ -154,7 +154,7 @@ TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTextu
   // leave the chord. RATCHET: this ceiling may only ever be LOWERED -- a rise
   // means the builder is escaping where it should be finding a chord tone.
   EXPECT_GT(relaxed_notes, 0u) << "the escape never fired; the exemption is unreachable";
-  EXPECT_LE(relaxed_notes, 4u) << "the escape is firing more widely than measured";
+  EXPECT_LE(relaxed_notes, 2u) << "the escape is firing more widely than measured";
 }
 
 }  // namespace

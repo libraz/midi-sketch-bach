@@ -579,7 +579,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // of, and when nothing clears both the parallel-free tone stands and keeps
     // its battuta. The hidden column pays a little for it, in the direction
     // already argued above.
-    {FormType::Fugue, 0, 0, 37, 99, 123, 0, 3, 4, 5, 80723},
+    // The contrary column is the shared beat-anchor selector's. That selector
+    // ranks its candidates by what each one sounds against the voices already
+    // moving, and the one motion it could not see was a perfect interval
+    // repeated by contrary motion -- so a tone answering a rising line by
+    // leaping down onto the octave it had just left scored as fully clean. The
+    // anchors that do it are the ones on a bar head, where the harmony turns and
+    // the bass moves into it by a fourth or a fifth, so the tier that sees the
+    // class is applied there and only there. The tier sits BELOW the battuta
+    // rather than above it, which is that selector's one inversion of "the
+    // harsher-sounding fault is the worse one": measured as overshoot scaled by
+    // the spread each class occupies in the reference corpus, the contrary
+    // repeat costs several times what the battuta does, because the works
+    // themselves write it far more sparingly. This form pays nothing for it --
+    // every other column here is unmoved.
+    {FormType::Fugue, 0, 0, 37, 99, 118, 0, 3, 4, 5, 80723},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -592,9 +606,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // derivation whenever the avoiding line still restates over the third
     // entry, so the arrivals that survive are the ones a restatable line cannot
     // trade away. What is left after the realization-time repair described on
-    // the fugue row is that residue and little else, and here the hidden and
-    // contrary columns fall with it rather than paying for it.
-    {FormType::PreludeAndFugue, 0, 0, 15, 34, 58, 0, 1, 2, 3, 38130},
+    // the fugue row is that residue and little else.
+    // Its prelude half is figuration over a moving bass throughout, so nearly
+    // every one of its bar heads is chosen against two lines that are both
+    // moving and the beat anchor's contrary tier reaches most of them. The
+    // battuta column pays one arrival for it and the hidden column pays
+    // nothing.
+    {FormType::PreludeAndFugue, 0, 0, 15, 35, 53, 0, 1, 2, 3, 38124},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -668,7 +686,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // worse than what it replaces empties this column without moving any other
     // one: the two faults were never in competition, one was simply outranking
     // the other by omission.
-    {FormType::ToccataAndFugue, 84, 84, 28, 2, 18, 7, 2, 1, 2, 33425},
+    // Its contrary column falls furthest in proportion of any form's when the
+    // shared beat anchor is given the tier described on the fugue row, and
+    // nothing else in the row moves at all -- this form's bar heads were
+    // producing that class and only that class.
+    {FormType::ToccataAndFugue, 84, 84, 28, 2, 11, 7, 2, 1, 1, 33425},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -686,9 +708,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // stays reserved for stepping off a true parallel, because this anchor is
     // load-bearing and every off-beat tone of its beat derives from it. Both
     // strict columns stay empty with it in, and the hidden and contrary columns
-    // fall alongside the battuta rather than paying for it; the one figure that
-    // rises is a single configuration's contrary count.
-    {FormType::Passacaglia, 0, 0, 48, 26, 12, 0, 3, 1, 2, 27792},
+    // fall alongside the battuta rather than paying for it. Its contrary column
+    // then falls again with the shared beat anchor's new tier, and the worst
+    // cell falls with it, which is what says the arrivals removed were reachable
+    // rather than merely numerous.
+    {FormType::Passacaglia, 0, 0, 48, 26, 10, 0, 3, 1, 1, 27792},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -701,13 +725,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // perfect interval apart by construction. And the sustained support leaves
     // the chord for a free diatonic tone once no triad tone in the band would
     // do. Both strict columns are empty; the anti-parallel column is where the
-    // register ranking steps when clean is unreachable, and the corpus writes
-    // that class freely. It shares the fugue tail's battuta-scored
+    // register ranking steps when clean is unreachable, and this form keeps the
+    // largest one in the table even after the shared beat anchor is taught to
+    // see the class -- the register ranking is a separate site from that anchor
+    // and still trades into it. It shares the fugue tail's battuta-scored
     // countersubject with the toccata and pays for it in the same two columns,
     // for the reason given there, and takes the realization-time repair with it.
     // Its succession floor rises rather than falling: the avoiding line's wider
     // intervals split sustains that had read as one motion.
-    {FormType::FantasiaAndFugue, 0, 0, 31, 3, 39, 0, 2, 1, 2, 34906},
+    {FormType::FantasiaAndFugue, 0, 0, 31, 3, 37, 0, 2, 1, 2, 34906},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -894,10 +920,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // subdividing a beat into sixteenths is what a longer span gives the
     // countersubject builder more room to do, so it is also where more of the
     // unjudged arrivals were.
-    {FormType::Fugue, 0, 0, 205, 976, 857, 0, 6, 13, 9, 776477},
+    {FormType::Fugue, 0, 0, 205, 974, 770, 0, 6, 13, 8, 776462},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length.
-    {FormType::PreludeAndFugue, 0, 0, 162, 334, 484, 0, 3, 5, 8, 504121},
+    {FormType::PreludeAndFugue, 0, 0, 164, 335, 457, 0, 3, 5, 8, 504115},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
