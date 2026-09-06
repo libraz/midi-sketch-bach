@@ -701,6 +701,15 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
   // 1. Strong-beat dissonance. Generation validation checks only search-owned
   //    notes; final-score validation checks every sounding source.
+  //
+  //    The chord tone set includes the seventh when the active chord declares
+  //    one. A dominant seventh sounding its own seventh on the downbeat is the
+  //    harmony, not a dissonance against it, and the triad-only reading made the
+  //    single most characteristic accented sonority in the idiom unreachable.
+  //    The weak-beat rule below deliberately keeps the triad-only reading: there
+  //    the question is not "does this note belong to the harmony" but "does it
+  //    need stepwise handling", and a chordal seventh does need preparing and
+  //    resolving by step.
   for (std::size_t i = 0; i < notes.size(); ++i) {
     const auto& note = notes[i];
     if (i >= provenance.size())
@@ -711,9 +720,13 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       continue;
 
     const auto& chord = activeChord(harmonic_plan, note.start_tick);
-    const auto triad = triadFor(chord);
+    std::size_t chord_tone_count = 0;
+    const auto chord_tones = chordPitchClasses(chord, &chord_tone_count);
     const std::uint8_t pc = static_cast<std::uint8_t>(note.pitch % 12);
-    if (pc != triad[0] && pc != triad[1] && pc != triad[2]) {
+    bool is_chord_tone = false;
+    for (std::size_t tone = 0; tone < chord_tone_count; ++tone)
+      is_chord_tone = is_chord_tone || chord_tones[tone] == pc;
+    if (!is_chord_tone) {
       ValidationFailure failure;
       failure.span_id = provenance[i].span_id;
       failure.rule_id = "strong_beat_dissonance";
