@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -219,6 +220,165 @@ TEST(ExpressionEventsTest, TerracesDeterministic) {
     EXPECT_EQ(a[idx].tick, b[idx].tick);
     EXPECT_EQ(a[idx].controller, b[idx].controller);
     EXPECT_EQ(a[idx].value, b[idx].value);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Registration level offset
+// ---------------------------------------------------------------------------
+
+TEST(ExpressionEventsTest, LevelOffsetShiftsTheWholeRegistrationCurve) {
+  const Tick total = 16 * kTicksPerBar;
+  const auto reference = volumeSequence(buildRegistrationPlan(16, 4, kTicksPerBar, total));
+  const auto louder = volumeSequence(buildRegistrationPlan(16, 4, kTicksPerBar, total, 0, 5));
+  const auto softer = volumeSequence(buildRegistrationPlan(16, 4, kTicksPerBar, total, 0, -7));
+  ASSERT_EQ(louder.size(), reference.size());
+  ASSERT_EQ(softer.size(), reference.size());
+  for (std::size_t idx = 0; idx < reference.size(); ++idx) {
+    EXPECT_EQ(louder[idx], reference[idx] + 5) << "point " << idx;
+    EXPECT_EQ(softer[idx], reference[idx] - 7) << "point " << idx;
+  }
+}
+
+TEST(ExpressionEventsTest, LevelOffsetKeepsTerracesUnderTheClimaxPeak) {
+  const Tick total = 32 * kTicksPerBar;
+  std::vector<Tick> steps;
+  for (int idx = 1; idx <= 8; ++idx) {
+    steps.push_back(static_cast<Tick>(idx) * kTicksPerBar);
+  }
+  for (const int offset : {-7, 0, 2, 5}) {
+    const auto arc = volumeSequence(buildRegistrationPlan(32, 4, kTicksPerBar, total, 0, offset));
+    const auto terraces = buildRegistrationTerraces(steps, total, offset);
+    ASSERT_FALSE(arc.empty());
+    ASSERT_FALSE(terraces.empty());
+    const std::uint8_t peak = *std::max_element(arc.begin(), arc.end());
+    for (const auto& evt : terraces) {
+      EXPECT_LT(evt.value, peak) << "offset " << offset;
+    }
+  }
+}
+
+TEST(ExpressionEventsTest, LevelOffsetMovesPhraseDynamicsWithTheRegistration) {
+  const Tick total = 16 * kTicksPerBar;
+  const auto reference = buildPhraseDynamics(4, 4, kTicksPerBar, total);
+  const auto shifted = buildPhraseDynamics(4, 4, kTicksPerBar, total, 0, 5);
+  ASSERT_EQ(shifted.size(), reference.size());
+  for (std::size_t idx = 0; idx < reference.size(); ++idx) {
+    EXPECT_EQ(shifted[idx].tick, reference[idx].tick);
+    EXPECT_EQ(shifted[idx].value, reference[idx].value + 5) << "event " << idx;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// applyArticulation
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A single voice of joined quarter notes.
+std::vector<NoteEvent> joinedQuarters(std::size_t count, VoiceId voice = 0) {
+  std::vector<NoteEvent> notes;
+  for (std::size_t idx = 0; idx < count; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = 60;
+    note.voice = voice;
+    notes.push_back(note);
+  }
+  return notes;
+}
+
+}  // namespace
+
+TEST(ArticulationTest, ReleasesEveryJoinedNoteByTheDeclaredAmount) {
+  auto notes = joinedQuarters(4);
+  std::vector<NoteProvenance> provenance(notes.size());
+  const std::vector<ArticulationDecl> plan = {{0, 0, 4 * kTicksPerBeat, 40}};
+  applyArticulation(plan, &notes, &provenance);
+  for (std::size_t idx = 0; idx + 1 < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].duration, kTicksPerBeat - 40) << "note " << idx;
+    EXPECT_TRUE((provenance[idx].satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any())
+        << "note " << idx;
+  }
+}
+
+TEST(ArticulationTest, LeavesEachVoiceFinalOnsetWhole) {
+  auto notes = joinedQuarters(3, /*voice=*/0);
+  const auto upper = joinedQuarters(3, /*voice=*/1);
+  notes.insert(notes.end(), upper.begin(), upper.end());
+  std::vector<NoteProvenance> provenance(notes.size());
+  const std::vector<ArticulationDecl> plan = {{0, 0, 3 * kTicksPerBeat, 40},
+                                              {1, 0, 3 * kTicksPerBeat, 40}};
+  applyArticulation(plan, &notes, &provenance);
+  for (const auto& note : notes) {
+    const bool is_last = note.start_tick == 2 * kTicksPerBeat;
+    EXPECT_EQ(note.duration, is_last ? kTicksPerBeat : kTicksPerBeat - 40)
+        << "voice " << static_cast<int>(note.voice) << " tick " << note.start_tick;
+  }
+}
+
+TEST(ArticulationTest, CapsTheReleaseAtAQuarterOfTheNote) {
+  // A sixteenth is 120 ticks, so a 72-tick stroke would swallow most of it.
+  std::vector<NoteEvent> notes;
+  for (std::size_t idx = 0; idx < 3; ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * 120;
+    note.duration = 120;
+    note.pitch = 62;
+    notes.push_back(note);
+  }
+  const std::vector<ArticulationDecl> plan = {{0, 0, 360, 72}};
+  applyArticulation(plan, &notes, nullptr);
+  EXPECT_EQ(notes[0].duration, 120 - 30);
+  EXPECT_EQ(notes[1].duration, 120 - 30);
+  EXPECT_EQ(notes[2].duration, 120) << "the voice's last onset stays whole";
+}
+
+TEST(ArticulationTest, LegatoDeclarationLeavesTheLineJoined) {
+  auto notes = joinedQuarters(4);
+  std::vector<NoteProvenance> provenance(notes.size());
+  const std::vector<ArticulationDecl> plan = {{0, 0, 4 * kTicksPerBeat, 0}};
+  applyArticulation(plan, &notes, &provenance);
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].duration, kTicksPerBeat);
+    EXPECT_FALSE(
+        (provenance[idx].satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any());
+  }
+}
+
+TEST(ArticulationTest, UndeclaredVoiceIsUntouched) {
+  auto notes = joinedQuarters(3, /*voice=*/0);
+  const auto other = joinedQuarters(3, /*voice=*/2);
+  notes.insert(notes.end(), other.begin(), other.end());
+  const std::vector<ArticulationDecl> plan = {{0, 0, 3 * kTicksPerBeat, 40}};
+  applyArticulation(plan, &notes, nullptr);
+  for (const auto& note : notes) {
+    if (note.voice == 2) {
+      EXPECT_EQ(note.duration, kTicksPerBeat);
+    }
+  }
+}
+
+TEST(ArticulationTest, PreservesPitchOnsetAndOrder) {
+  const auto before = joinedQuarters(6);
+  auto notes = before;
+  const std::vector<ArticulationDecl> plan = {{0, 0, 6 * kTicksPerBeat, 56}};
+  applyArticulation(plan, &notes, nullptr);
+  ASSERT_EQ(notes.size(), before.size());
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].start_tick, before[idx].start_tick);
+    EXPECT_EQ(notes[idx].pitch, before[idx].pitch);
+    EXPECT_EQ(notes[idx].voice, before[idx].voice);
+  }
+}
+
+TEST(ArticulationTest, EmptyPlanIsANoOp) {
+  const auto before = joinedQuarters(4);
+  auto notes = before;
+  applyArticulation({}, &notes, nullptr);
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    EXPECT_EQ(notes[idx].duration, before[idx].duration);
   }
 }
 

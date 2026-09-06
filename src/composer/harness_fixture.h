@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "composer/expression_events.h"
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/voice_plan.h"
@@ -257,6 +258,12 @@ struct HarnessFixture {
   // expression pass converts each tick into one registration step. Empty means
   // the form declares no terrace points and callers keep the macro arc only.
   std::vector<Tick> registration_step_ticks;
+  // Touch separation per voice. Baroque keyboard playing articulates with the
+  // finger rather than with the pen, so the release is a performance attribute
+  // of the same kind as the registration above: applied after validation, never
+  // written into the score the counterpoint rules read. Empty means the form
+  // declares no touch and every note sounds its whole notated value.
+  std::vector<ArticulationDecl> articulation_plan;
 };
 
 HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed);

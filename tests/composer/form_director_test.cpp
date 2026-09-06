@@ -256,6 +256,103 @@ TEST(FormDirectorBuild, AllFormsRunThroughComposerCleanly) {
   }
 }
 
+// The touch is declared for every form, covers every voice, and is the one
+// place a character can change how the piece sounds on an instrument with no
+// dynamic of its own.
+TEST(FormDirectorBuild, EveryFormDeclaresATouchForEveryVoice) {
+  for (FormType form : kAllForms) {
+    ComposeRequest req;
+    req.form = form;
+    req.seed = 1;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok)
+        << "form " << static_cast<int>(form);
+    ASSERT_EQ(fixture.articulation_plan.size(), fixture.voice_plan.num_voices)
+        << "form " << static_cast<int>(form);
+    for (VoiceId voice = 0; voice < fixture.voice_plan.num_voices; ++voice) {
+      const auto& decl = fixture.articulation_plan[voice];
+      EXPECT_EQ(decl.voice, voice) << "form " << static_cast<int>(form);
+      EXPECT_EQ(decl.start_tick, 0u) << "form " << static_cast<int>(form);
+      EXPECT_GT(decl.end_tick, 0u) << "form " << static_cast<int>(form);
+    }
+  }
+}
+
+TEST(FormDirectorBuild, CharacterChangesTheTouch) {
+  const std::array<SubjectCharacter, 4> ladder = {{
+      SubjectCharacter::Noble,
+      SubjectCharacter::Severe,
+      SubjectCharacter::Playful,
+      SubjectCharacter::Restless,
+  }};
+  Tick previous = 0;
+  for (SubjectCharacter character : ladder) {
+    ComposeRequest req;
+    req.form = FormType::Fugue;
+    req.character = character;
+    req.seed = 1;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+    ASSERT_FALSE(fixture.articulation_plan.empty());
+    const Tick separation = fixture.articulation_plan.front().separation;
+    EXPECT_GT(separation, previous) << "character " << static_cast<int>(character);
+    previous = separation;
+  }
+}
+
+// A chorale melody is sung, so whatever the character does to the figuration
+// around it, the cantus firmus stays joined.
+TEST(FormDirectorBuild, CantusFirmusIsDeclaredLegato) {
+  ComposeRequest req;
+  req.form = FormType::ChoralePrelude;
+  req.character = SubjectCharacter::Severe;
+  req.seed = 1;
+  HarnessFixture fixture;
+  ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+
+  std::array<bool, 256> sings{};
+  for (const Span& span : fixture.voice_plan.spans) {
+    if (span.intent == VoiceIntent::CantusFirmusCarrier) {
+      sings[span.voice] = true;
+    }
+  }
+  bool saw_cantus = false;
+  bool saw_articulated = false;
+  for (const auto& decl : fixture.articulation_plan) {
+    if (sings[decl.voice]) {
+      saw_cantus = true;
+      EXPECT_EQ(decl.separation, 0u) << "voice " << static_cast<int>(decl.voice);
+    } else if (decl.separation > 0) {
+      saw_articulated = true;
+    }
+  }
+  EXPECT_TRUE(saw_cantus) << "the form declares no cantus firmus carrier";
+  EXPECT_TRUE(saw_articulated) << "the figuration around it must still be articulated";
+}
+
+// The touch is performance data. Declaring it must not put anything in the
+// score-stage channel, which the Composer applies before validation: a release
+// the vertical rules can read looks like a rest and hides simultaneities.
+TEST(FormDirectorBuild, TouchStaysOutOfTheScoreStageChannel) {
+  for (FormType form : kAllForms) {
+    ComposeRequest req;
+    req.form = form;
+    req.seed = 1;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok)
+        << "form " << static_cast<int>(form);
+    EXPECT_TRUE(fixture.material.texture_plan.articulations.empty())
+        << "form " << static_cast<int>(form);
+
+    const ComposeResult result =
+        Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+    for (const auto& prov : result.provenance) {
+      EXPECT_FALSE((prov.satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any())
+          << "form " << static_cast<int>(form);
+    }
+  }
+}
+
 TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
   bool saw_four_three = false;
   bool saw_seven_six = false;

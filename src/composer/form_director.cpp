@@ -148,6 +148,61 @@ void declareCadenceVocabulary(FormType form, std::uint16_t bars, HarnessFixture*
   }
 }
 
+// Ticks of release the character asks for between two joined notes. The organ
+// answers a player only through touch and stop selection, so this ladder is
+// where a Noble piece and a Restless one stop sounding alike. The values are a
+// quarter-note grid: at 480 ticks per beat they run from a hair of daylight to
+// a clearly detached stroke, and they are read against note values, never
+// against the clock, so a fast movement keeps the same proportion of silence.
+Tick characterSeparation(SubjectCharacter character) {
+  switch (character) {
+    case SubjectCharacter::Noble:
+      return 24;  // Broad: the notes barely part.
+    case SubjectCharacter::Severe:
+      return 40;  // Ordinary touch, the Baroque default.
+    case SubjectCharacter::Playful:
+      return 56;  // Crisp.
+    case SubjectCharacter::Restless:
+      return 72;  // Markedly detached.
+  }
+  return 40;
+}
+
+// Declare the piece's touch, one window per voice.
+//
+// Two voices are exempt from the character's stroke. A cantus firmus is a
+// chorale melody, which is sung and therefore unbroken however the surrounding
+// figuration is played. A bowed line separates far less than a finger does, so
+// the string forms take half the stroke rather than none: the bow does lift.
+void declareArticulation(FormType form, SubjectCharacter character, std::uint16_t bars,
+                         HarnessFixture* fixture) {
+  if (fixture == nullptr || bars == 0 || fixture->voice_plan.num_voices == 0)
+    return;
+  const Tick piece_end = static_cast<Tick>(bars) * fixture->harmony.ticksPerBar();
+  if (piece_end == 0)
+    return;
+
+  const InstrumentType instrument = defaultInstrumentForForm(form);
+  const bool bowed = instrument == InstrumentType::Violin || instrument == InstrumentType::Cello;
+  Tick separation = characterSeparation(character);
+  if (bowed) {
+    separation /= 2;
+  }
+
+  std::array<bool, 256> sings{};
+  for (const Span& span : fixture->voice_plan.spans) {
+    if (span.intent == VoiceIntent::CantusFirmusCarrier) {
+      sings[span.voice] = true;
+    }
+  }
+
+  fixture->articulation_plan.reserve(fixture->voice_plan.num_voices);
+  for (VoiceId voice = 0; voice < fixture->voice_plan.num_voices; ++voice) {
+    fixture->articulation_plan.push_back(
+        {voice, /*start_tick=*/0, piece_end, sings[voice] ? 0 : separation});
+  }
+}
+
 }  // namespace
 
 const FormSpec& formSpec(FormType form) {
@@ -352,6 +407,7 @@ FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* o
   fixture.harmony.meter_profile = spec.meter_profile;
   annotateDiatonicChordMetadata(&fixture.harmony);
   declareCadenceVocabulary(req.form, resolved.bars, &fixture);
+  declareArticulation(req.form, req.character, resolved.bars, &fixture);
 
   // Opt-in free-counterpoint activation. With the flag off this loop never
   // runs and the fixture is the unchanged carrier-assembly result (byte-stable

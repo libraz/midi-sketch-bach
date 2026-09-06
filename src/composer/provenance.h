@@ -221,8 +221,12 @@ enum RuleBit : std::uint8_t {
   //   counterpart is the Validator's voice_range_integrity rule.
   // ManualAssigned: the note's voice has an OrganManual routing
   //   (Material::texture_plan.manual_assignments).
-  // ArticulationApplied: an articulation span covers the note's voice and
-  //   onset (Material::texture_plan.articulations).
+  // ArticulationApplied: a declared touch shortened the note's gate. Two
+  //   declarations carry it. Material::texture_plan.articulations is read by
+  //   the same post-pass as the bits above. HarnessFixture::articulation_plan
+  //   is read one stage later, after final validation, because a piece the
+  //   composer assembles is played with a release the counterpoint rules must
+  //   not read as a rest.
   // AffektCurveApplied: the note received an Affekt-driven velocity from
   //   the active velocity curve (Material::texture_plan.affekt_curve_active).
   VoiceRangeKept = 43,

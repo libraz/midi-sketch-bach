@@ -4,6 +4,7 @@
 #include "composer/expression_events.h"
 
 #include <algorithm>
+#include <array>
 
 namespace bach::composer {
 
@@ -28,6 +29,14 @@ constexpr int kPhraseSwell = 6;
 constexpr int kTerraceBase = 78;  ///< Level of the first terrace step.
 constexpr int kTerraceStep = 4;   ///< Added per subsequent terrace step.
 constexpr int kTerraceCap = 92;   ///< Ceiling, below the climax peak.
+
+/// @brief Shift a registration design value, kept inside the controller range.
+/// @param base Design value.
+/// @param offset Level shift (see buildRegistrationPlan).
+/// @return The shifted value clamped to [1, 127]; never silent.
+std::uint8_t shiftLevel(int base, int offset) {
+  return static_cast<std::uint8_t>(std::clamp(base + offset, 1, 127));
+}
 
 /// @brief Append one discrete CC#7 registration point.
 /// @param events Destination event stream.
@@ -70,7 +79,7 @@ Tick normalizedClimaxTick(std::size_t cycle_count, Tick ticks_per_bar, std::uint
 }
 
 std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick tick,
-                             std::uint32_t total_ticks, Tick climax_tick) {
+                             std::uint32_t total_ticks, Tick climax_tick, int level_offset) {
   struct Point {
     std::uint64_t tick;
     std::uint8_t value;
@@ -78,15 +87,15 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick t
   const std::uint64_t total = total_ticks;
   Point points[4];
   std::size_t count = 0;
-  points[count++] = {0, kOpeningValue};
+  points[count++] = {0, shiftLevel(kOpeningValue, level_offset)};
   if (cycle_count >= 3) {
-    points[count++] = {total / 2, kDevelopValue};
+    points[count++] = {total / 2, shiftLevel(kDevelopValue, level_offset)};
   }
   if (cycle_count >= 2) {
     points[count++] = {normalizedClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick),
-                       kClimaxValue};
+                       shiftLevel(kClimaxValue, level_offset)};
   }
-  points[count++] = {total > 0 ? total - 1 : 0, kSettleValue};
+  points[count++] = {total > 0 ? total - 1 : 0, shiftLevel(kSettleValue, level_offset)};
 
   const std::uint64_t t = tick;
   if (t <= points[0].tick) {
@@ -114,7 +123,7 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick t
 
 std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle_count,
                                            Tick ticks_per_bar, std::uint32_t total_ticks,
-                                           Tick climax_tick) {
+                                           Tick climax_tick, int level_offset) {
   (void)bars;  // Length is expressed via total_ticks; bars kept for caller clarity.
 
   std::vector<CcEvent> events;
@@ -131,21 +140,26 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
 
   events.reserve(4);
 
+  const std::uint8_t opening = shiftLevel(kOpeningValue, level_offset);
+  const std::uint8_t develop = shiftLevel(kDevelopValue, level_offset);
+  const std::uint8_t climax = shiftLevel(kClimaxValue, level_offset);
+  const std::uint8_t settle = shiftLevel(kSettleValue, level_offset);
+
   if (cycle_count <= 1) {
     // Minimal pieces: opening moderate, then settle.
-    addRegistrationPoint(events, 0, kOpeningValue);
-    addRegistrationPoint(events, settle_tick, kSettleValue);
+    addRegistrationPoint(events, 0, opening);
+    addRegistrationPoint(events, settle_tick, settle);
   } else if (cycle_count == 2) {
     // Opening, climax peak, settle.
-    addRegistrationPoint(events, 0, kOpeningValue);
-    addRegistrationPoint(events, peak_tick, kClimaxValue);
-    addRegistrationPoint(events, settle_tick, kSettleValue);
+    addRegistrationPoint(events, 0, opening);
+    addRegistrationPoint(events, peak_tick, climax);
+    addRegistrationPoint(events, settle_tick, settle);
   } else {
     // Full 4-point arc: opening, develop step-up, climax peak, settle.
-    addRegistrationPoint(events, 0, kOpeningValue);
-    addRegistrationPoint(events, develop_tick, kDevelopValue);
-    addRegistrationPoint(events, peak_tick, kClimaxValue);
-    addRegistrationPoint(events, settle_tick, kSettleValue);
+    addRegistrationPoint(events, 0, opening);
+    addRegistrationPoint(events, develop_tick, develop);
+    addRegistrationPoint(events, peak_tick, climax);
+    addRegistrationPoint(events, settle_tick, settle);
   }
 
   // Guard against any accidental tick collision producing a non-sorted stream
@@ -157,7 +171,7 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
 }
 
 std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_ticks,
-                                               Tick total_ticks) {
+                                               Tick total_ticks, int level_offset) {
   std::vector<CcEvent> events;
   if (step_ticks.empty() || total_ticks == 0) {
     return events;
@@ -179,14 +193,14 @@ std::vector<CcEvent> buildRegistrationTerraces(const std::vector<Tick>& step_tic
   for (std::size_t idx = 0; idx < ticks.size(); ++idx) {
     const int level = std::min(kTerraceBase + static_cast<int>(idx) * kTerraceStep, kTerraceCap);
     // One instantaneous CC#7 step: a stop change, not a ramp.
-    events.push_back({ticks[idx], kCcMainVolume, static_cast<std::uint8_t>(level)});
+    events.push_back({ticks[idx], kCcMainVolume, shiftLevel(level, level_offset)});
   }
   return events;
 }
 
 std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t phrase_bars,
                                          Tick ticks_per_bar, std::uint32_t total_ticks,
-                                         Tick climax_tick) {
+                                         Tick climax_tick, int level_offset) {
   std::vector<CcEvent> events;
   if (total_ticks == 0 || ticks_per_bar == 0) {
     return events;
@@ -202,7 +216,7 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
   for (std::uint64_t start = 0; start < total_ticks; start += phrase_ticks) {
     // Phrase start: return to the macro-arc baseline for this position.
     const std::uint8_t base = macroArcValueAt(cycle_count, ticks_per_bar, static_cast<Tick>(start),
-                                              total_ticks, climax_tick);
+                                              total_ticks, climax_tick, level_offset);
     events.push_back({static_cast<Tick>(start), kCcExpression, base});
 
     // Mid-phrase swell: a small designed step above the baseline. Skipped when
@@ -211,7 +225,7 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
     const std::uint64_t mid = start + phrase_ticks / 2;
     if (mid < total_ticks) {
       const int swelled = macroArcValueAt(cycle_count, ticks_per_bar, static_cast<Tick>(mid),
-                                          total_ticks, climax_tick) +
+                                          total_ticks, climax_tick, level_offset) +
                           kPhraseSwell;
       events.push_back({static_cast<Tick>(mid), kCcExpression,
                         static_cast<std::uint8_t>(std::min(swelled, 127))});
@@ -219,6 +233,49 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
   }
 
   return events;
+}
+
+void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<NoteEvent>* notes,
+                       std::vector<NoteProvenance>* provenance) {
+  if (plan.empty() || notes == nullptr || notes->empty()) {
+    return;
+  }
+
+  // Last onset per voice. Touch separates a note from its successor, so a voice
+  // that has stopped has nothing to separate from: leaving its final onset whole
+  // keeps the closing chord at its notated length under the ritardando.
+  // VoiceId is a byte, so one slot per value indexes any voice without a bound.
+  std::array<Tick, 256> last_onset{};
+  for (const auto& note : *notes) {
+    last_onset[note.voice] = std::max(last_onset[note.voice], note.start_tick);
+  }
+
+  for (std::size_t idx = 0; idx < notes->size(); ++idx) {
+    NoteEvent& note = (*notes)[idx];
+    if (note.start_tick == last_onset[note.voice]) {
+      continue;
+    }
+    Tick separation = 0;
+    for (const auto& decl : plan) {
+      if (decl.voice == note.voice && note.start_tick >= decl.start_tick &&
+          note.start_tick < decl.end_tick) {
+        separation = decl.separation;
+        break;
+      }
+    }
+    // A running figure is already articulated by its own speed; capping the
+    // release at a quarter of the note keeps short values joined and lets long
+    // values take the whole declared separation. The cap also holds the note
+    // above zero without a floor.
+    separation = std::min(separation, note.duration / 4);
+    if (separation == 0) {
+      continue;
+    }
+    note.duration -= separation;
+    if (provenance != nullptr && idx < provenance->size()) {
+      (*provenance)[idx].satisfied_rules |= ruleBitMask(RuleBit::ArticulationApplied);
+    }
+  }
 }
 
 std::vector<TempoEvent> buildFinalRitardando(std::uint16_t bpm, Tick total_ticks,
