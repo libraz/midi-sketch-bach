@@ -1813,9 +1813,27 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
   // one-beat resolution, and one-beat rest. The immutable ground supplies the bass at
   // all three positions; the actual final variation bounds the upper register
   // so the inserted carrier cannot cross either neighbour.
-  {
-    const int bars = static_cast<int>(req.bars);
-    const Tick suspension_tick = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+  //
+  // The ground restates the same bars throughout, so every cycle closes on the
+  // cadence the last one closes on and each of those is a place this figure
+  // belongs. A form built on repetition that states its one accented dissonance
+  // only in the closing bar has no friction against the ground anywhere else,
+  // and that friction is what a passacaglia is for. The chord is the same at
+  // every one of these bars because the lookup is already cycle-relative.
+  //
+  // The closing cadence is offered the figure first. Installing a carrier splits
+  // the span it sits in, and the last cadence is the one that must not lose its
+  // dissonance to a split made earlier in the piece, so trying it first leaves
+  // the shipped closing gesture unchanged whatever the earlier cycles take.
+  std::vector<int> suspension_bars;
+  suspension_bars.push_back(static_cast<int>(req.bars) - 2);
+  for (int cycle_bar = kPassacagliaCycleBars - 2; cycle_bar < static_cast<int>(req.bars) - 2;
+       cycle_bar += kPassacagliaCycleBars) {
+    suspension_bars.push_back(cycle_bar);
+  }
+
+  for (const int sus_bar : suspension_bars) {
+    const Tick suspension_tick = static_cast<Tick>(sus_bar) * kTicksPerBar34;
     const Tick preparation_tick = suspension_tick - kTicksPerBeat;
     const Tick resolution_tick = suspension_tick + kTicksPerBeat;
     const Tick period = out.material.passacaglia_ground_period;
@@ -1875,6 +1893,13 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     const int upper_res = upperPitchAt(resolution_tick);
     const int previous_upper_head = upperPitchAt(suspension_tick - kTicksPerBar34);
     const int previous_ground = groundPitchAt(suspension_tick - kTicksPerBar34);
+    // The bar the suspension resolves into is read for the same reason its
+    // approach is. The rewrite replaces the V0 tone AT this bar head, so it
+    // decides two motions against the ground, not one, and a tone vetted only
+    // on the way in is free to leave in perfect motion with the bass. Every
+    // cycle cadence has a bar after it that states the ground again.
+    const int next_upper_head = upperPitchAt(suspension_tick + kTicksPerBar34);
+    const int next_ground = groundPitchAt(suspension_tick + kTicksPerBar34);
     // The bar-head chain above reads the ground at the grain a whole-bar ground
     // moves at. A cycle that states the ground in quarters moves three times
     // inside that span, and the pair a listener hears -- the pair the audit
@@ -1895,7 +1920,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
       }
     }
     const CycleBar& suspension_chord =
-        plan[static_cast<std::size_t>((bars - 2) % kPassacagliaCycleBars)];
+        plan[static_cast<std::size_t>(sus_bar % kPassacagliaCycleBars)];
     const int chord_third = suspension_chord.minor ? 3 : 4;
     const std::array<int, 3> chord_pcs = {suspension_chord.root_pc,
                                           (suspension_chord.root_pc + chord_third) % 12,
@@ -1908,12 +1933,20 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     // near octave cannot. Ascending distance keeps the figuration's own tone
     // first, so a cadence that already works is left alone.
     //
-    // The whole search runs twice. The first pass also demands that the
-    // pattern's own three tones form no true parallel with the figuration; the
-    // second drops that demand, because some cadences admit no parallel-free
-    // suspension at all and the form's closing dissonance is worth more than the
-    // fault it carries.
-    for (int strict_pass = 0; strict_pass < 2 && !installed; ++strict_pass) {
+    // The whole search runs twice at the closing cadence. The first pass also
+    // demands that the pattern's own three tones form no true parallel with the
+    // figuration; the second drops that demand, because some cadences admit no
+    // parallel-free suspension at all and the form's closing dissonance is worth
+    // more than the fault it carries.
+    //
+    // That trade is the closing gesture's alone. An interior cycle cadence has
+    // no comparable claim -- it is one of several identical closes rather than
+    // the one the piece ends on -- and buying its dissonance with a true
+    // parallel would be paying a cardinal fault for an ornament the cycle can
+    // simply go without. Those bars take the figure only when it is clean.
+    const bool closing_cadence = sus_bar == static_cast<int>(req.bars) - 2;
+    const int strict_passes = closing_cadence ? 2 : 1;
+    for (int strict_pass = 0; strict_pass < strict_passes && !installed; ++strict_pass) {
       for (int distance = 0; distance <= 12 && !installed; ++distance) {
         for (int direction : {1, -1}) {
           if (distance == 0 && direction < 0)
@@ -1928,6 +1961,30 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             continue;
           if (prior_upper >= 0 && prior_upper_ground >= 0 &&
               formsPerfectParallel(prior_upper, upper_sus, prior_upper_ground, bass_sus))
+            continue;
+          // Held to the first pass only, like the strict check further down. An
+          // interior cycle never reaches the second pass and so always honours
+          // it; the close may spend a hidden perfect to keep its dissonance,
+          // which is the same trade the second pass already makes against the
+          // far more expensive true parallel. A closing cadence with no accented
+          // dissonance at all is the worse outcome.
+          if (strict_pass == 0 && next_upper_head >= 0 && next_ground >= 0 &&
+              formsPerfectParallel(upper_sus, next_upper_head, bass_sus, next_ground))
+            continue;
+          // The same three motions can arrive on a unison the contrary way as
+          // readily as they can approach a perfect interval in similar motion,
+          // and against a bass that cannot move there is no second chance to
+          // avoid it. Held to the first pass for the reason the departure check
+          // is: it is the cheapest class the reference corpus prices, and a
+          // closing cadence with no accented dissonance is worth less than one
+          // that arrives carrying a battuta.
+          if (strict_pass == 0 &&
+              ((previous_upper_head >= 0 && previous_ground >= 0 &&
+                formsBattuta(previous_upper_head, upper_sus, previous_ground, bass_sus)) ||
+               (prior_upper >= 0 && prior_upper_ground >= 0 &&
+                formsBattuta(prior_upper, upper_sus, prior_upper_ground, bass_sus)) ||
+               (next_upper_head >= 0 && next_ground >= 0 &&
+                formsBattuta(upper_sus, next_upper_head, bass_sus, next_ground))))
             continue;
           bool creates_augmented_second = false;
           if (req.mode == detail::Mode::Minor) {
