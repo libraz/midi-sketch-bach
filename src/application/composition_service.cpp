@@ -87,6 +87,25 @@ void sortTempoEvents(std::vector<TempoEvent>* events) {
                 events->end());
 }
 
+// Registration level shift for one character, in CC#7 steps. Terraced dynamics
+// are a choice of stops made before the piece starts, so a character is loud or
+// soft by being drawn on a bigger or smaller registration -- the whole curve
+// moves and its shape does not. Severe is the reference the design values were
+// written for.
+int characterRegistrationOffset(SubjectCharacter character) {
+  switch (character) {
+    case SubjectCharacter::Noble:
+      return 5;  // Full principal chorus.
+    case SubjectCharacter::Severe:
+      return 0;
+    case SubjectCharacter::Playful:
+      return -7;  // A light registration: one 8' with a 4' above it.
+    case SubjectCharacter::Restless:
+      return 2;  // Forward of the reference without reaching the plenum.
+  }
+  return 0;
+}
+
 }  // namespace
 
 PerformanceProfile resolvePerformanceProfile(FormType form, InstrumentType instrument) {
@@ -245,6 +264,18 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
     cadence_ticks.push_back(cadence.tick);
   }
   applyVelocityCurve(out->composition.notes, out->instrument, cadence_ticks);
+  // The notated lengths, kept before the touch shortens them. The exported
+  // report carries the validator's texture figures, and those measure how many
+  // voices the piece has sounding, not how long a player holds them: reading an
+  // articulated array would report a thinner texture than the one composed.
+  // Everything that is played -- MIDI, tracks, the public event stream -- takes
+  // the released lengths instead.
+  const std::vector<NoteEvent> notated = out->composition.notes;
+  // Touch belongs to this stage and for the same reason velocity does: an early
+  // release is how the piece is played, not what is written, and letting a
+  // vertical rule read one would turn an articulated line into a line of rests.
+  composer::applyArticulation(fixture.articulation_plan, &out->composition.notes,
+                              &out->composition.provenance);
   out->composition.tracks = composer::Renderer{}.render(out->composition.notes);
   applyInstrument(out->composition.tracks, out->instrument);
 
@@ -254,13 +285,18 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   if (cycle_count == 0) {
     cycle_count = 1;
   }
+  // Which stops the piece is drawn on. The registration is the organ's only
+  // dynamic, so without this the four characters would be played on identical
+  // stops and differ in nothing an ear can hear as loudness.
+  const int registration_offset = characterRegistrationOffset(effective.character);
   if (out->performance_profile.registration_terraces) {
     const Tick registration_climax =
         fixture.climax_end_tick > fixture.climax_start_tick ? fixture.climax_start_tick : 0;
-    const auto plan = composer::buildRegistrationPlan(
-        out->resolved_bars, cycle_count, ticks_per_bar, out->total_ticks, registration_climax);
-    const auto terraces =
-        composer::buildRegistrationTerraces(fixture.registration_step_ticks, out->total_ticks);
+    const auto plan =
+        composer::buildRegistrationPlan(out->resolved_bars, cycle_count, ticks_per_bar,
+                                        out->total_ticks, registration_climax, registration_offset);
+    const auto terraces = composer::buildRegistrationTerraces(
+        fixture.registration_step_ticks, out->total_ticks, registration_offset);
     for (auto& track : out->composition.tracks) {
       track.cc_events.insert(track.cc_events.end(), plan.begin(), plan.end());
       track.cc_events.insert(track.cc_events.end(), terraces.begin(), terraces.end());
@@ -269,8 +305,8 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   if (out->performance_profile.continuous_expression) {
     const Tick phrase_climax =
         fixture.climax_end_tick > fixture.climax_start_tick ? fixture.climax_start_tick : 0;
-    const auto phrase = composer::buildPhraseDynamics(cycle_count, snap, ticks_per_bar,
-                                                      out->total_ticks, phrase_climax);
+    const auto phrase = composer::buildPhraseDynamics(
+        cycle_count, snap, ticks_per_bar, out->total_ticks, phrase_climax, registration_offset);
     for (auto& track : out->composition.tracks) {
       track.cc_events.insert(track.cc_events.end(), phrase.begin(), phrase.end());
     }
@@ -325,9 +361,11 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   // The exported report must describe the notes exported beside it. The
   // ornament pass rewrote `composition.notes` after `composition.validation`
   // was produced, so only `final_validation` was measured on the note array
-  // this document carries; the failure path above already uses it.
+  // this document carries; the failure path above already uses it. For the same
+  // reason the report carries the notated lengths: `final_validation` and the
+  // texture figures inside it were measured before the touch was applied.
   out->generated_json =
-      composer::emitGeneratedJson(out->composition.notes, out->final_validation, out->tempo_events);
+      composer::emitGeneratedJson(notated, out->final_validation, out->tempo_events);
   out->provenance_json = composer::emitProvenanceJson(out->composition.provenance);
   out->status = CompositionStatus::Ok;
   return out->status;

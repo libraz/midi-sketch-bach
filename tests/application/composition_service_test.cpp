@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,20 @@ std::vector<std::uint8_t> homepagePitches(const std::string& json) {
     offset = end;
   }
   return pitches;
+}
+
+// Note durations in emission order from a generated.v1 payload.
+std::vector<Tick> jsonDurations(const std::string& json) {
+  constexpr const char* kDurationKey = "\"duration\":";
+  std::vector<Tick> durations;
+  std::size_t offset = 0;
+  while ((offset = json.find(kDurationKey, offset)) != std::string::npos) {
+    offset += std::char_traits<char>::length(kDurationKey);
+    const std::size_t end = json.find_first_not_of("0123456789", offset);
+    durations.push_back(static_cast<Tick>(std::stoul(json.substr(offset, end - offset))));
+    offset = end;
+  }
+  return durations;
 }
 
 std::vector<std::uint8_t> midiPitches(const ParsedMidi& midi) {
@@ -349,6 +364,118 @@ TEST(CompositionServiceTest, NonKeyboardInstrumentUsesPhraseVelocityCurve) {
   std::sort(velocities.begin(), velocities.end());
   velocities.erase(std::unique(velocities.begin(), velocities.end()), velocities.end());
   EXPECT_GT(velocities.size(), 1u);
+}
+
+// The organ answers nothing to key velocity, so its expression is touch and
+// stop selection. Both must reach the product: a line where every note-off
+// meets the next note-on is a line no organist plays.
+TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
+  constexpr std::array<FormType, 10> kAllForms = {{
+      FormType::Fugue,
+      FormType::PreludeAndFugue,
+      FormType::TrioSonata,
+      FormType::ChoralePrelude,
+      FormType::ToccataAndFugue,
+      FormType::Passacaglia,
+      FormType::FantasiaAndFugue,
+      FormType::CelloPrelude,
+      FormType::Chaconne,
+      FormType::GoldbergVariations,
+  }};
+  for (FormType form : kAllForms) {
+    CompositionRequest request;
+    request.form = form;
+    request.character = SubjectCharacter::Severe;
+    request.seed = 42;
+    request.bpm = 100;
+    CompositionProduct product;
+    ASSERT_EQ(compose(request, &product), CompositionStatus::Ok)
+        << "form " << static_cast<int>(form);
+
+    std::size_t joined = 0;
+    std::size_t separated = 0;
+    std::map<VoiceId, std::vector<const NoteEvent*>> by_voice;
+    for (const auto& note : product.composition.notes) {
+      by_voice[note.voice].push_back(&note);
+    }
+    for (auto& [voice, line] : by_voice) {
+      std::sort(line.begin(), line.end(), [](const NoteEvent* lhs, const NoteEvent* rhs) {
+        return lhs->start_tick < rhs->start_tick;
+      });
+      for (std::size_t idx = 0; idx + 1 < line.size(); ++idx) {
+        if (line[idx]->start_tick + line[idx]->duration < line[idx + 1]->start_tick) {
+          ++separated;
+        } else {
+          ++joined;
+        }
+      }
+    }
+    EXPECT_GT(separated, joined) << "form " << static_cast<int>(form) << " is played legato";
+
+    bool stamped = false;
+    for (const auto& prov : product.composition.provenance) {
+      if ((prov.satisfied_rules & composer::ruleBitMask(composer::RuleBit::ArticulationApplied))
+              .any()) {
+        stamped = true;
+        break;
+      }
+    }
+    EXPECT_TRUE(stamped) << "form " << static_cast<int>(form)
+                         << ": articulation shipped without a trace in provenance";
+  }
+}
+
+// The report carries the score and the render carries the performance. Mixing
+// them would make the validator's texture figures, which are measured on the
+// notated array and embedded in the same document, describe an array they were
+// never computed from.
+TEST(CompositionServiceTest, ExportedReportKeepsTheNotatedLengths) {
+  CompositionProduct product;
+  ASSERT_EQ(compose(fugueRequest(42), &product), CompositionStatus::Ok);
+
+  const std::vector<Tick> reported = jsonDurations(product.generated_json);
+  ASSERT_EQ(reported.size(), product.composition.notes.size());
+  std::uint64_t reported_total = 0;
+  std::uint64_t played_total = 0;
+  for (std::size_t idx = 0; idx < reported.size(); ++idx) {
+    reported_total += reported[idx];
+    played_total += product.composition.notes[idx].duration;
+    EXPECT_GE(reported[idx], product.composition.notes[idx].duration)
+        << "note " << idx << ": the touch may only release a note early";
+  }
+  EXPECT_GT(reported_total, played_total)
+      << "the report and the performance carry the same lengths, so one of them is wrong";
+}
+
+TEST(CompositionServiceTest, CharacterChangesTheRegistration) {
+  const std::array<SubjectCharacter, 4> characters = {{
+      SubjectCharacter::Noble,
+      SubjectCharacter::Severe,
+      SubjectCharacter::Playful,
+      SubjectCharacter::Restless,
+  }};
+  std::vector<std::vector<std::uint8_t>> streams;
+  for (SubjectCharacter character : characters) {
+    CompositionRequest request = fugueRequest(42);
+    request.character = character;
+    CompositionProduct product;
+    ASSERT_EQ(compose(request, &product), CompositionStatus::Ok)
+        << "character " << static_cast<int>(character);
+    std::vector<std::uint8_t> values;
+    for (const auto& track : product.composition.tracks) {
+      for (const auto& evt : track.cc_events) {
+        values.push_back(evt.value);
+      }
+    }
+    ASSERT_FALSE(values.empty()) << "character " << static_cast<int>(character);
+    streams.push_back(values);
+  }
+  for (std::size_t lhs = 0; lhs < streams.size(); ++lhs) {
+    for (std::size_t rhs = lhs + 1; rhs < streams.size(); ++rhs) {
+      EXPECT_NE(streams[lhs], streams[rhs])
+          << "characters " << lhs << " and " << rhs << " are played on the same stops";
+    }
+  }
 }
 
 TEST(CompositionServiceTest, ExplicitIncompatibleInstrumentFailsBeforeGeneration) {
