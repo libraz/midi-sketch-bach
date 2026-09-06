@@ -38,6 +38,9 @@ set(BACH_COMPOSER_SOURCES
   form_ground_variations.cpp
   form_linear.cpp
   form_cantus.cpp
+  form_goldberg.cpp
+  bar_material.cpp
+  arrival_relief.cpp
   form_fugue.cpp
   form_sectional.cpp
   minor_material.cpp
