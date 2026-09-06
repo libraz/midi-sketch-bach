@@ -288,7 +288,7 @@ void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
       // degree per sub toward (and possibly past) the next anchor. The walk is
       // NOT clamped at the anchor: a clamped fill parks on the next onset's
       // pitch and re-attacks it, chaining repeated notes the reference corpus
-      // almost never writes (~3% of transitions). A fill that would land the
+      // almost never writes. A fill that would land the
       // LAST sub exactly on the next anchor bends one step beyond it instead
       // (an echappee resolving onto the anchor by step). When the next anchor
       // repeats this one (span == 0, possible across a chord change that keeps
@@ -651,8 +651,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   int cursor = std::clamp(prev_anchor, wave_lo, wave_hi);
   int dir = (cursor <= center) ? 1 : -1;
   // Per-bar figure rotation. A purely stepwise wave over-concentrates the
-  // melodic-interval surface on seconds (the corpus walks steps on only ~36%
-  // of transitions and skips or leaps on ~61%), so the bar figure rotates:
+  // melodic-interval surface on seconds (the corpus writes more skips and
+  // leaps than steps), so the bar figure rotates:
   // a broken-third chain (c-e-d-f-e-g), one fourth/fifth dive per bar, and
   // the plain wave. Rotation matters as much as the figures themselves --
   // applying any single figure to every bar over-concentrates the interval
@@ -1454,8 +1454,8 @@ void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
     // The two shorts walk diatonically toward the next beat's anchor. A walk
     // that would stall (repeat a pitch) or land ON the next anchor (an off-beat
     // double of the following attack) is bent instead of held: the reference
-    // corpus repeats a pitch on only ~3% of transitions, so a held short reads
-    // as a stalled line, not an idiom.
+    // corpus almost never repeats a pitch, so a held short reads as a stalled
+    // line, not an idiom.
     int w1 = (dir > 0) ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
     int w2 = (dir > 0) ? detail::scaleUp(w1, 1, mode) : detail::scaleDown(w1, 1, mode);
     if (to == from) {
@@ -1506,7 +1506,7 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
     // The two shorts step toward the next onset's anchor. A short that would
     // repeat a pitch (stalled walk) or land ON the next anchor (an off-beat
     // double of the following attack) is bent into a neighbour or echappee
-    // instead: the reference corpus repeats a pitch on only ~3% of transitions.
+    // instead: the reference corpus almost never repeats a pitch.
     const int to_deg =
         (onset + 1 < onset_count) ? anchor_deg[static_cast<std::size_t>(onset + 1)] : from_deg;
     const int delta = to_deg - from_deg;

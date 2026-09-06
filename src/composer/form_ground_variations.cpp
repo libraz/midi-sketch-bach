@@ -532,8 +532,8 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       // sounding voice (a triad tone is always consonant with the ground, but
       // the V0 wave may sit on a non-chord tone -- a 6th over the ground --
       // that clashes with one triad member and not another): the reference
-      // corpus repeats a pitch on only ~3% of transitions, so even a pair
-      // reads as a stall. When no admissible different tone exists the repeat
+      // corpus almost never repeats a pitch, so even a pair reads as a stall.
+      // When no admissible different tone exists the repeat
       // stands -- a repeated consonance beats a fresh clash.
       if (notes_per_beat == 1 && anchor == line_prev) {
         for (int dist = 1; dist <= 12; ++dist) {

@@ -314,7 +314,7 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, Mode mode, int n
     // (Holding -- the previous behaviour -- flattened every beat whose anchors
     // sit a third apart into repeated sixteenths: up to eight identical
     // pitches per bar at the dense tier, an interval-0 surface the reference
-    // corpus writes on only ~3% of transitions.) A window with no interior
+    // corpus rarely writes.) A window with no interior
     // scale tone falls back to a neighbour oscillation away from the target,
     // the double-neighbour approach figure.
     const int lo = std::min(from, to);
@@ -503,8 +503,8 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
 
       // Repeat nudge: a static harmony (repeated root) or a held passing tone
       // can repeat the previous pitch. Any OFF-BEAT repeat is displaced (the
-      // reference corpus repeats a pitch on only ~3% of transitions, so even a
-      // pair reads as a stalled line): first to a diatonic step neighbour that
+      // reference corpus almost never repeats a pitch, so even a pair reads
+      // as a stalled line): first to a diatonic step neighbour that
       // is consonant against every concurrently sounding upper voice (keeping
       // the walking surface stepwise), else to the chord tone above (an
       // arpeggiated walk, consonant by construction). Downbeats are exempt

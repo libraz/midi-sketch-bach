@@ -321,8 +321,8 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       // min/max extremes are identical regardless of shape and the validator
       // streams are unchanged -- but one shape looped four times per bar
       // stamps the same three-four interval bigrams twelve times, which is
-      // exactly the pendulum concentration the corpus bigram surface (top
-      // entry only ~2.6%) never reaches.
+      // exactly the pendulum concentration the corpus bigram surface never
+      // reaches.
       for (int cell = 0; cell < 4; ++cell) {
         // The rotation stays in unsigned space: casting the seed to int first
         // makes every seed at or above 2^31 negative, and a negative remainder
