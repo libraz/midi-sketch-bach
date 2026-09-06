@@ -926,7 +926,25 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // inversions with it. The cantus bass moves with the harmony rather than
     // being sustained under running voices, so the ranking has somewhere to go on
     // almost every onset.
-    {FormType::ChoralePrelude, 0, 0, 25, 21, 0, 0, 2, 2, 0, 17021, 53},
+    //
+    // Its bass now leaves the chord on the weak beats. Every anchor of the
+    // walking bass is a tone of its bar chord, so the line used to move anchor
+    // to anchor by the intervals a triad offers and almost never by a step;
+    // beats two and four are metrically weak and carry a passing or neighbour
+    // tone between them instead, which is how a continuo bass fills the thirds
+    // of its own harmony. A bass that steps where it used to leap arrives at
+    // the same pitches as the voices above it more often, and the hidden
+    // column is where that lands -- ten more approaches, no true parallel of
+    // either class, and the contrary column still empty. The unresolved
+    // fourths fall by six with it: a fourth above the bass resolves by step,
+    // and a bass that is already stepping supplies the resolution.
+    //
+    // The floor drops by nine. Two Noble configurations lose three notes each,
+    // and the notes are one ornament apiece: an expansion that had split a
+    // quarter into four is no longer eligible over the changed bass, so six
+    // fewer onsets are examined. No voice fell silent and no pair stopped
+    // sounding together.
+    {FormType::ChoralePrelude, 0, 0, 35, 21, 0, 0, 2, 2, 0, 17012, 47},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1113,7 +1131,28 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // them is relieved arrival by arrival. Hidden approaches are what that
     // choice pays with: the leader window of a wide canon is about a fifth deep,
     // so an arrival it can reach cleanly is often still approached by leap.
-    {FormType::GoldbergVariations, 0, 0, 8, 8, 0, 0, 1, 1, 0, 15354, 0},
+    //
+    // The aria bass now walks. Its bar used to be built from the root, third
+    // and fifth alone, which moves by a third or a fifth at every one of its
+    // eight positions and made a chain of same-direction thirds the bass's
+    // whole vocabulary; the two weak positions of the first half now carry the
+    // scale degree between root and third, read under the bar's own harmony so
+    // a minor-key dominant takes the raised sixth rather than an augmented
+    // second. The strict columns stay at zero. What the step costs is the
+    // approaches: four more hidden and the contrary column opening at eight,
+    // one of them in a single cell. A stepping bass under a figuration that is
+    // itself predominantly stepwise reaches a perfect interval from a step on
+    // both sides, which is the contrary class by definition, and the relief
+    // pass answers for it at the eighth the bass actually moves in rather than
+    // at the beat. The floor RISES by twelve, because a bass that changes tone
+    // where it used to restate one gives the pair something to be examined on.
+    //
+    // Where the ground leaves no canon interval writable against the walking
+    // bass the plain triad statement ships instead, for the whole piece: the
+    // aria bass is one period replayed verbatim, so the choice cannot be made
+    // block by block, and a canon whose two voices can clear neither a
+    // crossing nor a true parallel is the harder constraint.
+    {FormType::GoldbergVariations, 0, 0, 12, 8, 8, 0, 1, 1, 1, 15366, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
