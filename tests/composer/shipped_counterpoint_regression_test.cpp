@@ -993,6 +993,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // re-articulate. The trade is priced against the reference corpus, where a
     // hidden perfect costs a small fraction of what an unresolved second
     // inversion does, and taken at a ratio of eighty-five to three.
+    //
+    // The size of the octave column is checked against the gesture's own model
+    // rather than against the form. The archetype is picked by the seed, so
+    // twelve of this sweep's forty-eight composed configurations reach the
+    // cascade and each contributes exactly the seven sixteenths of its one
+    // doubled bar; no other configuration contributes a single one. Read as a
+    // rate over pair motions, a reaching configuration sounds seventy-six
+    // parallel octaves per thousand where the organ corpus's upper envelope is
+    // fifteen -- and where BWV 565, the work whose cascade this is, sounds a
+    // hundred and three, the most extreme reading that corpus holds on this
+    // rule. A gesture cannot be held to an envelope its own model sits outside
+    // of, so this column is pinned against the model and the envelope is what
+    // the rest of the row answers to. What that settles is the rate inside a
+    // configuration that states the cascade, and only that: how often a form
+    // should reach for the gesture at all is a question about the archetype's
+    // share of the seeds, which no column here measures.
     {FormType::ToccataAndFugue, 84, 84, 29, 1, 6, 7, 2, 1, 1, 31885, 336},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
