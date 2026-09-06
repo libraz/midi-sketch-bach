@@ -319,7 +319,19 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
 
   int previous_emitted = -1;
   Tick previous_tick = 0;
-  auto avoidTrueParallel = [&](int proposed, Tick tick) {
+  // Realization-time repair, and the only place in this function that reads the
+  // tone actually emitted. Pass 1 scores one anchor per source note, so a beat
+  // realized as four sixteenths hands the next anchor a predecessor the scorer
+  // never saw -- the pair that ships is not the pair that was judged, and a
+  // sixteenth returning from an arpeggio can leap into an octave the anchor it
+  // was derived from approached by step.
+  //
+  // The two faults are ranked, never pooled: a candidate that sounds a true
+  // parallel is refused however clean it is of anything else, and the battuta
+  // is only allowed to choose among the candidates that already cleared the
+  // parallel. When nothing clears both, the parallel-free tone stands and keeps
+  // its battuta, because that trade only ever runs one way.
+  auto refineAgainstEmitted = [&](int proposed, Tick tick) {
     if (previous_emitted < 0)
       return proposed;
     std::vector<ConcurrentMotion> motions;
@@ -329,19 +341,36 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
         return formsStrictPerfectParallel(previous_emitted, candidate, motion.prev, motion.curr);
       });
     };
-    if (!has_parallel(proposed))
+    const auto has_battuta = [&](int candidate) {
+      return std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
+        return formsBattuta(previous_emitted, candidate, motion.prev, motion.curr);
+      });
+    };
+    const bool proposed_parallel = has_parallel(proposed);
+    if (!proposed_parallel && !has_battuta(proposed))
       return proposed;
 
     std::vector<int> sounding;
     registry.concurrentThemePitches(tick, voice, sounding);
-    for (int degrees = 1; degrees <= 4; ++degrees) {
-      for (int candidate :
-           {detail::scaleUp(proposed, degrees, mode), detail::scaleDown(proposed, degrees, mode)}) {
-        if (candidate < band_lo || candidate > band_hi || has_parallel(candidate))
-          continue;
-        if (std::all_of(sounding.begin(), sounding.end(),
-                        [&](int other) { return isConsonantIc(candidate - other); }))
-          return candidate;
+    const auto consonant_here = [&](int candidate) {
+      return std::all_of(sounding.begin(), sounding.end(),
+                         [&](int other) { return isConsonantIc(candidate - other); });
+    };
+    // Nearest first in both sweeps, so a repair moves the line as little as the
+    // fault allows.
+    for (const bool also_battuta_free : {true, false}) {
+      if (!also_battuta_free && !proposed_parallel)
+        break;  // the proposed tone is already parallel-free; nothing to fall back to.
+      for (int degrees = 1; degrees <= 4; ++degrees) {
+        for (int candidate : {detail::scaleUp(proposed, degrees, mode),
+                              detail::scaleDown(proposed, degrees, mode)}) {
+          if (candidate < band_lo || candidate > band_hi || has_parallel(candidate))
+            continue;
+          if (also_battuta_free && has_battuta(candidate))
+            continue;
+          if (consonant_here(candidate))
+            return candidate;
+        }
       }
     }
     return proposed;
@@ -352,7 +381,7 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
     const bool has_next = index + 1 < anchors.size();
     const int figure = static_cast<int>((anchor.tick / kTicksPerBeat) % 3);
     if (anchor.duration != kTicksPerBeat || !has_next || figure == 0) {
-      const int pitch = avoidTrueParallel(anchor.pitch, anchor.tick);
+      const int pitch = refineAgainstEmitted(anchor.pitch, anchor.tick);
       destination.push_back({anchor.tick, anchor.duration, static_cast<std::uint8_t>(pitch)});
       registry.record(anchor.tick, voice, pitch, anchor.duration);
       previous_emitted = pitch;
@@ -385,7 +414,7 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
     }
     for (int slot = 0; slot < 4; ++slot) {
       const Tick tick = anchor.tick + static_cast<Tick>(slot) * sixteenth;
-      const int pitch = avoidTrueParallel(
+      const int pitch = refineAgainstEmitted(
           std::clamp(pitches[static_cast<std::size_t>(slot)], band_lo, band_hi), tick);
       destination.push_back({tick, sixteenth, static_cast<std::uint8_t>(pitch)});
       registry.record(tick, voice, pitch, sixteenth);
