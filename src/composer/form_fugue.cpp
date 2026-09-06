@@ -597,9 +597,10 @@ RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
 // standalone fugue (first_bar = 0) and the fugue half of a prelude+fugue pair.
 //
 // Layout (bars relative to first_bar):
-//   exposition: subject V0 (0-3), answer V1 (4-7) + V0 figuration counterline,
-//               third entry V2 (8-11) + V0 countersubject + V1 figuration
-//               (only when exposition is the full 12 bars).
+//   exposition: the voices accumulate, each entering with its own statement --
+//               subject V0 (0-3) alone, answer V1 (4-7) + V0 countersubject,
+//               third entry V2 (8-11) + V1 countersubject + V0 figuration
+//               (the third entry only when the exposition is the full 12 bars).
 //   development: ceil((bars-16)/8) device-cycles of 8 bars each (middle entry
 //               4 bars + episode 4 bars); the last cycle may be a 4-bar
 //               episode-only half-cycle.
@@ -1188,8 +1189,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   bool battuta_free_adopted = false;
   std::vector<MaterialNote> plain_cs;
   ThemeToneRegistry plain_tones = asm_ctx.theme_tones;
+  // The answer is the only voice sounding under this line: the third voice has
+  // not entered yet, and in an exposition it stays silent until it does.
   appendScoredCountersubject(answer_source, 0, cs_start, cs_end, kBandLo[0], kBandHi[0], mode,
-                             plain_cs, plain_tones);
+                             plain_cs, plain_tones, /*avoid_battuta=*/false,
+                             /*source_is_lowest=*/true);
   // Battutas the realized line forms against the entry it accompanies, read at
   // the line's own onsets against whatever the entry sounds under them. The
   // narrowed trial band changes the candidate set for EVERY note, not only the
@@ -1227,7 +1231,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     appendScoredCountersubject(answer_source, 0, cs_start, cs_end,
                                std::max(kBandLo[0], plain_lo - slack),
                                std::min(kBandHi[0], plain_hi + slack), mode, trial_cs, trial_tones,
-                               /*avoid_battuta=*/true);
+                               /*avoid_battuta=*/true, /*source_is_lowest=*/true);
     if (!trial_cs.empty() && battuta_count(trial_cs) < battuta_count(plain_cs)) {
       const Tick origin = trial_cs.front().start_tick;
       canonical_cs.clear();
@@ -1270,13 +1274,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       canonical_cs.push_back(note);
     }
   }
-  // V2 chord-root figuration under the answer fills the bass register so the
-  // second exposition bar-group is a full three-voice texture (the answer entry
-  // on V1, the V0 countersubject above, and a verbatim Material bass below). A
-  // Material bass keeps all three exposition voices fixed, so the validator
-  // skips every inter-voice rule but voice_crossing (which the disjoint bands
-  // already prevent), guaranteeing the bass always sounds here.
-  addFigurationSpan(asm_ctx, 2, first_bar + 4, first_bar + 7, plan, first_bar, mode, 1, fig_offset);
+  // V2 stays silent under the answer. In an exposition the voices accumulate:
+  // a voice's first sound IS its statement of the subject, so the bass cannot
+  // be heard filling in the register four bars before its own entry arrives.
+  // The answer bar-group is therefore a genuine two-voice texture (answer plus
+  // countersubject) and the third entry below is the moment the bass appears.
 
   // Imitation entry declaration: subject leads, answer follows a bar later. The
   // declared interval is the actual pitch offset between the two band-placed

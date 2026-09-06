@@ -11,7 +11,8 @@
 //   - both forms validate Ok and are deterministic across
 //     seeds {1,5,42,99} x {Major,Minor} x bars {16, natural, 64, 128}.
 //   - fugue exposition has three staggered entries (V0, then V1 at the answer
-//     band, then V2 at the third-entry band).
+//     band, then V2 at the third-entry band), and each voice's first sound
+//     inside the exposition is its own subject/answer statement.
 //   - the V0 subject melody equals the selected catalog slot.
 //   - a stretto is present in the climax cycle of most seeds (two overlapping
 //     subject statements <= 2 bars apart), and never sounds a true parallel.
@@ -29,6 +30,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "composer/character_profile.h"
@@ -190,6 +192,85 @@ TEST(FormFugueTest, MinimumPublicLengthsKeepTheThirdExpositionEntry) {
       }
     }
     EXPECT_TRUE(has_third_entry);
+  }
+}
+
+namespace {
+
+// The exposition window: from the opening subject statement to the end of the
+// last entry that still chains onto the previous one. Entries abut, so the
+// first Subject/Answer statement that starts after a gap already belongs to the
+// development or the coda.
+std::pair<Tick, Tick> expositionWindow(const HarnessFixture& fixture) {
+  std::vector<std::pair<Tick, Tick>> entries;
+  for (const Span& span : fixture.voice_plan.spans) {
+    if (span.intent == VoiceIntent::SubjectCarrier || span.intent == VoiceIntent::AnswerCarrier) {
+      entries.emplace_back(span.start_tick, span.end_tick);
+    }
+  }
+  if (entries.empty()) {
+    return {0, 0};
+  }
+  std::sort(entries.begin(), entries.end());
+  const Tick start = entries.front().first;
+  Tick end = entries.front().second;
+  for (const auto& entry : entries) {
+    if (entry.first > end) {
+      break;
+    }
+    end = std::max(end, entry.second);
+  }
+  return {start, end};
+}
+
+}  // namespace
+
+// In an exposition the voices accumulate, and a voice announces itself with the
+// subject or the answer: its first sound inside the exposition IS its entry. No
+// voice may be heard filling in the texture before it has stated the theme.
+TEST(FormFugueTest, EveryVoiceEntersOnItsOwnSubjectStatement) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(form, seed, minor, naturalBars(form));
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_EQ(r.notes.size(), r.provenance.size());
+        const std::pair<Tick, Tick> window = expositionWindow(fx);
+        ASSERT_LT(window.first, window.second);
+
+        // Per voice, the earliest note that starts inside the exposition.
+        std::map<VoiceId, std::size_t> first_index;
+        for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+          const NoteEvent& note = r.notes[idx];
+          if (note.start_tick < window.first || note.start_tick >= window.second) {
+            continue;
+          }
+          const auto found = first_index.find(note.voice);
+          if (found == first_index.end() || note.start_tick < r.notes[found->second].start_tick) {
+            first_index[note.voice] = idx;
+          }
+        }
+        ASSERT_FALSE(first_index.empty());
+
+        for (const auto& entry : first_index) {
+          const VoiceIntent intent = r.provenance[entry.second].voice_intent;
+          EXPECT_TRUE(intent == VoiceIntent::SubjectCarrier || intent == VoiceIntent::AnswerCarrier)
+              << "seed " << seed << (minor ? " minor" : " major") << " voice "
+              << static_cast<int>(entry.first) << " first sounds at tick "
+              << r.notes[entry.second].start_tick << " before stating the subject";
+        }
+
+        // A voice must not slip into the exposition on a tone begun outside it
+        // either: whatever sounded before the opening statement has to stop.
+        for (const NoteEvent& note : r.notes) {
+          if (note.start_tick < window.first) {
+            EXPECT_LE(note.start_tick + note.duration, window.first)
+                << "seed " << seed << " voice " << static_cast<int>(note.voice)
+                << " sustains into the exposition";
+          }
+        }
+      }
+    }
   }
 }
 
