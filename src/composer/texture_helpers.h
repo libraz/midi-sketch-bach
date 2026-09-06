@@ -247,10 +247,18 @@ class ThemeToneRegistry {
 ///        Off by default: the line this derives is also the line later entries
 ///        restate, and callers that restate it must first check that the
 ///        avoiding line still combines with the entry it will meet.
+/// @param source_is_lowest The source line is the lowest voice sounding under
+///        this one. The pass-1 consonance term reads isConsonantIc, which
+///        admits the perfect fourth because a fourth between upper voices sits
+///        over a chord-tone bass; with nothing sounding below the source that
+///        premise is gone and the same fourth is a second inversion the ear
+///        waits on. Ranked rather than vetoed, so the fourth is still reachable
+///        when the band offers no consonance -- the alternative to a fourth
+///        over the bass is a leap out of the line's own shape.
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
                                 std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
-                                bool avoid_battuta = false);
+                                bool avoid_battuta = false, bool source_is_lowest = false);
 
 /// @brief Replace part of one carrier span with an explicit suspension carrier.
 ///

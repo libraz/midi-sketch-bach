@@ -262,7 +262,7 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
                                 std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
-                                bool avoid_battuta) {
+                                bool avoid_battuta, bool source_is_lowest) {
   struct Anchor {
     Tick tick = 0;
     Tick duration = 0;
@@ -302,6 +302,15 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
       int score = std::abs(pitch - target);
       if (!consonant) {
         score += 10000;
+      }
+      // A fourth is consonant between upper voices and a dissonance over the
+      // bass. When nothing sounds under the source, the source IS the bass, so
+      // the fourth this line would leave above it is a second inversion the ear
+      // waits on. Ranked at half the dissonance charge: enough that any
+      // consonance in the band wins, not so much that the line leaps out of its
+      // own shape when the band offers none.
+      if (source_is_lowest && interval_class == 5) {
+        score += 5000;
       }
       if (similar && perfect_arrival) {
         score += 4000;
