@@ -787,7 +787,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // classes here are motions the ear follows and forgets; the fourth is a
     // vertical it sits inside for as long as the bass holds, which is why the
     // trade goes this way at seventeen faults gained against nine hundred lost.
-    {FormType::Fugue, 0, 0, 59, 99, 7, 0, 3, 4, 1, 79763, 204},
+    // The free lines inside a stated key area are now spelled in that key rather
+    // than always in the home one, so the episode figuration, the Fortspinnung
+    // sequences and the countersubject carry the accidentals the area names. A
+    // line that changes a tone changes where it meets the other voices, so the
+    // approach columns move; the cardinal ones do not, and neither does the
+    // reference-corpus reading -- this form's counterpoint profile sits at zero
+    // excess before and after. The bend is refused wherever it would worsen the
+    // perfect-motion class at either end of the tone, so what remains here is
+    // the residue of pairs that guard cannot see: two accompanying lines that
+    // were each chosen against the home spelling of the other.
+    //
+    // The floor falls by a few dozen successions because a re-spelled tone
+    // sometimes lands on the pitch its neighbour already sounds, and a repeat
+    // is one onset where there were two.
+    {FormType::Fugue, 0, 0, 66, 99, 7, 0, 3, 4, 1, 79742, 216},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -844,7 +858,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // across the CLI sweep. Its bass-fourth column ends at the lowest rate of any
     // form here, which is what a fugue whose bass is free to move should look
     // like.
-    {FormType::PreludeAndFugue, 0, 0, 24, 47, 3, 0, 1, 2, 1, 37632, 64},
+    // Same spelling change as the fugue above, and this form absorbs it almost
+    // entirely: every perfect-motion column holds. Only the bass fourth and the
+    // floor move, and both for the same reason -- a bass tone re-spelled for the
+    // area it sounds in resolves its fourth one step later, or lands on the
+    // pitch it already sounded and stops being a second onset.
+    {FormType::PreludeAndFugue, 0, 0, 24, 47, 3, 0, 1, 2, 1, 37605, 71},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1058,7 +1077,26 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // configuration that states the cascade, and only that: how often a form
     // should reach for the gesture at all is a question about the archetype's
     // share of the seeds, which no column here measures.
-    {FormType::ToccataAndFugue, 84, 84, 29, 1, 6, 7, 2, 1, 1, 31885, 336},
+    // This form travels furthest of the four, and the row moves most. The chord
+    // plan itself is now restated bar by bar in the key sounding at it, so the
+    // local spelling reaches every tone derived from harmony -- the anchors, the
+    // pedal, the punctuation, the chord blocks -- without any of those selectors
+    // knowing a key area exists. The scalar fills between them are bent
+    // afterwards. Almost the whole note mass of the piece therefore changes
+    // pitch somewhere, and the columns that count how one line approaches
+    // another change with it.
+    //
+    // The doubled line is untouched: the structural and strict columns stand at
+    // the same 84, which is the octave doubling this form writes deliberately
+    // and not counterpoint at all. Read against the reference corpus the profile
+    // is where it was -- excess distance unmoved, the contrary octave arrival at
+    // zero in every configuration sampled, and the hidden rate an order below
+    // the corpus ninety-fifth percentile. What rose is a raw count over the
+    // sweep, not a rate the style objects to.
+    //
+    // The floor falls because a re-spelled tone sometimes lands on the pitch its
+    // neighbour already sounds, which merges two onsets into one.
+    {FormType::ToccataAndFugue, 84, 84, 38, 12, 11, 7, 2, 1, 2, 31768, 332},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1137,7 +1175,20 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // four hundred, and the hidden column pays three for it while the succession
     // floor drops by nine. The reasoning and the price are the toccata's,
     // recorded there.
-    {FormType::FantasiaAndFugue, 0, 0, 32, 2, 36, 0, 2, 1, 2, 33409, 427},
+    // The same per-bar restatement of the chord plan, and here it TIGHTENS more
+    // than it loosens. The contrary repeat falls by a third and the contrary
+    // octave arrival by a downward leap leaves entirely: a bass that changes its
+    // spelling for the area it sounds in stops arriving at the same octave from
+    // the same side, which is the figure both columns are made of. Measured per
+    // thousand against the reference corpus the contrary repeat also concentrates
+    // -- it now appears in a handful of configurations instead of most of them,
+    // and the summed rate across the sample is roughly half what it was.
+    //
+    // The bass fourth rises for the plainest reason: the tone that resolves a
+    // fourth is sometimes the one the local key re-spells, so the resolution
+    // arrives a step later than the sample window looks. The hidden column moves
+    // with the same three tones.
+    {FormType::FantasiaAndFugue, 0, 0, 35, 0, 23, 0, 2, 0, 2, 33409, 501},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1394,7 +1445,12 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // fault column holds; the second inversions come down and the floor moves by
     // six pairs in three quarters of a million, which is the seam tone landing
     // where the next one can be sustained instead of restruck.
-    {FormType::Fugue, 0, 0, 318, 846, 36, 0, 4, 9, 2, 773467, 2295},
+    // Across every length the spelling change costs proportionally less than it
+    // does at the natural length: six more hidden approaches in three hundred,
+    // and the contrary octave arrival tightens by twenty-five. A longer piece
+    // spends more of itself in the home key, because the key areas are anchored
+    // to the exposition and the development rather than scaled with the form.
+    {FormType::Fugue, 0, 0, 324, 821, 36, 0, 4, 9, 2, 773362, 2354},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1420,7 +1476,11 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // reaches the fugue, and with the same shape: no fault column moves, the
     // second inversions fall, and the floor gives up six pairs in half a
     // million.
-    {FormType::PreludeAndFugue, 0, 0, 184, 346, 10, 0, 3, 5, 1, 500841, 1077},
+    // Same across lengths, and smaller still: two more hidden approaches in a
+    // hundred and eighty, and the contrary octave arrival tightens by seven. The
+    // prelude half carries no key area at all, so half of every piece here is
+    // untouched however long it runs.
+    {FormType::PreludeAndFugue, 0, 0, 186, 339, 10, 0, 3, 5, 1, 500832, 1103},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
