@@ -596,21 +596,31 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // contrary columns fall with it rather than paying for it.
     {FormType::PreludeAndFugue, 0, 0, 15, 34, 58, 0, 1, 2, 3, 38130},
     // Its hidden column is the one with room, and with a denominator in the row
-    // that can be said as a rate rather than as a ratio to some other form. Its
-    // hidden total over its succession floor is the densest hidden writing in
-    // the product, and still a lower rate than a typical work of the reference
-    // corpus's THREE-VOICE group, which writes hidden perfects freely in exactly
-    // this texture. Both operands are the columns below rather than figures
-    // restated here: a measurement copied into prose beside the table it came
-    // from is one nothing re-reads. That comparison is a sweep-wide
-    // rate against a per-work distribution and is not like for like, but the gap
-    // is not one a units mismatch closes. A trade into hidden is payable at that
-    // distance; a trade into either true class is not, at any distance, and
-    // neither survives here. The pedal is the voice that pays -- written last
-    // against two settled manuals, once it ranks a hidden perfect below a true
-    // one it steps onto the hidden approach rather than keep the parallel it
-    // began with.
-    {FormType::TrioSonata, 0, 0, 184, 135, 8, 0, 7, 4, 2, 34770},
+    // that can be said as a rate rather than as a ratio to some other form. Both
+    // operands are the columns below rather than figures restated here: a
+    // measurement copied into prose beside the table it came from is one nothing
+    // re-reads. A trade into hidden is payable; a trade into either true class is
+    // not, at any distance, and neither survives here. The pedal is the voice
+    // that pays -- written last against two settled manuals, once it ranks a
+    // hidden perfect below a true one it steps onto the hidden approach rather
+    // than keep the parallel it began with.
+    //
+    // That pedal now also ranks the contrary-motion octave arrival ABOVE the
+    // hidden perfect, inverting for this one voice the order the rest of the
+    // product uses, and the two columns below are the result. The reason is a
+    // per-work measurement rather than a sweep-wide ratio: read one piece at a
+    // time against the reference corpus's three-voice group, this form was
+    // several times over the rate any of those works reach on the contrary
+    // arrival while sitting near the middle of the same distribution on the
+    // hidden perfect. The pedal's band spans a thirteenth and a triad puts three
+    // tones in it, so that guard is choosing between faults far more often than
+    // it is finding a clean tone -- which makes the order it chooses by the thing
+    // that decides this form's profile, and spending the class with room to buy
+    // back the class without it the wrong way round. The hidden ceiling is
+    // deliberately loosened for it. Where the pedal was not making that trade
+    // the output is byte-identical, so the loosening buys the arrivals and
+    // nothing else.
+    {FormType::TrioSonata, 0, 0, 279, 33, 10, 0, 8, 3, 3, 34770},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
