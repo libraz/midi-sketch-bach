@@ -620,16 +620,26 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return best_pitch;
   };
 
-  // Motion-level parallel guard. The window check above only compares ornament
-  // BASE pitches, but an ornament run can track another voice's moving line --
-  // Material sixteenths, or another ornament's sub-notes -- in parallel
+  // Motion-level perfect-arrival guard. The window check above only compares
+  // ornament BASE pitches, but an ornament run can track another voice's moving
+  // line -- Material sixteenths, or another ornament's sub-notes -- in parallel
   // fifths/octaves transition by transition (the bases can sit at any
   // interval). Walk every transition the expansion would create: sub-note to
   // sub-note, plus the entry/exit transitions where the expansion changes the
   // arrival or departure tone. Suppress the ornament (stay plain) when any of
-  // them forms a parallel or hidden perfect against any other voice.
-  auto expansion_forms_parallel = [&](const Expansion& cand_exp, const NoteEvent& base,
-                                      std::size_t idx) {
+  // them forms a perfect arrival against any other voice.
+  //
+  // All three arrival classes are tested, not similar motion alone. An
+  // expansion that opens on the upper neighbour REPLACES the arrival tone the
+  // form builder chose and judged, so the leap into it is the ornament's own
+  // and the contrary-motion arrivals are as much its doing as the similar ones.
+  // Those two classes are what a form whose budget closes them rejects outright,
+  // and the guard has to cover the same ground the gate does or the pass can
+  // ship a fault the piece is failed for. Stepwise decoration cannot reach
+  // either class -- both require the arriving voice to leap -- so the trills and
+  // mordents that make up most of the pass are untouched by the widening.
+  auto expansion_forms_perfect_arrival = [&](const Expansion& cand_exp, const NoteEvent& base,
+                                             std::size_t idx) {
     struct Transition {
       int from;
       int to;
@@ -677,7 +687,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           continue;
         }
         const int other_prev = sounding_in_voice(v, tr.at - 1, idx + 1);
-        if (formsPerfectParallel(tr.from, tr.to, other_prev, other_curr)) {
+        if (formsPerfectParallel(tr.from, tr.to, other_prev, other_curr) ||
+            formsAntiParallelPerfect(tr.from, tr.to, other_prev, other_curr) ||
+            formsBattuta(tr.from, tr.to, other_prev, other_curr)) {
           return true;
         }
       }
@@ -1092,7 +1104,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     }
 
     if (!exp.notes.empty() &&
-        (clashes_committed_ornament(note) || expansion_forms_parallel(exp, note, idx) ||
+        (clashes_committed_ornament(note) || expansion_forms_perfect_arrival(exp, note, idx) ||
          expansion_sustains_dissonance(exp, note, idx) || expansion_crosses_voice(exp, note, idx)))
       exp.notes.clear();  // would clash with or cross another voice: stay plain.
 
