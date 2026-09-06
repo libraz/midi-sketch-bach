@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "composer/chord_voicing.h"
 #include "composer/composer.h"
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
@@ -581,6 +582,26 @@ TEST(GroundVariationPassacaglia, PicardyFinalChordOnEvenSeed) {
 // variation line once put non-chord tones on the beats of entire late cycles
 // (audible as sustained dissonance from the climax onward).
 
+// Chord-tone membership as the Validator spells it, seventh included.
+bool isChordTone(const HarmonicPlan& plan, Tick tick, int pitch) {
+  const ChordEvent* active = nullptr;
+  for (const ChordEvent& chord : plan.chords) {
+    if (chord.start_tick > tick)
+      break;
+    active = &chord;
+  }
+  if (active == nullptr)
+    return false;
+  std::size_t count = 0;
+  const auto tones = chordPitchClasses(*active, &count);
+  const std::uint8_t pitch_class = static_cast<std::uint8_t>(((pitch % 12) + 12) % 12);
+  for (std::size_t tone = 0; tone < count; ++tone) {
+    if (tones[tone] == pitch_class)
+      return true;
+  }
+  return false;
+}
+
 void expectBeatOnsetsConsonant(FormType form) {
   for (const Case& c : casesFor(form)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
@@ -601,6 +622,18 @@ void expectBeatOnsetsConsonant(FormType form) {
       }
       for (std::size_t i = 0; i < sounding.size(); ++i) {
         for (std::size_t j = i + 1; j < sounding.size(); ++j) {
+          // A pair whose BOTH tones belong to the chord in force is not a clash
+          // within it: over a dominant seventh the third and the seventh sound a
+          // tritone, and the seventh a minor seventh against the ground that is
+          // the chord's own bass, for as long as the harmony lasts. Reading only
+          // the interval here, while the selector and the Validator both read
+          // the chord, would leave this form unable to state the one accented
+          // dissonance its harmony is built on. Anything else stays absolute:
+          // this is a bar-rate ground form, and outside its own harmony a
+          // dissonant beat onset has no preparation to be judged by.
+          if (isChordTone(fx.harmony, t, sounding[i]) && isChordTone(fx.harmony, t, sounding[j])) {
+            continue;
+          }
           EXPECT_TRUE(isConsonantIc(sounding[i] - sounding[j]))
               << "form " << static_cast<int>(form) << " seed " << c.seed << " minor " << c.is_minor
               << " bars " << c.target_bars << " tick " << t << " pitches " << sounding[i] << "/"

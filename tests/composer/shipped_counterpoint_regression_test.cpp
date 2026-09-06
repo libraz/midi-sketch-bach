@@ -635,7 +635,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // battuta, that is the cheap end of the trade. The floor drops by a handful
     // of successions where a changed anchor lets a tone be sustained rather than
     // restruck.
-    {FormType::Fugue, 0, 0, 46, 106, 7, 0, 3, 5, 2, 79580},
+    //
+    // The ornament pass now suppresses an expansion whose transitions arrive on
+    // a perfect interval by contrary motion, not similar motion alone. An
+    // expansion that opens on the upper neighbour replaces the arrival tone the
+    // builder chose, so the leap into it belongs to the ornament and the two
+    // contrary classes are as much its doing as the similar one. Both of those
+    // columns fall here, and the worst cell falls with them; the floor drops
+    // because a suppressed expansion is notes that are no longer there. Nothing
+    // rises, which is the shape a suppression should have: it can only remove
+    // tones, and the only way it could add a fault is by making two skeleton
+    // tones adjacent that an ornament had been sitting between.
+    {FormType::Fugue, 0, 0, 46, 98, 4, 0, 3, 3, 1, 79487},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -681,7 +692,12 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // it is the prelude's thin two-voice texture that makes it happen: with only
     // one line to answer, an anchor stepping off a hidden approach has few places
     // to land that are not the octave below.
-    {FormType::PreludeAndFugue, 0, 0, 17, 56, 3, 0, 1, 2, 1, 37368},
+    //
+    // The ornament suppression described on the fugue row reaches both halves.
+    // Here it takes only the battuta column and the floor: this form's contrary
+    // arrivals are already down to the residue the seam pass leaves, and none of
+    // that residue is an ornament's doing.
+    {FormType::PreludeAndFugue, 0, 0, 17, 50, 3, 0, 1, 2, 1, 37323},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -731,7 +747,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the form's own vertical test holds it to. The perfect approach is the fault
     // the corpus is strict about; the passing second is one it writes constantly
     // in the same texture.
-    {FormType::TrioSonata, 0, 0, 127, 19, 0, 0, 5, 2, 0, 34770},
+    //
+    // Both manual voices now zigzag through four chord tones instead of three on
+    // a bar acting as the dominant of the bar after it, the seventh being offered
+    // on the accented beats alone. Every fault column falls, and the floor RISES
+    // -- the only row here where it does. Both follow from the same fact: a
+    // fourth tone in the set puts the next anchor a smaller interval away, so the
+    // guard finds a clean rung more often and the line restrikes where it used to
+    // sustain across a wider skip.
+    {FormType::TrioSonata, 0, 0, 126, 16, 0, 0, 5, 2, 0, 34837},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -739,7 +763,17 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // against the three-line surface it produces instead of installed over one
     // settled without it. What that re-aim accepts is a weaker approach in place
     // of a worse one, which is why the residue sits in hidden and battuta.
-    {FormType::ChoralePrelude, 0, 0, 28, 22, 1, 0, 3, 2, 1, 16992},
+    //
+    // This is the one row where the ornament suppression raises a column: the
+    // contrary column empties and the hidden column takes one arrival. That is
+    // the unmasking the fugue row describes -- the suppressed expansion had been
+    // sitting between two skeleton tones that read as a hidden perfect once they
+    // became adjacent, so the fault was already in the line and the ornament was
+    // covering it. The trade is still the right way round by a wide margin: the
+    // reference corpus prices a contrary arrival at several times a hidden one,
+    // so paying one of the cheap class to be rid of one of the dear class lowers
+    // the weighted cost even as the raw count moves the other way.
+    {FormType::ChoralePrelude, 0, 0, 29, 22, 0, 0, 3, 2, 0, 16983},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -787,7 +821,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // pass stops decorating subject statements: the arrival that leaves was an
     // ornament's own tone answering a manual, not a skeleton motion, so it is the
     // one class here that the surface was contributing rather than exposing.
-    {FormType::ToccataAndFugue, 84, 84, 28, 1, 8, 7, 2, 1, 1, 31872},
+    // Its contrary column tightens by one for the same reason and with the same
+    // floor: the ornament suppression on the fugue row now reads that class too,
+    // and one expansion was leaving a perfect interval only to reach it again the
+    // other way round.
+    {FormType::ToccataAndFugue, 84, 84, 28, 1, 7, 7, 2, 1, 1, 31872},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -819,7 +857,18 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // bass which cannot answer reaches a contrary unison as readily as it
     // reaches a perfect interval in similar motion, and the interior cycles have
     // no closing-gesture claim that would justify paying for one.
-    {FormType::Passacaglia, 0, 0, 48, 26, 7, 0, 3, 1, 1, 27392},
+    //
+    // This form takes no dominant seventh, and the exclusion is a decision rather
+    // than an omission. Its grounds have exactly one bar per cycle whose root
+    // falls a fifth, and that bar is the one the cadential suspension is
+    // installed on -- the suspension being an authored dissonance with its own
+    // preparation and resolution, chosen against the figuration it will sound
+    // with. Spelling that bar with a seventh moves the figuration the suspension
+    // search reads and can leave a cycle close with no admissible suspension at
+    // all, which trades a prepared accented dissonance for an unprepared one. The
+    // two columns that fall here and the floor with them are the ornament
+    // suppression described on the fugue row, and nothing else.
+    {FormType::Passacaglia, 0, 0, 48, 23, 5, 0, 3, 1, 1, 27338},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -850,7 +899,17 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
     // cadential writing, so hidden carries the whole residue by design.
-    {FormType::Chaconne, 0, 0, 47, 0, 7, 0, 1, 0, 1, 7507},
+    //
+    // Its cycle now spells the bar whose root falls a fifth into the next
+    // statement's tonic as a dominant seventh, and the variation states that
+    // seventh on the bar's last beat. Nothing forces the pairing: read as a
+    // straight line the plan has no dominant at all, because a ground's dominant
+    // is always the bar the cycle wraps from. The hidden column falls because the
+    // seventh is the one chord tone that cannot itself arrive as a perfect
+    // interval over a bass tracking the chord root, so every beat it occupies is
+    // a beat the hidden approach had no way to reach. The floor rises by two
+    // where a changed anchor restrikes.
+    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7509},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1043,7 +1102,12 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // and the contrary one -- the dearest of the three by the corpus -- falls by
     // a fifth. Its worst cell comes down with it. What the form row pays as a
     // single extra battuta arrival is not paid here at all.
-    {FormType::Fugue, 0, 0, 235, 999, 78, 0, 5, 12, 3, 771546},
+    // The ornament suppression on the form row is worth most on this axis for
+    // the same reason: more length means more ornament sites, so more of them
+    // were leaping onto a perfect interval. The battuta and contrary columns fall
+    // by a tenth and a fifth of themselves, the worst battuta cell with them, and
+    // the floor drops by the notes the suppressed expansions were.
+    {FormType::Fugue, 0, 0, 235, 912, 64, 0, 5, 11, 3, 770736},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1058,7 +1122,11 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // length gives the prelude's anchor chain more places to break a hidden
     // approach without answering it in the octave. The floor rises here rather
     // than dropping: fewer sustained repeats means more onset pairs to judge.
-    {FormType::PreludeAndFugue, 0, 0, 194, 401, 27, 0, 3, 5, 2, 499729},
+    // The ornament suppression then takes the battuta arrivals that trade bought
+    // and a third of the contrary column besides, so both columns end below where
+    // they stood before the seventh was spelled at all. The floor drops back for
+    // the notes the suppressed expansions were.
+    {FormType::PreludeAndFugue, 0, 0, 194, 364, 19, 0, 3, 4, 2, 499321},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
