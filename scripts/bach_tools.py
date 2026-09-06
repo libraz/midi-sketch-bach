@@ -39,6 +39,7 @@ from bachlib import (  # noqa: E402
     schema,
     subject_stats,
     subject_synth,
+    sweep_score,
     texture_gate,
 )
 
@@ -46,6 +47,7 @@ from bachlib import (  # noqa: E402
 _COMMAND_MODULES = (
     closure,
     audio,  # registers both `render` and `listening`
+    sweep_score,
     texture_gate,
     morphology,
     completion,
