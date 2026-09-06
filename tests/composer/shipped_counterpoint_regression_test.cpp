@@ -574,7 +574,14 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // than a bar back and ranks a hidden perfect below a true one, and its
     // figuration leaves the chord for a free diatonic tone at bar heads where no
     // chord tone is playable at all.
-    {FormType::PreludeAndFugue, 0, 0, 17, 168, 62, 0, 1, 5, 3, 38133},
+    // Its battuta column carries the canonical countersubject's own arrivals:
+    // the exposition derives that line twice and keeps the battuta-avoiding
+    // derivation whenever the avoiding line still restates over the third
+    // entry, so the arrivals that survive are the ones a restatable line cannot
+    // trade away. The succession floor drops with it by a rounding's worth --
+    // far less than the column did, so the column fell because the arrivals
+    // went, not because there is less music.
+    {FormType::PreludeAndFugue, 0, 0, 17, 143, 62, 0, 1, 5, 3, 38130},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Its
     // hidden total over its succession floor is the densest hidden writing in
@@ -827,7 +834,7 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     {FormType::Fugue, 0, 0, 201, 2640, 958, 0, 6, 28, 10, 776411},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length.
-    {FormType::PreludeAndFugue, 0, 0, 162, 1027, 485, 0, 3, 10, 8, 504004},
+    {FormType::PreludeAndFugue, 0, 0, 162, 967, 481, 0, 3, 10, 8, 504019},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
