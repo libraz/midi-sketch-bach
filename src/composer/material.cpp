@@ -1,11 +1,29 @@
 #include "composer/material.h"
 
+#include <array>
+
 namespace bach::composer {
 
 namespace {
 
 std::uint8_t pitchClass(std::uint8_t pitch) {
   return static_cast<std::uint8_t>(pitch % 12);
+}
+
+// Semitone offsets of the seven degrees above the tonic. Minor is the natural
+// minor, matching the collection the figuration helpers walk.
+constexpr std::array<int, 7> kMajorDegrees = {0, 2, 4, 5, 7, 9, 11};
+constexpr std::array<int, 7> kMinorDegrees = {0, 2, 3, 5, 7, 8, 10};
+
+const std::array<int, 7>& degreesOf(const KeyContext& key) {
+  return key.is_minor ? kMinorDegrees : kMajorDegrees;
+}
+
+// Euclidean division, so a pitch below the tonic still resolves to the degree
+// it occupies rather than to a negative remainder.
+int floorDiv(int value, int divisor) {
+  const int quotient = value / divisor;
+  return (value % divisor != 0 && ((value < 0) != (divisor < 0))) ? quotient - 1 : quotient;
 }
 
 std::uint8_t leadingTonePc(std::uint8_t tonic_pc, bool /*is_minor*/) {
@@ -40,6 +58,71 @@ void annotateFragment(std::vector<LeadingToneMarker>& markers,
 }
 
 }  // namespace
+
+KeyContext localKeyAt(const HarmonicPlan& plan, Tick tick) {
+  KeyContext key{static_cast<std::uint8_t>(plan.tonic_pc % 12), plan.is_minor};
+  // The modulation list is emitted in tick order by every builder that fills
+  // it, but a scan for the latest boundary at or before `tick` does not depend
+  // on that, so a plan assembled out of order still resolves correctly.
+  Tick best = 0;
+  bool found = false;
+  for (const ModulationEvent& modulation : plan.modulations) {
+    if (modulation.tick <= tick && (!found || modulation.tick >= best)) {
+      best = modulation.tick;
+      found = true;
+      key.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
+      key.is_minor = modulation.to_is_minor;
+    }
+  }
+  return key;
+}
+
+bool inKey(int pitch, const KeyContext& key) {
+  return degreeInKey(pitch, key) >= 0;
+}
+
+int degreeInKey(int pitch, const KeyContext& key) {
+  const int offset = ((pitch - static_cast<int>(key.tonic_pc)) % 12 + 12) % 12;
+  const std::array<int, 7>& degrees = degreesOf(key);
+  for (int degree = 0; degree < 7; ++degree) {
+    if (degrees[static_cast<std::size_t>(degree)] == offset)
+      return degree;
+  }
+  return -1;
+}
+
+int transposeIntoKey(int pitch, const KeyContext& from, const KeyContext& to) {
+  const int relative = pitch - static_cast<int>(from.tonic_pc);
+  const int octave = floorDiv(relative, 12);
+  const int offset = relative - 12 * octave;
+  const std::array<int, 7>& source = degreesOf(from);
+  const std::array<int, 7>& target = degreesOf(to);
+  // Walk down to the degree at or below the pitch and carry whatever semitone
+  // separates them, so a chromatic tone stays an inflection of the same degree
+  // instead of collapsing onto a diatonic neighbour.
+  int degree = 6;
+  while (degree > 0 && source[static_cast<std::size_t>(degree)] > offset)
+    --degree;
+  const int inflection = offset - source[static_cast<std::size_t>(degree)];
+  return static_cast<int>(to.tonic_pc) + 12 * octave + target[static_cast<std::size_t>(degree)] +
+         inflection;
+}
+
+int bendIntoKey(int pitch, const KeyContext& key) {
+  if (inKey(pitch, key))
+    return pitch;
+  // A diatonic set never leaves a three-semitone gap, so one of the two
+  // immediate neighbours is always a member and the search settles at distance
+  // one or two. Upward is tried first, which spells a raised leading tone
+  // rather than flattening onto the degree below it.
+  for (int distance = 1; distance <= 2; ++distance) {
+    if (inKey(pitch + distance, key))
+      return pitch + distance;
+    if (inKey(pitch - distance, key))
+      return pitch - distance;
+  }
+  return pitch;
+}
 
 void annotateLeadingToneMarkers(Material& material, std::uint8_t tonic_pc, bool is_minor) {
   material.leading_tone_markers.clear();

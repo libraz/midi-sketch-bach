@@ -26,6 +26,83 @@ enum class MaterialFragment : std::uint8_t {
   Countersubject = 3,
 };
 
+// A diatonic collection: a tonic pitch class and the mode built on it. The
+// composer runs C-internal, so a piece's own context is {0, is_minor} and the
+// MIDI transposition happens on the way out. A modulation names a *second*
+// collection that the material is heard against for the span it covers, which
+// is the only way an accidental can enter the internal representation: every
+// scale helper below the material layer is written on a fixed C tonic, so a
+// line that is only ever degree-shifted within the home collection cannot
+// leave it however far its stations travel.
+//
+// Minor is the natural minor here, matching the collection the figuration
+// helpers walk. A raised leading tone is a property of the dominant harmony,
+// not of the key, and is supplied where that harmony is known.
+struct KeyContext {
+  std::uint8_t tonic_pc = 0;
+  bool is_minor = false;
+};
+
+/**
+ * @brief The key in effect at `tick`, read from the plan's modulation list.
+ * @param plan Harmonic plan whose modulations bound the key areas.
+ * @param tick Tick to resolve.
+ * @return The most recent modulation's destination, or the plan's home key
+ *         when no modulation has taken effect yet.
+ */
+KeyContext localKeyAt(const HarmonicPlan& plan, Tick tick);
+
+/**
+ * @brief Test whether a pitch belongs to a key's diatonic collection.
+ * @param pitch MIDI pitch (or bare pitch class).
+ * @param key Collection to test against.
+ * @return True when the pitch class is one of the key's seven degrees.
+ */
+bool inKey(int pitch, const KeyContext& key);
+
+/**
+ * @brief Scale degree of a pitch within a key.
+ * @param pitch MIDI pitch (or bare pitch class).
+ * @param key Collection to measure against.
+ * @return 0-based degree (0 = tonic, 4 = dominant), or -1 when the pitch is
+ *         chromatic in that key.
+ */
+int degreeInKey(int pitch, const KeyContext& key);
+
+/**
+ * @brief Restate a pitch in another key, preserving the degree it occupies.
+ *
+ * This is a real transposition, not a degree shift inside the home
+ * collection: a subject on the tonic of `from` comes out on the tonic of
+ * `to`, and every degree comes out with the accidental `to` spells it with.
+ * The result moves by the interval between the two tonics, so a caller that
+ * needs the line inside a voice band octave-fits it afterwards.
+ *
+ * A pitch that is chromatic in `from` keeps its inflection: it is spelled a
+ * semitone above the degree below it in `to`.
+ *
+ * @param pitch MIDI pitch to restate.
+ * @param from Key the pitch is currently spelled in.
+ * @param to Key to restate it in.
+ * @return The restated MIDI pitch.
+ */
+int transposeIntoKey(int pitch, const KeyContext& from, const KeyContext& to);
+
+/**
+ * @brief Bend a pitch into a key without moving it off its own degree.
+ *
+ * Used for the material that surrounds a modulating statement rather than
+ * carrying it -- an episode figure or an accompaniment line that has to stop
+ * contradicting the local key while a foreign entry sounds. A pitch already in
+ * the key is returned unchanged; a chromatic one moves to the nearest member,
+ * upward when both sides are equally near.
+ *
+ * @param pitch MIDI pitch to bend.
+ * @param key Collection to bend into.
+ * @return The nearest pitch belonging to `key`.
+ */
+int bendIntoKey(int pitch, const KeyContext& key);
+
 struct LeadingToneMarker {
   MaterialFragment fragment = MaterialFragment::Subject;
   std::size_t leading_index = 0;
