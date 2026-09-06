@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "composer/character_profile.h"
@@ -93,6 +94,20 @@ void addNote(std::vector<MaterialNote>& dst, Tick tick, Tick dur, int pitch) {
 /// @brief Convert a bar index to its starting tick.
 Tick barTick(int bar) {
   return static_cast<Tick>(bar) * kTicksPerBar;
+}
+
+// The tone and onset length of one accompaniment bar. A layer that lays a
+// single tone per bar is fully described by that pair, so a later bar carrying
+// it again is the earlier bar restated note for note -- the one kind of return
+// the ear hears as nothing new, because neither the pitch nor the tread has
+// moved. A layer reading this answers such a return by treating the tone
+// differently rather than by choosing a different tone.
+using SustainedBar = std::pair<int, Tick>;
+
+/// @brief True when this line has already laid a bar of exactly this tone and
+///        length.
+bool alreadySustained(const std::vector<SustainedBar>& seen, int pitch, Tick duration) {
+  return std::find(seen.begin(), seen.end(), SustainedBar{pitch, duration}) != seen.end();
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +267,11 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // pitch and how many identical onsets precede the next one.
   int last_pedal_pitch = -1;
   int pedal_run = 0;
+  // Every bar this pedal has already laid, by tone and by the length of its
+  // first onset (a whole bar when held, a half note when walked). A second bar
+  // repeating both would be that bar restated note for note, so the pedal
+  // reads this to pick the density it has not used on the tone yet.
+  std::vector<SustainedBar> pedal_held;
   // Every beat the bar's pedal tone is still sounding at, read from the V0
   // figuration already placed above it. The pedal is struck once or twice a bar
   // while that line attacks four or more times, so the interval that decides
@@ -421,7 +441,6 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       continue;
     }
     const bool homophonic = pl.homophonic;
-    const bool walking = !homophonic && (bar % 4) == walk_phase;
     if (homophonic) {
       // Declamatory chordal texture: a half-note strike re-articulated at the
       // bar mid-point, sounding with the concurrent V1 half note. The first
@@ -433,7 +452,23 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, second);
       registry.record(bar_start, /*voice=*/2, first, kTicksPerBeat * 2);
       registry.record(bar_start + kTicksPerBeat * 2, /*voice=*/2, second, kTicksPerBeat * 2);
-    } else if (walking) {
+      continue;
+    }
+    const int pitch = pedal_pitch(root, chord);
+    // Which treatment this tone has already had. The pedal states a tone in one
+    // of two densities -- held for the whole bar, or struck as a half note and
+    // answered by its own fifth (the walking-pedal idiom) -- and a second bar
+    // that repeats both the tone and the density is the earlier bar restated
+    // note for note. So a returning tone takes whichever density it has not
+    // been heard in yet, and the seed-phased walk decides only while both are
+    // still free. The bass note itself never moves for this: what changes on
+    // the return is how densely the same pedal is stated.
+    const bool held_before = alreadySustained(pedal_held, pitch, kTicksPerBar);
+    const bool walked_before = alreadySustained(pedal_held, pitch, kTicksPerBeat * 2);
+    bool walking = (bar % 4) == walk_phase;
+    if (held_before != walked_before)
+      walking = !walked_before;
+    if (walking) {
       // Half-note root then a half-note fifth above it (still inside the band).
       // The first tone goes through the same ranking as every other pedal onset.
       // Writing the root unranked here left this the one branch where a bar head
@@ -441,21 +476,21 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       // it: the ordinary branch would have stepped to a chord tone instead. The
       // fifth is measured from the tone actually taken, so the walk keeps its
       // shape wherever the root is displaced.
-      const int first = pedal_pitch(root, chord);
-      int fifth = first + 7;
+      int fifth = pitch + 7;
       if (fifth > kFreeV2Hi)
-        fifth = first - 5;  // fall to the fourth below if the fifth overflows.
+        fifth = pitch - 5;  // fall to the fourth below if the fifth overflows.
       fifth = std::clamp(fifth, kFreeV2Lo, kFreeV2Hi);
-      addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, first);
+      addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, pitch);
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, fifth);
-      registry.record(bar_start, /*voice=*/2, first, kTicksPerBeat * 2);
+      registry.record(bar_start, /*voice=*/2, pitch, kTicksPerBeat * 2);
       registry.record(bar_start + kTicksPerBeat * 2, /*voice=*/2, fifth, kTicksPerBeat * 2);
       last_pedal_pitch = fifth;
       pedal_run = 1;
+      pedal_held.push_back({pitch, kTicksPerBeat * 2});
     } else {
-      const int pitch = pedal_pitch(root, chord);
       addNote(pedal_section.notes, bar_start, kTicksPerBar, pitch);
       registry.record(bar_start, /*voice=*/2, pitch, kTicksPerBar);
+      pedal_held.push_back({pitch, kTicksPerBar});
     }
   }
   if (!pedal_section.notes.empty()) {
@@ -984,11 +1019,14 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   const bool full_exposition = (first_bar + 11) < cadence_start;
 
   // --- Stamp a 16-note subject statement transposed by `semis` into `voice`. ---
-  auto stamp_subject = [&](int base_bar, int semis, int theme_voice) {
+  // `rhythm` carries the values the statement treads; every statement but the
+  // stretto leader uses the catalog row unchanged.
+  auto stamp_subject = [&](int base_bar, int semis, int theme_voice,
+                           const std::array<Tick, 16>& rhythm) {
     Tick cursor = barTick(base_bar);
     for (int note = 0; note < kSubjectNotes; ++note) {
       const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + semis;
-      const Tick dur = subj_rhythm[static_cast<std::size_t>(note)];
+      const Tick dur = rhythm[static_cast<std::size_t>(note)];
       addNote(out.material.subject, cursor, dur, pitch);
       registry.record(cursor, static_cast<VoiceId>(theme_voice), pitch, dur);
       cursor += dur;
@@ -1187,7 +1225,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
                                kBandHi[voice], mode, out.material.countersubject, registry,
                                /*avoid_battuta=*/true);
   };
-  stamp_subject(first_bar + 0, v0_off, 0);
+  stamp_subject(first_bar + 0, v0_off, 0, subj_rhythm);
   out.material.canonical_subject_note_count = kSubjectNotes;
   pushSpan(asm_ctx, 0, first_bar + 0, first_bar + 3, VoiceIntent::SubjectCarrier);
   // Texture thickening of the solo subject entry: the subject head enters alone
@@ -1282,7 +1320,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   if (full_exposition) {
     // V2 re-entry (subject - P8) in the V2 band (bars 8-11).
     const int third_off = octaveOffsetForBand(subj_pat, 0, 2, kBandLo, kBandHi);
-    stamp_subject(first_bar + 8, third_off, 2);
+    stamp_subject(first_bar + 8, third_off, 2, subj_rhythm);
     pushSpan(asm_ctx, 2, first_bar + 8, first_bar + 11, VoiceIntent::SubjectCarrier);
     std::vector<MaterialNote> third_entry_seed;
     Tick third_cursor = barTick(first_bar + 8);
@@ -1344,8 +1382,26 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       add_sustained_support(2, next_free_bar, leader_bar - 1, bass_pulse);
     }
 
-    // Leader: a full subject statement in V0 (bars leader_bar .. +3).
-    stamp_subject(leader_bar, v0_off, 0);
+    // Leader: a full subject statement in V0 (bars leader_bar .. +3), stated at
+    // the exposition's own pitch level -- the band holds one placement of this
+    // subject and no other, so the return cannot be answered in a new register.
+    // What changes instead is the tread: each pair of equal catalog values is
+    // stated long-short (3:1), the dotted treatment a returning subject takes
+    // in the reference literature. Every pitch and its order survive, so the
+    // ear hears the subject it already knows, played sharper. Only pairs of
+    // equal values at least a quarter long are dotted, which keeps the short
+    // half of every pair no shorter than an eighth, and the pair's total is
+    // unchanged -- so the statement still spans exactly kSubjectBars and the
+    // canon window, the follower entry and the span all stand.
+    std::array<Tick, 16> leader_rhythm = subj_rhythm;
+    for (std::size_t note = 0; note + 1 < leader_rhythm.size(); note += 2) {
+      const Tick value = leader_rhythm[note];
+      if (value != leader_rhythm[note + 1] || value < kQuarter)
+        continue;
+      leader_rhythm[note] = value + value / 2;
+      leader_rhythm[note + 1] = value - value / 2;
+    }
+    stamp_subject(leader_bar, v0_off, 0, leader_rhythm);
     pushSpan(asm_ctx, 0, leader_bar, leader_bar + 3, VoiceIntent::SubjectCarrier);
 
     // Follower: a subject statement in V1 entering after the leader (genuine
@@ -1374,8 +1430,13 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
         const int candidate_off =
             octaveOffsetForBand(subj_pat, candidate.extra_semis, 1, kBandLo, kBandHi) +
             candidate.extra_semis;
+        // The leader treads its dotted values and the follower the plain catalog
+        // row, so the two rhythms are passed separately: reading the pair as if
+        // both were plain would vet an alignment neither line actually sounds,
+        // and the configuration scan exists precisely to refuse the true
+        // parallels this overlap would otherwise design in.
         const StrettoOverlapProfile profile =
-            strettoOverlapProfile(subj_pat, v0_off, subj_pat, candidate_off, subj_rhythm,
+            strettoOverlapProfile(subj_pat, v0_off, subj_pat, candidate_off, leader_rhythm,
                                   subj_rhythm, candidate.delay_bars, kSubjectBars);
         if (profile.parallel_perfects > 0) {
           continue;
