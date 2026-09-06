@@ -473,12 +473,35 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
+  const int seventh_pc = chord.seventh ? detail::chordSeventhPc(chord) : -1;
   auto is_triad = [&](int midi) {
     const int pcl = ((midi % 12) + 12) % 12;
     return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
   };
+  // Chord membership including the seventh. A bar head is the only onset held to
+  // the chord, so a seventh chord that could not offer its seventh there would
+  // sound as the plain triad it is not.
+  auto is_chord_tone = [&](int midi) {
+    const int pcl = ((midi % 12) + 12) % 12;
+    return is_triad(midi) || pcl == seventh_pc;
+  };
+  // The seventh is a single dissonant tone with one obligation -- to fall by
+  // step -- so two voices holding it would have to resolve in parallel. When an
+  // earlier voice already sounds it, this voice takes another chord tone.
+  bool seventh_taken = false;
+  if (seventh_pc >= 0) {
+    for (int theme : theme_pitches)
+      seventh_taken = seventh_taken || (((theme % 12) + 12) % 12) == seventh_pc;
+    for (const ConcurrentMotion& motion : motions) {
+      if (motion.curr >= 0)
+        seventh_taken = seventh_taken || (((motion.curr % 12) + 12) % 12) == seventh_pc;
+    }
+  }
   auto is_anchor_tone = [&](int midi) {
-    return downbeat ? is_triad(midi) : (is_triad(midi) || detail::inScale(midi, mode));
+    const int pcl = ((midi % 12) + 12) % 12;
+    if (seventh_taken && pcl == seventh_pc)
+      return false;
+    return downbeat ? is_chord_tone(midi) : (is_chord_tone(midi) || detail::inScale(midi, mode));
   };
   auto is_parallel = [&](int cand) {
     for (const ConcurrentMotion& motion : motions) {
@@ -606,6 +629,15 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       if (isConsonantIc(pitch - sounding)) {
         return;
       }
+      // Two tones of the SAME chord state the harmony; they do not clash within
+      // it. On a plain triad every such pair is already consonant, so this is
+      // inert there and reachable only under a declared seventh, where the pair
+      // it admits is the tritone between third and seventh -- the interval that
+      // defines a dominant. Judging that pair by interval class alone is what
+      // made the selector unable to place the sonority it was asked for.
+      if (is_chord_tone(pitch) && is_chord_tone(sounding)) {
+        return;
+      }
       const int ic = std::abs(pitch - sounding) % 12;
       ++clashes;
       const bool sharp = (ic == 1 || ic == 6 || ic == 11);
@@ -627,7 +659,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     }
     int window_clashes = 0;
     for (int sounding : window_pitches) {
-      if (!isConsonantIc(pitch - sounding)) {
+      if (!isConsonantIc(pitch - sounding) && !(is_chord_tone(pitch) && is_chord_tone(sounding))) {
         ++window_clashes;
       }
     }

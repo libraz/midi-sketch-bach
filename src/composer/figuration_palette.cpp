@@ -188,6 +188,21 @@ void stackTriadInBand(std::uint8_t root_pc, bool minor, detail::Mode mode, int b
   }
 }
 
+/// @brief Chord membership of a pitch, seventh included.
+///
+/// Every scan that displaces or holds a beat anchor has to admit the same tones
+/// the anchor selector was allowed to choose. Reading a bare triad here while
+/// consonantChordTone reads four tones would let a later pass push a seventh the
+/// selector deliberately placed back off the chord, or judge the chord exhausted
+/// while one of its tones was still free. Inert over a triad, where `seventh` is
+/// unset and the set is the same three pitch classes as before.
+bool isChordTonePc(const detail::ChordSpec& chord, int midi) {
+  const int third = chord.minor ? 3 : 4;
+  const int pcl = ((midi % 12) + 12) % 12;
+  return pcl == ((chord.root_pc % 12) + 12) % 12 || pcl == (chord.root_pc + third) % 12 ||
+         pcl == (chord.root_pc + 7) % 12 || (chord.seventh && pcl == detail::chordSeventhPc(chord));
+}
+
 /// @brief Return the next tone of the chord's triad strictly above `from`.
 int chordToneAbove(int from, std::uint8_t root_pc, bool minor) {
   const int third = minor ? 3 : 4;
@@ -817,15 +832,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       };
       const int snapped_rank = anchor_fault_rank(snapped);
       if (snapped_rank != kAnchorClean) {
-        const int third = chord.minor ? 3 : 4;
-        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
-                                 (chord.root_pc + 7) % 12};
         auto admissible = [&](int cand, int accept) {
           if (cand < band_lo || cand > band_hi || cand == snapped || !within_order(cand)) {
             return false;
           }
-          const int pc = ((cand % 12) + 12) % 12;
-          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          if (!isChordTonePc(chord, cand)) {
             return false;
           }
           for (const int sounding : theme_pitches) {
@@ -875,15 +886,14 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             }
             return anchor_fault_rank(cand) == kAnchorClean;
           };
-          bool triad_available = false;
-          for (int cand = band_lo; cand <= band_hi && !triad_available; ++cand) {
-            const int pc = ((cand % 12) + 12) % 12;
-            if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          bool chord_tone_available = false;
+          for (int cand = band_lo; cand <= band_hi && !chord_tone_available; ++cand) {
+            if (!isChordTonePc(chord, cand)) {
               continue;
             }
-            triad_available = anchor_free(cand);
+            chord_tone_available = anchor_free(cand);
           }
-          if (!triad_available) {
+          if (!chord_tone_available) {
             // A tone the sustain window grinds against is worse than a quiet
             // one, so a clash-free escape is taken first; it is not worse than
             // the parallel it replaces, so a clashing one is still taken over
@@ -954,9 +964,6 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         }
       }
       if (beat >= 2 && trailing_locked && (snapped == bar_pitch_a || snapped == bar_pitch_b)) {
-        const int third = chord.minor ? 3 : 4;
-        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
-                                 (chord.root_pc + 7) % 12};
         auto escape_ok = [&](int cand) {
           if (cand < band_lo || cand > band_hi || cand < order_floor || cand > order_ceiling) {
             return false;
@@ -964,8 +971,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           if (cand == bar_pitch_a || cand == bar_pitch_b) {
             return false;
           }
-          const int pc = ((cand % 12) + 12) % 12;
-          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          if (!isChordTonePc(chord, cand)) {
             return false;
           }
           for (const int sounding : theme_pitches) {
@@ -1070,15 +1076,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             order_floor = std::max(order_floor, motion.curr);
           }
         }
-        const int third = chord.minor ? 3 : 4;
-        const int triad_pc[3] = {((chord.root_pc % 12) + 12) % 12, (chord.root_pc + third) % 12,
-                                 (chord.root_pc + 7) % 12};
         auto held_ok = [&](int cand) {
           if (cand < band_lo || cand > band_hi || cand < order_floor || cand > order_ceiling) {
             return false;
           }
-          const int pc = ((cand % 12) + 12) % 12;
-          if (pc != triad_pc[0] && pc != triad_pc[1] && pc != triad_pc[2]) {
+          if (!isChordTonePc(chord, cand)) {
             return false;
           }
           for (const int sounding : theme_pitches) {

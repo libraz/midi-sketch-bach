@@ -88,7 +88,19 @@ inline constexpr std::array<std::array<Tick, 16>, 5> kFugueCompleteSubjectRhythm
 struct ChordSpec {
   std::uint8_t root_pc;
   bool minor;
+  // The chord sounds its minor seventh (root + 10) as a fourth chord tone: a
+  // dominant seventh over a major triad, a minor seventh over a minor one. The
+  // seventh is a tone the anchor selector may take, and the tritone it makes
+  // with the third of a dominant is the harmony itself rather than a clash
+  // against it -- without this flag the accented dissonance that defines the
+  // dominant is unreachable, because every selector below reads a bare triad.
+  bool seventh = false;
 };
+
+// Pitch class of the chord's seventh. Only meaningful when `seventh` is set.
+constexpr int chordSeventhPc(const ChordSpec& chord) {
+  return (chord.root_pc + 10) % 12;
+}
 
 // 4 harmony patterns × 4 chords each. Roman numerals for reference:
 // 0=I-IV-V-I, 1=I-vi-IV-V, 2=I-IV-I-V, 3=I-V-vi-I (deceptive resolved).
