@@ -241,6 +241,82 @@ PerfectMotionCounts countPerfectMotion(const std::vector<NoteEvent>& notes) {
   return counts;
 }
 
+// --- Unresolved second inversions -------------------------------------------
+//
+// The perfect fourth is the one interval whose consonance depends on where it
+// sits: a consonance between upper voices, a dissonance above the bass. The
+// grammar licenses it above the bass in three ways, and all three MOVE -- it
+// resolves down by step over a held bass, the bass itself steps away under it,
+// or it stands over a pedal. What is not licensed is a bass that simply parks
+// under one: it holds into the next beat and the fourth above it neither
+// resolves nor is left. That is the count below.
+//
+// Sampled on the beat grid, not at note onsets, because a vertical is heard for
+// as long as it sounds: a whole-bar fourth is four beats of it, and an onset
+// sweep would read the same thing as one event and rank it with a passing
+// sixteenth. The interval classes the perfect-motion counter above reads are
+// motions between two onsets, which is why the two use different grids.
+struct BassFourthCounts {
+  // Every beat sample of a voice sounding above the lowest one: the chances the
+  // count below had. Same role as PerfectMotionCounts::successions.
+  std::size_t upper_samples = 0;
+  std::size_t unresolved = 0;
+
+  void add(const BassFourthCounts& other) {
+    upper_samples += other.upper_samples;
+    unresolved += other.unresolved;
+  }
+};
+
+BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes) {
+  BassFourthCounts counts;
+  if (notes.empty())
+    return counts;
+
+  Tick end = 0;
+  std::vector<VoiceId> voices;
+  for (const NoteEvent& note : notes) {
+    end = std::max(end, note.start_tick + note.duration);
+    if (std::find(voices.begin(), voices.end(), note.voice) == voices.end())
+      voices.push_back(note.voice);
+  }
+  const SoundingPitchIndex index(notes);
+  std::vector<std::uint8_t> sounding;
+  std::vector<std::uint8_t> next_sounding;
+  for (Tick tick = 0; tick < end; tick += kTicksPerBeat) {
+    sounding.clear();
+    next_sounding.clear();
+    for (VoiceId voice : voices) {
+      const std::uint8_t pitch = index.pitchAt(voice, tick);
+      if (pitch != 0)
+        sounding.push_back(pitch);
+      const std::uint8_t next_pitch = index.pitchAt(voice, tick + kTicksPerBeat);
+      if (next_pitch != 0)
+        next_sounding.push_back(next_pitch);
+    }
+    if (sounding.size() < 2)
+      continue;
+    const std::uint8_t bass = *std::min_element(sounding.begin(), sounding.end());
+    const bool bass_holds = !next_sounding.empty() &&
+                            *std::min_element(next_sounding.begin(), next_sounding.end()) == bass;
+    for (std::uint8_t pitch : sounding) {
+      if (pitch == bass)
+        continue;
+      ++counts.upper_samples;
+      if ((pitch - bass) % 12 != 5)
+        continue;
+      if (!bass_holds)
+        continue;  // the bass steps away: the fourth was passing.
+      const bool resolves =
+          std::any_of(next_sounding.begin(), next_sounding.end(),
+                      [&](std::uint8_t next) { return next + 1 == pitch || next + 2 == pitch; });
+      if (!resolves)
+        ++counts.unresolved;
+    }
+  }
+  return counts;
+}
+
 // --- Counter self-check ------------------------------------------------------
 //
 // Without these, a bug in countPerfectMotion would make every ceiling below
@@ -404,6 +480,56 @@ TEST(PerfectMotionCounter, DegenerateVoicingsCountNothing) {
   EXPECT_EQ(countPerfectMotion(monophonic).hidden(), 0u);
 }
 
+TEST(BassFourthCounter, ReportsAFourthTheBassParksUnder) {
+  // C3 held three beats with F4 above it, and the F stays where it is. The last
+  // beat has no successor to hold into, so two of the three sound the fault.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 1440, 65),
+  };
+  const BassFourthCounts counts = countUnresolvedBassFourths(notes);
+  EXPECT_EQ(counts.unresolved, 2u);
+  EXPECT_EQ(counts.upper_samples, 3u);
+}
+
+TEST(BassFourthCounter, AResolvingFourthIsLicensed) {
+  // The same fourth, but the upper voice steps down to the third on beat two.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 960, 48),
+      makeNote(0, 0, 480, 65),
+      makeNote(0, 480, 480, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+}
+
+TEST(BassFourthCounter, AFourthTheBassLeavesIsLicensed) {
+  // The fourth stands, but the bass steps away under it: a passing vertical.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 480, 48),
+      makeNote(1, 480, 480, 50),
+      makeNote(0, 0, 960, 65),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+}
+
+TEST(BassFourthCounter, AFourthBetweenUPPERVoicesIsNotCounted) {
+  // C2 in the bass, with G3 and C4 above it: the upper pair spans a fourth, and
+  // over a chord-tone bass that is a consonance.
+  const std::vector<NoteEvent> notes = {
+      makeNote(2, 0, 960, 36),
+      makeNote(1, 0, 960, 55),
+      makeNote(0, 0, 960, 60),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+  EXPECT_EQ(countUnresolvedBassFourths(notes).upper_samples, 4u);
+}
+
+TEST(BassFourthCounter, DegenerateVoicingsCountNothing) {
+  EXPECT_EQ(countUnresolvedBassFourths({}).unresolved, 0u);
+  const std::vector<NoteEvent> single_note = {makeNote(0, 0, 480, 60)};
+  EXPECT_EQ(countUnresolvedBassFourths(single_note).upper_samples, 0u);
+}
+
 // --- Shipped-output sweep ----------------------------------------------------
 
 constexpr std::array<SubjectCharacter, 4> kCharacters = {{
@@ -478,6 +604,12 @@ struct FormCeiling {
   // This may only ever be RAISED, and lowering it is a deliberate statement that
   // the form now has less counterpoint in it.
   std::size_t min_successions;
+  // Fourths above the bass the bass then parks under, on the beat grid. The
+  // columns above are all motions between two onsets; this one is a vertical,
+  // and no amount of clean motion says anything about it. Its own denominator
+  // is the beat samples of a voice sounding above the lowest one, which moves
+  // with min_successions closely enough that the floor above guards both.
+  std::size_t max_bass_fourth;
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
@@ -646,7 +778,16 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // rises, which is the shape a suppression should have: it can only remove
     // tones, and the only way it could add a fault is by making two skeleton
     // tones adjacent that an ornament had been sitting between.
-    {FormType::Fugue, 0, 0, 46, 98, 4, 0, 3, 3, 1, 79487},
+    //
+    // The bass now ranks tones that leave a fourth above it below those that do
+    // not. Three columns rise for it -- thirteen hidden approaches, three
+    // contrary repeats, one battuta and one worst battuta cell -- and this is the
+    // first column that says what they buy: the same sweep run through the CLI
+    // drops from 1142 unresolved second inversions to 188. The perfect approach
+    // classes here are motions the ear follows and forgets; the fourth is a
+    // vertical it sits inside for as long as the bass holds, which is why the
+    // trade goes this way at seventeen faults gained against nine hundred lost.
+    {FormType::Fugue, 0, 0, 59, 99, 7, 0, 3, 4, 1, 79763, 211},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -697,7 +838,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Here it takes only the battuta column and the floor: this form's contrary
     // arrivals are already down to the residue the seam pass leaves, and none of
     // that residue is an ornament's doing.
-    {FormType::PreludeAndFugue, 0, 0, 17, 50, 3, 0, 1, 2, 1, 37323},
+    //
+    // The bass ranking against the fourth costs this row seven hidden approaches
+    // and returns thirty of the battuta arrivals plus 284 second inversions
+    // across the CLI sweep. Its bass-fourth column ends at the lowest rate of any
+    // form here, which is what a fugue whose bass is free to move should look
+    // like.
+    {FormType::PreludeAndFugue, 0, 0, 24, 47, 3, 0, 1, 2, 1, 37632, 64},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -755,7 +902,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourth tone in the set puts the next anchor a smaller interval away, so the
     // guard finds a clean rung more often and the line restrikes where it used to
     // sustain across a wider skip.
-    {FormType::TrioSonata, 0, 0, 126, 16, 0, 0, 5, 2, 0, 34837},
+    {FormType::TrioSonata, 0, 0, 126, 16, 0, 0, 5, 2, 0, 34837, 90},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -773,7 +920,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // reference corpus prices a contrary arrival at several times a hidden one,
     // so paying one of the cheap class to be rid of one of the dear class lowers
     // the weighted cost even as the raw count moves the other way.
-    {FormType::ChoralePrelude, 0, 0, 29, 22, 0, 0, 3, 2, 0, 16983},
+    //
+    // Nothing rises here: the bass ranking against the fourth takes four hidden
+    // approaches, one battuta, one worst hidden cell and half the second
+    // inversions with it. The cantus bass moves with the harmony rather than
+    // being sustained under running voices, so the ranking has somewhere to go on
+    // almost every onset.
+    {FormType::ChoralePrelude, 0, 0, 25, 21, 0, 0, 2, 2, 0, 17021, 53},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -825,7 +978,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // floor: the ornament suppression on the fugue row now reads that class too,
     // and one expansion was leaving a perfect interval only to reach it again the
     // other way round.
-    {FormType::ToccataAndFugue, 84, 84, 28, 1, 7, 7, 2, 1, 1, 31872},
+    //
+    // Two columns fall and none rises, but the bass-fourth column is the highest
+    // of any form and it is NOT a fault the ranking above declined to fix. This
+    // form's lowest voice is a pedal for most of its length -- a bass the texture
+    // sustains beneath running lines -- and standing a fourth over a pedal is
+    // what a pedal point is for. The ranking is therefore switched off at that
+    // voice by contract rather than by omission, and the column records the
+    // consequence so that a later change cannot quietly widen it.
+    {FormType::ToccataAndFugue, 84, 84, 26, 1, 6, 7, 2, 1, 1, 31906, 590},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -868,7 +1029,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // all, which trades a prepared accented dissonance for an unprepared one. The
     // two columns that fall here and the floor with them are the ornament
     // suppression described on the fugue row, and nothing else.
-    {FormType::Passacaglia, 0, 0, 48, 23, 5, 0, 3, 1, 1, 27338},
+    //
+    // Byte-identical under the bass ranking: this form's lowest voice is the
+    // ground, and the ground is immutable. Its bass-fourth column is pinned at
+    // what the ground table itself produces.
+    {FormType::Passacaglia, 0, 0, 48, 23, 5, 0, 3, 1, 1, 27338, 190},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -893,8 +1058,16 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // being ornamented, and every fault column holds -- including the contrary
     // one, which is a register decision made before the surface exists and so is
     // untouched by what the surface stops adding.
-    {FormType::FantasiaAndFugue, 0, 0, 31, 3, 32, 0, 2, 1, 2, 33230},
-    {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    //
+    // The one row where the bass ranking is close to a wash: four contrary
+    // repeats gained against two hidden approaches, one battuta and 22 second
+    // inversions. Its bass is the same sustained pedal the toccata uses, so the
+    // ranking reaches only the manuals, and it reaches them only where the pedal
+    // is silent and a manual is briefly the lowest voice sounding. The contrary
+    // rise is real and is pinned rather than absorbed; the bass-fourth column
+    // beside it is what says the rise was not paid for nothing.
+    {FormType::FantasiaAndFugue, 0, 0, 29, 2, 36, 0, 2, 1, 2, 33418, 736},
+    {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
@@ -909,7 +1082,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // interval over a bass tracking the chord root, so every beat it occupies is
     // a beat the hidden approach had no way to reach. The floor rises by two
     // where a changed anchor restrikes.
-    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7509},
+    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 7509, 31},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -918,7 +1091,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // them is relieved arrival by arrival. Hidden approaches are what that
     // choice pays with: the leader window of a wide canon is about a fifth deep,
     // so an arrival it can reach cleanly is often still approached by leap.
-    {FormType::GoldbergVariations, 0, 0, 8, 8, 0, 0, 1, 1, 0, 15354},
+    {FormType::GoldbergVariations, 0, 0, 8, 8, 0, 0, 1, 1, 0, 15354, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -951,6 +1124,7 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
     std::size_t worst_hidden = 0;
     std::size_t worst_battuta = 0;
     std::size_t worst_anti = 0;
+    BassFourthCounts bass_fourths;
     for (SubjectCharacter character : kCharacters) {
       bool character_skipped = false;
       for (bool is_minor : kModes) {
@@ -978,6 +1152,7 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
           worst_hidden = std::max(worst_hidden, cell.hidden());
           worst_battuta = std::max(worst_battuta, cell.battuta);
           worst_anti = std::max(worst_anti, cell.anti_parallel);
+          bass_fourths.add(countUnresolvedBassFourths(notes));
         }
       }
       if (character_skipped) {
@@ -994,6 +1169,8 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
         total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
         worst_hidden, worst_battuta, worst_anti, total.successions);
+    std::printf("[bass-fourth] %-20s unresolved=%zu / upper-samples=%zu\n",
+                formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.upper_samples);
     EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint rose "
@@ -1014,6 +1191,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
         << formTypeToString(entry.form)
         << ": anti-parallel perfect intervals in shipped output rose above "
         << "the ratchet";
+    EXPECT_LE(bass_fourths.unresolved, entry.max_bass_fourth)
+        << formTypeToString(entry.form)
+        << ": fourths above a bass that then parks under them rose above the "
+        << "ratchet (upper samples=" << bass_fourths.upper_samples << ")";
     // The worst single configuration, held beside the totals above. A change
     // that leaves a total where it was while moving findings between cells is a
     // redistribution, not a repair, and only this reads it.
@@ -1074,6 +1255,8 @@ struct LengthCeiling {
   std::size_t max_cell_anti;
   // FLOOR, for the reason given on FormCeiling.
   std::size_t min_successions;
+  // Second inversions the bass parks on, for the reason given on FormCeiling.
+  std::size_t max_bass_fourth;
 };
 
 // RATCHET: as above, these may only ever be LOWERED. Measured across
@@ -1107,7 +1290,13 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // were leaping onto a perfect interval. The battuta and contrary columns fall
     // by a tenth and a fifth of themselves, the worst battuta cell with them, and
     // the floor drops by the notes the suppressed expansions were.
-    {FormType::Fugue, 0, 0, 235, 912, 64, 0, 5, 11, 3, 770736},
+    // The bass ranking against the fourth pays for itself hardest on this axis
+    // in both directions: the hidden column rises by a third, and the battuta,
+    // contrary and both worst cells all fall -- the contrary column by nearly
+    // half. A stretched fugue passes through more bars where the bass is free to
+    // choose, so both sides of the trade are larger, and by the corpus weighting
+    // the two classes that fall cost several times what the one that rises does.
+    {FormType::Fugue, 0, 0, 318, 846, 36, 0, 4, 9, 2, 773473, 2308},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1126,7 +1315,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // and a third of the contrary column besides, so both columns end below where
     // they stood before the seventh was spelled at all. The floor drops back for
     // the notes the suppressed expansions were.
-    {FormType::PreludeAndFugue, 0, 0, 194, 364, 19, 0, 3, 4, 2, 499321},
+    // The bass ranking takes every total column down here and the floor up with
+    // them, at the price of one stretched configuration's battuta count. That
+    // single worst cell is the whole cost on this row.
+    {FormType::PreludeAndFugue, 0, 0, 184, 346, 10, 0, 3, 5, 1, 500847, 1082},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
@@ -1137,6 +1329,7 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
     std::size_t worst_hidden = 0;
     std::size_t worst_battuta = 0;
     std::size_t worst_anti = 0;
+    BassFourthCounts bass_fourths;
     for (DurationScale scale : kScales) {
       const std::uint16_t bars = resolveBars(entry.form, scale, /*target_bars=*/0);
       for (SubjectCharacter character : kCharacters) {
@@ -1161,6 +1354,7 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
             worst_hidden = std::max(worst_hidden, cell.hidden());
             worst_battuta = std::max(worst_battuta, cell.battuta);
             worst_anti = std::max(worst_anti, cell.anti_parallel);
+            bass_fourths.add(countUnresolvedBassFourths(notes));
           }
         }
       }
@@ -1172,6 +1366,8 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
         total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
         worst_hidden, worst_battuta, worst_anti, total.successions);
+    std::printf("[bass-fourth] %-20s unresolved=%zu / upper-samples=%zu\n",
+                formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.upper_samples);
     EXPECT_LE(structural_total.strict(), entry.max_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint rose "
@@ -1186,6 +1382,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
     EXPECT_LE(total.hidden(), entry.max_hidden) << formTypeToString(entry.form) << ": hidden rose";
     EXPECT_LE(total.anti_parallel, entry.max_anti)
         << formTypeToString(entry.form) << ": anti-parallel rose";
+    EXPECT_LE(bass_fourths.unresolved, entry.max_bass_fourth)
+        << formTypeToString(entry.form)
+        << ": fourths above a parked bass rose at some length (upper samples="
+        << bass_fourths.upper_samples << ")";
     EXPECT_LE(worst_strict, entry.max_cell_strict)
         << formTypeToString(entry.form) << ": one stretched configuration's parallel count rose";
     EXPECT_LE(worst_hidden, entry.max_cell_hidden)
