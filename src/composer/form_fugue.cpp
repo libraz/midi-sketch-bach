@@ -529,49 +529,6 @@ std::vector<ChordSpec> buildFugueTonalPlan(int bars, Mode mode, int exposition_b
   return plan;
 }
 
-/// @brief Spell every bar acting as a dominant with its seventh.
-///
-/// A major triad whose root lies a fifth above the next bar's root is that bar's
-/// dominant, and a dominant states its function through the tritone between its
-/// third and its seventh. The flag is DERIVED from the progression rather than
-/// declared per bar, so a plan with no fifth-fall stays entirely triadic and the
-/// secondary dominants the caller pins in front of a related-key entry pick the
-/// seventh up on the same rule as the home dominant. Applied to the finished
-/// plan, after every pin, so the final V -> I is covered too.
-///
-/// `triad_only_bars` are the bars of the related-key approach, which keep the
-/// plain triad for two separate reasons. The pivot itself is a harmony both keys
-/// own, and the seventh is exactly the tone that stops it being shared -- G7
-/// belongs to C alone, so spelling the C-to-G pivot that way would deny the
-/// modulation the common chord it turns on. The secondary dominant in front of
-/// it is chromatic already through its third; giving it a seventh as well would
-/// claim a four-tone chromatic chord over a bar whose voices are verbatim
-/// thematic material, chosen without reference to it -- and where the subject
-/// and its countersubject happen to share that pitch class, the spelling turns
-/// their plain octave into a doubled seventh that no voice can be moved off.
-void markDominantSevenths(std::vector<ChordSpec>& plan, const std::vector<int>& triad_only_bars,
-                          Mode mode) {
-  for (std::size_t bar = 0; bar + 1 < plan.size(); ++bar) {
-    if (plan[bar].minor)
-      continue;
-    if (std::find(triad_only_bars.begin(), triad_only_bars.end(), static_cast<int>(bar)) !=
-        triad_only_bars.end())
-      continue;
-    const int resolution = (plan[bar].root_pc + 5) % 12;
-    if (plan[bar + 1].root_pc % 12 != resolution)
-      continue;
-    // The seventh must belong to the working scale. Every accompaniment line in
-    // this form is diatonic, so a chromatic seventh would not be a tone they can
-    // reach -- it would only be a chord tone nothing plays. It is the tonic that
-    // this excludes: I falling to IV is a fifth-fall like any other, but its
-    // seventh is the flat seventh degree, which turns the home chord into a
-    // secondary dominant and takes the figuration out of the key.
-    if (!detail::inScale(detail::chordSeventhPc(plan[bar]), mode))
-      continue;
-    plan[bar].seventh = true;
-  }
-}
-
 /// @brief Emit the HarmonicPlan ChordEvents from a per-bar chord plan.
 void emitHarmony(HarnessFixture& out, const std::vector<ChordSpec>& plan, Mode mode, int base_bar) {
   out.harmony.tonic_pc = 0;
@@ -800,7 +757,16 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // The related-key approach: the secondary dominant the loop above pinned and
   // the pivot the modulation pass below declares. Both are derived here from the
   // same conditions those passes use, so the chord spelling cannot drift apart
-  // from the modulation it belongs to.
+  // from the modulation it belongs to. Both keep the plain triad, for separate
+  // reasons. The pivot is a harmony both keys own, and the seventh is exactly
+  // the tone that stops it being shared -- G7 belongs to C alone, so spelling
+  // the C-to-G pivot that way would deny the modulation the common chord it
+  // turns on. The secondary dominant in front of it is chromatic already through
+  // its third; giving it a seventh as well would claim a four-tone chromatic
+  // chord over a bar whose voices are verbatim thematic material, chosen without
+  // reference to it -- and where the subject and its countersubject happen to
+  // share that pitch class, the spelling turns their plain octave into a doubled
+  // seventh that no voice can be moved off.
   std::vector<int> triad_only_bars;
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
@@ -812,7 +778,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     if (window.entry_start >= 2)
       triad_only_bars.push_back(window.entry_start - 2);
   }
-  markDominantSevenths(plan, triad_only_bars, mode);
+  markDominantSevenths(plan, triad_only_bars, mode, /*cyclic=*/false);
   emitHarmony(out, plan, mode, first_bar);
   for (ChordEvent& chord : out.harmony.chords) {
     if (chord.start_tick == barTick(first_bar + bars - 1)) {
@@ -2400,7 +2366,7 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // triad. Nothing here is verbatim thematic material either: all three voices
   // are figuration reading the same chord, which is the texture a chain of
   // seventh chords is written for.
-  markDominantSevenths(prelude_plan, /*triad_only_bars=*/{}, mode);
+  markDominantSevenths(prelude_plan, /*triad_only_bars=*/{}, mode, /*cyclic=*/false);
   emitHarmony(out, prelude_plan, mode, 0);
 
   // The prelude uses the same parallel-aware scalar-wave figuration as the

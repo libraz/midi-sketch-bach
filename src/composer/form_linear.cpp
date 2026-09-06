@@ -31,14 +31,12 @@ namespace {
 using detail::ChordSpec;
 using detail::Mode;
 
-// One whole-bar harmonic step: root pitch class + minor-quality flag. The
-// per-bar progressions below are drawn from the shared diatonic catalogs
-// (kHarmonyPatterns / kHarmonyPatternsMinor) so both forms speak the same
-// harmonic language as the rest of the composer.
-struct BarChord {
-  std::uint8_t root_pc;
-  bool minor;
-};
+// One whole-bar harmonic step is a ChordSpec: the per-bar progressions below are
+// drawn from the shared diatonic catalogs (kHarmonyPatterns /
+// kHarmonyPatternsMinor) so both forms speak the same harmonic language as the
+// rest of the composer, and carrying the catalog's own type through means a
+// dominant that markDominantSevenths spells with its seventh reaches the anchor
+// selector rather than being flattened back to a triad on the way in.
 
 // The cello's implicit-voice shapes need a dedicated migration before they can
 // safely admit every natural-minor root. Keep that form-local admissibility
@@ -60,8 +58,8 @@ constexpr bool inHarmonicMinor(int pc) {
 // @param seed Piece seed (selects which catalog pattern each block uses).
 // @param mode Major selects kHarmonyPatterns, Minor selects kHarmonyPatternsMinor.
 // @return Per-bar chord list of length `bars`.
-std::vector<BarChord> buildProgression(int bars, std::uint32_t seed, Mode mode,
-                                       bool cello_implicit_safe = false) {
+std::vector<ChordSpec> buildProgression(int bars, std::uint32_t seed, Mode mode,
+                                        bool cello_implicit_safe = false) {
   const auto& catalog =
       (mode == Mode::Minor) ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
   std::vector<std::size_t> admissible;
@@ -76,15 +74,14 @@ std::vector<BarChord> buildProgression(int bars, std::uint32_t seed, Mode mode,
   }
   if (admissible.empty())
     admissible.push_back(0);
-  std::vector<BarChord> chords;
+  std::vector<ChordSpec> chords;
   chords.reserve(static_cast<std::size_t>(bars));
   for (int bar = 0; bar < bars; ++bar) {
     const int block = bar / 4;
     const std::size_t pat =
         admissible[(static_cast<std::size_t>(seed) + static_cast<std::size_t>(block)) %
                    admissible.size()];
-    const ChordSpec& spec = catalog[pat][static_cast<std::size_t>(bar % 4)];
-    chords.push_back({spec.root_pc, spec.minor});
+    chords.push_back(catalog[pat][static_cast<std::size_t>(bar % 4)]);
   }
   // Design-valued final cadence: V (dominant, always major) then tonic. In
   // minor the tonic stays minor unless the seed elects a Picardy third.
@@ -98,14 +95,18 @@ std::vector<BarChord> buildProgression(int bars, std::uint32_t seed, Mode mode,
 // @param out Fixture whose harmony plan receives the chords.
 // @param chords Per-bar progression.
 // @param mode Selects the tonic minor flag for the plan.
-void writeHarmony(HarnessFixture& out, const std::vector<BarChord>& chords, Mode mode) {
+void writeHarmony(HarnessFixture& out, const std::vector<ChordSpec>& chords, Mode mode) {
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = (mode == Mode::Minor);
   for (std::size_t bar = 0; bar < chords.size(); ++bar) {
     ChordEvent chord;
     chord.start_tick = static_cast<Tick>(bar) * kTicksPerBar;
     chord.root_pc = chords[bar].root_pc;
-    chord.quality = chords[bar].minor ? ChordQuality::Minor : ChordQuality::Major;
+    if (chords[bar].seventh) {
+      chord.quality = chords[bar].minor ? ChordQuality::Minor7 : ChordQuality::Dominant7;
+    } else {
+      chord.quality = chords[bar].minor ? ChordQuality::Minor : ChordQuality::Major;
+    }
     out.harmony.chords.push_back(chord);
   }
 }
@@ -142,8 +143,8 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   constexpr int kGroup = 4;             // four sixteenths per implicit cell.
   constexpr int kNotesPerBar = 16;      // sixteen sixteenths per bar.
 
-  const std::vector<BarChord> chords = buildProgression(bars, req.seed, mode,
-                                                        /*cello_implicit_safe=*/true);
+  const std::vector<ChordSpec> chords = buildProgression(bars, req.seed, mode,
+                                                         /*cello_implicit_safe=*/true);
   writeHarmony(out, chords, mode);
 
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);
@@ -582,7 +583,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   const Tick kEighth = kTicksPerBeat / 2;     // eighth note.
   const Tick kSixteenth = kTicksPerBeat / 4;  // sixteenth note.
 
-  std::vector<BarChord> chords = buildProgression(bars, req.seed, mode);
+  std::vector<ChordSpec> chords = buildProgression(bars, req.seed, mode);
   // Internal cadences every 8 bars: penultimate bar of each 8-bar group is V,
   // the boundary bar is I (the tonic landing). This shapes the long form into
   // clear 8-bar periods. The final two bars already hold the design cadence.
@@ -590,6 +591,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     chords[static_cast<std::size_t>(boundary - 1)] = {7, false};  // V before the boundary.
     chords[static_cast<std::size_t>(boundary)] = {0, mode == Mode::Minor};  // I/i on the boundary.
   }
+  // Every internal cadence just pinned, and the design-valued close, is a
+  // fifth-fall, so the derivation reaches each of them. Nothing in this form is
+  // verbatim thematic material -- all three voices are written against the plan
+  // bar by bar -- so the spelling has no line it can contradict.
+  markDominantSevenths(chords, /*triad_only_bars=*/{}, mode, /*cyclic=*/false);
   writeHarmony(out, chords, mode);
 
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);
@@ -624,10 +630,22 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                              int band_hi, int bar, int notes_per_beat, bool dotted, int shape,
                              int zig_dir, const ThemeToneRegistry* guard_registry,
                              int& prev_emitted) {
-    const BarChord& bc = chords[static_cast<std::size_t>(bar)];
+    const ChordSpec& bc = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bc.root_pc % 12;
     const int third = bc.minor ? 3 : 4;
-    const int triad_pc[3] = {root_pc, (root_pc + third) % 12, (root_pc + 7) % 12};
+    // Triad first, then the seventh when the bar's chord declares one. The two
+    // counts below split that set by where a tone may land. The seventh is a
+    // chord tone the harmony owns on an accented beat, but on a weak beat the
+    // question is a different one -- there a tone outside the triad has to be
+    // approached and left by step, and the anchor chain moves by broken-chord
+    // leaps, so offering it there would write a dissonance with no stepwise
+    // handling. Keeping it to the accented beats also means it is the tone the
+    // bar carries into the next one, where the nearest chord tone of the
+    // resolution is its own third: the seventh falls by step across the barline.
+    const int chord_pc[4] = {root_pc, (root_pc + third) % 12, (root_pc + 7) % 12,
+                             detail::chordSeventhPc(bc)};
+    const int accent_tones = bc.seventh ? 4 : 3;
+    constexpr int kTriadTones = 3;
     const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
 
     // Audible-grain parallel guard against the already-built other manual
@@ -687,13 +705,13 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // preferring a fully clean one; the anchor itself when nothing improves on
     // it (a rare double bind -- one consonant parallel beats a non-chord strong
     // beat).
-    auto guarded_anchor = [&](int anchor, Tick tick) {
+    auto guarded_anchor = [&](int anchor, Tick tick, int tone_count) {
       const int anchor_rank = guard_rank(prev_emitted, anchor, tick);
       for (int accept = kGuardClean; accept < anchor_rank; ++accept) {
         int best = -1;
         int best_dist = 1 << 20;
-        for (int tone = 0; tone < 3; ++tone) {
-          int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+        for (int tone = 0; tone < tone_count; ++tone) {
+          int low = band_lo + (((chord_pc[tone] - band_lo) % 12) + 12) % 12;
           for (int v = low; v <= band_hi; v += 12) {
             if (v == anchor || guard_rank(prev_emitted, v, tick) > accept)
               continue;
@@ -733,11 +751,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // anchor to the closest chord tone, so consecutive anchors move by at most a
     // third and the line never leaps. The band keeps the voice in its register so
     // the two upper voices never cross and both stay above the pedal.
-    auto nearestChordTone = [&](int near) {
+    auto nearestChordTone = [&](int near, int tone_count) {
       int best = band_lo;
       int best_dist = 1 << 20;
-      for (int tone = 0; tone < 3; ++tone) {
-        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;  // chord tone in band.
+      for (int tone = 0; tone < tone_count; ++tone) {
+        int low = band_lo + (((chord_pc[tone] - band_lo) % 12) + 12) % 12;  // chord tone in band.
         for (int v = low; v <= band_hi; v += 12) {
           const int dist = std::abs(v - near);
           if (dist < best_dist) {
@@ -755,11 +773,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // (from + 1) is almost always `from` itself (triad tones sit >= 3 semitones
     // apart), so a "nudge" built on it never moves and the anchor chain stalls
     // into a repeated-note line.
-    auto chordToneBeyond = [&](int from, int dir) {
+    auto chordToneBeyond = [&](int from, int dir, int tone_count) {
       int best = from;
       int best_dist = 1 << 20;
-      for (int tone = 0; tone < 3; ++tone) {
-        int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+      for (int tone = 0; tone < tone_count; ++tone) {
+        int low = band_lo + (((chord_pc[tone] - band_lo) % 12) + 12) % 12;
         for (int v = low; v <= band_hi; v += 12) {
           const int delta = (v - from) * dir;
           if (delta > 0 && delta < best_dist) {
@@ -781,13 +799,14 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // leaps the reference corpus writes between strong beats.
     int beat_anchor[4];
     const int near = std::max(band_lo, std::min(band_hi, prev_anchor));
-    beat_anchor[0] = nearestChordTone(near);
+    beat_anchor[0] = nearestChordTone(near, accent_tones);
     for (int beat = 1; beat < 4; ++beat) {
       const int prev = beat_anchor[beat - 1];
       const int dir = ((beat % 2 == 1) ? 1 : -1) * zig_dir;
-      int anchor = chordToneBeyond(prev, dir);
+      const int tones = (beat % 2 == 0) ? accent_tones : kTriadTones;
+      int anchor = chordToneBeyond(prev, dir, tones);
       if (anchor == prev)  // band edge: bounce the other way.
-        anchor = chordToneBeyond(prev, -dir);
+        anchor = chordToneBeyond(prev, -dir, tones);
       beat_anchor[beat] = anchor;
     }
     prev_anchor = beat_anchor[3];  // carry the closing anchor to the next bar.
@@ -817,14 +836,16 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         int long_pitch = half_anchor[half];
         const int long_rank = figure_rank(long_pitch, base);
         if (long_rank != kGuardClean) {
-          // Nearest in-band triad tone whose whole figure ranks better, a clean
+          // Nearest in-band chord tone whose whole figure ranks better, a clean
           // one first; when nothing improves on the cell, fall back to guarding
           // the strong beat alone, as every other shape in this builder does.
+          // Both halves of this figure open on an accented beat, so the seventh
+          // is available here on the same terms as the anchors themselves.
           int best = -1;
           for (int accept = kGuardClean; accept < long_rank && best < 0; ++accept) {
             int best_dist = 1 << 20;
-            for (int tone = 0; tone < 3; ++tone) {
-              const int low = band_lo + (((triad_pc[tone] - band_lo) % 12) + 12) % 12;
+            for (int tone = 0; tone < accent_tones; ++tone) {
+              const int low = band_lo + (((chord_pc[tone] - band_lo) % 12) + 12) % 12;
               for (int cand = low; cand <= band_hi; cand += 12) {
                 if (cand == long_pitch || figure_rank(cand, base) > accept)
                   continue;
@@ -836,7 +857,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
               }
             }
           }
-          long_pitch = (best >= 0) ? best : guarded_anchor(long_pitch, base);
+          long_pitch = (best >= 0) ? best : guarded_anchor(long_pitch, base, accent_tones);
         }
         MaterialNote longn;
         longn.start_tick = base;
@@ -866,7 +887,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       for (int beat = 0; beat < 4; ++beat) {
         const Tick base =
             static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
-        const int anchor = guarded_anchor(beat_anchor[beat], base);
+        const int anchor =
+            guarded_anchor(beat_anchor[beat], base, (beat % 2 == 0) ? accent_tones : kTriadTones);
         MaterialNote longn;
         longn.start_tick = base;
         longn.duration = kEighth;
@@ -892,7 +914,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     for (int beat = 0; beat < 4; ++beat) {
       const Tick beat_base =
           static_cast<Tick>(bar) * kTicksPerBar + static_cast<Tick>(beat) * kTicksPerBeat;
-      const int anchor = guarded_anchor(beat_anchor[beat], beat_base);
+      const int anchor = guarded_anchor(beat_anchor[beat], beat_base,
+                                        (beat % 2 == 0) ? accent_tones : kTriadTones);
       // Within the beat: the onset is the chord-tone anchor; the remaining
       // subdivisions trace an intra-beat cell that resolves back to the
       // anchor's neighbourhood. The sixteenth tier rotates the cell PER BEAT
@@ -1697,7 +1720,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       }
       const std::size_t bar_index =
           std::min(static_cast<std::size_t>(note.start_tick / kTicksPerBar), chords.size() - 1);
-      const BarChord& bar_chord = chords[bar_index];
+      const ChordSpec& bar_chord = chords[bar_index];
       const int root_pc = bar_chord.root_pc % 12;
       const int third_semi = bar_chord.minor ? 3 : 4;
       const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};

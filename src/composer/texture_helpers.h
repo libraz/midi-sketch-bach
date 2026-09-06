@@ -29,6 +29,32 @@ bool shouldUseTonalAnswer(const std::array<std::uint8_t, 16>& subject, std::uint
 std::vector<detail::ChordSpec> buildRepeatingChordPlan(int total_bars, detail::Mode mode,
                                                        int harmony_index);
 
+/// @brief Spell every bar acting as a dominant with its seventh.
+///
+/// A major triad whose root lies a fifth above the next bar's root is that bar's
+/// dominant, and a dominant states its function through the tritone between its
+/// third and its seventh. The flag is DERIVED from the progression rather than
+/// declared per bar, so a plan with no fifth-fall stays entirely triadic and a
+/// secondary dominant picks the seventh up on the same rule as the home one.
+/// Apply to a finished plan, after every pin, so the closing V -> I is covered.
+///
+/// The seventh must also belong to the working scale. Every accompaniment line
+/// in these forms is diatonic, so a chromatic seventh would be a chord tone
+/// nothing can reach. It is the tonic that this excludes: I falling to IV is a
+/// fifth-fall like any other, but its seventh is the flat seventh degree, which
+/// turns the home chord into a secondary dominant and leaves the key.
+///
+/// @param plan Per-bar chord plan, modified in place.
+/// @param triad_only_bars Bars that must keep the plain triad whatever the
+///        progression says (a modulation's pivot is a harmony both keys own, and
+///        the seventh is exactly the tone that stops it being shared).
+/// @param mode Diatonic mode supplying the scale the seventh must belong to.
+/// @param cyclic Whether the last bar's successor is the first. A ground cycle
+///        repeats, so its closing dominant really does fall to the tonic that
+///        opens the next statement; a through-composed section's does not.
+void markDominantSevenths(std::vector<detail::ChordSpec>& plan,
+                          const std::vector<int>& triad_only_bars, detail::Mode mode, bool cyclic);
+
 // ---------------------------------------------------------------------------
 // Shared texture / parallel-avoidance machinery.
 //

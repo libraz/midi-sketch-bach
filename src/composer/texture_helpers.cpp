@@ -61,6 +61,25 @@ std::vector<detail::ChordSpec> buildRepeatingChordPlan(int total_bars, detail::M
   return plan;
 }
 
+void markDominantSevenths(std::vector<detail::ChordSpec>& plan,
+                          const std::vector<int>& triad_only_bars, detail::Mode mode, bool cyclic) {
+  const std::size_t last = cyclic ? plan.size() : (plan.empty() ? 0 : plan.size() - 1);
+  for (std::size_t bar = 0; bar < last; ++bar) {
+    if (plan[bar].minor)
+      continue;
+    if (std::find(triad_only_bars.begin(), triad_only_bars.end(), static_cast<int>(bar)) !=
+        triad_only_bars.end())
+      continue;
+    const std::size_t next = (bar + 1) % plan.size();
+    const int resolution = (plan[bar].root_pc + 5) % 12;
+    if (plan[next].root_pc % 12 != resolution)
+      continue;
+    if (!detail::inScale(detail::chordSeventhPc(plan[bar]), mode))
+      continue;
+    plan[bar].seventh = true;
+  }
+}
+
 bool installSuspensionCarrier(Material& material, VoicePlan& voice_plan,
                               const SuspensionPattern& pattern) {
   if (pattern.preparation_tick >= pattern.suspension_tick ||
