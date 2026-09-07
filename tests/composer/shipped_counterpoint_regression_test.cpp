@@ -1325,7 +1325,14 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // arrival there as well -- at both ends of the cadence, since ranking the
     // approach alone moves the fault to the landing rather than removing it --
     // takes the column down and leaves the contrary column exactly where it was.
-    {FormType::Chaconne, 0, 0, 38, 0, 7, 0, 1, 0, 1, 18698, 48},
+    //
+    // The contrary column then follows, from the one onset left between the
+    // approach and the landing. It had a re-aim of its own already, but as a
+    // filter admitting anything that was not a true parallel; ranking it the same
+    // way empties most of that column and takes the fifths down with it. What it
+    // costs is unprepared dissonance, which is the tone it now lands on meeting
+    // the harmony rather than the bass.
+    {FormType::Chaconne, 0, 0, 37, 0, 2, 0, 1, 0, 1, 18698, 48},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

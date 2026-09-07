@@ -2220,20 +2220,37 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         // carries no such ranking of its own: the block's only guard reads the
         // ground at bar heads, and this onset is neither. It is re-aimed to the
         // nearest scale tone of the same compass that leaves the arrival clean.
-        if (tail_note != nullptr && tail_note != approach_note &&
-            formsStrictPerfectParallel(static_cast<int>(tail_note->pitch), prefinal,
-                                       kCodaBassDominant, coda_tonic)) {
+        //
+        // Ranked rather than filtered, and for the same reason the approach beat
+        // is. Demanding a fully free arrival outright would reject the whole
+        // compass on the bars where none exists and leave the tone exactly as it
+        // was -- including where a merely hidden one was in reach and the tone in
+        // place is the true parallel. Each accept level re-offers the whole
+        // compass, so a clean tone is always preferred to one that only
+        // downgrades the fault.
+        if (tail_note != nullptr && tail_note != approach_note) {
+          const auto tailFaultRank = [&](int cand) {
+            if (formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
+              return 2;
+            if (formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic) ||
+                formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic))
+              return 1;
+            return 0;
+          };
           const int original = static_cast<int>(tail_note->pitch);
-          for (int dist = 1; dist <= 12; ++dist) {
+          const int design_rank = tailFaultRank(original);
+          for (int accept = 0; accept < design_rank; ++accept) {
             bool placed = false;
-            for (const int sgn : {-1, 1}) {
-              const int cand = original + sgn * dist;
-              if (cand < 67 || cand > 81 || !detail::inScale(cand, mode) ||
-                  formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
-                continue;
-              tail_note->pitch = static_cast<std::uint8_t>(cand);
-              placed = true;
-              break;
+            for (int dist = 1; dist <= 12 && !placed; ++dist) {
+              for (const int sgn : {-1, 1}) {
+                const int cand = original + sgn * dist;
+                if (cand < 67 || cand > 81 || !detail::inScale(cand, mode) ||
+                    tailFaultRank(cand) > accept)
+                  continue;
+                tail_note->pitch = static_cast<std::uint8_t>(cand);
+                placed = true;
+                break;
+              }
             }
             if (placed)
               break;
