@@ -1042,7 +1042,32 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // quarter into four is no longer eligible over the changed bass, so six
     // fewer onsets are examined. No voice fell silent and no pair stopped
     // sounding together.
-    {FormType::ChoralePrelude, 0, 0, 35, 21, 0, 0, 2, 2, 0, 17012, 47},
+    //
+    // Two columns rise, and they are the price of reading the bass against the
+    // bass. The walking line judged its own candidates with the consonance
+    // table the upper voices share, which admits the perfect fourth; below the
+    // lowest sounding line that interval is a dissonance, so the line was free
+    // to sit under one all along. Reading it with the bass-relative table
+    // instead takes the second inversions with it -- the fourths above a parked
+    // bass nearly halve, and three hidden approaches, the whole contrary column
+    // and, off this ratchet's grid, most of this form's vertical dissonance go
+    // with them. What it costs is that the classes a bass may sit at narrow to
+    // the unison, the thirds, the fifth and the sixths, so the line converges on
+    // an octave with a voice above it more often than it did: one configuration
+    // now holds three of them. That is structural rather than a mis-ranking --
+    // tightening the guard to accept only a subset of the fault classes it
+    // already forms raises the column further, not less -- and the shipped
+    // battuta total does not move at all.
+    //
+    // The floor drops by twenty-nine more, and the form gained music rather
+    // than losing it. The cadential suspension is designed over the bass
+    // beneath it, so a bass that moves reaches a bar the old one could not
+    // answer: one more configuration now closes with the figure instead of
+    // running figuration through its cadence. The carrier is three notes and
+    // overwrites the stretch it covers, so installing one lowers the onset
+    // count -- ninety-four configurations carry a suspension where ninety-three
+    // did, and the sampled pairs fall with the onsets. No voice fell silent.
+    {FormType::ChoralePrelude, 0, 0, 28, 21, 0, 0, 2, 3, 0, 16983, 26},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
