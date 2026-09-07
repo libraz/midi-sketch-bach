@@ -1357,7 +1357,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // way empties most of that column and takes the fifths down with it. What it
     // costs is unprepared dissonance, which is the tone it now lands on meeting
     // the harmony rather than the bass.
-    {FormType::Chaconne, 0, 0, 37, 0, 2, 0, 1, 0, 1, 18698, 48},
+    //
+    // What was left after that was not a shortage of tones, and the whole of it
+    // came off three bounds that were each borrowed from the wrong place. The
+    // re-aim of the tone the cadence is approached FROM -- the one free tone in
+    // reach, since every compass tone over the coda's dominant is a perfect
+    // interval with it and only the interval it is reached BY is still open --
+    // was offered solely where a true parallel stood, took the first tone under
+    // that threshold rather than the best in the window, and measured its window
+    // against the arrival's octave rather than the variation's own compass, which
+    // refused every candidate outright wherever the line ran lower. Offering it
+    // for any fault, keeping the lowest key across the window, and reading the
+    // window off the line empties this form's perfect motion entirely: not one
+    // approach in the sweep now forms a fault of any class, and the fourths, the
+    // contrary repeats, the leaps and the melodic columns all fall with it.
+    // Nothing here is paid for. Every column is pinned at zero and stays there.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18698, 46},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
