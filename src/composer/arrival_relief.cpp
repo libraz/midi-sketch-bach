@@ -58,6 +58,15 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
   int displacement = std::max(2, std::abs(original - approach));
   if (next_pitch >= 0)
     displacement = std::max(displacement, std::abs(original - next_pitch));
+  // How far the replacement may sit from the tone that approaches it. The
+  // window above is measured from the tone being displaced, which says nothing
+  // about the interval the line then has to leap to reach it: where the design
+  // already arrives here by a wide interval, a candidate a third the other side
+  // of it spans further still, and the registral cliff that opens is a worse
+  // fault than the perfect interval being repaired. The bound is the same one
+  // the way-in re-aim uses -- an octave, or whatever the design already spanned
+  // if that is wider, so a line is never asked to close a gap it wrote itself.
+  const int entry_ceiling = std::max(12, std::abs(original - approach));
 
   // A replacement that takes a neighbour's pitch the displaced tone did not
   // already share lengthens a static run, so it is tried only after the window
@@ -71,8 +80,10 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
       for (int dist = 1; dist <= displacement; ++dist) {
         for (const int sgn : {-1, 1}) {
           const int cand = original + sgn * dist;
-          if (!detail::inScale(cand, mode) || (!allow_flatten && flattens(cand)))
+          if (!detail::inScale(cand, mode) || (!allow_flatten && flattens(cand)) ||
+              std::abs(cand - approach) > entry_ceiling) {
             continue;
+          }
           bool admissible = true;
           for (const ConcurrentMotion& motion : at_arrival) {
             // A lower voice index sounds higher.
