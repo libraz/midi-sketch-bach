@@ -34,6 +34,14 @@ namespace bach::composer {
 ///
 /// 0 clean, 1 battuta, 2 anti-parallel, 3 parallel or hidden -- the ranking
 /// every displacement in this tree obeys.
+///
+/// The two similar-motion arrivals share the top rank deliberately. Splitting
+/// them so a hidden outranks a true parallel also tightens every ceiling a
+/// displacement is measured against -- a replacement whose far end forms a
+/// parallel the sampling grain never pairs would start being refused -- and the
+/// displacements that refusal blocks are ones the shipped surface wants. A
+/// caller that genuinely has to choose between the two states it locally,
+/// beneath this ranking rather than inside it.
 int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& motions);
 
 /// @brief A line as the relief pass wants it: every note of one voice in tick
