@@ -128,7 +128,9 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // beat-grain reference: a cycle that states the ground in quarters moves
     // three times inside a bar, so a guard that vets against the bar head alone
     // is reading a succession nobody hears and discards the scrub's work on the
-    // tone it replaces.
+    // tone it replaces. `invertible_at_octave` closes with those two classes and
+    // for the same reason: it is the parallel octave restricted to the adjacent
+    // upper pair, so a texture that writes none at all writes none there either.
     {FormType::Passacaglia, "anti_parallel_perfect"},
     {FormType::Passacaglia, "battuta"},
     {FormType::Passacaglia, "cross_relation"},
@@ -136,7 +138,6 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     {FormType::Passacaglia, "doubling_no_seventh"},
     {FormType::Passacaglia, "hidden_parallel_fifth"},
     {FormType::Passacaglia, "hidden_parallel_octave"},
-    {FormType::Passacaglia, "invertible_at_octave"},
     {FormType::Passacaglia, "strong_beat_dissonance"},
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},

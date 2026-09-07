@@ -178,9 +178,12 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
   // suspension that rewrites one of them afterwards re-reads that same reference
   // instead of the bar head, which a ground stated in quarters moves three times
   // inside. Both true-parallel classes close; the seventh doubling does not,
-  // and this is the only form where it stays open.
-  EXPECT_EQ(closedRulesFor(FormType::Passacaglia),
-            (std::vector<std::string>{"parallel_fifth", "parallel_octave"}));
+  // and this is the only form where it stays open. The invertibility rule is
+  // the parallel octave restricted to the adjacent upper pair, so it closes
+  // with them: a texture that sounds no octave anywhere sounds none there.
+  EXPECT_EQ(
+      closedRulesFor(FormType::Passacaglia),
+      (std::vector<std::string>{"invertible_at_octave", "parallel_fifth", "parallel_octave"}));
   // Its stretto reads four canon configurations and refuses one that sounds a
   // true parallel; the fill running up to that block is written before it so the
   // block has a preceding bar to be read against; the half-cadence bass and the
