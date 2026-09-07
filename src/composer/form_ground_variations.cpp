@@ -2139,6 +2139,25 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
           // contrary motion off the same interval -- the fault moves to the far
           // end rather than leaving, and the far end is measured too. Reading
           // both ends removes it at both.
+          // How a tone on this beat meets the bass it actually sounds over. The
+          // penultimate ground tone is still held here -- the coda states its
+          // dominant from the final bar -- so the motion this chooser ranks says
+          // nothing about the interval standing at the onset, and it carried no
+          // term for that at all. It went unnoticed while the motion penalties
+          // were doing the steering; with those answered the colour preference
+          // decides, and it prefers the dominant's own spelling whatever that
+          // spelling clashes with. Read against the bass, so the fourth counts as
+          // the dissonance it is under the lowest line.
+          //
+          // Weighed rather than filtered, and the same weight at both ends of the
+          // re-aim below, so the two trade against each other instead of one
+          // being answered at the other's expense.
+          const auto clashAt = [&](int pitch) {
+            return rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(pitch),
+                                                      static_cast<std::uint8_t>(bass_prev))
+                       ? 0
+                       : (1 << 9);
+          };
           const auto rankDominantApproach = [&](int prev, int* chosen) {
             int best = -1;
             int best_key = 1 << 20;
@@ -2171,12 +2190,22 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
                       formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic)))
                         ? (1 << 11)
                         : 0;
+                // Read at both ends, like the anti-parallel above it and for the
+                // same reason: a class ranked at one end only is not removed by
+                // the ranking, it is moved to the other end, where the sweep that
+                // measures the composed surface cannot see it.
                 const int hidden_penalty =
-                    formsPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 10) : 0;
+                    (formsPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ||
+                     (tail_note == approach_note &&
+                      formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic)))
+                        ? (1 << 10)
+                        : 0;
+                const int clash_penalty = clashAt(cand);
                 const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
                 const int step = (prev >= 0) ? std::abs(cand - prev) : 0;
                 const int key = parallel_penalty + landing_penalty + battuta_penalty +
-                                anti_penalty + hidden_penalty + colour_penalty + step;
+                                anti_penalty + hidden_penalty + clash_penalty + colour_penalty +
+                                step;
                 if (key < best_key) {
                   best_key = key;
                   best = cand;
@@ -2189,29 +2218,67 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
           };
           int chosen = -1;
           int chosen_key = rankDominantApproach(approach_prev, &chosen);
-          // Nothing clean left. The tone before this one is then the only free
-          // tone in reach, and it is genuinely free: the coda's support tone is
-          // held from the start of this bar to the approach beat, so any onset
-          // strictly inside that span meets an oblique bass and can fault
-          // against nothing. Re-aim it until a dominant tone clears both ends.
+          // Re-aim the tone this approach is reached FROM, wherever that lowers
+          // the fault. It is the only free tone in reach, and it is genuinely
+          // free: the coda's support tone is held from the start of this bar to
+          // the approach beat, so any onset strictly inside that span meets an
+          // oblique bass and can fault against nothing.
+          //
+          // Offered for any fault, not only a parallel. Every tone this compass
+          // holds over the coda's dominant is a perfect interval with it -- the
+          // two spellings of the dominant an octave apart, and its fifth -- so
+          // which fault the approach forms is settled entirely by the interval it
+          // is reached BY, and this is the end that settles it. Gated at the
+          // parallel, the hidden perfect had a repair it could always reach and
+          // was never once offered it.
+          //
+          // The whole window is read and the lowest key kept, rather than the
+          // first tone under a threshold: a nearer tone that only downgrades the
+          // fault would otherwise be taken while a clean one stood one step
+          // further out. Ties fall to the nearest, and the tone already chosen is
+          // the floor, so a re-aim can only lower the key.
+          //
+          // Held inside the line's own compass rather than the arrival's, and
+          // reaching an octave rather than a fourth. The tone being re-aimed
+          // belongs to the variation, which need not run in the register the
+          // cadence lands in: measured against the arrival's octave instead,
+          // every candidate was refused outright wherever the variation sat
+          // below it, and where the variation sat an octave below, no reach short
+          // of one could put the approach within a step of where it is going.
+          int line_lo = 127;
+          int line_hi = 0;
+          for (const MaterialNote& note : notes) {
+            line_lo = std::min(line_lo, static_cast<int>(note.pitch));
+            line_hi = std::max(line_hi, static_cast<int>(note.pitch));
+          }
           const Tick support_start = final_bar_tick - kTicksPerBar34;
-          if (chosen_key >= (1 << 14) && before_approach != nullptr &&
-              before_approach->start_tick > support_start) {
+          if (before_approach != nullptr && before_approach->start_tick > support_start) {
             const int prev_original = static_cast<int>(before_approach->pitch);
-            for (int dist = 1; dist <= 5 && chosen_key >= (1 << 14); ++dist) {
-              for (const int sgn : {-1, 1}) {
-                const int prev_cand = prev_original + sgn * dist;
-                if (prev_cand < 67 || prev_cand > 81 || !detail::inScale(prev_cand, mode))
-                  continue;
-                int trial = -1;
-                const int trial_key = rankDominantApproach(prev_cand, &trial);
-                if (trial_key < (1 << 14)) {
-                  before_approach->pitch = static_cast<std::uint8_t>(prev_cand);
-                  chosen = trial;
-                  chosen_key = trial_key;
-                  break;
+            int best_prev = -1;
+            int best_note = chosen;
+            int best_key = chosen_key + clashAt(prev_original);
+            if (best_key > 0) {
+              for (int dist = 1; dist <= 12; ++dist) {
+                for (const int sgn : {-1, 1}) {
+                  const int prev_cand = prev_original + sgn * dist;
+                  if (prev_cand < line_lo || prev_cand > line_hi ||
+                      !detail::inScale(prev_cand, mode)) {
+                    continue;
+                  }
+                  int trial = -1;
+                  const int trial_key =
+                      rankDominantApproach(prev_cand, &trial) + clashAt(prev_cand);
+                  if (trial_key < best_key) {
+                    best_key = trial_key;
+                    best_note = trial;
+                    best_prev = prev_cand;
+                  }
                 }
               }
+            }
+            if (best_prev >= 0) {
+              before_approach->pitch = static_cast<std::uint8_t>(best_prev);
+              chosen = best_note;
             }
           }
           approach_note->pitch = static_cast<std::uint8_t>(chosen >= 0 ? chosen : 67);
