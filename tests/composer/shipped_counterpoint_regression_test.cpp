@@ -1200,16 +1200,22 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // quarters moves three times inside a bar, so the cadential suspension that
     // rewrites one of those tones after the scrub has passed it re-reads the
     // beat-grain reference rather than the bar head it would otherwise inherit.
-    // Its counter figuration's beat anchor is displaced off a contrary octave
-    // arrival as well as off a same-direction one, but only toward a tone free
-    // of every approach fault -- the relaxing pass that accepts a hidden perfect
-    // stays reserved for stepping off a true parallel, because this anchor is
-    // load-bearing and every off-beat tone of its beat derives from it. Both
-    // strict columns stay empty with it in, and the hidden and contrary columns
-    // fall alongside the battuta rather than paying for it. Its contrary column
-    // then falls again with the shared beat anchor's new tier, and the worst
-    // cell falls with it, which is what says the arrivals removed were reachable
-    // rather than merely numerous.
+    // Its counter figuration's beat anchor ranks all four approach classes on
+    // one ladder and takes the mildest its band can reach, rather than demanding
+    // full freedom and keeping whatever it started with. Holding the tone that
+    // just sounded is a rung of that ladder: oblique motion forms no approach
+    // fault at all, so it is available exactly where the band is not, and it
+    // sits directly below a genuinely clean tone -- a repeated quarter is duller
+    // than a fresh one and that is a smaller matter than any way of arriving on
+    // a perfect interval.
+    //
+    // The ladder is only sound because the same candidate filter reads the
+    // lowest sounding voice with the bass table. Consonance between upper parts
+    // admits the perfect fourth; over a ground that holds one tone for a whole
+    // bar it does not, and the fourth taken there is neither left nor resolved.
+    // Ranked without that reading the anchor steps off its approach faults onto
+    // fourths instead, which is a trade between two columns of this table in one
+    // direction and a much larger one against the vertical rules outside it.
     // The cadential suspension is now stated at the close of every ground cycle
     // rather than only the last, so the floor drops -- the figure ends in a rest
     // that replaces onsets the variation would otherwise have struck. The
@@ -1245,7 +1251,24 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // was vetting against a tone the bass had already left. The floor gives up
     // forty pairs where a decoration is withdrawn for reaching a perfect interval
     // and the bar falls back to its plain statement.
-    {FormType::Passacaglia, 0, 0, 48, 11, 5, 0, 3, 1, 1, 27298, 190},
+    //
+    // The battuta column is RAISED here, from eleven to seventeen, and this is
+    // the trade the exception above allows. Every one of this form's hidden
+    // approaches was written by the counter figuration's beat anchor, and none
+    // of them was a misjudgement: at a hundred and twelve of the hundred and
+    // fourteen anchors that kept one, the whole band held no candidate of any
+    // milder class. What the old guard did with the remaining two was veto the
+    // battuta outright, which left it holding the hidden perfect it had been
+    // called to remove. Ranking the classes instead drops the hidden column from
+    // forty-eight to twenty and the contrary-repeat column from five to two,
+    // and the six the battuta column gains are what buys both. That is the
+    // direction the reference corpus prices: it writes a battuta far more freely
+    // than a hidden perfect in this texture, and the worst cell of the raised
+    // column is unchanged at one, so the six are spread across the sweep rather
+    // than piled into a bar. The vertical column falls with them, by
+    // thirty-four, because the candidate filter that made the ladder reachable
+    // is the bass-table reading described above.
+    {FormType::Passacaglia, 0, 0, 20, 17, 2, 0, 1, 1, 1, 27313, 156},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1372,7 +1395,14 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // approach in the sweep now forms a fault of any class, and the fourths, the
     // contrary repeats, the leaps and the melodic columns all fall with it.
     // Nothing here is paid for. Every column is pinned at zero and stays there.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18698, 46},
+    //
+    // Its middle voice is written by the counter figuration this form shares
+    // with the passacaglia, so the approach ladder and the bass-table candidate
+    // filter described on that row reach here too. The perfect columns were
+    // already empty and stay empty; what moves is the vertical one, down three,
+    // and the floor, up by three hundred and fifty-four onsets the anchor chain
+    // now restrikes rather than sustains.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19052, 43},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
