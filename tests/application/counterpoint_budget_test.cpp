@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "application/composition_service.h"
@@ -66,6 +67,19 @@ composer::RuleObservation observation(const std::string& rule_id, int total) {
   return result;
 }
 
+// Every row marked settled, as (form, rule_id), in table order.
+std::vector<std::pair<std::string, std::string>> settledRows() {
+  std::size_t count = 0;
+  const composer::CounterpointBudgetEntry* table = composer::counterpointBudgetTable(&count);
+  std::vector<std::pair<std::string, std::string>> settled;
+  for (std::size_t idx = 0; idx < count; ++idx) {
+    if (table[idx].reason == composer::OpenReason::Accepted) {
+      settled.emplace_back(formTypeToString(table[idx].form), table[idx].rule_id);
+    }
+  }
+  return settled;
+}
+
 std::vector<std::string> closedRulesFor(FormType form) {
   std::vector<std::string> closed;
   for (const char* rule_id : kVerticalRules) {
@@ -110,6 +124,37 @@ TEST(CounterpointBudgetTest, TableHoldsOnlyVerticalRulesInStrictOrder) {
                 (previous_form == current_form && previous_rule < rule_id))
         << "row " << idx << " breaks the (form, rule_id) ordering";
   }
+}
+
+TEST(CounterpointBudgetTest, SettledRowsArePinned) {
+  // Written out literally so a row that stops being outstanding work has to be
+  // argued for here rather than slipping in with the change that re-labels it.
+  // The chorale prelude's contrary-motion octave is the one settled row: it
+  // appears once over the whole request surface, at a bass approach beat, and
+  // the re-aim that would remove it leaves the dissonances downstream of the
+  // displaced tone unprepared for far more than it saves.
+  EXPECT_EQ(settledRows(), (std::vector<std::pair<std::string, std::string>>{
+                               {"chorale_prelude", "anti_parallel_perfect"}}));
+}
+
+TEST(CounterpointBudgetTest, OutstandingRowCountOnlyEverFalls) {
+  std::size_t count = 0;
+  const composer::CounterpointBudgetEntry* table = composer::counterpointBudgetTable(&count);
+  ASSERT_NE(table, nullptr);
+
+  std::size_t outstanding = 0;
+  for (std::size_t idx = 0; idx < count; ++idx) {
+    if (table[idx].reason == composer::OpenReason::Unresolved) {
+      ++outstanding;
+    }
+  }
+
+  // RATCHET: this number may only ever be LOWERED, never raised. It counts the
+  // rules a form still breaks and nobody has decided to live with, so lowering
+  // it means a form was repaired and its row deleted, or a row was settled with
+  // its reason recorded. Raising it means a form started breaking a rule it had
+  // stopped breaking, and the fix belongs in that form rather than here.
+  EXPECT_LE(outstanding, 84u) << "a vertical rule re-opened as outstanding work";
 }
 
 TEST(CounterpointBudgetTest, RuleListsMatchTheValidatorGeometryTable) {
@@ -271,6 +316,21 @@ TEST(CounterpointBudgetTest, AppendsOneFailurePerClosedRuleAndPreservesExistingO
   EXPECT_EQ(report.failures[0].kind, FailKind::StructuralFail);
   EXPECT_EQ(report.failures[1].rule_id, "doubling_no_leading_tone");
   EXPECT_EQ(report.failures[2].rule_id, "doubling_no_seventh");
+}
+
+TEST(CounterpointBudgetTest, ASettledRowGatesExactlyLikeAnOutstandingOne) {
+  // The reason is bookkeeping only: both kinds of row are open, so neither
+  // closes a rule and neither can fail a piece.
+  const std::string settled_rule = "anti_parallel_perfect";
+  EXPECT_FALSE(composer::counterpointRuleIsClosed(FormType::ChoralePrelude, settled_rule));
+
+  composer::ValidationReport report;
+  report.observations.push_back(observation(settled_rule, 500));
+  report.observations.push_back(observation("cross_relation", 500));
+
+  composer::applyCounterpointBudget(FormType::ChoralePrelude, &report);
+
+  EXPECT_TRUE(report.failures.empty());
 }
 
 TEST(CounterpointBudgetTest, NullReportIsANoOp) {

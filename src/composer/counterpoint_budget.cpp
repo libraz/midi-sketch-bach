@@ -90,7 +90,21 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // `invertible_at_octave` closes with them; what the re-aim does accept is a
     // weaker approach in place of a worse one, which is why the contrary-motion
     // and hidden rules stay open.
-    {FormType::ChoralePrelude, "anti_parallel_perfect"},
+    //
+    // `anti_parallel_perfect` is settled rather than outstanding. What the form
+    // writes against it is a single contrary-motion repeat of an octave between
+    // the outer voices at a bass approach beat, and it writes it once over the
+    // whole request surface. The re-aim that already ranks the true parallel at
+    // that beat can rank the contrary repeat beside it, and that does remove the
+    // occurrence -- but the tone it displaces is the preparation the dissonances
+    // downstream of it lean on, so buying the octave back leaves those
+    // unprepared, breaks leading-tone resolutions and opens consecutive leaps,
+    // well past the vertical dissonances the move saves. Holding the
+    // displacement to chord tones moves none of that, so the cost belongs to
+    // moving the tone at all rather than to which tone replaces it. The row
+    // stays until a repair appears that does not spend the approach to buy the
+    // repeat.
+    {FormType::ChoralePrelude, "anti_parallel_perfect", OpenReason::Accepted},
     {FormType::ChoralePrelude, "battuta"},
     {FormType::ChoralePrelude, "cross_relation"},
     {FormType::ChoralePrelude, "hidden_parallel_fifth"},
