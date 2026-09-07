@@ -135,8 +135,16 @@ struct WaveVetoStats {
   long step_harsh_adjusted = 0;        ///< Wave step reversed / skipped off a sharp clash.
   long order_clamp_changed = 0;        ///< Step pinned into the concurrent voice-order window.
   long window_expanded = 0;            ///< Working window stretched to contain a snapped anchor.
+  // The counter for the case the others cannot express: the anchor displacement
+  // ran, found no admissible tone at any accept level, and left the perfect-motion
+  // fault standing. Every other field counts a veto that fired, so a layer whose
+  // displacement is exhausted reads as a quiet layer rather than a blocked one --
+  // and the onsets that actually ship a fault are exactly the ones nothing counts.
+  long anchor_fault_held = 0;  ///< Beat anchor kept its fault; no admissible tone in reach.
 
   void reset() { *this = WaveVetoStats{}; }
+  // Vetoes that changed a note. A held fault changed nothing by definition, so it
+  // stays out of the total and is read on its own.
   long total() const {
     return anchor_parallel_displaced + wobble_breaker_fired + step_parallel_adjusted +
            step_harsh_adjusted + order_clamp_changed + window_expanded;

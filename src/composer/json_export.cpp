@@ -240,6 +240,8 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
   w.value(static_cast<std::uint64_t>(validation.wave_veto.order_clamp_changed));
   w.key("window_expanded");
   w.value(static_cast<std::uint64_t>(validation.wave_veto.window_expanded));
+  w.key("anchor_fault_held");
+  w.value(static_cast<std::uint64_t>(validation.wave_veto.anchor_fault_held));
   w.key("total");
   w.value(static_cast<std::uint64_t>(validation.wave_veto.total()));
   w.endObject();

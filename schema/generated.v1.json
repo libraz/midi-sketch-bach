@@ -181,6 +181,7 @@
         "step_harsh_adjusted",
         "order_clamp_changed",
         "window_expanded",
+        "anchor_fault_held",
         "total"
       ],
       "additionalProperties": false,
@@ -206,6 +207,10 @@
           "minimum": 0
         },
         "window_expanded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "anchor_fault_held": {
           "type": "integer",
           "minimum": 0
         },

@@ -2350,6 +2350,11 @@ TEST(FormFuguePreludeAndFugueTest, LongFormStaysParallelFreeThroughOrnamentPass)
 // wave are caught, and documents the baseline the cell-realization work
 // shrinks toward zero.
 TEST(FormFugueTest, WaveVetoLayersStayWithinDesignBudget) {
+  // The layer that ships a fault rather than fixing one. Every other counter
+  // here records a veto that fired, so a displacement with nothing admissible
+  // in reach reads as a quiet layer; this one has to be seen firing or the
+  // budget above describes only the onsets that went well.
+  long total_held = 0;
   for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
     for (std::uint32_t seed : {1u, 8u, 12u, 42u, 99u}) {
       waveVetoStats().reset();
@@ -2372,8 +2377,10 @@ TEST(FormFugueTest, WaveVetoLayersStayWithinDesignBudget) {
           << "form " << static_cast<int>(form) << " seed " << seed;
       EXPECT_LE(stats.window_expanded, 175)
           << "form " << static_cast<int>(form) << " seed " << seed;
+      total_held += stats.anchor_fault_held;
     }
   }
+  EXPECT_GT(total_held, 0) << "the held-fault counter stopped being reachable";
   waveVetoStats().reset();
 }
 

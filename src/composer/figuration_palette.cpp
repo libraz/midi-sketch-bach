@@ -885,6 +885,14 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           if (cand < band_lo || cand > band_hi || cand == snapped || !within_order(cand)) {
             return false;
           }
+          // A chord tone at every beat, not only the downbeat. The selector one
+          // call above takes any diatonic tone off the downbeat, and matching
+          // that latitude here looks like the obvious symmetry -- but the
+          // selector reaches its off-beat tones through a consonance test
+          // against what is sounding, while a bare diatonic tone off the chord
+          // is still judged against the harmonic plan downstream. Widening this
+          // set to in-scale tones bought one class of perfect approach with
+          // another plus a strong-beat dissonance at every onset it moved.
           if (!isChordTonePc(chord, cand)) {
             return false;
           }
@@ -984,6 +992,12 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               }
             }
           }
+        }
+        // Both displacements are allowed to come back empty, and when they do the
+        // onset ships the fault they were called to remove. That is the one
+        // outcome the intervention counters cannot show, so it is counted here.
+        if (anchor_fault_rank(snapped) != kAnchorClean) {
+          ++waveVetoStats().anchor_fault_held;
         }
       }
       // Wobble breaker: the theme-consonance, harshness, and parallel vetoes

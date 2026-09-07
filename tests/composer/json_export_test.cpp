@@ -162,7 +162,7 @@ TEST(JsonExportWaveVetoTest, GeneratedJsonCarriesZeroedWaveVetoForEmptyReport) {
                        "\"wave_veto\":{\"anchor_parallel_displaced\":0,"
                        "\"wobble_breaker_fired\":0,\"step_parallel_adjusted\":0,"
                        "\"step_harsh_adjusted\":0,\"order_clamp_changed\":0,"
-                       "\"window_expanded\":0,\"total\":0}"));
+                       "\"window_expanded\":0,\"anchor_fault_held\":0,\"total\":0}"));
 }
 
 TEST(JsonExportWaveVetoTest, GeneratedJsonCarriesWaveVetoCountersAndTotal) {
@@ -173,13 +173,16 @@ TEST(JsonExportWaveVetoTest, GeneratedJsonCarriesWaveVetoCountersAndTotal) {
   report.wave_veto.step_harsh_adjusted = 4;
   report.wave_veto.order_clamp_changed = 5;
   report.wave_veto.window_expanded = 6;
+  // Distinct from the others so the total below also asserts what it excludes:
+  // a held fault displaced nothing, so it is reported beside the sum, not in it.
+  report.wave_veto.anchor_fault_held = 7;
 
   const std::string json = emitGeneratedJson({}, report);
   EXPECT_TRUE(contains(json,
                        "\"wave_veto\":{\"anchor_parallel_displaced\":1,"
                        "\"wobble_breaker_fired\":2,\"step_parallel_adjusted\":3,"
                        "\"step_harsh_adjusted\":4,\"order_clamp_changed\":5,"
-                       "\"window_expanded\":6,\"total\":21}"));
+                       "\"window_expanded\":6,\"anchor_fault_held\":7,\"total\":21}"));
 }
 
 TEST(JsonExportInfoTest, GeneratedJsonCarriesStreamCellDivergenceMetrics) {
