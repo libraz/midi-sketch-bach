@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "composer/arc.h"
@@ -42,6 +43,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/subject_catalog.h"
+#include "composer/validation.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 
@@ -731,6 +733,34 @@ TEST(FormSectionalTest, ToccataDramaticusOctaveCascadeAndUnisonDoubling) {
       bar3_voices.insert(note.voice);
   }
   EXPECT_EQ(bar3_voices.size(), 3u) << "bar 3 is not a full-texture chord block";
+}
+
+TEST(FormSectionalTest, ToccataUnisonBarIsDeclaredAsADoublingAndReadsAsOneLine) {
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, kDramaticusSeed, false, 32);
+
+  // The doubling is declared, not inferred: it names the bar, the two streams
+  // and the interval between them, so the reading below can be checked rather
+  // than believed.
+  ASSERT_EQ(fx.material.declared_doublings.size(), 1u);
+  const DoublingWindow& doubling = fx.material.declared_doublings.front();
+  EXPECT_EQ(doubling.lead_voice, 0);
+  EXPECT_EQ(doubling.doubled_voice, 1);
+  EXPECT_EQ(doubling.start_tick, 2 * kBar);
+  EXPECT_EQ(doubling.end_tick, 3 * kBar);
+  EXPECT_EQ(doubling.semitones, -12);
+
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  ASSERT_TRUE(r.validation.failures.empty())
+      << "Dramaticus fails: "
+      << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+
+  // The declaration describes the notes the builder actually wrote, so it is
+  // honoured, and the unison bar -- the only place this form sounded an octave
+  // at length -- leaves no parallel-octave finding behind at all.
+  for (const RuleObservation& entry : r.validation.observations) {
+    EXPECT_NE(entry.rule_id, "parallel_octave")
+        << "the doubled line is still counted as two parts moving in octaves";
+  }
 }
 
 TEST(FormSectionalTest, ToccataDramaticusFermataBreath) {

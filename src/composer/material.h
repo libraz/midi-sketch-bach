@@ -151,6 +151,27 @@ struct SuspensionPattern {
   VoiceId voice = 0;
 };
 
+// One doubling: two voices carrying a single line, the second an exact
+// transposition of the first over a tick window. A doubling is a registration
+// effect -- one part played on two ranks, written as two note streams -- so a
+// vertical relation between the pair inside the window is internal to that one
+// line and describes nothing an ear hears as counterpoint between parts.
+//
+// The Validator honours the declaration only after checking it against the
+// notes: over [start_tick, end_tick) the doubled voice must carry exactly the
+// lead voice's notes -- same count, same onsets, same durations, every pitch
+// offset by exactly `semitones`. A declaration that does not describe the notes
+// is reported as `declared_doubling_integrity` rather than silently believed.
+// The exemption reaches two-voice vertical rules only; a linear rule describes
+// one voice's own succession, which the reading leaves untouched.
+struct DoublingWindow {
+  VoiceId lead_voice = 0;     // the line as written.
+  VoiceId doubled_voice = 1;  // the stream that restates it.
+  Tick start_tick = 0;        // half-open window [start_tick, end_tick).
+  Tick end_tick = 0;
+  int semitones = 0;  // doubled_voice pitch minus lead_voice pitch.
+};
+
 // Motif-transform descriptor for an Episode span. Holds (a) what subject
 // fragment to derive from, (b) which transform to apply, (c) where to
 // place the result, and (d) the transform parameters. CandidateSearch
@@ -576,6 +597,9 @@ struct Material {
   std::vector<LeadingToneMarker> leading_tone_markers;
   std::vector<CadenceCell> cadence_cells;
   std::vector<SuspensionPattern> suspension_patterns;
+  // Windows where two voices state one line in octaves (or any fixed interval).
+  // Checked against the notes before the Validator reads the pair as one part.
+  std::vector<DoublingWindow> declared_doublings;
   std::vector<EpisodeFragment> episodes;
   // Fortspinnung + Imitation.
   std::vector<SequenceTemplate> sequence_templates;

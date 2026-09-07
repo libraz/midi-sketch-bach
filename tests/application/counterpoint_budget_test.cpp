@@ -164,12 +164,13 @@ TEST(CounterpointBudgetTest, ClosedRulesPerFormArePinned) {
       (std::vector<std::string>{"doubling_no_leading_tone", "doubling_no_seventh",
                                 "invertible_at_octave", "parallel_fifth", "parallel_octave"}));
   // The fifth closes with the fantasia's, whose section builder this form
-  // shares. The octave cannot: the free section's opening rhetoric doubles its
-  // gesture exactly an octave below in a neighbouring voice, and a verbatim
-  // doubling is a parallel octave on every note to anything that reads the two
-  // streams as separate parts.
+  // shares. The octave closes with it now that the free section's opening
+  // rhetoric declares what it is: the gesture stated low and restated exactly an
+  // octave below in a neighbouring voice is one line on two ranks, and the
+  // validator checks the restatement note for note before reading the pair as
+  // that one line rather than as two parts moving in octaves.
   EXPECT_EQ(closedRulesFor(FormType::ToccataAndFugue),
-            (std::vector<std::string>{"doubling_no_seventh", "parallel_fifth"}));
+            (std::vector<std::string>{"doubling_no_seventh", "parallel_fifth", "parallel_octave"}));
   // The counter-figuration is written last against a settled variation and an
   // immutable ground, and reads both as one continuous line across the ground
   // cycles; where its band offers no admissible tone at all it holds the tone it

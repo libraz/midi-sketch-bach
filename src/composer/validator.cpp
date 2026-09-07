@@ -501,6 +501,83 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
   }
+  // Declared doublings, checked once each before any of them is honoured. A
+  // doubling says two voices carry one line, and that is a statement about the
+  // notes: over the declared window the doubled voice must be the lead voice
+  // transposed by the declared interval, note for note. Believing the claim
+  // without testing it would exempt whatever a builder chose to call a
+  // doubling, so a declaration that does not describe the notes is a structural
+  // error and is reported rather than quietly dropped.
+  std::vector<bool> doubling_holds(material.declared_doublings.size(), false);
+  if (!material.declared_doublings.empty()) {
+    std::vector<std::size_t> lead_notes;
+    std::vector<std::size_t> doubled_notes;
+    const auto collectWindow = [&notes](VoiceId voice, Tick start_tick, Tick end_tick,
+                                        std::vector<std::size_t>* out_indices) {
+      out_indices->clear();
+      for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+        if (notes[idx].voice != voice || notes[idx].start_tick < start_tick ||
+            notes[idx].start_tick >= end_tick)
+          continue;
+        out_indices->push_back(idx);
+      }
+      std::sort(out_indices->begin(), out_indices->end(),
+                [&notes](std::size_t lhs, std::size_t rhs) {
+                  return notes[lhs].start_tick != notes[rhs].start_tick
+                             ? notes[lhs].start_tick < notes[rhs].start_tick
+                             : notes[lhs].pitch < notes[rhs].pitch;
+                });
+    };
+    for (std::size_t decl = 0; decl < material.declared_doublings.size(); ++decl) {
+      const DoublingWindow& window = material.declared_doublings[decl];
+      bool holds = window.end_tick > window.start_tick && window.lead_voice != window.doubled_voice;
+      if (holds) {
+        collectWindow(window.lead_voice, window.start_tick, window.end_tick, &lead_notes);
+        collectWindow(window.doubled_voice, window.start_tick, window.end_tick, &doubled_notes);
+        // An empty window describes no line at all, so it cannot be a doubling.
+        holds = !lead_notes.empty() && lead_notes.size() == doubled_notes.size();
+      }
+      for (std::size_t pos = 0; holds && pos < lead_notes.size(); ++pos) {
+        const NoteEvent& lead = notes[lead_notes[pos]];
+        const NoteEvent& doubled = notes[doubled_notes[pos]];
+        holds = lead.start_tick == doubled.start_tick && lead.duration == doubled.duration &&
+                static_cast<int>(doubled.pitch) - static_cast<int>(lead.pitch) == window.semitones;
+      }
+      doubling_holds[decl] = holds;
+      if (!holds) {
+        ValidationFailure failure;
+        failure.rule_id = "declared_doubling_integrity";
+        failure.kind = FailKind::StructuralFail;
+        report.failures.push_back(failure);
+      }
+    }
+  }
+  // Whether a two-voice finding lies inside a doubling that was checked and
+  // held. Both notes must be the pair the window names (in either order) and
+  // both must begin inside its ticks; outside them the same two voices are
+  // ordinary parts again.
+  const auto insideDeclaredDoubling = [&](std::size_t first_index, std::size_t second_index) {
+    if (first_index >= notes.size() || second_index >= notes.size())
+      return false;
+    const NoteEvent& first = notes[first_index];
+    const NoteEvent& second = notes[second_index];
+    if (first.voice == second.voice)
+      return false;
+    for (std::size_t decl = 0; decl < material.declared_doublings.size(); ++decl) {
+      if (!doubling_holds[decl])
+        continue;
+      const DoublingWindow& window = material.declared_doublings[decl];
+      const bool pair_matches =
+          (first.voice == window.lead_voice && second.voice == window.doubled_voice) ||
+          (first.voice == window.doubled_voice && second.voice == window.lead_voice);
+      if (!pair_matches)
+        continue;
+      if (first.start_tick >= window.start_tick && first.start_tick < window.end_tick &&
+          second.start_tick >= window.start_tick && second.start_tick < window.end_tick)
+        return true;
+    }
+    return false;
+  };
   // Per-rule tally of every counterpoint match. At most one entry per rule, so
   // the linear probe stays cheaper than a map node allocation on a path that
   // runs only when a rule actually matched.
@@ -520,6 +597,17 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // remains a blocking failure with an actionable span.
   const auto recordCounterpointFinding = [&](const ValidationFailure& finding,
                                              std::initializer_list<std::size_t> indices) {
+    // A verified doubling is one line written on two staves. A vertical rule
+    // between its two streams measures the line against itself, so the finding
+    // is not a finding and is dropped before it is counted -- a doubled line
+    // that stayed countable would keep the rule permanently open for the form.
+    // Linear rules are untouched: each describes one voice's own succession,
+    // which is the same succession whether or not a second rank restates it.
+    if (!material.declared_doublings.empty() && indices.size() == 2 &&
+        counterpointRuleGeometry(finding.rule_id) == RuleGeometry::Vertical &&
+        insideDeclaredDoubling(*indices.begin(), *(indices.begin() + 1))) {
+      return;
+    }
     bool all_fixed = true;
     bool all_authored = audit_final_score;
     for (const std::size_t index : indices) {

@@ -1936,9 +1936,10 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       }
       if (kind == FreeBarKind::kUnisonGesture) {
         // Deliberate BWV565 unison rhetoric: the opening gesture stated low in
-        // V0 and doubled exactly 12 below in V1. Both lines are Material, so the
-        // validator's parallel-octave rules are skipped by design; the doubled
-        // V1 statement is emitted as a verbatim voice-1 ToccataSection below.
+        // V0 and doubled exactly 12 below in V1. The pair is declared as a
+        // doubling below, so the validator reads the two streams as the single
+        // line they are rather than as two parts moving in octaves; the doubled
+        // V1 statement is emitted as a verbatim voice-1 ToccataSection there.
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(win.first_bar)], mode,
                          kBandLo[0], kBandHi[0], /*octave_drop=*/2);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
@@ -2063,6 +2064,17 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     unison_section.notes = std::move(unison_v1_notes);
     out.material.toccata_sections.push_back(std::move(unison_section));
     pushSpan(asm_ctx, 1, unison_bar, unison_bar, VoiceIntent::ToccataCarrier);
+    // The two streams are one line on two ranks, not two parts, so declare the
+    // bar as a doubling. The validator re-derives V1 from V0 over the window
+    // before it reads the pair that way; the declaration is a claim about notes
+    // that already exist, and an unchecked one would be worth nothing.
+    DoublingWindow doubling;
+    doubling.lead_voice = 0;
+    doubling.doubled_voice = 1;
+    doubling.start_tick = barTick(unison_bar);
+    doubling.end_tick = barTick(unison_bar + 1);
+    doubling.semitones = -12;
+    out.material.declared_doublings.push_back(doubling);
   }
 
   // --- Dramaticus pedal solo (V2 walking pedal alone, root-fifth quarters). ---

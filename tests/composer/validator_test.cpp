@@ -373,6 +373,117 @@ TEST(ValidatorTest, ParallelOctaveFails) {
   EXPECT_TRUE(hasRule(r, "parallel_octave"));
 }
 
+namespace {
+
+// The ParallelOctaveFails material: voice 0 C5 -> D5 over voice 1 C4 -> D4, an
+// octave apart on both onsets. Read as two parts it is a parallel octave; read
+// as one line doubled at the lower octave it is a registration effect.
+std::vector<NoteEvent> octaveDoubledNotes() {
+  return {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 48, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 62, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 50, 1),
+  };
+}
+
+DoublingWindow octaveDoubling(Tick start_tick, Tick end_tick, int semitones) {
+  DoublingWindow window;
+  window.lead_voice = 0;
+  window.doubled_voice = 1;
+  window.start_tick = start_tick;
+  window.end_tick = end_tick;
+  window.semitones = semitones;
+  return window;
+}
+
+bool hasRuleKind(const ValidationReport& report, const std::string& rule_id, FailKind kind) {
+  for (const ValidationFailure& failure : report.failures) {
+    if (failure.rule_id == rule_id && failure.kind == kind)
+      return true;
+  }
+  return false;
+}
+
+const RuleObservation* observationFor(const ValidationReport& report, const std::string& rule_id) {
+  for (const RuleObservation& entry : report.observations) {
+    if (entry.rule_id == rule_id)
+      return &entry;
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, DeclaredDoublingReadsTheOctavePairAsOneLine) {
+  const std::vector<NoteEvent> notes = octaveDoubledNotes();
+  const std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.declared_doublings.push_back(octaveDoubling(0, 2 * kTicksPerBeat, -12));
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_FALSE(hasRule(r, "declared_doubling_integrity"));
+  EXPECT_FALSE(hasRule(r, "parallel_octave"));
+  // The finding is dropped before it is tallied: a line measured against itself
+  // is not a counterpoint observation, and one left countable would keep the
+  // rule open for every form that writes a doubling.
+  EXPECT_EQ(observationFor(r, "parallel_octave"), nullptr);
+  EXPECT_EQ(r.status, ValidationStatus::Ok);
+}
+
+TEST(ValidatorTest, DeclaredDoublingWithTheWrongIntervalTripsIntegrityAndIsNotHonoured) {
+  // The notes are an octave apart; the declaration claims a major seventh. It
+  // therefore describes something that is not in the score, which is a
+  // structural error -- and the parallel it would have excused still fires.
+  const std::vector<NoteEvent> notes = octaveDoubledNotes();
+  const std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.declared_doublings.push_back(octaveDoubling(0, 2 * kTicksPerBeat, -11));
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_TRUE(hasRuleKind(r, "declared_doubling_integrity", FailKind::StructuralFail));
+  EXPECT_TRUE(hasRule(r, "parallel_octave"));
+  EXPECT_EQ(r.status, ValidationStatus::FailedSpan);
+}
+
+TEST(ValidatorTest, DeclaredDoublingWhoseVoicesCarryDifferentNoteCountsTripsIntegrity) {
+  // The doubled voice sounds a tone the lead voice never states, so the two
+  // streams are not one line however close they otherwise run.
+  std::vector<NoteEvent> notes = octaveDoubledNotes();
+  notes.push_back(makeNote(kTicksPerBeat / 2, kTicksPerBeat / 2, 49, 1));
+  const std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.declared_doublings.push_back(octaveDoubling(0, 2 * kTicksPerBeat, -12));
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_TRUE(hasRuleKind(r, "declared_doubling_integrity", FailKind::StructuralFail));
+}
+
+TEST(ValidatorTest, DeclaredDoublingDoesNotReachOutsideItsOwnTicks) {
+  // The window stops before the second onset, which is the one the parallel is
+  // reported at. Outside the declared ticks the same two voices are ordinary
+  // parts again, so the rule applies to them normally.
+  const std::vector<NoteEvent> notes = octaveDoubledNotes();
+  const std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.declared_doublings.push_back(octaveDoubling(0, kTicksPerBeat, -12));
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_FALSE(hasRule(r, "declared_doubling_integrity"));
+  EXPECT_TRUE(hasRule(r, "parallel_octave"));
+}
+
+TEST(ValidatorTest, DeclaredDoublingOverAnEmptyWindowTripsIntegrity) {
+  // A window naming no notes describes no line, so it cannot be a doubling.
+  const std::vector<NoteEvent> notes = octaveDoubledNotes();
+  const std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  Material material;
+  material.declared_doublings.push_back(octaveDoubling(8 * kTicksPerBeat, 12 * kTicksPerBeat, -12));
+
+  const ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  EXPECT_TRUE(hasRuleKind(r, "declared_doubling_integrity", FailKind::StructuralFail));
+}
+
 TEST(ValidatorTest, ParallelFifthAcrossASilenceBetweenOnsetsPasses) {
   // The same two fifths as ParallelFifthFails, but both voices fall silent for
   // a beat in between and re-enter together. Nothing starts inside that
