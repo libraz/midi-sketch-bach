@@ -840,6 +840,20 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       motions.clear();
       registry.concurrentThemePitches(beat_tick, /*voice=*/1, theme_pitches);
       registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/1, /*num_voices=*/3, motions);
+      // Consonance here is read with the upper-voice table, which admits the
+      // perfect fourth. Against the lowest sounding voice that reading is wrong:
+      // this ground holds one tone for a whole bar, so a fourth taken over it is
+      // neither left nor resolved. The line's own band sits above the ground by
+      // construction, so the lowest concurrent tone IS the bass whenever one
+      // sounds at all.
+      int bass_pitch = 128;
+      for (int upper : theme_pitches)
+        bass_pitch = std::min(bass_pitch, upper);
+      auto clean_over_bass = [&](int cand) {
+        return bass_pitch >= 128 ||
+               rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
+                                                  static_cast<std::uint8_t>(bass_pitch));
+      };
       int anchor = consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches,
                                       line_prev, motions, mode, /*downbeat=*/beat == 0);
       // Adjacent bars whose chords share a tone near the band centre can pin
@@ -890,100 +904,92 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         motions.clear();
         registry.concurrentMotions(beat_tick - kTicksPerBeat / 4, beat_tick, /*voice=*/1,
                                    /*num_voices=*/3, motions);
-        auto anchor_is_parallel = [&](int cand) {
+        // The five approach classes on one scale, not two boolean passes. A
+        // candidate here has to be inside the band, inside the scale, consonant
+        // with every sounding voice under the upper-voice table AND clean over
+        // the bass all at once, which against two concurrent lines regularly
+        // leaves one or two tones admissible; a guard that pooled the classes
+        // would step off the mildest onto the worst as soon as that set ran dry.
+        //
+        // The contrary classes are rungs of the same ladder rather than veto
+        // conditions. The displacement reaches its replacement by MOVING the
+        // tone, which regularly turns the motion round instead of removing it,
+        // so a ladder that stopped at the same-direction classes would answer a
+        // rising line by leaping down onto the perfect it had just left and
+        // score that clean. Their order is the reference corpus's: the contrary
+        // repeat sits worst of the three payable classes and the battuta
+        // cheapest.
+        constexpr int kAnchorClean = 0;
+        constexpr int kAnchorBattuta = 1;
+        constexpr int kAnchorAnti = 2;
+        constexpr int kAnchorHidden = 3;
+        constexpr int kAnchorParallel = 4;
+        auto anchor_fault_rank = [&](int cand) {
+          int worst = kAnchorClean;
           for (const ConcurrentMotion& motion : motions) {
-            if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
-              return true;
-            }
+            if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+              return kAnchorParallel;
+            if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kAnchorHidden);
+            else if (formsAntiParallelPerfect(prev_emitted, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kAnchorAnti);
+            else if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr))
+              worst = std::max(worst, kAnchorBattuta);
           }
-          return false;
+          return worst;
         };
-        auto anchor_is_true_parallel = [&](int cand) {
-          for (const ConcurrentMotion& motion : motions) {
-            if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr)) {
-              return true;
+        const int design_rank = anchor_fault_rank(anchor);
+        if (design_rank != kAnchorClean) {
+          auto admissible = [&](int cand) {
+            if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
+                !detail::inScale(cand, mode)) {
+              return false;
             }
-          }
-          return false;
-        };
-        auto anchor_has_battuta = [&](int cand) {
-          for (const ConcurrentMotion& motion : motions) {
-            if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr)) {
-              return true;
+            for (int upper : theme_pitches) {
+              if (!isConsonantIc(cand - upper))
+                return false;
             }
-          }
-          return false;
-        };
-        if (anchor_is_parallel(anchor) || anchor_has_battuta(anchor)) {
-          // Two passes over the same candidates. The first demands full
-          // parallel-freedom. The second runs only when the anchor is a TRUE
-          // parallel and nothing was fully free, and then accepts a hidden
-          // perfect: the chord root tracks the ground's pitch class every bar
-          // and this band is one octave wide, so the ground's octave companion
-          // is often the only chord tone in reach -- a band-pinned tone meeting
-          // an immutable one, where every approach is at least hidden. Holding
-          // out for a free tone there keeps the true parallel; taking the
-          // hidden one steps off the fault the ear actually tracks.
-          //
-          // The battuta joins the first pass but not the second. This anchor
-          // chain is load-bearing -- every off-beat tone of the beat derives
-          // from it -- so it is displaced for a contrary arrival only when a
-          // tone free of every approach fault is available; an anchor whose
-          // only fault is the battuta never reaches the relaxing pass, which
-          // stays reserved for stepping off a true parallel. Both strict
-          // columns hold empty across the sweep with it in, and the hidden and
-          // contrary columns fall rather than pay.
+            return clean_over_bass(cand);
+          };
+          // Holding the tone that just sounded is oblique motion, which forms no
+          // approach fault of any class, so it is available exactly where the
+          // band is not. It is a rung of the same ladder rather than a last
+          // resort: the repeated tone is what the anti-stall displacement above
+          // exists to prevent, so it does not outrank a genuinely clean tone,
+          // but it does outrank every fault class -- a line that repeats a
+          // quarter is duller than one that does not, and that is a smaller
+          // matter than any way of arriving on a perfect interval.
+          auto hold_admissible = [&]() {
+            if (prev_emitted < band_lo || prev_emitted > band_hi)
+              return false;
+            for (int upper : theme_pitches) {
+              if (!isConsonantIc(prev_emitted - upper))
+                return false;
+            }
+            return clean_over_bass(prev_emitted);
+          };
           bool displaced = false;
-          for (int pass = 0; pass < 2 && !displaced; ++pass) {
-            if (pass == 1 && !anchor_is_true_parallel(anchor))
-              break;
-            // The sweep reaches the whole band, not a fixed fifth-and-a-bit. Two
-            // of the three tests below are pitch-class shaped (scale membership,
-            // consonance against the concurrent tones), so the admissible set is
-            // sparse and its nearest member is regularly further than a fifth
-            // away; a short radius left the anchor sitting on a true parallel
-            // while a free tone waited an octave down.
+          for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
+            // The band sweep reaches the whole band, not a fixed fifth-and-a-bit.
+            // Two of the tests in `admissible` are pitch-class shaped (scale
+            // membership, consonance against the concurrent tones), so the
+            // admissible set is sparse and its nearest member is regularly
+            // further than a fifth away; a short radius left the anchor sitting
+            // on a true parallel while a free tone waited an octave down.
             for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
               for (int dir : {1, -1}) {
                 const int cand = anchor + dir * dist;
-                if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-                    !detail::inScale(cand, mode)) {
-                  continue;
-                }
-                bool consonant = true;
-                for (int upper : theme_pitches) {
-                  if (!isConsonantIc(cand - upper)) {
-                    consonant = false;
-                    break;
-                  }
-                }
-                if (!consonant)
-                  continue;
-                if (pass == 0 ? (anchor_is_parallel(cand) || anchor_has_battuta(cand))
-                              : anchor_is_true_parallel(cand))
+                if (!admissible(cand) || anchor_fault_rank(cand) > accept)
                   continue;
                 anchor = cand;
                 displaced = true;
                 break;
               }
             }
-          }
-          // Last resort: hold the tone that just sounded. Oblique motion forms
-          // no parallel at all, and where the band offers nothing else the
-          // repeated tone is the smaller blemish -- the anti-stall displacement
-          // above exists to keep the line from going dull, not to buy that at
-          // the price of a parallel octave.
-          if (!displaced && anchor_is_true_parallel(anchor) && prev_emitted >= band_lo &&
-              prev_emitted <= band_hi) {
-            bool consonant = true;
-            for (int upper : theme_pitches) {
-              if (!isConsonantIc(prev_emitted - upper)) {
-                consonant = false;
-                break;
-              }
-            }
-            if (consonant)
+            if (!displaced && accept == kAnchorClean && hold_admissible()) {
               anchor = prev_emitted;
+              displaced = true;
+            }
           }
         }
       }
