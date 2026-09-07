@@ -1181,6 +1181,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // its band holds a handful of chord tones, and whatever it leaves standing
       // is what ships. The middle voice is the one still free to move at those
       // onsets, and it judges the same two classes there.
+      //
+      // What the hand-over does and does not reach: it widens the window the
+      // middle voice repairs in, and that voice is still moved only off faults of
+      // its own. A perfect approach the pedal forms against the UPPER voice is
+      // not one of those, and no later pass answers it -- by then both of its
+      // operands are settled. Roughly half of what this voice leaves standing is
+      // that kind, and it is left standing on purpose: the alternative is moving
+      // a line that is already finished. The bar head is skipped for the same
+      // reason it is exempt from the pedal's own escape, and including it here
+      // was measured to change nothing at all, since the onsets it adds are ones
+      // where the middle voice reads clean and the pass returns immediately.
       if (beat != 0 && pedal_prev >= 0 && pedal_fault_rank(pedal_prev, pitch, t) >= kPedalHidden)
         pedal_boxed_ticks.push_back(t);
       if (link_pitch >= 0 && pedal_fault_rank(pitch, link_pitch, t + kEighth) >= kPedalHidden) {
