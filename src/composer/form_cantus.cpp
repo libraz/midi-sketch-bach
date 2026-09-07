@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <tuple>
 #include <vector>
 
 #include "composer/arc.h"
@@ -14,6 +15,7 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
@@ -261,6 +263,24 @@ int connectingBassTone(int from, int to, Mode mode) {
   return candidate;
 }
 
+// True when the walking bass may take `bass` under everything sounding with it.
+//
+// Two conditions, and the second is not the one an upper voice would apply. The
+// bass is the texture's floor, so a tone that reaches or passes a sounding line
+// is a crossing whatever interval it forms. And a perfect fourth is a consonance
+// BETWEEN upper voices but a dissonance against the lowest sounding line, so a
+// candidate that would put one under a theme tone has to be read with the
+// bass-relative table rather than the pairwise one.
+bool bassCarriesUnder(int bass, const std::vector<int>& sounding) {
+  for (int upper : sounding) {
+    if (bass >= upper || !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(upper),
+                                                             static_cast<std::uint8_t>(bass))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Build the V2 walking bass over all `bars` bars and append it to `out_notes`.
 // Each bar opens on the bar chord's root (a quarter note on the downbeat),
 // fitted into the bass band nearest the running cursor. The remaining three
@@ -347,20 +367,9 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       // (the root statement is the bar's harmonic anchor and must not be
       // displaced); the off-beat fills carry the variety.
       if (pitch == prev_pitch && beat != 0) {
-        // Consonant with every sounding upper voice AND strictly below them
-        // all -- the walking bass is the texture's floor, and a displacement
-        // that lands ON the cantus firmus tone (a consonant unison) is still
-        // a voice crossing.
-        auto consonant_with_all = [&](int cand) {
-          for (int upper : theme_pitches) {
-            if (!isConsonantPair(cand, upper) || cand >= upper)
-              return false;
-          }
-          return true;
-        };
         int alt = -1;
         for (int cand : {detail::scaleUp(pitch, 1, mode), detail::scaleDown(pitch, 1, mode)}) {
-          if (cand >= kBassBandLo && cand <= kBassBandHi && consonant_with_all(cand)) {
+          if (cand >= kBassBandLo && cand <= kBassBandHi && bassCarriesUnder(cand, theme_pitches)) {
             alt = cand;
             break;
           }
@@ -401,14 +410,7 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                 !detail::inScale(cand, mode)) {
               return false;
             }
-            for (int upper : theme_pitches) {
-              // Consonant and strictly below every sounding upper voice: the
-              // bass is the texture's floor, and a consonant unison with the
-              // cantus firmus tone is still a voice crossing.
-              if (!isConsonantPair(cand, upper) || cand >= upper)
-                return false;
-            }
-            return !bass_is_parallel(cand);
+            return bassCarriesUnder(cand, theme_pitches) && !bass_is_parallel(cand);
           };
           for (int dist = 1; dist <= 7; ++dist) {
             bool placed = false;
@@ -426,77 +428,66 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
         }
       }
 
-      // Forward parallel guard on the approach beat: the next bar's downbeat
-      // states the chord root without substitution (the harmonic anchor), so
-      // the only freedom in the (beat 3 -> next root) motion is the beat-3
-      // tone itself. The upper voices are final at this point, so a parallel
-      // perfect formed against their motion into the bar head is already
-      // knowable; re-aim the approach tone when it would lock one in. The
-      // root lands relative to the approach tone (band fit follows the
-      // cursor), so the candidate's own landing root is recomputed per try.
+      // Forward guard on the approach beat: the next bar's downbeat states the
+      // chord root without substitution (the harmonic anchor) and the bass band
+      // spans a single octave, so that root's register is determined too --
+      // the only freedom in the (beat 3 -> next root) motion is the beat-3 tone
+      // itself. The upper voices are final at this point, so the fault formed
+      // against their motion into the bar head is already knowable; re-aim the
+      // approach tone when it would lock one in. The root lands relative to the
+      // approach tone (band fit follows the cursor), so the candidate's own
+      // landing root is recomputed per try.
       if (beat == 3 && bar + 1 < bars && prev_pitch >= 0) {
         const Tick next_bar_tick = barTick(bar + 1);
         std::vector<ConcurrentMotion> fwd_motions;
-        auto forward_parallel = [&](int cand, bool strict_only) {
-          const int landing_root = fitPcToBand(next_chord.root_pc, cand, kBassBandLo, kBassBandHi);
-          fwd_motions.clear();
-          registry.concurrentMotions(next_bar_tick - kSixteenth, next_bar_tick,
-                                     /*voice=*/2, /*num_voices=*/3, fwd_motions);
-          for (const ConcurrentMotion& motion : fwd_motions) {
-            const bool hit =
-                strict_only
-                    ? formsStrictPerfectParallel(cand, landing_root, motion.prev, motion.curr)
-                    : formsPerfectParallel(cand, landing_root, motion.prev, motion.curr);
-            if (hit)
-              return true;
+        registry.concurrentMotions(next_bar_tick - kSixteenth, next_bar_tick, /*voice=*/2,
+                                   /*num_voices=*/3, fwd_motions);
+        // The set of fault classes a candidate forms across BOTH ends: the
+        // motion into the beat itself and the motion from it into the bar head.
+        // A set rather than the tree's severity rank, because the classes are
+        // counted separately in this form's shipped surface and a displacement
+        // that swapped one for another would trade a column, not lower one.
+        auto faultClasses = [&](int cand) {
+          const int landing = fitPcToBand(next_chord.root_pc, cand, kBassBandLo, kBassBandHi);
+          unsigned classes = 0;
+          for (const auto& [from, to, lines] :
+               {std::tuple{prev_pitch, cand, &motions}, std::tuple{cand, landing, &fwd_motions}}) {
+            for (const ConcurrentMotion& motion : *lines) {
+              if (formsStrictPerfectParallel(from, to, motion.prev, motion.curr))
+                classes |= 8u;
+              else if (formsPerfectParallel(from, to, motion.prev, motion.curr))
+                classes |= 4u;
+              else if (formsAntiParallelPerfect(from, to, motion.prev, motion.curr))
+                classes |= 2u;
+              else if (formsBattuta(from, to, motion.prev, motion.curr))
+                classes |= 1u;
+            }
           }
-          return false;
+          return classes;
         };
-        if (forward_parallel(pitch, /*strict_only=*/false)) {
-          auto into_beat_parallel = [&](int cand, bool strict_only) {
-            for (const ConcurrentMotion& motion : motions) {
-              const bool hit =
-                  strict_only
-                      ? formsStrictPerfectParallel(prev_pitch, cand, motion.prev, motion.curr)
-                      : formsPerfectParallel(prev_pitch, cand, motion.prev, motion.curr);
-              if (hit)
-                return true;
-            }
-            return false;
-          };
-          auto admissible = [&](int cand, bool strict_only) {
-            if (cand < kBassBandLo || cand > kBassBandHi || cand == pitch ||
-                !detail::inScale(cand, mode)) {
-              return false;
-            }
-            for (int upper : theme_pitches) {
-              // Consonant and strictly below every sounding upper voice: the
-              // bass is the texture's floor, and a consonant unison with the
-              // cantus firmus tone is still a voice crossing.
-              if (!isConsonantPair(cand, upper) || cand >= upper)
-                return false;
-            }
-            return !into_beat_parallel(cand, strict_only) && !forward_parallel(cand, strict_only);
-          };
-          // Two displacement tiers. The clean tier first: a tone whose own
-          // arrival and forward arrival are neither parallel nor hidden. When
-          // the arrival is forced onto a perfect (the immutable skeleton tone
-          // over the band-pinned root makes every same-direction approach at
-          // least hidden), no clean tone exists -- then both checks relax to
-          // TRUE parallels only, accepting an unavoidable hidden rather than
-          // keeping a true parallel.
-          bool placed = false;
-          for (const bool strict_only : {false, true}) {
-            if (strict_only && !forward_parallel(pitch, /*strict_only=*/true))
-              break;  // current tone is hidden at worst: nothing left to fix.
-            for (int dist = 1; dist <= 7 && !placed; ++dist) {
-              for (const int sgn : {-1, 1}) {
-                const int cand = pitch + sgn * dist;
-                if (admissible(cand, strict_only)) {
-                  pitch = cand;
-                  placed = true;
-                  break;
-                }
+        // The reach is a sixth. The bass band is a single octave, so a tone
+        // near either edge has clean answers only at the far edge, out of reach
+        // of a fifth; a sixth is the widest leap a walking bass takes
+        // idiomatically, and the ascending distance order means it is only ever
+        // used once every smaller displacement has been refused.
+        const unsigned standing = faultClasses(pitch);
+        if (standing != 0) {
+          for (int dist = 1; dist <= 7; ++dist) {
+            bool placed = false;
+            for (const int sgn : {-1, 1}) {
+              const int cand = pitch + sgn * dist;
+              if (cand < kBassBandLo || cand > kBassBandHi || !detail::inScale(cand, mode) ||
+                  !bassCarriesUnder(cand, theme_pitches)) {
+                continue;
+              }
+              // Strictly fewer faults, and never a class the standing tone did
+              // not already form: the displacement can only empty columns, so
+              // no fault this guard removes reappears as another.
+              const unsigned candidate = faultClasses(cand);
+              if (candidate != standing && (candidate & ~standing) == 0u) {
+                pitch = cand;
+                placed = true;
+                break;
               }
             }
             if (placed)
