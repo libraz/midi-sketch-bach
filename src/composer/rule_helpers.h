@@ -219,6 +219,13 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
 // `plan` supplies the local key: each pair is judged in the key of the later
 // of the two onsets, so an alteration arriving after a modulation is read in
 // the key it arrives in.
+//
+// Succession is a beat-wide tick window here and NOT the onset adjacency the
+// finished-score rule uses, because the two questions differ. This one is asked
+// while the line is being written, against a partial `placed`: whether anything
+// will come to stand between the two tones is not yet decided, so the wider
+// window is the conservative reading. The rule that judges a finished score can
+// see what actually stands between them and asks that instead.
 bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick, const HarmonicPlan& plan);
 

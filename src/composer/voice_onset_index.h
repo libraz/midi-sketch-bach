@@ -78,6 +78,26 @@ class VoiceOnsetIndex {
     return index < notes_.size() ? notes_[index].start_tick + notes_[index].duration : tick;
   }
 
+  /// @brief True when this voice strikes a note strictly between two ticks.
+  ///
+  /// Succession between two voices is not a distance in ticks. Two tones follow
+  /// one another only when neither of the two voices speaks in between; a rule
+  /// that asks "within a beat" instead admits pairs with a whole figure
+  /// standing between them, which is a different relation and one the ear does
+  /// not hear as succession at all.
+  ///
+  /// @param voice The voice to search.
+  /// @param after Exclusive lower bound.
+  /// @param before Exclusive upper bound.
+  /// @return True when an onset of `voice` lies in the open interval.
+  bool hasOnsetBetween(VoiceId voice, Tick after, Tick before) const {
+    const auto& indices = by_voice_[voice];
+    const auto it = std::upper_bound(
+        indices.begin(), indices.end(), after,
+        [&](Tick value, std::size_t index) { return value < notes_[index].start_tick; });
+    return it != indices.end() && notes_[*it].start_tick < before;
+  }
+
  private:
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;

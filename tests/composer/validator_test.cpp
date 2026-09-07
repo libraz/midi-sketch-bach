@@ -1170,6 +1170,28 @@ TEST(ValidatorTest, CrossRelationAdjacentFails) {
   EXPECT_TRUE(hasRule(r, "cross_relation"));
 }
 
+// The same pair, at the same distance, with each voice striking twice in
+// between. A tick window reads them as successive; they are four onsets apart
+// and nothing connects them, so the rule must not fire. Every note here is
+// diatonic apart from the two that carry the inflection, so nothing else in the
+// passage can raise the finding.
+TEST(ValidatorTest, CrossRelationIgnoresOnsetsWithFigurationBetweenThem) {
+  const Tick sixteenth = kTicksPerBeat / 4;
+  std::vector<NoteEvent> notes = {
+      makeNote(0, sixteenth, 65, 0),
+      makeNote(sixteenth, sixteenth, 67, 0),
+      makeNote(2 * sixteenth, sixteenth, 69, 0),
+      makeNote(3 * sixteenth, sixteenth, 71, 0),
+      makeNote(0, sixteenth, 48, 1),
+      makeNote(sixteenth, sixteenth, 50, 1),
+      makeNote(2 * sixteenth, sixteenth, 52, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 66, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(4, NoteSource::Compose));
+
+  EXPECT_FALSE(hasRule(Validator{}.validate(notes, prov, cMajorWhole()), "cross_relation"));
+}
+
 TEST(ValidatorTest, NaturalHalfStepIsNotCrossRelation) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 64, 0),  // E

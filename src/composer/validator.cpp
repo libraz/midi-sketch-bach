@@ -1031,9 +1031,19 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const bool reverse_simultaneous =
           notes[j].start_tick <= notes[i].start_tick &&
           notes[i].start_tick < notes[j].start_tick + notes[j].duration;
+      // Adjacency is measured in onsets, not in ticks. A beat-wide tick window
+      // reads two tones as successive with a whole figure standing between
+      // them: under sixteenth figuration a beat holds four onsets per voice, so
+      // the same degree inflected at either end of a beat was counted even
+      // though each voice had spoken several times in between. The pair is
+      // successive only when neither of the two voices strikes anything between
+      // the two onsets -- the relation the ear actually tracks, and the one the
+      // rule's own name describes.
+      const Tick first_onset = std::min(notes[i].start_tick, notes[j].start_tick);
+      const Tick second_onset = std::max(notes[i].start_tick, notes[j].start_tick);
       const bool adjacent =
-          std::abs(static_cast<int>(notes[i].start_tick) - static_cast<int>(notes[j].start_tick)) <=
-          static_cast<int>(kTicksPerBeat);
+          !onset_index.hasOnsetBetween(notes[i].voice, first_onset, second_onset) &&
+          !onset_index.hasOnsetBetween(notes[j].voice, first_onset, second_onset);
       if (!simultaneous && !reverse_simultaneous && !adjacent)
         continue;
       // Judge the pair in the key of the later onset: an alteration arriving
