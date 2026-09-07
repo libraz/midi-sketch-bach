@@ -129,15 +129,21 @@ TEST(CounterpointBudgetTest, TableHoldsOnlyVerticalRulesInStrictOrder) {
 TEST(CounterpointBudgetTest, SettledRowsArePinned) {
   // Written out literally so a row that stops being outstanding work has to be
   // argued for here rather than slipping in with the change that re-labels it.
-  // Both rows are settled for the same reason in different terms: the repair
-  // works and costs more than the fault. The chorale prelude's contrary-motion
-  // octave appears once over the whole request surface, at a bass approach beat,
-  // and the re-aim that removes it leaves the dissonances downstream of the
-  // displaced tone unprepared. The goldberg canon's doubled leading tone goes
-  // away once the block chooser ranks it, but the only doubling-free assignment
-  // it can reach is chromatic and pays cross relations several times over.
+  // Every row here is settled for a reason of one of two shapes. Either the
+  // repair works and costs more than the fault -- the chorale prelude's
+  // contrary-motion octave appears once over the whole request surface, at a
+  // bass approach beat, and the re-aim that removes it leaves the dissonances
+  // downstream of the displaced tone unprepared; the goldberg canon's doubled
+  // leading tone goes away once the block chooser ranks it, but the only
+  // doubling-free assignment it can reach is chromatic and pays cross relations
+  // several times over. Or the repair has nothing to choose: the passacaglia's
+  // two hidden classes all sit on beat anchors whose admissible tones, however
+  // many, contain no parallel-free member, and both ways of widening that set
+  // were measured to cost a conjunct melodic surface or the form's own gate.
   EXPECT_EQ(settledRows(), (std::vector<std::pair<std::string, std::string>>{
                                {"chorale_prelude", "anti_parallel_perfect"},
+                               {"passacaglia", "hidden_parallel_fifth"},
+                               {"passacaglia", "hidden_parallel_octave"},
                                {"goldberg_variations", "doubling_no_leading_tone"}}));
 }
 
@@ -158,7 +164,7 @@ TEST(CounterpointBudgetTest, OutstandingRowCountOnlyEverFalls) {
   // it means a form was repaired and its row deleted, or a row was settled with
   // its reason recorded. Raising it means a form started breaking a rule it had
   // stopped breaking, and the fix belongs in that form rather than here.
-  EXPECT_LE(outstanding, 83u) << "a vertical rule re-opened as outstanding work";
+  EXPECT_LE(outstanding, 81u) << "a vertical rule re-opened as outstanding work";
 }
 
 TEST(CounterpointBudgetTest, RuleListsMatchTheValidatorGeometryTable) {

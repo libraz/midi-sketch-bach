@@ -143,13 +143,31 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // tone it replaces. `invertible_at_octave` closes with those two classes and
     // for the same reason: it is the parallel octave restricted to the adjacent
     // upper pair, so a texture that writes none at all writes none there either.
+    //
+    // The two hidden classes are settled rather than outstanding. Every one this
+    // form ships sits on a beat anchor of the counter figuration, none inside a
+    // beat -- the off-beat re-check clears its whole population, and the anchor
+    // re-check clears nine in ten of its own. Where the anchor holds, the tones
+    // that are in band, in the mode and consonant with every concurrent theme
+    // tone number in the hundreds and not one of them is free of the approach:
+    // the guard is not choosing badly, it is choosing from a set with no clean
+    // member. It never holds a true parallel, only a hidden one. Both ways out
+    // were measured and both cost more than they buy. Letting an onset inside a
+    // bar travel as far as a bar head may removes no hidden perfect at all and
+    // adds diminished and augmented melodic intervals, tritone leaps, consecutive
+    // leaps and unprepared dissonances by the hundred -- the conjunct surface is
+    // what the step limit is buying. Judging the anchor against the pair the
+    // audit hears, rather than at the fixed sixteenth grain the concurrent voices
+    // are sampled at, breaks the form outright: the repair vocabulary cannot
+    // clear what the corrected reading asks of it, and true parallel octaves
+    // reach the gate in three quarters of the request surface.
     {FormType::Passacaglia, "anti_parallel_perfect"},
     {FormType::Passacaglia, "battuta"},
     {FormType::Passacaglia, "cross_relation"},
     {FormType::Passacaglia, "doubling_no_leading_tone"},
     {FormType::Passacaglia, "doubling_no_seventh"},
-    {FormType::Passacaglia, "hidden_parallel_fifth"},
-    {FormType::Passacaglia, "hidden_parallel_octave"},
+    {FormType::Passacaglia, "hidden_parallel_fifth", OpenReason::Accepted},
+    {FormType::Passacaglia, "hidden_parallel_octave", OpenReason::Accepted},
     {FormType::Passacaglia, "strong_beat_dissonance"},
     {FormType::Passacaglia, "unprepared_dissonance"},
     {FormType::Passacaglia, "vertical_dissonance"},
