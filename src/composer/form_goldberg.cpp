@@ -373,21 +373,27 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 
 // Read a laid-out four-bar block against the aria bass it will sound over.
 //
-// A block whose upper voices are settled here is a closed system. The aria bass
-// returns its four-bar harmonic cycle over exactly the block the caller names,
-// on the surface the caller names, it is immutable by
-// contract, and the relief pass that answers for the free figuration elsewhere
-// deliberately skips the imitative blocks -- the canon pair cannot be re-aimed
-// one end at a time without dissolving the imitation. So the whole three-voice
-// surface follows from the choices made here and can be read before a note is
-// committed, at the grain an external reading pairs the voices at: every onset
-// of any voice, against whatever the others are sounding then.
+// The aria bass returns its four-bar harmonic cycle over exactly the block the
+// caller names, on the surface the caller names, and it is immutable by
+// contract, so the lowest of the three voices is exact here. The upper line is
+// exact only for a caller that is settling it: the imitative blocks are, since
+// the relief pass deliberately skips them -- a canon pair cannot be re-aimed one
+// end at a time without dissolving the imitation -- but a free variation's line
+// is re-aimed after its middle voice has been chosen, so for THAT caller this
+// reads the figuration as it stood, not as it ships. Re-choosing the middle
+// voice afterwards only moves the staleness, because the relief that moved the
+// figuration read the middle voice out of the registry in turn; the two are
+// settled against each other in one direction by construction.
+//
+// Read at the grain an external reading pairs the voices at: every onset of any
+// voice, against whatever the others are sounding then.
 //
 // Reported worst first, so the array compares as a preference order: a crossing
-// or a unison breaks the register order the form is built on, a true parallel is the fault
-// the ear names, then the weaker perfect approaches, then the dissonant
-// simultaneities. A caller with its own terms to weigh interleaves them.
-std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
+// or a unison breaks the register order the form is built on, a true parallel is
+// the fault the ear names, then the three weaker perfect approaches each in
+// their own column, then the dissonant simultaneities. A caller with its own
+// terms to weigh interleaves them.
+std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode,
                                        bool fill_thirds, AriaBassSurface surface) {
@@ -409,7 +415,7 @@ std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
   std::sort(onsets.begin(), onsets.end());
   onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
 
-  std::array<int, 6> score{};
+  std::array<int, 8> score{};
   std::array<int, 3> prev = {-1, -1, -1};
   for (const Tick tick : onsets) {
     std::array<int, 3> curr = {-1, -1, -1};
@@ -440,16 +446,30 @@ std::array<int, 6> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
           ++score[0];
         else if (curr[above] == curr[below])
           ++(below == 2 ? score[2] : score[3]);
+        // Read with the upper-voice table even where the lower line is the aria
+        // bass, so a fourth above the ground counts as clean. Reading that pair
+        // against the bass instead is correct in isolation and measurably worse
+        // here: the middle voice draws from three chord tones a bar, and closing
+        // the fourth leaves it choosing between a doubled leading tone and an
+        // octave with the bass. The narrower table needs a wider band to spend.
         if (!isConsonantPair(curr[above], curr[below]))
-          ++score[5];
+          ++score[7];
         if (prev[above] < 0 || prev[below] < 0)
           continue;
+        // The three weaker perfect approaches are counted apart rather than
+        // pooled, in the order the tree ranks them: a hidden perfect is the same
+        // fault class as a true parallel, an anti-parallel below it, a battuta
+        // weakest of all. Pooled, a candidate that trades a battuta for a hidden
+        // reads as no change, and the design takes whichever the enumeration
+        // reached first.
         if (formsStrictPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
           ++score[1];
-        else if (formsPerfectParallel(prev[above], curr[above], prev[below], curr[below]) ||
-                 formsAntiParallelPerfect(prev[above], curr[above], prev[below], curr[below]) ||
-                 formsBattuta(prev[above], curr[above], prev[below], curr[below]))
+        else if (formsPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
           ++score[4];
+        else if (formsAntiParallelPerfect(prev[above], curr[above], prev[below], curr[below]))
+          ++score[5];
+        else if (formsBattuta(prev[above], curr[above], prev[below], curr[below]))
+          ++score[6];
       }
     }
     prev = curr;
@@ -490,7 +510,7 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
-  std::array<int, 9> best{};
+  std::array<int, 11> best{};
   bool have_best = false;
   bool clean = false;
   // Pass 0 holds the cell's designed alternation; pass 1 opens it. The second
@@ -518,7 +538,7 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
               const CanonLines lines =
                   layOutCanon(assignment, /*block_start_bar=*/0, source_register_shift, comes_shift,
                               mode, rising);
-              const std::array<int, 6> faults = goldbergBlockFaults(
+              const std::array<int, 8> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
                   /*block_start_bar=*/0, ground, mode, fill_thirds, surface);
               // The leader's own bar-to-bar steps, which the comes inherits
@@ -539,13 +559,13 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
               // cardinal prohibition and comes next, and the leader's
               // singability follows because the comes inherits every step of it.
               // Only then a voice touching the ground, the upper pair touching
-              // each other, the weaker perfect approaches, the dissonance, the
-              // departure from the cell's designed shape and the distance
-              // travelled: preferences in descending weight, and none of them
-              // worth a parallel.
-              const std::array<int, 9> score = {faults[0], faults[1],       unsingable,
-                                                faults[2], faults[3],       faults[4],
-                                                faults[5], shape_deviation, travel};
+              // each other, the weaker perfect approaches in their own descending
+              // order, the dissonance, the departure from the cell's designed
+              // shape and the distance travelled: preferences in descending
+              // weight, and none of them worth a parallel.
+              const std::array<int, 11> score = {faults[0], faults[1],       unsingable, faults[2],
+                                                 faults[3], faults[4],       faults[5],  faults[6],
+                                                 faults[7], shape_deviation, travel};
               if (!have_best || score < best) {
                 best = score;
                 chosen.assignment = assignment;
@@ -775,7 +795,7 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
                                           InnerSurface surface) {
   const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
   std::vector<MaterialNote> chosen;
-  std::array<int, 8> best{};
+  std::array<int, 10> best{};
   bool have_best = false;
   std::array<std::size_t, 4> pick{};
   for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
@@ -797,7 +817,7 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
             appendInnerBar(line, block_start_bar + static_cast<int>(local), tones[local],
                            exits[local], surface);
           }
-          const std::array<int, 6> faults = goldbergBlockFaults(
+          const std::array<int, 8> faults = goldbergBlockFaults(
               upper, line, block_start_bar, ground, mode, fill_thirds, bass_surface);
           // Every bar of a block is laid out on the same surface, so two of them
           // that state the same tones are the same bar. A block that repeats a
@@ -816,8 +836,8 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
             if (local > 0)
               travel += std::abs(tones[local] - tones[local - 1]);
           }
-          const std::array<int, 8> score = {faults[0], faults[1], repeated,  faults[2],
-                                            faults[3], faults[4], faults[5], travel};
+          const std::array<int, 10> score = {faults[0], faults[1], repeated,  faults[2], faults[3],
+                                             faults[4], faults[5], faults[6], faults[7], travel};
           if (!have_best || score < best) {
             best = score;
             chosen = std::move(line);
@@ -1035,7 +1055,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         // answering it. Every rotation is laid out against the figuration
         // already settled above and the bass below, and the cleanest is kept.
         std::vector<MaterialNote> tune;
-        std::array<int, 6> best_score{};
+        std::array<int, 8> best_score{};
         for (int rotation = 0; rotation < 4; ++rotation) {
           std::vector<MaterialNote> candidate;
           candidate.reserve(16);
@@ -1055,7 +1075,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 6> score =
+          const std::array<int, 8> score =
               goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds,
                                   bass_surface_of_block(blk));
           if (rotation == 0 || score < best_score) {
