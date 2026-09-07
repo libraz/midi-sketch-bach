@@ -201,10 +201,24 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // otherwise be paid for: a meeting costs the pair its audible independence
     // for an onset, a crossing breaks the register order the validator reads off
     // the notes, and only the crossing is a rule.
+    //
+    // `doubling_no_leading_tone` is settled rather than outstanding. The block
+    // chooser ranks no term for it, and giving it one does remove every
+    // occurrence -- but the only doubling-free assignment the choice can reach
+    // is chromatic, and it pays cross relations several times over what it
+    // saves, with vertical and strong-beat dissonances on top, against a smaller
+    // return in leading-tone resolutions and augmented melodic intervals. Where
+    // the term sits does not change that: ranked among the rules it gives the
+    // same assignment as ranked below singability, and ranked as a tiebreak
+    // below the continuous shape and travel terms it is never consulted at all.
+    // Admitting the second round of configurations reaches the same assignment
+    // again, so the candidate set holds one alternative rather than a better one
+    // the ranking is failing to find. The chooser has no cross-relation term
+    // either, which is what the repair steers into; the row stays until it does.
     {FormType::GoldbergVariations, "anti_parallel_perfect"},
     {FormType::GoldbergVariations, "battuta"},
     {FormType::GoldbergVariations, "cross_relation"},
-    {FormType::GoldbergVariations, "doubling_no_leading_tone"},
+    {FormType::GoldbergVariations, "doubling_no_leading_tone", OpenReason::Accepted},
     {FormType::GoldbergVariations, "hidden_parallel_fifth"},
     {FormType::GoldbergVariations, "hidden_parallel_octave"},
     {FormType::GoldbergVariations, "strong_beat_dissonance"},
