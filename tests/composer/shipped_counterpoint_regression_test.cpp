@@ -1317,7 +1317,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // to 55 and the passacaglia's contrary repeats from 5 to 14. The column is
     // pinned at what a three-voice chaconne actually costs until that selector
     // ranks rather than filters.
-    {FormType::Chaconne, 0, 0, 43, 0, 7, 0, 1, 0, 1, 18698, 48},
+    //
+    // The hidden column falls where the coda ranks perfect motion at all. Every
+    // one this form shipped stood in its last two bars, at the cadence that
+    // states the dominant and the tonic under a fixed bass, and that chooser
+    // ranked only the true parallel. Ranking the hidden approach and the contrary
+    // arrival there as well -- at both ends of the cadence, since ranking the
+    // approach alone moves the fault to the landing rather than removing it --
+    // takes the column down and leaves the contrary column exactly where it was.
+    {FormType::Chaconne, 0, 0, 38, 0, 7, 0, 1, 0, 1, 18698, 48},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

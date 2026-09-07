@@ -2122,14 +2122,23 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
           // write lands after the line's only guard.
           //
           // The penalties are ranked, not summed as equals: a true parallel
-          // outranks a battuta, which outranks spelling the dominant as its
-          // fifth, which outranks distance. Merging them would let the tone dodge
-          // the mildest fault by committing the worst. A hidden perfect is
-          // deliberately NOT penalised here: this is a two-voice cadential
-          // approach where the bass is fixed and the compass is an octave and a
-          // half, so demanding a similar-motion-free arrival too leaves only
-          // tones that fault worse elsewhere -- and a leap to the dominant over a
-          // rising bass is ordinary cadential writing, not a blemish.
+          // outranks a battuta, which outranks a contrary arrival on the perfect
+          // interval already sounding, which outranks a hidden perfect, which
+          // outranks spelling the dominant as its fifth, which outranks distance.
+          // Merging them would let the tone dodge the mildest fault by committing
+          // the worst. The hidden rung sits below the battuta because a leap to
+          // the dominant over a rising bass is ordinary cadential writing where a
+          // converging octave is not, but it sits above colour and distance
+          // because the compass holds more than one spelling of the dominant and
+          // a third of the similar-motion arrivals have a tone that avoids one,
+          // for a handful of wider melodic intervals.
+          //
+          // Both perfect-motion rungs read BOTH ends of the cadence, not just
+          // this one. Ranking the approach alone does remove the arrivals it is
+          // aimed at, but the tone it then prefers reaches the final tonic by
+          // contrary motion off the same interval -- the fault moves to the far
+          // end rather than leaving, and the far end is measured too. Reading
+          // both ends removes it at both.
           const auto rankDominantApproach = [&](int prev, int* chosen) {
             int best = -1;
             int best_key = 1 << 20;
@@ -2156,10 +2165,18 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
                      formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
                         ? (1 << 14)
                         : 0;
+                const int anti_penalty =
+                    (formsAntiParallelPerfect(prev, cand, bass_prev, kCodaBassDominant) ||
+                     (tail_note == approach_note &&
+                      formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic)))
+                        ? (1 << 11)
+                        : 0;
+                const int hidden_penalty =
+                    formsPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 10) : 0;
                 const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
                 const int step = (prev >= 0) ? std::abs(cand - prev) : 0;
-                const int key =
-                    parallel_penalty + landing_penalty + battuta_penalty + colour_penalty + step;
+                const int key = parallel_penalty + landing_penalty + battuta_penalty +
+                                anti_penalty + hidden_penalty + colour_penalty + step;
                 if (key < best_key) {
                   best_key = key;
                   best = cand;
