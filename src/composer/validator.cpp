@@ -930,9 +930,10 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // 2b. Cross-relation: chromatic alteration conflict in different voices,
-  // either simultaneous or on adjacent starts. Natural half-steps (E/F,
-  // B/C) are not cross-relations because they are different letter names.
+  // 2b. Cross-relation: the same scale degree of the local key sounding with
+  // two different inflections in different voices, either simultaneous or on
+  // adjacent starts. Half-steps between two distinct degrees (E/F and B/C in
+  // major, D/Eb and G/Ab in minor) are not cross relations.
   for (std::size_t i = 0; i < notes.size(); ++i) {
     for (std::size_t j = i + 1; j < notes.size(); ++j) {
       if (notes[i].voice == notes[j].voice)
@@ -947,7 +948,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
           static_cast<int>(kTicksPerBeat);
       if (!simultaneous && !reverse_simultaneous && !adjacent)
         continue;
-      if (!isCrossRelationPc(pitchClass(notes[i].pitch), pitchClass(notes[j].pitch)))
+      // Judge the pair in the key of the later onset: an alteration arriving
+      // after a modulation belongs to the key it arrives in.
+      const auto local_key =
+          rule_helpers::keyAt(harmonic_plan, std::max(notes[i].start_tick, notes[j].start_tick));
+      if (!isCrossRelationPc(pitchClass(notes[i].pitch), pitchClass(notes[j].pitch),
+                             local_key.tonic_pc, local_key.is_minor))
         continue;
       // Both Material; nothing the composer can do (mirrors the
       // parallel/hidden-parallel/vertical-dissonance both_material gate).

@@ -1,6 +1,7 @@
 #include "composer/rule_helpers.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 
 #include "composer/chord_voicing.h"
@@ -175,18 +176,62 @@ bool chordContainsPc(const ChordEvent& chord, std::uint8_t pc) {
   return seventh >= 0 && pc == static_cast<std::uint8_t>((root + seventh) % 12);
 }
 
+// Seven diatonic pitch classes for a key. Minor uses the harmonic form, whose
+// raised 7th is the degree the dominant needs.
+std::array<std::uint8_t, 7> scalePcs(std::uint8_t tonic_pc, bool is_minor) {
+  const int tonic = tonic_pc % 12;
+  const std::array<int, 7> steps = is_minor ? std::array<int, 7>{0, 2, 3, 5, 7, 8, 11}
+                                            : std::array<int, 7>{0, 2, 4, 5, 7, 9, 11};
+  std::array<std::uint8_t, 7> pcs{};
+  for (std::size_t idx = 0; idx < pcs.size(); ++idx) {
+    pcs[idx] = static_cast<std::uint8_t>((tonic + steps[idx]) % 12);
+  }
+  return pcs;
+}
+
+// The scale degree `pc` represents, returned as that degree's own pitch class,
+// or -1 when `pc` is a semitone away from no degree at all. A diatonic pitch
+// class represents itself; a chromatic one is read as the raised form of the
+// degree a semitone below in preference to the lowered form of the degree a
+// semitone above, which is what makes F# in C major the raised 4th rather than
+// a lowered 5th.
+int inflectedDegreePc(std::uint8_t pc, const std::array<std::uint8_t, 7>& scale) {
+  const auto in_scale = [&scale](int candidate) {
+    return std::find(scale.begin(), scale.end(), static_cast<std::uint8_t>(candidate)) !=
+           scale.end();
+  };
+  const int here = pc % 12;
+  if (in_scale(here))
+    return here;
+  const int below = (here + 11) % 12;
+  if (in_scale(below))
+    return below;
+  const int above = (here + 1) % 12;
+  if (in_scale(above))
+    return above;
+  return -1;
+}
+
 }  // namespace
 
-TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick) {
-  TonalContext context;
-  context.tonic_pc = static_cast<std::uint8_t>(plan.tonic_pc % 12);
-  context.is_minor = plan.is_minor;
+KeyContext keyAt(const HarmonicPlan& plan, Tick tick) {
+  KeyContext key;
+  key.tonic_pc = static_cast<std::uint8_t>(plan.tonic_pc % 12);
+  key.is_minor = plan.is_minor;
   for (const auto& modulation : plan.modulations) {
     if (modulation.tick > tick)
       break;
-    context.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
-    context.is_minor = modulation.to_is_minor;
+    key.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
+    key.is_minor = modulation.to_is_minor;
   }
+  return key;
+}
+
+TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick) {
+  TonalContext context;
+  const KeyContext key = keyAt(plan, tick);
+  context.tonic_pc = key.tonic_pc;
+  context.is_minor = key.is_minor;
   context.leading_tone_pc = static_cast<std::uint8_t>((context.tonic_pc + 11) % 12);
   context.resolution_pc = context.tonic_pc;
   const ChordEvent* chord = chordAt(plan, tick);
@@ -287,11 +332,17 @@ bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b,
   return isConsonantAboveBass(pitch_a, bass_pitch) && isConsonantAboveBass(pitch_b, bass_pitch);
 }
 
-bool isCrossRelationPc(std::uint8_t a, std::uint8_t b) {
-  const std::uint8_t lo = std::min(a, b);
-  const std::uint8_t hi = std::max(a, b);
-  return (lo == 0 && hi == 1) || (lo == 2 && hi == 3) || (lo == 5 && hi == 6) ||
-         (lo == 7 && hi == 8) || (lo == 9 && hi == 10);
+bool isCrossRelationPc(std::uint8_t a, std::uint8_t b, std::uint8_t tonic_pc, bool is_minor) {
+  const std::uint8_t pc_a = static_cast<std::uint8_t>(a % 12);
+  const std::uint8_t pc_b = static_cast<std::uint8_t>(b % 12);
+  if (pc_a == pc_b)
+    return false;
+  const auto scale = scalePcs(tonic_pc, is_minor);
+  const int degree_a = inflectedDegreePc(pc_a, scale);
+  const int degree_b = inflectedDegreePc(pc_b, scale);
+  if (degree_a < 0 || degree_b < 0)
+    return false;
+  return degree_a == degree_b;
 }
 
 namespace {
@@ -299,26 +350,7 @@ namespace {
 // Seven diatonic pitch classes for the plan's key. Mirrors the local
 // scalePcs() previously duplicated in validator.cpp.
 std::array<std::uint8_t, 7> scalePcs(const HarmonicPlan& plan) {
-  if (plan.is_minor) {
-    return {
-        static_cast<std::uint8_t>(plan.tonic_pc % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 3) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 8) % 12),
-        static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
-    };
-  }
-  return {
-      static_cast<std::uint8_t>(plan.tonic_pc % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 2) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 4) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 5) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 7) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 9) % 12),
-      static_cast<std::uint8_t>((plan.tonic_pc + 11) % 12),
-  };
+  return scalePcs(static_cast<std::uint8_t>(plan.tonic_pc % 12), plan.is_minor);
 }
 
 int scaleIndex(std::uint8_t pc, const HarmonicPlan& plan) {
@@ -631,8 +663,9 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
 }
 
 bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                          std::uint8_t candidate_pitch, Tick cur_tick) {
+                          std::uint8_t candidate_pitch, Tick cur_tick, const HarmonicPlan& plan) {
   const std::uint8_t pc = pitchClass(candidate_pitch);
+  const KeyContext candidate_key = keyAt(plan, cur_tick);
   for (const auto& note : placed) {
     if (note.voice == candidate_voice)
       continue;
@@ -642,7 +675,11 @@ bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidat
                                    static_cast<int>(cur_tick)) <= static_cast<int>(kTicksPerBeat);
     if (!simultaneous && !adjacent)
       continue;
-    if (isCrossRelationPc(pc, pitchClass(note.pitch))) {
+    // Judge the pair in the key of the later onset, so an alteration arriving
+    // after a modulation is read in the key it arrives in.
+    const KeyContext key =
+        note.start_tick > cur_tick ? keyAt(plan, note.start_tick) : candidate_key;
+    if (isCrossRelationPc(pc, pitchClass(note.pitch), key.tonic_pc, key.is_minor)) {
       return true;
     }
   }

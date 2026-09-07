@@ -226,12 +226,70 @@ TEST(RuleHelpersTest, ContextualPolicyUsesLatestLocalKey) {
   EXPECT_EQ(context.leading_tone_pc, 6);
 }
 
-TEST(RuleHelpersTest, IsCrossRelationPcDetectsChromaticPairs) {
-  EXPECT_TRUE(isCrossRelationPc(0, 1));
-  EXPECT_TRUE(isCrossRelationPc(9, 10));
-  // Natural half-steps E/F and B/C are not cross-relations.
-  EXPECT_FALSE(isCrossRelationPc(4, 5));
-  EXPECT_FALSE(isCrossRelationPc(11, 0));
+TEST(RuleHelpersTest, KeyAtSwitchesOnTheModulationBoundary) {
+  HarmonicPlan plan = cMajor();
+  plan.modulations.push_back({kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  plan.modulations.push_back({2 * kTicksPerBar, 7, 9, false, true, ModulationType::Phrase});
+
+  EXPECT_EQ(keyAt(plan, 0).tonic_pc, 0);
+  EXPECT_FALSE(keyAt(plan, 0).is_minor);
+  EXPECT_EQ(keyAt(plan, kTicksPerBar - 1).tonic_pc, 0);
+  EXPECT_EQ(keyAt(plan, kTicksPerBar).tonic_pc, 7);
+  EXPECT_FALSE(keyAt(plan, kTicksPerBar).is_minor);
+  EXPECT_EQ(keyAt(plan, 2 * kTicksPerBar - 1).tonic_pc, 7);
+  EXPECT_EQ(keyAt(plan, 2 * kTicksPerBar).tonic_pc, 9);
+  EXPECT_TRUE(keyAt(plan, 2 * kTicksPerBar).is_minor);
+  EXPECT_EQ(keyAt(plan, 8 * kTicksPerBar).tonic_pc, 9);
+}
+
+TEST(RuleHelpersTest, IsCrossRelationPcDetectsInflectedDegreesInMajor) {
+  // C major: each chromatic pitch class reads as the raised form of the degree
+  // below it, so it clashes with that degree and with nothing else.
+  const auto major = [](std::uint8_t pc_a, std::uint8_t pc_b) {
+    return isCrossRelationPc(pc_a, pc_b, /*tonic_pc=*/0, /*is_minor=*/false);
+  };
+  EXPECT_TRUE(major(0, 1));   // C / C#
+  EXPECT_TRUE(major(2, 3));   // D / D#
+  EXPECT_TRUE(major(5, 6));   // F / F#
+  EXPECT_TRUE(major(7, 8));   // G / G#
+  EXPECT_TRUE(major(9, 10));  // A / A#
+  // Half-steps between two distinct degrees are not cross relations.
+  EXPECT_FALSE(major(4, 5));    // E / F
+  EXPECT_FALSE(major(11, 0));   // B / C
+  EXPECT_FALSE(major(6, 7));    // F# is the raised 4th, not a lowered 5th
+  EXPECT_FALSE(major(1, 2));    // C# against the natural 2nd
+  EXPECT_FALSE(major(3, 4));    // D# against the natural 3rd
+  EXPECT_FALSE(major(8, 9));    // G# against the natural 6th
+  EXPECT_FALSE(major(10, 11));  // A# against the natural 7th
+}
+
+TEST(RuleHelpersTest, IsCrossRelationPcFollowsTheMinorScaleDegrees) {
+  // C minor: the harmonic minor owns Eb and Ab outright, so those half-steps
+  // are ordinary adjacent degrees; the alterations that DO clash are the
+  // melodic-minor 6th, the natural 7th, and mode mixture on the 3rd and 4th.
+  const auto minor = [](std::uint8_t pc_a, std::uint8_t pc_b) {
+    return isCrossRelationPc(pc_a, pc_b, /*tonic_pc=*/0, /*is_minor=*/true);
+  };
+  EXPECT_FALSE(minor(2, 3));   // D / Eb — the 2nd and the minor 3rd
+  EXPECT_FALSE(minor(7, 8));   // G / Ab — the 5th and the minor 6th
+  EXPECT_TRUE(minor(8, 9));    // Ab / A natural — the melodic-minor 6th
+  EXPECT_TRUE(minor(10, 11));  // Bb / B natural — the raised 7th
+  EXPECT_TRUE(minor(3, 4));    // Eb / E natural — mode mixture
+  EXPECT_TRUE(minor(5, 6));    // F / F# — the raised 4th
+  EXPECT_FALSE(minor(1, 2));   // Db against the natural 2nd
+}
+
+TEST(RuleHelpersTest, IsCrossRelationPcIsSymmetricAndIgnoresUnisons) {
+  for (std::uint8_t pc_a = 0; pc_a < 12; ++pc_a) {
+    EXPECT_FALSE(isCrossRelationPc(pc_a, pc_a, 0, false)) << "major unison pc " << int{pc_a};
+    EXPECT_FALSE(isCrossRelationPc(pc_a, pc_a, 0, true)) << "minor unison pc " << int{pc_a};
+    for (std::uint8_t pc_b = 0; pc_b < 12; ++pc_b) {
+      EXPECT_EQ(isCrossRelationPc(pc_a, pc_b, 0, false), isCrossRelationPc(pc_b, pc_a, 0, false))
+          << "major pair " << int{pc_a} << "," << int{pc_b};
+      EXPECT_EQ(isCrossRelationPc(pc_a, pc_b, 0, true), isCrossRelationPc(pc_b, pc_a, 0, true))
+          << "minor pair " << int{pc_a} << "," << int{pc_b};
+    }
+  }
 }
 
 TEST(RuleHelpersTest, VoicePitchAtReturnsLastSoundingPitch) {
@@ -329,10 +387,27 @@ TEST(RuleHelpersTest, CreatesCrossRelationDetectsChromaticConflictInOtherVoice) 
   // Voice 0 sounds C natural (60) at tick 0..2. Voice 1 candidate is C#
   // (61) at tick 0. Cross-relation since lower voice's note is sounding.
   std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat * 2, 60, 0)};
-  EXPECT_TRUE(createsCrossRelation(placed, 1, 61, 0));
-  // Different letter half-step E↔F: not cross-relation.
+  EXPECT_TRUE(createsCrossRelation(placed, 1, 61, 0, cMajor()));
+  // Adjacent degrees E↔F: not a cross relation.
   std::vector<NoteEvent> placed_ef = {makeNote(0, kTicksPerBeat * 2, 64, 0)};
-  EXPECT_FALSE(createsCrossRelation(placed_ef, 1, 65, 0));
+  EXPECT_FALSE(createsCrossRelation(placed_ef, 1, 65, 0, cMajor()));
+}
+
+TEST(RuleHelpersTest, CreatesCrossRelationJudgesInTheLocalKey) {
+  // G natural (67) against Ab (68) is the 5th against the minor 6th of C
+  // minor, but the tonic against its raised form in Ab major.
+  std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat * 2, 67, 0)};
+  HarmonicPlan c_minor;
+  c_minor.tonic_pc = 0;
+  c_minor.is_minor = true;
+  EXPECT_FALSE(createsCrossRelation(placed, 1, 68, 0, c_minor));
+  EXPECT_TRUE(createsCrossRelation(placed, 1, 68, 0, cMajor()));
+
+  // After a modulation to C minor the same pair is judged in the new key.
+  HarmonicPlan modulating = cMajor();
+  modulating.modulations.push_back({kTicksPerBeat, 0, 0, false, true, ModulationType::Phrase});
+  EXPECT_TRUE(createsCrossRelation(placed, 1, 68, 0, modulating));
+  EXPECT_FALSE(createsCrossRelation(placed, 1, 68, kTicksPerBeat, modulating));
 }
 
 // Melodic-interval rules (shared with the CandidateSearch pre-filter and the

@@ -55,6 +55,18 @@ bool isLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan);
 // || isLeadingToneResolution(prev, cand, plan)`.
 bool isLeadingToneResolution(std::uint8_t leading, int resolution, const HarmonicPlan& plan);
 
+// The key in force at a tick: the plan's home key updated by every modulation
+// whose boundary the tick has reached. This is the single source of truth for
+// "what key is it here"; TonalContext is built on top of it.
+struct KeyContext {
+  std::uint8_t tonic_pc = 0;
+  bool is_minor = false;
+};
+
+// Consults only the modulation list, never the chord list, so it stays cheap
+// enough for the validator's pairwise rule loops.
+KeyContext keyAt(const HarmonicPlan& plan, Tick tick);
+
 // Local tonal policy derived from the latest modulation and active harmony.
 // `leading_tone_pc` resolves to `resolution_pc`; `has_active_leading_tone` is
 // false outside dominant/secondary-dominant contexts.
@@ -91,7 +103,21 @@ bool isConsonantInterval(int semitones);
 bool isConsonantAboveBass(std::uint8_t pitch, std::uint8_t bass_pitch);
 bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b, std::uint8_t bass_pitch);
 
-bool isCrossRelationPc(std::uint8_t a, std::uint8_t b);
+// A cross relation is the SAME scale degree sounding with two different
+// chromatic inflections, so the verdict depends on the key rather than on the
+// bare semitone distance: D/Eb are two adjacent degrees of C minor but a
+// degree and its raised form in C major. Each pitch class is mapped to the
+// degree it represents (itself when diatonic, otherwise the degree it is an
+// inflection of, preferring the degree a semitone below so a chromatic tone
+// reads as raised); the pair is a cross relation iff both map to the same
+// degree. The minor reference scale is the harmonic minor, which makes the
+// melodic-minor 6th and the natural 7th read as inflections of it.
+//
+// The key context is required, never defaulted: judging in the wrong key both
+// invents cross relations between ordinary neighbouring degrees and hides the
+// real ones. Long pieces modulate, so pass the LOCAL key at the tick being
+// judged (see keyAt), not the home key.
+bool isCrossRelationPc(std::uint8_t a, std::uint8_t b, std::uint8_t tonic_pc, bool is_minor);
 
 // Melodic-interval rules (mirror Validator Rule P1: forbidden melodic
 // leaps for Compose voices). Shared so the CandidateSearch pre-filter
@@ -190,8 +216,11 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
                                              Tick cur_tick, std::uint8_t prev_pitch,
                                              Tick prev_tick);
 
+// `plan` supplies the local key: each pair is judged in the key of the later
+// of the two onsets, so an alteration arriving after a modulation is read in
+// the key it arrives in.
 bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                          std::uint8_t candidate_pitch, Tick cur_tick);
+                          std::uint8_t candidate_pitch, Tick cur_tick, const HarmonicPlan& plan);
 
 // Material queries.
 

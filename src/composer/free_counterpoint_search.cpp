@@ -504,8 +504,8 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr &&
-          createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
-                               t)) {
+          createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+                               harmonic_plan)) {
         continue;
       }
       // Cadence cells force the approach/cadence pitch classes in every
@@ -531,8 +531,11 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
                 point.tick > kTicksPerBeat ? point.tick - kTicksPerBeat : Tick{0};
             if (t < window_lo || t > point.tick + kTicksPerBeat)
               continue;
-            if (rule_helpers::isCrossRelationPc(pc, point.soprano_pc) ||
-                rule_helpers::isCrossRelationPc(pc, point.bass_pc)) {
+            const auto cell_key = rule_helpers::keyAt(harmonic_plan, std::max(t, point.tick));
+            if (rule_helpers::isCrossRelationPc(pc, point.soprano_pc, cell_key.tonic_pc,
+                                                cell_key.is_minor) ||
+                rule_helpers::isCrossRelationPc(pc, point.bass_pc, cell_key.tonic_pc,
+                                                cell_key.is_minor)) {
               clashes_forced_cadence_pc = true;
               break;
             }
@@ -683,7 +686,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             }
             if (context.placed_notes != nullptr &&
                 createsCrossRelation(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next)) {
+                                     static_cast<std::uint8_t>(q), t_next, harmonic_plan)) {
               continue;
             }
             const ChordEvent& q_chord = activeChord(harmonic_plan, t_next);
@@ -800,7 +803,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             }
             if (context.placed_notes != nullptr &&
                 createsCrossRelation(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next)) {
+                                     static_cast<std::uint8_t>(q), t_next, harmonic_plan)) {
               continue;
             }
             has_step_followup = true;
@@ -1230,8 +1233,8 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           continue;
         }
         if (context.placed_notes != nullptr &&
-            createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
-                                 t)) {
+            createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+                                 harmonic_plan)) {
           continue;
         }
         best_pitch = p;
