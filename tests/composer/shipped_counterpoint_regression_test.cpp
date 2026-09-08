@@ -1747,8 +1747,7 @@ TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderPerFormCeiling) {
         << "ratchet (hidden5=" << total.hidden_fifth << " hidden8=" << total.hidden_octave << ")";
     EXPECT_LE(total.anti_parallel, entry.max_anti)
         << formTypeToString(entry.form)
-        << ": anti-parallel perfect intervals in shipped output rose above "
-        << "the ratchet";
+        << ": anti-parallel perfect intervals in shipped output rose above the ratchet";
     EXPECT_LE(bass_fourths.unresolved, entry.max_bass_fourth)
         << formTypeToString(entry.form)
         << ": fourths above a bass that then parks under them rose above the "
