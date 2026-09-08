@@ -832,7 +832,31 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // told when its source is the lowest voice and ranks that fourth below a
     // consonance, which takes the column past where it stood before the
     // exposition rule at the price of six hidden approaches.
-    {FormType::Fugue, 0, 0, 77, 71, 4, 0, 3, 4, 1, 74479, 180},
+    //
+    // The development's episodes now thin to the outer pair: the middle voice
+    // rests through one and returns with the next entry, and the bass walks in
+    // eighths where it does. This is the one change on this row that lowers the
+    // succession floor deliberately, and the statement it makes is the intended
+    // one -- the form does have less counterpoint sounding at once, because it
+    // was sounding more than the music it is modelled on. Among the three-voice
+    // fugues in the reference corpus the full complement sounds about half the
+    // time and the middle voice is silent for roughly a third of the piece;
+    // this generator sounded all three for four fifths of it and never rested a
+    // voice after its entry, so a large share of the pairs the floor counted
+    // were pairs the form should not have been writing. Every fault column
+    // falls by more than the floor does -- hidden approaches by more than a
+    // third, battuta by a third, the contrary repeat by half against a floor
+    // that gives up under a third -- so each of these rates improves rather
+    // than a count merely following its denominator down.
+    //
+    // The second inversions are the column that had to be worked for. With the
+    // middle voice gone the bass chooses against the Fortspinnung alone, and
+    // with one fewer line to answer it settled: it held a pitch across the beat
+    // under a fourth that then had nowhere to go, which is the parked bass this
+    // column counts, and the count rose even though the samples fell. A bass
+    // that walks in eighths through a thinned episode does not park, and the
+    // column ends a tenth below where the middle voice had been hiding it.
+    {FormType::Fugue, 0, 0, 48, 47, 2, 0, 3, 2, 1, 53184, 162},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1716,7 +1740,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // the rule's reach does not scale with the form -- what scales is the
     // development around it, which is why the proportional gain here is smaller
     // than on the form row while the direction is the same.
-    {FormType::Fugue, 0, 0, 311, 803, 28, 0, 5, 8, 1, 752412, 2210},
+    //
+    // The thinned episode reaches further here than on the form row, because a
+    // stretched fugue is mostly development: the floor gives up two fifths of
+    // itself and every column comes down with it, battuta by two thirds and
+    // both its worst cells besides. The fourths fall by a fifth rather than
+    // rising, which is the eighth-note episode bass -- the longer the piece the
+    // more episodes it walks through.
+    {FormType::Fugue, 0, 0, 188, 271, 18, 0, 3, 5, 1, 452801, 1789},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1759,7 +1790,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // countersubject reaching every length rather than only the natural one:
     // the exposition it is derived in is the same exposition however long the
     // piece runs, and the line it produces is restated at every later entry.
-    {FormType::PreludeAndFugue, 0, 0, 150, 320, 9, 0, 3, 5, 1, 478198, 1110},
+    //
+    // The thinned episode reaches this form only at the stretched lengths. At
+    // the natural one its fugue half holds a single development window, whose
+    // episode is the last and keeps all three voices, so the form row above is
+    // untouched; stretch it and the development grows episodes to thin. Every
+    // column falls and the floor with them, in the same proportion the fugue
+    // row shows over the half of each piece that is a fugue at all.
+    {FormType::PreludeAndFugue, 0, 0, 110, 235, 7, 0, 3, 4, 1, 415530, 1036},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

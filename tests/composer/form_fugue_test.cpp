@@ -498,15 +498,29 @@ TEST(FormFugueTest, MinimumExpositionHasThreeVoicesBeforeCadence) {
   EXPECT_EQ(r.validation.texture_metrics[0].max_active_voices, 3);
 }
 
-TEST(FormFugueTest, EpisodesAccompanyFortspinnungWithBothMiddleAndBassVoices) {
-  // Every full-length episode (a V0 Fortspinnung) is accompanied by BOTH a V1
-  // figuration and a V2 bass over the same window, so all three voices sound
-  // through the development instead of leaving the middle and/or bass register
-  // empty. The accompaniment voices are verbatim Material confined to disjoint
-  // bands, so the piece still validates clean.
+TEST(FormFugueTest, EpisodesThinToTheOuterPairUntilTheLastOne) {
+  // An episode (a V0 Fortspinnung) keeps its V2 bass but drops the middle
+  // voice, so the development alternates between three-voice entries and
+  // two-voice sequences instead of running one texture end to end. The episode
+  // that leads into the coda is the exception: it keeps all three voices so the
+  // home return arrives on a full texture. Both accompaniment voices are
+  // verbatim Material confined to disjoint bands, so the piece still validates
+  // clean whichever way an episode is scored.
   const HarnessFixture fx = buildFixture(FormType::Fugue, 42, false, 84);
 
+  Tick last_episode_start = 0;
+  bool saw_episode = false;
+  for (const auto& span : fx.voice_plan.spans) {
+    if (span.intent == VoiceIntent::FortspinnungSpan) {
+      last_episode_start =
+          saw_episode ? std::max(last_episode_start, span.start_tick) : span.start_tick;
+      saw_episode = true;
+    }
+  }
+  ASSERT_TRUE(saw_episode) << "no Fortspinnung episodes in an 84-bar fugue";
+
   int episode_windows = 0;
+  int thinned_windows = 0;
   for (const auto& span : fx.voice_plan.spans) {
     if (span.intent != VoiceIntent::FortspinnungSpan) {
       continue;
@@ -525,12 +539,18 @@ TEST(FormFugueTest, EpisodesAccompanyFortspinnungWithBothMiddleAndBassVoices) {
         bass_figuration = true;
       }
     }
-    EXPECT_TRUE(middle_figuration)
-        << "episode at bar " << (span.start_tick / kBar) << " lacks a V1 accompaniment";
     EXPECT_TRUE(bass_figuration) << "episode at bar " << (span.start_tick / kBar)
                                  << " lacks a V2 bass";
+    if (span.start_tick == last_episode_start) {
+      EXPECT_TRUE(middle_figuration) << "the last episode dropped its V1 accompaniment";
+    } else {
+      EXPECT_FALSE(middle_figuration)
+          << "episode at bar " << (span.start_tick / kBar) << " still fills the middle voice";
+      ++thinned_windows;
+    }
   }
-  EXPECT_GT(episode_windows, 0) << "no Fortspinnung episodes in an 84-bar fugue";
+  EXPECT_GT(episode_windows, 1) << "no Fortspinnung episodes in an 84-bar fugue";
+  EXPECT_GT(thinned_windows, 0) << "no episode thinned to the outer pair";
 
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
   EXPECT_TRUE(r.validation.failures.empty())
@@ -2215,36 +2235,47 @@ TEST(FormFugueTest, CountersubjectThirdEntryRestatementAvoidsSustainedSevenths) 
 // episodes (eighths / sixteenths), keeping the development's counterlines
 // audibly varied and the piece's sixteenth-note duration mass intact under
 // the full-coverage V0 sequence.
-TEST(FormFugueTest, EpisodeCounterlinesAlternateSubdivisionTiers) {
+TEST(FormFugueTest, ThinnedEpisodeBassMovesFasterThanUnderAnEntry) {
+  // With the middle voice out, the episode is a two-part texture and its bass
+  // is half of it: it moves in eighths rather than the quarter-note walk it
+  // takes under a three-voice entry. A bass that keeps the slower tread there
+  // parks under the Fortspinnung, and a parked bass is what turns a passing
+  // fourth above it into a standing second inversion.
   for (std::uint32_t seed : {1u, 5u, 42u}) {
     const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, 64);
-    bool saw_eighths = false;
-    bool saw_sixteenths = false;
+    Tick last_episode_start = 0;
+    bool saw_episode = false;
     for (const auto& span : fx.voice_plan.spans) {
-      if (span.intent != VoiceIntent::FortspinnungSpan) {
+      if (span.intent == VoiceIntent::FortspinnungSpan) {
+        last_episode_start =
+            saw_episode ? std::max(last_episode_start, span.start_tick) : span.start_tick;
+        saw_episode = true;
+      }
+    }
+    ASSERT_TRUE(saw_episode) << "seed " << seed;
+
+    int thinned_episodes = 0;
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent != VoiceIntent::FortspinnungSpan || span.start_tick == last_episode_start) {
         continue;
       }
       for (const auto& section : fx.material.figuration_sections) {
-        if (section.voice != 1 || section.notes.empty() || section.start_tick != span.start_tick ||
+        if (section.voice != 2 || section.notes.empty() || section.start_tick != span.start_tick ||
             section.end_tick != span.end_tick) {
           continue;
         }
         // Coalescing only lengthens notes, so the subdivision tier survives
         // as the section's MINIMUM duration.
         Tick min_dur = section.notes.front().duration;
-        for (const auto& n : section.notes) {
-          min_dur = std::min(min_dur, n.duration);
+        for (const auto& note : section.notes) {
+          min_dur = std::min(min_dur, note.duration);
         }
-        if (min_dur == kTicksPerBeat / 2) {
-          saw_eighths = true;
-        }
-        if (min_dur == kTicksPerBeat / 4) {
-          saw_sixteenths = true;
-        }
+        EXPECT_EQ(min_dur, kTicksPerBeat / 2)
+            << "seed " << seed << " episode at bar " << (span.start_tick / kBar);
+        ++thinned_episodes;
       }
     }
-    EXPECT_TRUE(saw_eighths) << "seed " << seed;
-    EXPECT_TRUE(saw_sixteenths) << "seed " << seed;
+    EXPECT_GT(thinned_episodes, 0) << "seed " << seed;
   }
 }
 
