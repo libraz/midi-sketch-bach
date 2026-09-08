@@ -604,6 +604,56 @@ def _voice_note_table(notes: list[dict[str, int]]) -> dict[int, list[tuple[int, 
     return table
 
 
+# Voice intents that state the theme. A voice has not entered a fugue until one
+# of them sounds; anything it plays before that is accompaniment.
+THEMATIC_INTENTS = frozenset({"SubjectCarrier", "AnswerCarrier", "MiddleEntryCarrier"})
+
+
+def compute_entry_relative_silence(
+    notes: list[dict[str, int]],
+    provenance: list[dict[str, Any]],
+    voice: int,
+    fallback: float,
+) -> float:
+    """Silence ratio of ``voice`` measured from where it enters, not where it starts.
+
+    The window a voice is judged over runs from its first thematic note rather
+    than its first note of any kind. In a form whose fugue follows a prelude the
+    voice is already sounding as prelude figuration when the exposition begins,
+    so a window opened at its first onset counts the staggered entry -- the
+    voice waiting its turn, which is what an exposition is -- as though the
+    voice had dropped out mid-piece.
+
+    Returns ``fallback`` when there is no provenance to read, when the voice
+    never states the theme, or when the entry leaves no window to measure. In a
+    single-section fugue a voice's first note is already its entry, so this
+    returns the same figure the whole-span window does.
+    """
+    if not provenance or len(provenance) != len(notes):
+        return fallback
+    entry: int | None = None
+    for note, prov in zip(notes, provenance):
+        if int(note["voice"]) != voice or prov.get("voice_intent") not in THEMATIC_INTENTS:
+            continue
+        start = int(note["start_tick"])
+        entry = start if entry is None else min(entry, start)
+    if entry is None:
+        return fallback
+    spans = [
+        (int(note["start_tick"]), int(note["start_tick"]) + int(note["duration"]))
+        for note in notes
+        if int(note["voice"]) == voice and int(note["start_tick"]) >= entry
+    ]
+    if not spans:
+        return fallback
+    last = max(end for _, end in spans)
+    window = last - entry
+    if window <= 0:
+        return fallback
+    sounding = sum(end - start for start, end in spans)
+    return max(0.0, min(1.0, 1.0 - sounding / window))
+
+
 def _sounding_pitch(intervals: list[tuple[int, int, int]], tick: int) -> int | None:
     """Pitch of the latest-onset interval covering ``tick``, or None if silent."""
     found: tuple[int, int, int] | None = None
@@ -780,7 +830,9 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
         num_voices=actual_voices,
         expected_voices=expected_voices,
         max_silence_ratio=max(silence_by_voice.values(), default=0.0),
-        v2_silence_ratio=silence_by_voice.get(2, 1.0),
+        v2_silence_ratio=compute_entry_relative_silence(
+            notes, provenance, 2, silence_by_voice.get(2, 1.0)
+        ),
         max_repeated_run=max((voice.max_repeated_run for voice in metrics.voices), default=0),
         compass_violation_count=metrics.compass_violation_count,
         register_overlap_ratio=metrics.register_overlap_ratio,

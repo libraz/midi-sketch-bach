@@ -542,5 +542,66 @@ class LengthInvariantFloorTest(unittest.TestCase):
         self.assertFalse(case.passes_texture_gate)
 
 
+class EntryRelativeSilenceTest(unittest.TestCase):
+    """The third-voice silence window opens at the voice's entry, not its first note.
+
+    The axis exists to catch a voice that starves. A voice that has not stated
+    the theme yet is not starving, it is waiting its turn, and in a form whose
+    fugue follows a prelude it is already sounding as prelude figuration while
+    it waits.
+    """
+
+    @staticmethod
+    def _note(start: int, duration: int, voice: int = 2) -> dict[str, int]:
+        return {"start_tick": start, "duration": duration, "voice": voice, "pitch": 48}
+
+    def test_leading_accompaniment_before_the_entry_is_outside_the_window(self) -> None:
+        # Sounds as figuration for one bar, waits two, then enters and runs on.
+        notes = [self._note(0, 1920), self._note(5760, 1920), self._note(7680, 1920)]
+        provenance = [
+            {"voice_intent": "FigurationCarrier"},
+            {"voice_intent": "SubjectCarrier"},
+            {"voice_intent": "FigurationCarrier"},
+        ]
+        whole_span = 1.0 - (3 * 1920) / 9600
+        self.assertAlmostEqual(whole_span, 0.4)
+        self.assertEqual(
+            texture_gate.compute_entry_relative_silence(notes, provenance, 2, whole_span), 0.0
+        )
+
+    def test_a_voice_that_enters_on_its_first_note_is_unchanged(self) -> None:
+        # A single-section fugue: the window is the whole span either way, so
+        # the corrected figure has to equal the one it replaces.
+        notes = [self._note(0, 1920), self._note(3840, 1920)]
+        provenance = [
+            {"voice_intent": "SubjectCarrier"},
+            {"voice_intent": "FigurationCarrier"},
+        ]
+        whole_span = 1.0 - (2 * 1920) / 5760
+        self.assertAlmostEqual(
+            texture_gate.compute_entry_relative_silence(notes, provenance, 2, whole_span),
+            whole_span,
+        )
+
+    def test_falls_back_without_provenance_or_without_a_thematic_note(self) -> None:
+        notes = [self._note(0, 1920), self._note(5760, 1920)]
+        self.assertEqual(texture_gate.compute_entry_relative_silence(notes, [], 2, 0.75), 0.75)
+        unthematic = [{"voice_intent": "FigurationCarrier"} for _ in notes]
+        self.assertEqual(
+            texture_gate.compute_entry_relative_silence(notes, unthematic, 2, 0.75), 0.75
+        )
+
+    def test_an_answer_counts_as_an_entry(self) -> None:
+        # The exposition's second voice enters on the answer, not the subject.
+        notes = [self._note(0, 1920, voice=1), self._note(5760, 1920, voice=1)]
+        provenance = [
+            {"voice_intent": "FigurationCarrier"},
+            {"voice_intent": "AnswerCarrier"},
+        ]
+        self.assertEqual(
+            texture_gate.compute_entry_relative_silence(notes, provenance, 1, 0.75), 0.0
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
