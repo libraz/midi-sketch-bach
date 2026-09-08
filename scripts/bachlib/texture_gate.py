@@ -498,7 +498,7 @@ class GateCase:
             "generated": self.generated,
             "max_active_voices": self.max_active_voices == self.voice_count_target,
             "max_repeated_run": self.max_repeated_run <= 4,
-        "alternation_share": self.max_alternation_share <= MAX_ALTERNATION_SHARE,
+            "alternation_share": self.max_alternation_share <= MAX_ALTERNATION_SHARE,
             "parallel_perfect": self.passes_parallel,
             "model_score_v2_length_invariant": (
                 self.passes_model_score_v2_length_invariant
