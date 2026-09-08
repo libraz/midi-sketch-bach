@@ -433,18 +433,41 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
 
     const Tick sixteenth = kTicksPerBeat / 4;
     std::array<int, 4> pitches{anchor.pitch, anchor.pitch, anchor.pitch, anchor.pitch};
+    // A run needs somewhere to run to. Three sixteenths fill the beat, so the
+    // next anchor has to stand at least three scale steps off for the walk to
+    // arrive on it; nearer than that the walk reaches its target inside the beat
+    // and can only fill the rest by turning back onto the tone it just left -- a
+    // beat of a-b-a-b, which is a shake rather than a line, and the shape a
+    // stepwise counter-line would take on almost every beat. Where the run has
+    // no room the beat states the chord instead, which is the same figure the
+    // rotation already offers and needs no shape of its own.
+    const int run_target = anchors[index + 1].pitch;
+    const int toward = run_target >= anchor.pitch ? 1 : -1;
+    const int reach = toward > 0 ? detail::scaleUp(anchor.pitch, 3, mode)
+                                 : detail::scaleDown(anchor.pitch, 3, mode);
+    const bool has_room = toward > 0 ? run_target >= reach : run_target <= reach;
     if (figure == 1) {
-      const int run_target = anchors[index + 1].pitch;
-      int direction = run_target > anchor.pitch ? 1 : -1;
-      int current = anchor.pitch;
-      for (int slot = 1; slot < 4; ++slot) {
-        current =
-            direction > 0 ? detail::scaleUp(current, 1, mode) : detail::scaleDown(current, 1, mode);
-        current = std::clamp(current, band_lo, band_hi);
-        if ((direction > 0 && current >= run_target) || (direction < 0 && current <= run_target)) {
-          direction = -direction;
+      if (has_room) {
+        int current = anchor.pitch;
+        for (int slot = 1; slot < 4; ++slot) {
+          current =
+              toward > 0 ? detail::scaleUp(current, 1, mode) : detail::scaleDown(current, 1, mode);
+          pitches[static_cast<std::size_t>(slot)] = std::clamp(current, band_lo, band_hi);
         }
-        pitches[static_cast<std::size_t>(slot)] = current;
+      } else {
+        // No room to run: the beat takes its neighbour on the far side from the
+        // next anchor, returns, and steps toward it -- the ordinary
+        // written-out neighbour figure. It leaves moving toward what follows
+        // instead of away from it, and it is the only stepwise filling of this
+        // beat that does not raise the contrary repeat: a beat of leaps here
+        // arrives on perfect intervals against the entry it accompanies, and a
+        // beat that crosses over its own tone reaches them by contrary motion.
+        const int away = toward > 0 ? detail::scaleDown(anchor.pitch, 1, mode)
+                                    : detail::scaleUp(anchor.pitch, 1, mode);
+        const int into = toward > 0 ? detail::scaleUp(anchor.pitch, 1, mode)
+                                    : detail::scaleDown(anchor.pitch, 1, mode);
+        pitches = {anchor.pitch, std::clamp(away, band_lo, band_hi), anchor.pitch,
+                   std::clamp(into, band_lo, band_hi)};
       }
     } else {
       const int direction = anchor.pitch + 7 <= band_hi ? 1 : -1;

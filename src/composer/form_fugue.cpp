@@ -1899,18 +1899,20 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // every move stays +-1.
       {
         int cur = head_deg[3];
-        bool up_next = true;
         for (int slot = 4; slot < 12; ++slot) {
           const int rem = 12 - slot;    // moves left, including this one.
           const int dist = cur - (-4);  // descent still needed.
-          if (dist >= rem) {
-            --cur;
-          } else if (up_next && dist <= rem - 2) {
+          // Whatever slack the descent leaves is spent as one contiguous rise
+          // before the fall, so the figure is an arch. Spending it as alternate
+          // up and down steps instead returns the line to the tone before last
+          // on every other note, and the more slack the model has the longer
+          // that shake between two pitches runs -- which is the one shape a
+          // spun-out sixteenth figure must not settle into, since the sequence
+          // then states it once per stride for the length of the episode.
+          if (dist < rem - 1) {
             ++cur;
-            up_next = false;
           } else {
             --cur;
-            up_next = true;
           }
           model_deg[static_cast<std::size_t>(slot)] = cur;
           model_dur[static_cast<std::size_t>(slot)] = kTicksPerBeat / 4;

@@ -869,7 +869,37 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // carry under a three-voice texture, the floor rises instead of falling.
     // The fourths come down by ten with it: the line covering the bass function
     // is running in sixteenths, so it never parks for one to stand over.
-    {FormType::Fugue, 0, 0, 48, 47, 2, 0, 3, 2, 1, 54607, 152},
+    //
+    // A beat of the countersubject realized as four sixteenths used to walk
+    // toward the next anchor and reflect off it, so wherever that anchor stood
+    // a step away -- which for a stepwise counter-line is most beats -- the
+    // beat came out as a-b-a-b. Nearly half of every note the countersubject
+    // sounded lay inside a two-pitch shake of four notes or longer, against a
+    // reference three-voice fugue that keeps a whole voice under a sixth of
+    // its notes there and states its own subjects and answers with none at
+    // all. A beat with no room to run now takes the neighbour on the far side
+    // from the next anchor and steps back into it, and the share falls to a
+    // seventh. Every other filling measured worse where it matters most: a
+    // beat of leaps, or one that crosses back over its own tone, reaches
+    // perfect intervals by contrary motion and multiplies the contrary repeat
+    // several times over. This one leaves that column alone, and the hidden,
+    // battuta and second-inversion columns all fall beside it.
+    //
+    // The episode's spun sixteenth figure walks down to its floor, and where
+    // the descent left it slack it used to spend that slack on alternate up
+    // and down steps -- which returns the line to the tone before last on
+    // every other note, so the wider the slack the longer the two-pitch shake
+    // ran, once per stride for the length of the episode. The slack is now one
+    // contiguous rise before the fall, an arch, and the share of the
+    // Fortspinnung's notes lying inside a shake falls from over four tenths to
+    // under a sixth. Hidden approaches fall by more than a quarter with the
+    // worst hidden cell, battuta falls, and the second inversions rise by ten:
+    // an arch reaches a step higher than the zigzag did, so it meets the
+    // voices under it in places the flatter figure never went. Counting the
+    // fourths over a held bass directly shows the population itself barely
+    // moves -- the figure is not manufacturing them, it is standing on more of
+    // the ones the form already had.
+    {FormType::Fugue, 0, 0, 31, 38, 2, 0, 2, 2, 1, 54480, 150},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -948,7 +978,19 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // most. The contrary repeat is the one column that rises, by two, and it is
     // the same trade the fugue row pays -- a countersubject kept off the fourth
     // sometimes reaches its tone from the other side.
-    {FormType::PreludeAndFugue, 0, 0, 12, 32, 5, 0, 2, 2, 1, 31885, 53},
+    //
+    // The countersubject's neighbour-turn beat reaches this form's fugue half
+    // too: battuta and the contrary repeat both fall, and the one second
+    // inversion it adds is a beat that now closes a step under the anchor it
+    // hands to instead of on the tone it started from.
+    //
+    // The arched Spielfigur reaches this form's fugue half as well, and here
+    // it is bought rather than free: battuta rises by five and the second
+    // inversions by twelve against an unmoved hidden column. This half is
+    // twenty bars against the fugue's forty-four, so its episodes carry a
+    // larger share of the piece and the figure's wider reach is felt across
+    // more of it.
+    {FormType::PreludeAndFugue, 0, 0, 12, 35, 3, 0, 2, 2, 1, 31903, 66},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1225,7 +1267,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // repeat by half, the worst contrary cell to one, and the fourths by a
     // third. The floor falls by the filler bars. Both cardinal columns stand at
     // the same 84, which remains the deliberate octave doubling.
-    {FormType::ToccataAndFugue, 84, 84, 13, 12, 6, 7, 2, 1, 1, 28019, 210},
+    //
+    // The countersubject's neighbour-turn beat costs this form one hidden
+    // approach and three second inversions against a floor that rises. The
+    // cardinal columns are unmoved: the doubled toccata line above is what
+    // holds this row's octaves, and the counter-line below it does not reach
+    // them.
+    {FormType::ToccataAndFugue, 84, 84, 14, 12, 6, 7, 2, 1, 1, 28030, 213},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1384,7 +1432,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // one, and the fourths by two fifths -- this form kept the largest contrary
     // column in the table, and a good part of it turns out to have been the
     // third voice answering an entry it had no business accompanying.
-    {FormType::FantasiaAndFugue, 0, 0, 7, 0, 14, 0, 1, 0, 1, 28643, 290},
+    //
+    // The same beat costs this form two hidden approaches and three second
+    // inversions. Its battuta column stays at zero, which is where the
+    // fantasia's own writing keeps it.
+    {FormType::FantasiaAndFugue, 0, 0, 9, 0, 14, 0, 1, 0, 1, 28654, 293},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1778,7 +1830,25 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // approaches pay for is a bass that stops: the reference three-voice fugues
     // rest theirs for about a tenth of the piece, and this one rested it for
     // none of it.
-    {FormType::Fugue, 0, 0, 190, 260, 18, 0, 3, 4, 1, 470406, 1768},
+    //
+    // The countersubject's neighbour-turn beat pays for itself on this axis on
+    // the approach columns and charges for it on the vertical one: hidden falls
+    // by a tenth of itself and battuta by a twenty-fifth, the contrary repeat
+    // does not move, and the second inversions rise by twenty-six. That is the
+    // dearer class of the three by the corpus weighting, so the trade is stated
+    // rather than assumed -- what it buys is not another column but the line
+    // itself, the piece's one recurring counter-identity, which had spent close
+    // to half of every note it sounded shaking between two pitches. At the
+    // natural length the same change takes the second inversions DOWN by twelve;
+    // only a stretched fugue, which restates the countersubject over more
+    // entries, ends up paying for it here.
+    //
+    // The arched Spielfigur pays here the way it does on the form row: hidden
+    // falls by a fourteenth, and battuta, the contrary repeat and the second
+    // inversions each rise by a fiftieth or less. A stretched fugue is mostly
+    // episode, so the figure states itself more often and both sides of the
+    // trade grow together rather than one outrunning the other.
+    {FormType::Fugue, 0, 0, 158, 256, 22, 0, 3, 4, 1, 469773, 1806},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1835,7 +1905,19 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // untouched by it. Here every column falls: battuta by a thirteenth with
     // its worst cell, the fourths by twenty-seven, and the hidden approach the
     // fugue row pays does not appear at all, against a floor that rises.
-    {FormType::PreludeAndFugue, 0, 0, 109, 217, 7, 0, 3, 3, 1, 418395, 1009},
+    //
+    // The same beat, and this form pays more of it than the fugue does: battuta
+    // and the contrary repeat fall, while hidden rises by twelve with its worst
+    // cell and the second inversions by fifteen. Its prelude half contributes
+    // no counter-line at all, so the change reaches a smaller share of the
+    // piece while the entries it does reach are packed into it more tightly.
+    //
+    // The arched Spielfigur takes this row's hidden column down by a seventh
+    // and its worst hidden cell with it, and charges sixty-two second
+    // inversions for it -- the largest single rise any of these rows carries.
+    // This form spends the greatest share of itself in episode, and the figure
+    // is what an episode is made of.
+    {FormType::PreludeAndFugue, 0, 0, 104, 213, 5, 0, 3, 3, 1, 418162, 1086},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
