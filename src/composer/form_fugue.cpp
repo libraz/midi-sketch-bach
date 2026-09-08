@@ -2025,24 +2025,37 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
       pushSpan(asm_ctx, 0, ep_start, ep_start + ep_len - 1, VoiceIntent::FortspinnungSpan);
 
-      // Episodes carry BOTH a V1 figuration and a V2 bass under the V0
-      // Fortspinnung, so all three voices sound through the development instead
-      // of leaving the middle and/or bass register empty. Both accompaniment
-      // voices are verbatim Material whose strong beats anchor on chord tones
-      // consonant with the concurrent theme tones. With all three voices fixed,
-      // the validator skips every inter-voice rule but voice_crossing, which the
-      // disjoint per-voice bands already prevent; a free Compose bass here would
-      // be forced into parallels against the fast figuration and rest, thinning
-      // the texture. The V1 figuration alternates its subdivision tier
-      // (eighths / sixteenths) across episodes and rotates its register
-      // offset, so the development's counterlines vary audibly and the
-      // piece keeps its sixteenth-note duration mass; the V2 bass walks in
-      // quarter-note chord roots a register below it.
-      const int v1_notes_per_beat = (cycle % 2 == 1) ? 4 : 2;
-      addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
-                        v1_notes_per_beat, (fig_offset + cycle) % 4);
-      addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode, 1,
-                        fig_offset);
+      // The episode thins to the outer pair: the middle voice rests through it
+      // and returns with the next subject statement, so the reduction marks the
+      // form instead of one texture running end to end. Among the three-voice
+      // fugues in the reference corpus the middle voice is the one that drops --
+      // it is silent for roughly a third of the piece and accounts for about
+      // sixty percent of every two-voice moment, while the outer pair carries
+      // the sequence. The episode that leads into the coda keeps all three so
+      // the home return arrives on a full texture.
+      //
+      // The V2 bass stays under every episode. It is a verbatim Material
+      // scalar-wave whose strong beats anchor on chord tones consonant with the
+      // concurrent theme tones; being Material it skips every inter-voice rule
+      // but voice_crossing, which the disjoint per-voice bands already prevent.
+      // A free Compose bass here would instead be forced into parallels against
+      // the fast figuration above it. It walks in eighths rather than quarters
+      // where the middle voice is out, because there it is half of a two-part
+      // texture rather than the support under a three-voice one -- and because
+      // a bass with one fewer line to answer settles on a repeated pitch, which
+      // is what turns a passing fourth above it into a standing second
+      // inversion. Where the V1 figuration does sound it alternates its
+      // subdivision tier (eighths / sixteenths) across episodes and rotates its
+      // register offset, so the development's counterlines vary audibly and the
+      // piece keeps its sixteenth-note duration mass.
+      const bool episode_keeps_middle = cycle + 1 >= static_cast<int>(development_windows.size());
+      if (episode_keeps_middle) {
+        const int v1_notes_per_beat = (cycle % 2 == 1) ? 4 : 2;
+        addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
+                          v1_notes_per_beat, (fig_offset + cycle) % 4);
+      }
+      addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
+                        episode_keeps_middle ? 1 : 2, fig_offset);
     }
   }
 
