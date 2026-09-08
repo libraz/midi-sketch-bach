@@ -1,6 +1,6 @@
 {
   "name": "@libraz/midi-sketch-bach",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "packageManager": "yarn@4.18.0",
   "description": "Bach Instrumental MIDI Generator - WASM library",
