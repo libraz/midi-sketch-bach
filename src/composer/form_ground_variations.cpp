@@ -861,8 +861,12 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     line_prev = prev_emitted;
   }
   int cursor = (band_lo + band_hi) / 2;
+  // Prevailing direction of the off-beat walk, held across beats and bars so a
+  // run reads as one line rather than as a fresh gesture every beat.
+  int walk_dir = 1;
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
+  std::vector<int> ladder;
 
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
@@ -906,6 +910,65 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       }
       return from;
     };
+    // Every tone the fill may take over this bar's ground, low to high: a scale
+    // tone inside the band that is consonant with the held ground note. The
+    // fill walks this ladder rather than circling one companion tone, so the
+    // line states the harmony across its whole register instead of trilling a
+    // single interval; over a bar-long ground the ladder is a broken chord,
+    // which is what a middle voice realising the harmony writes.
+    // Consonance with the ground is read with the bass-sensitive table, not the
+    // upper-voice one: this line's band sits above the ground by construction,
+    // so the ground IS the bass under every tone here, and the perfect fourth
+    // the upper-voice table admits is a dissonance the held ground never
+    // resolves.
+    auto clean_over_ground = [&](int cand) {
+      const int lifted = plan.ground_pc + 12 * ((cand - plan.ground_pc) / 12);
+      return rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
+                                                static_cast<std::uint8_t>(lifted));
+    };
+    ladder.clear();
+    for (int cand = band_lo; cand <= band_hi; ++cand) {
+      if (detail::inScale(cand, mode) && clean_over_ground(cand))
+        ladder.push_back(cand);
+    }
+    // The rung nearest a pitch, so the walk can start from whatever the beat
+    // anchor selector chose -- the anchor is vetted against the other voices
+    // and need not sit on the ladder at all.
+    auto rung_of = [&](int from) {
+      int best = 0;
+      for (int idx = 1; idx < static_cast<int>(ladder.size()); ++idx) {
+        if (std::abs(ladder[static_cast<std::size_t>(idx)] - from) <
+            std::abs(ladder[static_cast<std::size_t>(best)] - from))
+          best = idx;
+      }
+      return best;
+    };
+    // A rung a fixed offset away, or -1 when the ladder ends first. Used by the
+    // parallel escape below, which must be able to look either way along the
+    // walk without committing the walk to a new direction.
+    auto rung_at = [&](int from, int offset) {
+      if (ladder.empty())
+        return -1;
+      const int rung = rung_of(from) + offset;
+      if (rung < 0 || rung >= static_cast<int>(ladder.size()))
+        return -1;
+      return ladder[static_cast<std::size_t>(rung)];
+    };
+    // One rung on, reversing at either end of the ladder so the line turns
+    // round inside the band instead of stalling against its edge.
+    auto walk_step = [&](int from, int& direction) {
+      if (ladder.empty())
+        return from;
+      const int here = rung_of(from);
+      int next_rung = here + direction;
+      if (next_rung < 0 || next_rung >= static_cast<int>(ladder.size())) {
+        direction = -direction;
+        next_rung = here + direction;
+      }
+      if (next_rung < 0 || next_rung >= static_cast<int>(ladder.size()))
+        return from;
+      return ladder[static_cast<std::size_t>(next_rung)];
+    };
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -931,17 +994,19 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       int anchor = consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches,
                                       line_prev, motions, mode, /*downbeat=*/beat == 0);
       // Adjacent bars whose chords share a tone near the band centre can pin
-      // the nearest-tone anchor chain to ONE pitch for many beats; at the
-      // quarter-note tier that surfaces as a stalled repeated-note line. Any
-      // repeated quarter anchor is displaced to the nearest DIFFERENT triad
-      // tone in band that is ALSO consonant against every concurrently
-      // sounding voice (a triad tone is always consonant with the ground, but
-      // the V0 wave may sit on a non-chord tone -- a 6th over the ground --
-      // that clashes with one triad member and not another): the reference
-      // corpus almost never repeats a pitch, so even a pair reads as a stall.
-      // When no admissible different tone exists the repeat
-      // stands -- a repeated consonance beats a fresh clash.
-      if (notes_per_beat == 1 && anchor == line_prev) {
+      // the nearest-tone anchor chain to ONE pitch for many beats. At the
+      // quarter-note tier that surfaces as a stalled repeated-note line; where
+      // the beat is subdivided it is worse, because every beat then restates
+      // the same two tones and whole bars settle onto one interval. Any
+      // repeated anchor is displaced to the nearest DIFFERENT triad tone in
+      // band that is ALSO consonant against every concurrently sounding voice
+      // (a triad tone is always consonant with the ground, but the V0 wave may
+      // sit on a non-chord tone -- a 6th over the ground -- that clashes with
+      // one triad member and not another): the reference corpus almost never
+      // repeats a pitch, so even a pair reads as a stall. When no admissible
+      // different tone exists the repeat stands -- a repeated consonance beats
+      // a fresh clash.
+      if (anchor == line_prev) {
         for (int dist = 1; dist <= 12; ++dist) {
           bool placed = false;
           for (int cand : {anchor + dist, anchor - dist}) {
@@ -1067,27 +1132,21 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           }
         }
       }
-      // Off-beat fills oscillate between the anchor and a consonant companion
-      // tone: prefer a stepwise diatonic neighbour that is consonant against
-      // the held ground (upper first -- the common figure), falling back to
-      // the nearest other triad tone (a broken third) when both neighbours
-      // clash. A blind diatonic upper-neighbour oscillation proved too harsh
-      // here: it hammered a sustained 9th/7th against the bar-long ground note
-      // under the running V0 figuration.
-      int osc = -1;
-      for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode)}) {
-        if (cand >= band_lo && cand <= band_hi && isConsonantIc(cand - plan.ground_pc)) {
-          osc = cand;
-          break;
-        }
-      }
-      if (osc < 0)
-        osc = nearest_other_chord_tone(anchor);
+      // Off-beat fills walk the ladder built above: each one is a rung on from
+      // the tone that just sounded, so the beat carries the line somewhere
+      // instead of restating a pair. The alternative -- an anchor and one fixed
+      // companion tone -- states two pitches for the whole beat, and because
+      // the anchor selector prefers the tone nearest the last one it kept
+      // restating the same two across whole bars; a blind diatonic
+      // upper-neighbour oscillation is harsher still, hammering a sustained
+      // 9th/7th against the bar-long ground note under the running V0
+      // figuration. Every rung is consonant with the held ground by
+      // construction, so the walk buys its variety without adding a clash.
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
-        int pitch = (sub % 2 == 1) ? osc : anchor;
+        int pitch = (sub == 0) ? anchor : walk_step(prev_emitted, walk_dir);
         // Every off-beat tone moves concurrently with the V0 sixteenths, so all
         // of them need the same audible-grain parallel re-check as the beat
         // anchor: when the tone lands a parallel against a concurrently moving
@@ -1103,11 +1162,14 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
                                      /*voice=*/1, /*num_voices=*/3, motions);
           // The true parallel and the hidden perfect sit on separate rungs. The
-          // companion vocabulary here is four tones wide and each must still be
-          // consonant with the held ground, so demanding full freedom regularly
-          // rejects all four and leaves the design tone in place -- including
-          // when that tone is the true parallel and a merely hidden companion
-          // was available. Take the mildest fault the vocabulary can reach.
+          // vocabulary here is four tones wide and each must still be consonant
+          // with the held ground, so demanding full freedom regularly rejects
+          // all four and leaves the design tone in place -- including when that
+          // tone is the true parallel and a merely hidden companion was
+          // available. Take the mildest fault the vocabulary can reach. The
+          // contrary classes the beat anchor ranks are absent here on purpose:
+          // the first candidate below turns the walk round, so they would seem
+          // to belong, but adding them changes not one tone the sweep ships.
           constexpr int kOscClean = 0;
           constexpr int kOscHidden = 1;
           constexpr int kOscParallel = 2;
@@ -1121,19 +1183,21 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             }
             return worst;
           };
-          // The anchor is the last candidate, not one of the first: repeating
-          // it flattens the oscillation into a held tone, which is why the
-          // neighbours and the broken third are tried ahead of it. But an
-          // oblique repeat cannot form a parallel with anything, so where the
-          // whole companion vocabulary is tied it is the one escape left.
+          // The escape looks along the walk first -- the rung the other way,
+          // then the rung the design tone skipped over -- before leaving the
+          // ladder for a chord tone. Repeating the tone that just sounded is
+          // the last candidate, not one of the first: it flattens the walk into
+          // a held tone. But an oblique repeat cannot form a parallel with
+          // anything, so where the whole vocabulary is tied it is the one
+          // escape left.
           const int design_rank = osc_fault_rank(pitch);
           for (int accept = kOscClean; accept < design_rank; ++accept) {
             bool placed = false;
-            for (int cand : {detail::scaleUp(anchor, 1, mode), detail::scaleDown(anchor, 1, mode),
-                             nearest_other_chord_tone(anchor), anchor}) {
-              if (cand == pitch || cand < band_lo || cand > band_hi)
+            for (int cand : {rung_at(prev_emitted, -walk_dir), rung_at(prev_emitted, 2 * walk_dir),
+                             nearest_other_chord_tone(pitch), prev_emitted}) {
+              if (cand < 0 || cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
-              if (!isConsonantIc(cand - plan.ground_pc))
+              if (!clean_over_ground(cand))
                 continue;
               if (osc_fault_rank(cand) > accept)
                 continue;
@@ -1149,9 +1213,9 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           // ear has not already accepted one sixteenth earlier -- which is why
           // it is exempt from the ground-consonance test the fresh candidates
           // take, and how it escapes bars whose chord puts a tritone between the
-          // companion tone and the ground. It ranks below the anchor's own
-          // return because a repeat flattens the oscillation; only a true
-          // parallel is worth that.
+          // companion tone and the ground. It ranks below every rung of the
+          // walk because a repeat flattens the line; only a true parallel is
+          // worth that.
           if (osc_fault_rank(pitch) == kOscParallel)
             pitch = prev_emitted;
         }

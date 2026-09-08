@@ -1343,6 +1343,79 @@ void expectMultiWaveValidatesOk(FormType form) {
   }
 }
 
+// Share of a line's notes lying inside a two-pitch alternation of four or more
+// notes -- a line that keeps returning to the tone before last is shaking
+// rather than moving. A tone restated on the next subdivision is one sound, so
+// a repeat does not advance the figure.
+double shakeShare(const std::vector<MaterialNote>& notes) {
+  std::vector<int> heard;
+  for (const MaterialNote& note : notes) {
+    const int pitch = static_cast<int>(note.pitch);
+    if (heard.empty() || heard.back() != pitch) {
+      heard.push_back(pitch);
+    }
+  }
+  if (heard.size() < 4) {
+    return 0.0;
+  }
+  std::vector<bool> shaken(heard.size(), false);
+  auto mark = [&shaken](std::size_t end, std::size_t run) {
+    if (run + 2 < 4) {
+      return;
+    }
+    for (std::size_t idx = end - run - 2; idx < end; ++idx) {
+      shaken[idx] = true;
+    }
+  };
+  std::size_t run = 0;
+  for (std::size_t idx = 2; idx < heard.size(); ++idx) {
+    if (heard[idx] == heard[idx - 2] && heard[idx] != heard[idx - 1]) {
+      ++run;
+      continue;
+    }
+    mark(idx, run);
+    run = 0;
+  }
+  mark(heard.size(), run);
+  return static_cast<double>(std::count(shaken.begin(), shaken.end(), true)) /
+         static_cast<double>(heard.size());
+}
+
+// The middle voice realises the harmony the ground implies. Written as a beat
+// anchor and one companion tone struck alternately it states two pitches for
+// the whole beat, and because the anchor selector prefers the tone nearest the
+// last one the same pair outlives the beat: whole bars settle onto a single
+// interval. It walks the tones the held ground admits instead.
+//
+// The ceiling is what the reference corpus's own three-voice middle voices
+// write over a line of this length -- roughly a hundred notes, where their
+// ninety-fifth percentile share is 0.396. The share depends on how long the
+// line is, so a shorter line would be judged against a larger figure.
+void expectMiddleVoiceWalks(FormType form) {
+  constexpr double kCorpusShakeShare = 0.396;
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = build(form, seed, minor, 0);
+      for (const TrioVoiceLine& line : fx.material.trio_voices) {
+        if (line.notes.size() < 24) {
+          continue;
+        }
+        EXPECT_LE(shakeShare(line.notes), kCorpusShakeShare)
+            << "form " << static_cast<int>(form) << " seed " << seed << " minor " << minor
+            << ": the middle voice oscillates between two pitches instead of walking";
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, MiddleVoiceWalksInsteadOfShaking) {
+  expectMiddleVoiceWalks(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MiddleVoiceWalksInsteadOfShaking) {
+  expectMiddleVoiceWalks(FormType::Passacaglia);
+}
+
 TEST(GroundVariationChaconne, MultiWaveValidatesAcrossSeeds) {
   expectMultiWaveValidatesOk(FormType::Chaconne);
 }

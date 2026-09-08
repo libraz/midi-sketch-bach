@@ -759,6 +759,18 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // detection blind to a bar-initial tone carried over from the previous bar.
   int recent_pitches[4] = {-1, -1, -1, -1};
   int emitted_count = 0;
+  // The last three DISTINCT pitches, oldest first, used to see the shake at the
+  // grain the ear hears it: a tone restated on the next subdivision is one
+  // sound, not two, since the span coalesces consecutive same pitches before
+  // anything hears them. Kept apart from the window above, which counts
+  // emissions because the beat-grain breaker is calibrated on them.
+  int heard[3] = {-1, -1, -1};
+  // Whether taking `cand` would put a fourth note on a two-pitch alternation:
+  // a-b-a and back to b. The plain neighbour return a-b-a is not one -- it is
+  // an ordinary figure -- so three notes are never enough to say.
+  auto completes_shake = [&heard](int cand) {
+    return heard[0] >= 0 && heard[0] == heard[2] && heard[1] != heard[2] && cand == heard[1];
+  };
   // This line's previous beat anchor, used to judge whether the next anchor
   // moves in parallel with an earlier voice. Seeded from prev_anchor (the prior
   // bar's last anchor) so the bar-boundary beat is also parallel-checked.
@@ -1283,12 +1295,20 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           // acceptance, so a clean tone later in the list still beats a merely
           // better one earlier in it, and nothing is taken that does not improve
           // on what the wave was about to emit.
+          //
+          // The reversed step gives up its place when it would complete a
+          // two-pitch alternation. Escaping a fault by turning round is how the
+          // wave arrives at a shake in the first place: turn round on every
+          // other note and the line states two pitches and nothing else. The
+          // skip is tried at the SAME acceptance level, so this reorders two
+          // candidates the escape already holds equal and never buys the change
+          // with a worse approach.
           const int reversed = step_from(-dir);
           const int skip_up = detail::scaleUp(from, 2, mode);
           const int skip_down = detail::scaleDown(from, 2, mode);
           bool escaped = false;
           for (int accept = kStepClean; accept < next_rank && !escaped; ++accept) {
-            if (step_rank(reversed) <= accept) {
+            if (step_rank(reversed) <= accept && !completes_shake(reversed)) {
               dir = -dir;
               next = reversed;
               escaped = true;
@@ -1317,6 +1337,14 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
                 break;
               }
             }
+          }
+          // The shake is a preference and the perfect-motion prohibition is not:
+          // where holding the reversed step back left the escape with nothing,
+          // it is taken anyway rather than ship the fault it was called to
+          // remove.
+          if (!escaped && step_rank(reversed) < next_rank) {
+            dir = -dir;
+            next = reversed;
           }
         }
         // Harshness-aware wave: a passing tone that lands a minor 2nd, tritone,
@@ -1372,10 +1400,13 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         if (harsh_rank < kStepHidden && wave_is_harsh(next)) {
           ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
-          if (step_rank(reversed) <= harsh_rank && !wave_is_harsh(reversed)) {
-            dir = -dir;
-            next = reversed;
-          } else {
+          const bool reversed_ok = step_rank(reversed) <= harsh_rank && !wave_is_harsh(reversed);
+          // As in the parallel escape above, the reversed step yields to the
+          // skip where it would complete a two-pitch alternation -- both are
+          // equally admissible there, and turning round on every other note is
+          // how the wave writes a shake.
+          bool skipped = false;
+          if (!reversed_ok || completes_shake(reversed)) {
             // Both single steps clash (or the reversed step lands a parallel):
             // try a third-skip in either direction before accepting the clash.
             // A scale-third skip is the smallest non-step move and reads as an
@@ -1388,9 +1419,14 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               }
               if (step_rank(skip) <= harsh_rank && !wave_is_harsh(skip)) {
                 next = skip;
+                skipped = true;
                 break;
               }
             }
+          }
+          if (!skipped && reversed_ok) {
+            dir = -dir;
+            next = reversed;
           }
         }
         // Keep the per-tick voice order V0 >= V1 >= V2: clamp the wave note below
@@ -1444,6 +1480,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       prev_emitted = pitch;
       recent_pitches[emitted_count % 4] = pitch;
       ++emitted_count;
+      if (heard[2] != pitch) {
+        heard[0] = heard[1];
+        heard[1] = heard[2];
+        heard[2] = pitch;
+      }
       addNote(section.notes, tick, step, pitch);
       // Register this figuration note so a voice placed later in the same window
       // can read what this line sounds and avoid a parallel against it.

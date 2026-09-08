@@ -899,7 +899,26 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourths over a held bass directly shows the population itself barely
     // moves -- the figure is not manufacturing them, it is standing on more of
     // the ones the form already had.
-    {FormType::Fugue, 0, 0, 31, 38, 2, 0, 2, 2, 1, 54480, 150},
+    //
+    // The figuration wave escapes a parallel, and a harsh clash, by reversing
+    // its step, and that is how it arrives at a shake of its own: turn round on
+    // every other note and the line states two pitches and nothing else. The
+    // reversed step now gives up its place to the third-skip whenever it would
+    // put a fourth note on a two-pitch alternation -- at the SAME acceptance
+    // level, so this reorders two candidates the escape already held equal and
+    // never buys the change with a worse approach. Where holding it back leaves
+    // the escape empty the reversal is taken anyway: the shake is a preference
+    // and the perfect-motion prohibition is not.
+    //
+    // Hidden approaches are RAISED by four and that is the price. A skip
+    // reaches a tone the step did not, and against a voice moving with it that
+    // is one more approach to a perfect interval; the same trade at length adds
+    // seventeen. What comes back is larger in every other column: the battuta
+    // falls by two, the fourths over a held bass by four, the floor RISES by
+    // seventy-two, and the figuration line's worst shake share drops from four
+    // hundredths above the share the reference corpus writes at that line
+    // length to seven hundredths below it.
+    {FormType::Fugue, 0, 0, 35, 36, 2, 0, 2, 2, 1, 54552, 146},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1373,7 +1392,34 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // of them, at a bar head where the corpus writes a step, plus both
     // contrary-repeat arrivals -- and what comes back is ten fourths above a
     // bass that parks under them.
-    {FormType::Passacaglia, 0, 0, 20, 9, 0, 0, 1, 1, 0, 27386, 166},
+    //
+    // The middle voice this form shares with the chaconne used to be written as
+    // a beat anchor and one companion tone struck alternately. Because the
+    // anchor selector prefers the tone nearest the last one, the pair outlived
+    // the beat: whole bars settled onto a single interval, and in the worst
+    // statement nine of every ten of the line's notes lay inside a two-pitch
+    // shake. It now walks a ladder -- the scale tones inside its band that the
+    // held ground admits -- one rung per off-beat tone, and a repeated anchor is
+    // displaced at every subdivision instead of only where the line moves in
+    // quarters. The middle voice of a three-voice work in the reference corpus
+    // writes that figure over about seven notes in a hundred and never past
+    // thirty-five; this line falls from ninety-three in a hundred to twenty-eight,
+    // and from sixty-two to ten across the sweep as a whole.
+    //
+    // The ladder reads the ground with the bass table rather than the
+    // upper-voice one, the ground being the bass under every tone this line can
+    // take, so the vertical column falls by sixteen and the battuta column by
+    // one. Two columns are RAISED and that is the price. Hidden approaches rise
+    // by four: the walk visits more of the band than the pair did, and a line
+    // that moves reaches perfect intervals a line that circles never approached.
+    // The contrary repeat leaves zero for four, all of them one geometry -- the
+    // variation leaping up a fifth into a bar head while the middle voice's
+    // anchor falls onto a fifth against it -- and at four across the whole sweep
+    // that is a rate the corpus tolerates many times over. The strict columns
+    // stay empty. The floor falls by twelve because the displaced anchors
+    // occasionally land on a pitch the line already sounds, and a repeat is one
+    // onset where there were two.
+    {FormType::Passacaglia, 0, 0, 24, 8, 4, 0, 1, 1, 1, 27374, 150},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1436,7 +1482,13 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The same beat costs this form two hidden approaches and three second
     // inversions. Its battuta column stays at zero, which is where the
     // fantasia's own writing keeps it.
-    {FormType::FantasiaAndFugue, 0, 0, 9, 0, 14, 0, 1, 0, 1, 28654, 293},
+    //
+    // The figuration wave's escape reordering described on the bare fugue's row
+    // reaches here, and this form is the only one of the four it costs
+    // anything: every perfect column holds and the floor falls by four, because
+    // a skip taken instead of a reversal occasionally lands the pitch the voice
+    // beside it already sounds, and a repeat is one onset where there were two.
+    {FormType::FantasiaAndFugue, 0, 0, 9, 0, 14, 0, 1, 0, 1, 28650, 293},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1520,7 +1572,15 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // in the line means fewer positions it will decorate, so the array it hands
     // on carries forty fewer notes across a thirty-two cell sample and five more
     // rests. The counterpoint under the decoration is the same counterpoint.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18801, 43},
+    //
+    // The walking middle voice described on the passacaglia row reaches here
+    // too, and here it costs nothing at all: every perfect column stays at zero,
+    // the vertical column falls by three, and the floor RISES by a hundred and
+    // seventy-seven -- a line that walks states a pitch where the alternation
+    // restated one, so there are more pairs to examine. Its shake falls from
+    // eighty-one notes in a hundred to forty-six, and from forty-six to
+    // twenty-seven across the sweep.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18978, 40},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1848,7 +1908,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // inversions each rise by a fiftieth or less. A stretched fugue is mostly
     // episode, so the figure states itself more often and both sides of the
     // trade grow together rather than one outrunning the other.
-    {FormType::Fugue, 0, 0, 158, 256, 22, 0, 3, 4, 1, 469773, 1806},
+    //
+    // The wave's escape reordering described on the form row costs this axis
+    // seventeen hidden approaches, its largest single charge, and a stretched
+    // fugue is where it would be: the wave IS the episode and the episode is
+    // most of the piece. Against it the battuta column falls by twenty, the
+    // fourths over a held bass by thirty-four, and the floor rises by
+    // ninety-three -- the skip states a pitch where the reversal restated one.
+    {FormType::Fugue, 0, 0, 175, 236, 22, 0, 3, 4, 1, 469866, 1772},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1917,7 +1984,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // inversions for it -- the largest single rise any of these rows carries.
     // This form spends the greatest share of itself in episode, and the figure
     // is what an episode is made of.
-    {FormType::PreludeAndFugue, 0, 0, 104, 213, 5, 0, 3, 3, 1, 418162, 1086},
+    //
+    // The wave's escape reordering charges this row one hidden approach and one
+    // contrary repeat, and drops the floor by sixty-one, against a battuta
+    // column that falls by twelve and fourths that hold exactly. Its prelude
+    // half runs the same wave as its fugue half, so the change reaches the whole
+    // piece here rather than half of it, and the columns move in small amounts
+    // in both directions instead of one of them carrying the trade.
+    {FormType::PreludeAndFugue, 0, 0, 105, 201, 6, 0, 3, 3, 1, 418101, 1086},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

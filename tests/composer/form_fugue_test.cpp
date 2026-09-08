@@ -623,6 +623,45 @@ std::vector<MaterialNote> bassSupportNotes(const HarnessFixture& fx, VoiceId voi
   return {};
 }
 
+// Share of a line's notes lying inside a two-pitch alternation of four or more
+// notes -- a line that keeps returning to the tone before last is shaking
+// rather than moving. A tone restated on the next subdivision is one sound, not
+// two, and a span coalesces consecutive same pitches before anything hears
+// them, so a repeat does not advance the figure.
+double shakeShare(const std::vector<MaterialNote>& notes) {
+  std::vector<int> heard;
+  for (const MaterialNote& note : notes) {
+    const int pitch = static_cast<int>(note.pitch);
+    if (heard.empty() || heard.back() != pitch) {
+      heard.push_back(pitch);
+    }
+  }
+  if (heard.size() < 4) {
+    return 0.0;
+  }
+  std::vector<bool> shaken(heard.size(), false);
+  auto mark = [&shaken](std::size_t end, std::size_t run) {
+    if (run + 2 < 4) {
+      return;
+    }
+    for (std::size_t idx = end - run - 2; idx < end; ++idx) {
+      shaken[idx] = true;
+    }
+  };
+  std::size_t run = 0;
+  for (std::size_t idx = 2; idx < heard.size(); ++idx) {
+    if (heard[idx] == heard[idx - 2] && heard[idx] != heard[idx - 1]) {
+      ++run;
+      continue;
+    }
+    mark(idx, run);
+    run = 0;
+  }
+  mark(heard.size(), run);
+  return static_cast<double>(std::count(shaken.begin(), shaken.end(), true)) /
+         static_cast<double>(heard.size());
+}
+
 // Sign (+1 / 0 / -1) of each consecutive melodic step in a pitch line.
 std::vector<int> stepSigns(const std::vector<int>& pitches) {
   std::vector<int> signs;
@@ -2585,6 +2624,31 @@ TEST(FormFugueTest, PreludeAndFugueDeclaresSectionBoundary) {
 // back to the normal wave when no consonant candidate exists (graceful
 // degradation), so the assertion is a "feature is alive" guard: the held tone
 // must appear for at least half of the tested seeds.
+TEST(FormFugueTest, ExpositionFigurationDoesNotSettleIntoTwoPitches) {
+  // The wave escapes a parallel, and a sharp clash, by reversing its step, and
+  // reversing on every other note IS a two-pitch shake -- so the escape has to
+  // prefer the third-skip where the reversal would make one.
+  //
+  // The ceiling is what the reference fugues write over a line this short: the
+  // share depends on how long the line is (a four-bar span has room for one
+  // figure and little else, so a single ordinary shake fills a large fraction
+  // of it), and at twenty-odd notes their ninety-fifth percentile is 0.583.
+  constexpr double kCorpusShakeShare = 0.583;
+  const std::uint16_t bars = naturalBars(FormType::Fugue);
+  const Tick span_start = 8u * kBar;
+  const Tick span_end = 12u * kBar;
+  // Twenty seeds rather than the eight most of these tests take: the span is
+  // four bars, so a seed's figuration either falls into the pattern or does not,
+  // and eight seeds is too few for one of them to.
+  for (std::uint32_t seed = 1; seed <= 20; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, bars);
+    const std::vector<MaterialNote> notes = bassSupportNotes(fx, /*voice=*/0, span_start, span_end);
+    ASSERT_FALSE(notes.empty()) << "seed " << seed << " has no V0 exposition figuration";
+    EXPECT_LE(shakeShare(notes), kCorpusShakeShare)
+        << "seed " << seed << ": the exposition figuration is mostly a two-pitch shake";
+  }
+}
+
 TEST(FormFugueTest, ExpositionFiguresCloseOnStrongBeatHalfNote) {
   const std::uint16_t bars = naturalBars(FormType::Fugue);
   // The plain fugue starts at bar 0, so the V0 exposition figuration span is
