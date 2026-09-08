@@ -589,6 +589,20 @@ class AlternationShareTest(unittest.TestCase):
         self.assertEqual(shares["v0/FigurationCarrier"], 1.0)
         self.assertEqual(shares["v1/SubjectCarrier"], 0.0)
 
+    def test_a_trill_realization_is_not_read_as_a_shake(self) -> None:
+        # A trill is an alternation of two pitches by definition. Counting its
+        # realization would report the worst shake in the piece wherever the
+        # composed line carries a long tone worth decorating.
+        line = [60 + (index % 8) for index in range(32)] + [72, 74] * 16
+        provenance = [
+            {"voice_intent": "MiddleEntryCarrier", "source": "Material"} for _ in range(32)
+        ]
+        provenance += [
+            {"voice_intent": "MiddleEntryCarrier", "source": "Ornament"} for _ in range(32)
+        ]
+        shares = texture_gate.compute_alternation_shares(self._notes(line), provenance)
+        self.assertEqual(shares["v0/MiddleEntryCarrier"], 0.0)
+
     def test_short_lines_and_missing_provenance(self) -> None:
         short = self._notes([60, 62] * 4)
         provenance = [{"voice_intent": "FigurationCarrier"} for _ in short]
@@ -600,7 +614,7 @@ class AlternationShareTest(unittest.TestCase):
         )
 
     @staticmethod
-    def _fugue_case(share: float) -> texture_gate.GateCase:
+    def _fugue_case(excess: float) -> texture_gate.GateCase:
         return texture_gate.GateCase(
             form="fugue",
             seed=1,
@@ -615,15 +629,48 @@ class AlternationShareTest(unittest.TestCase):
             final_quarter_avg_active=2.8,
             parallel_perfect_count=0,
             model_score=0.85,
-            max_alternation_share=share,
+            max_alternation_excess=excess,
         )
 
     def test_the_axis_gates_on_the_corpus_ceiling(self) -> None:
-        ceiling = texture_gate.MAX_ALTERNATION_SHARE
-        self.assertFalse(
-            self._fugue_case(ceiling + 0.01).axis_results()["alternation_share"]
+        self.assertFalse(self._fugue_case(0.01).axis_results()["alternation_share"])
+        self.assertTrue(self._fugue_case(0.0).axis_results()["alternation_share"])
+
+    def test_the_ceiling_falls_as_the_line_gets_longer(self) -> None:
+        # A short line has room for one figure and little else, so the corpus
+        # itself takes a far larger share of it. Judging both against one number
+        # reports the short line as a defect and lets the long one past.
+        lengths = [length for length, _ in texture_gate.ALTERNATION_CEILING_CURVE]
+        ceilings = [texture_gate.alternation_ceiling(length) for length in lengths]
+        self.assertEqual(ceilings, sorted(ceilings, reverse=True))
+        self.assertEqual(texture_gate.alternation_ceiling(1), ceilings[0])
+        self.assertEqual(texture_gate.alternation_ceiling(10_000), ceilings[-1])
+        # Between two sampled lengths the ceiling is the interpolation of them.
+        self.assertAlmostEqual(texture_gate.alternation_ceiling(30), 0.5415)
+
+    def test_the_excess_is_measured_against_the_line_own_length(self) -> None:
+        # Two lines, each two fifths shake and three fifths plain scale. The
+        # short one is inside what the corpus writes at that length; the long
+        # one is a habit and reads as a defect. A single ceiling cannot say both.
+        def line(shake_notes: int, run_notes: int) -> list[dict[str, int]]:
+            return self._notes(
+                [60, 62] * (shake_notes // 2) + [64 + (index % 18) for index in range(run_notes)]
+            )
+
+        def excess(notes: list[dict[str, int]]) -> float:
+            provenance = [{"voice_intent": "FigurationCarrier"} for _ in notes]
+            return texture_gate.compute_alternation_excesses(notes, provenance)[
+                "v0/FigurationCarrier"
+            ]
+
+        short = line(12, 18)
+        long_line = line(120, 180)
+        shares = texture_gate.compute_alternation_shares(
+            short, [{"voice_intent": "FigurationCarrier"} for _ in short]
         )
-        self.assertTrue(self._fugue_case(ceiling).axis_results()["alternation_share"])
+        self.assertAlmostEqual(shares["v0/FigurationCarrier"], 0.4)
+        self.assertLess(excess(short), 0.0)
+        self.assertGreater(excess(long_line), 0.0)
 
 
 class EntryRelativeSilenceTest(unittest.TestCase):

@@ -90,21 +90,65 @@ MAX_PARALLEL_PERFECT_COUNT = 12
 
 # Two-pitch shake ceiling. A line that keeps returning to the tone before last
 # is oscillating between two pitches instead of moving, and four or more such
-# notes in a row read as a shake rather than as a line. Measured over the same
-# reference fugues (form=fugue, track_type=voice), the share of a voice's notes
-# lying inside a run of four or more spans 0..38% across 90 voices (median 14%,
-# p90 28%); the ceiling is that corpus maximum, as the parallel ceiling above is.
+# notes in a row read as a shake rather than as a line.
 #
 # The share is taken per (voice, voice_intent), not per voice. A generated voice
 # mixes a subject that never shakes with an accompaniment that may do little
 # else, and that mixture sat inside the corpus band while the accompaniment
 # alone was at 46% -- the aggregate hides the very case this axis exists to
 # catch. Each intent is one sustained line character, which is what a corpus
-# voice is. Lines shorter than MIN_ALTERNATION_LINE_NOTES are not judged: a
-# handful of notes cannot establish a habit, and one figure would read as the
-# whole line.
-MAX_ALTERNATION_SHARE = 0.38
+# voice is.
+#
+# The ceiling depends on how long the line is, because the share does. A short
+# line has room for one figure and little else, so a single ordinary shake fills
+# a large fraction of it; over the reference fugues (form=fugue,
+# track_type=voice) the ninety-fifth percentile of the share falls from 58% over
+# a twenty-four-note window to 31% over a whole voice, monotonically. Judging a
+# twenty-four-note accompaniment span against the whole-voice figure reports a
+# defect the corpus itself commits at that length several times in a hundred.
+# The table is that percentile curve, sampled and interpolated between; the
+# percentile is the ninety-fifth and not the maximum because the maximum is
+# degenerate at the short end -- one figure can fill a whole short window, so
+# the corpus maximum there is 100%.
+#
+# Lines shorter than MIN_ALTERNATION_LINE_NOTES are not judged at all: a handful
+# of notes cannot establish a habit, and one figure would read as the whole
+# line.
+#
+# The generated side is read without its ornaments, which makes the comparison
+# strictly conservative: the corpus files realize the ornaments their sources
+# notate, so whatever trills they contain are counted against the corpus and
+# not against the product.
+ALTERNATION_CEILING_CURVE: tuple[tuple[int, float], ...] = (
+    (24, 0.583),
+    (36, 0.500),
+    (48, 0.479),
+    (72, 0.431),
+    (96, 0.396),
+    (144, 0.368),
+    (192, 0.354),
+    (288, 0.326),
+    (384, 0.311),
+)
 MIN_ALTERNATION_LINE_NOTES = 24
+
+
+def alternation_ceiling(line_notes: int) -> float:
+    """Largest shake share a line of ``line_notes`` notes may take.
+
+    Piecewise-linear over ALTERNATION_CEILING_CURVE, flat outside its ends.
+    """
+    if line_notes <= ALTERNATION_CEILING_CURVE[0][0]:
+        return ALTERNATION_CEILING_CURVE[0][1]
+    if line_notes >= ALTERNATION_CEILING_CURVE[-1][0]:
+        return ALTERNATION_CEILING_CURVE[-1][1]
+    for (low, low_share), (high, high_share) in zip(
+        ALTERNATION_CEILING_CURVE, ALTERNATION_CEILING_CURVE[1:]
+    ):
+        if low <= line_notes <= high:
+            span = high - low
+            return low_share + (high_share - low_share) * (line_notes - low) / span
+    raise AssertionError("alternation ceiling curve is not monotone in line length")
 
 
 # Fraction of num_voices that the tick-weighted average active-voice count must
@@ -329,9 +373,13 @@ class GateCase:
     max_silence_ratio: float = 0.0
     v2_silence_ratio: float = 1.0
     max_repeated_run: int = 0
-    # Worst per-line two-pitch-shake share, and the full per-line map it
-    # came from (keyed "v<voice>/<intent>"). See MAX_ALTERNATION_SHARE.
+    # Worst per-line two-pitch-shake share, the amount by which the worst line
+    # overshoots the ceiling for its OWN length, and the full per-line map both
+    # came from (keyed "v<voice>/<intent>"). The axis reads the excess, not the
+    # share -- see ALTERNATION_CEILING_CURVE. The share is kept because it is
+    # what a reader compares against the corpus figures.
     max_alternation_share: float = 0.0
+    max_alternation_excess: float = 0.0
     alternation_shares: dict[str, float] | None = None
     compass_violation_count: int = 0
     register_overlap_ratio: float = 0.0
@@ -498,7 +546,7 @@ class GateCase:
             "generated": self.generated,
             "max_active_voices": self.max_active_voices == self.voice_count_target,
             "max_repeated_run": self.max_repeated_run <= 4,
-            "alternation_share": self.max_alternation_share <= MAX_ALTERNATION_SHARE,
+            "alternation_share": self.max_alternation_excess <= 0.0,
             "parallel_perfect": self.passes_parallel,
             "model_score_v2_length_invariant": (
                 self.passes_model_score_v2_length_invariant
@@ -678,6 +726,32 @@ def compute_entry_relative_silence(
     return max(0.0, min(1.0, 1.0 - sounding / window))
 
 
+def _alternation_lines(
+    notes: list[dict[str, int]], provenance: list[dict[str, Any]]
+) -> dict[str, list[tuple[int, int]]]:
+    """Group notes into lines keyed ``"v<voice>/<intent>"``, ornaments dropped."""
+    lines: dict[str, list[tuple[int, int]]] = {}
+    have_provenance = bool(provenance) and len(provenance) == len(notes)
+    for index, note in enumerate(notes):
+        if have_provenance and provenance[index].get("source") == "Ornament":
+            continue
+        voice = int(note["voice"])
+        if have_provenance:
+            intent = provenance[index].get("voice_intent") or "unlabelled"
+            key = f"v{voice}/{intent}"
+        else:
+            key = f"v{voice}"
+        lines.setdefault(key, []).append((int(note["start_tick"]), int(note["pitch"])))
+    return lines
+
+
+def _alternation_line_notes(
+    notes: list[dict[str, int]], provenance: list[dict[str, Any]]
+) -> dict[str, int]:
+    """Note count per line, on the same grouping the shares are taken over."""
+    return {key: len(entries) for key, entries in _alternation_lines(notes, provenance).items()}
+
+
 def compute_alternation_shares(
     notes: list[dict[str, int]], provenance: list[dict[str, Any]]
 ) -> dict[str, float]:
@@ -690,36 +764,54 @@ def compute_alternation_shares(
     are measured apart, falling back to ``"v<voice>"`` when there is no
     provenance to read. Lines under MIN_ALTERNATION_LINE_NOTES notes are
     omitted.
+
+    Ornament notes are left out. A trill is an alternation of two pitches by
+    definition, so counting its realization reports the shake wherever the
+    composed line carries a long tone worth decorating -- the opposite of what
+    the measure is for. The composed note the ornament stands on is the one the
+    form builder chose and the only one a fix can change.
     """
-    lines: dict[str, list[tuple[int, int]]] = {}
-    have_provenance = bool(provenance) and len(provenance) == len(notes)
-    for index, note in enumerate(notes):
-        voice = int(note["voice"])
-        if have_provenance:
-            intent = provenance[index].get("voice_intent") or "unlabelled"
-            key = f"v{voice}/{intent}"
-        else:
-            key = f"v{voice}"
-        lines.setdefault(key, []).append((int(note["start_tick"]), int(note["pitch"])))
+    lines = _alternation_lines(notes, provenance)
 
     shares: dict[str, float] = {}
     for key, entries in lines.items():
         if len(entries) < MIN_ALTERNATION_LINE_NOTES:
             continue
         pitches = [pitch for _, pitch in sorted(entries)]
-        shaken = 0
+        # Marked per note rather than summed per run: two runs a note apart share
+        # that note, and adding each run's length independently counts it twice.
+        # Summing can report more shaken notes than the line has.
+        shaken = [False] * len(pitches)
+
+        def _mark(end: int, run: int) -> None:
+            if run + 2 >= 4:
+                for index in range(end - run - 2, end):
+                    shaken[index] = True
+
         run = 0
         for index in range(2, len(pitches)):
             if pitches[index] == pitches[index - 2] != pitches[index - 1]:
                 run += 1
                 continue
-            if run:
-                shaken += run + 2 if run + 2 >= 4 else 0
+            _mark(index, run)
             run = 0
-        if run:
-            shaken += run + 2 if run + 2 >= 4 else 0
-        shares[key] = shaken / len(pitches)
+        _mark(len(pitches), run)
+        shares[key] = sum(shaken) / len(pitches)
     return shares
+
+
+def compute_alternation_excesses(
+    notes: list[dict[str, int]], provenance: list[dict[str, Any]]
+) -> dict[str, float]:
+    """How far each line's shake share exceeds the ceiling for its own length.
+
+    Zero or negative is inside the corpus envelope. This, not the bare share, is
+    what the axis gates on: the share of a short line and the share of a long
+    one are not the same quantity (see ALTERNATION_CEILING_CURVE).
+    """
+    shares = compute_alternation_shares(notes, provenance)
+    counts = _alternation_line_notes(notes, provenance)
+    return {key: share - alternation_ceiling(counts[key]) for key, share in shares.items()}
 
 
 def _sounding_pitch(intervals: list[tuple[int, int, int]], tick: int) -> int | None:
@@ -904,6 +996,9 @@ def evaluate_generated_json(form: str, seed: int, generated_json: Path) -> GateC
         ),
         max_repeated_run=max((voice.max_repeated_run for voice in metrics.voices), default=0),
         max_alternation_share=max(alternation_shares.values(), default=0.0),
+        max_alternation_excess=max(
+            compute_alternation_excesses(notes, provenance).values(), default=0.0
+        ),
         alternation_shares=alternation_shares,
         compass_violation_count=metrics.compass_violation_count,
         register_overlap_ratio=metrics.register_overlap_ratio,
