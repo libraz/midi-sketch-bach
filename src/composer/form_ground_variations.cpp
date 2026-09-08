@@ -92,22 +92,46 @@ enum class GroundArticulation {
   kNeighbourTurn,   // the tone turns above and back before the ground steps on.
 };
 
-// The treatments the statements after the opening one rotate through, in rising
-// order of subdivision.
+// The treatments a decorated statement draws from, in rising order of
+// subdivision, so successive decorations grow rather than repeat.
 constexpr GroundArticulation kGroundGrowth[3] = {GroundArticulation::kUpperNeighbour,
                                                  GroundArticulation::kLowerNeighbour,
                                                  GroundArticulation::kNeighbourTurn};
 
+// Statements that open the piece with the ground exactly as written. The theme
+// has to be established by repetition before a variant of it can be heard AS a
+// variant; one statement is an announcement, not an establishment.
+constexpr int kPlainOpeningStatements = 2;
+
+// One statement in this many carries a decoration. The rest are plain.
+constexpr int kStatementsPerDecoration = 3;
+
 /**
  * @brief The articulation a ground statement takes.
+ *
+ * The plain statement is this form's norm and a decorated one is an event
+ * against it, not the other way round. The variations are heard as variations
+ * because the bass under them keeps coming back the same; a ground that never
+ * returns to its own surface leaves them nothing to be measured against, which
+ * is the one thing this form cannot give up.
+ *
+ * So the opening statements are plain, one statement in three after them takes
+ * a decoration, and the closing statement is plain whatever the count -- the
+ * piece ends on the tune it began with. A short piece whose statements are all
+ * opening or closing therefore states the ground plainly throughout, which is
+ * the right reading of a ground heard only three times.
+ *
  * @param cycle Statement index in [0, cycle_count).
- * @return kSustained for the opening statement -- the ground is heard whole
- *         before it is broken up -- then the growth rotation.
+ * @param cycle_count Statements the piece contains.
  */
-GroundArticulation groundArticulationFor(int cycle) {
-  if (cycle <= 0)
+GroundArticulation groundArticulationFor(int cycle, int cycle_count) {
+  if (cycle < kPlainOpeningStatements || cycle + 1 >= cycle_count)
     return GroundArticulation::kSustained;
-  return kGroundGrowth[static_cast<std::size_t>((cycle - 1) % 3)];
+  const int since_opening = cycle - kPlainOpeningStatements;
+  if (since_opening % kStatementsPerDecoration != kStatementsPerDecoration - 1)
+    return GroundArticulation::kSustained;
+  const int decoration_index = since_opening / kStatementsPerDecoration;
+  return kGroundGrowth[static_cast<std::size_t>(decoration_index % 3)];
 }
 
 /**
@@ -177,6 +201,10 @@ void appendGroundBar(std::vector<MaterialNote>& out, Tick bar_start, std::uint8_
  *        The passacaglia hands its late statements to the replay branch's own
  *        restatement device and stops decorating here; a form without that
  *        device passes the statement count so every statement is treated here.
+ * @param statement_count Statements the PIECE contains, which is not always the
+ *        number treated here: the opening and closing statements are plain, and
+ *        which statement closes the piece is a fact about the piece rather than
+ *        about the window this call covers.
  * @param sounding_bars Bars the ground carrier actually sounds for. Its last bar
  *        stays sustained: the ground hands over to whatever follows -- for the
  *        chaconne an authored cadential coda -- on a plain structural tone.
@@ -184,14 +212,15 @@ void appendGroundBar(std::vector<MaterialNote>& out, Tick bar_start, std::uint8_
  */
 void appendGroundStatements(std::vector<MaterialNote>& out, int total_bars, int cycle_bars,
                             const std::vector<std::uint8_t>& ground_pitch, int sustained_from_cycle,
-                            int sounding_bars, detail::Mode mode) {
+                            int statement_count, int sounding_bars, detail::Mode mode) {
   const auto pitchAtBar = [&](int bar) {
     return ground_pitch[static_cast<std::size_t>(bar % cycle_bars)];
   };
   for (int bar = 0; bar < total_bars; ++bar) {
     const int cycle = bar / cycle_bars;
-    GroundArticulation articulation = cycle >= sustained_from_cycle ? GroundArticulation::kSustained
-                                                                    : groundArticulationFor(cycle);
+    GroundArticulation articulation = cycle >= sustained_from_cycle
+                                          ? GroundArticulation::kSustained
+                                          : groundArticulationFor(cycle, statement_count);
     // A bar whose successor restates the same tone stays held: the decoration
     // closes by returning to the structural tone, so decorating this bar would
     // put that tone against its own restatement across the bar line as a
@@ -517,13 +546,17 @@ constexpr int kCodaBassDominant = 43;
 /// @param every_voice_placed Whether the two contrary-motion faults may also be
 ///        repaired here. Every candidate is judged against the ground and
 ///        nothing else, so in a texture that still has a voice to come the
-///        relocation is unverified against it -- and the wider the remit, the
-///        more onsets move and the more often that unverified choice is the
-///        one that ships. In the two-voice chaconne there is nothing left to
-///        verify against and the wider remit removes the form's characteristic
-///        fault outright; in the three-voice passacaglia, whose counter
-///        figuration is written after this scan, it measurably traded parallel
-///        fifths for parallel octaves, which is the wrong direction.
+///        relocation is unverified against it. What decides whether the wider
+///        remit is safe is how stable the ground under it is: a ground stated
+///        plainly holds one tone across the beat the relocation lands on, so a
+///        candidate cleared against it stays cleared, while a ground decorated
+///        at every statement moves inside the bar and the same candidate is
+///        cleared against a tone the bass is about to leave. Both forms state
+///        their ground plainly for most of its statements and both take the
+///        wider remit, which is what empties the contrary columns: the
+///        arrival by downward leap onto an octave with the ground is otherwise
+///        invisible to this scan, and it is the largest fault either form has
+///        at a bar head.
 /// @param ground_pitch The ground tone sounding on every beat of this block,
 ///        three entries per bar (groundBeatTones). A statement the diminution
 ///        decorates moves inside the bar, so the reference is per beat.
@@ -645,7 +678,26 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
       return false;
     };
     const int melodic_prev = i > 0 ? static_cast<int>(notes[i - 1].pitch) : -1;
+    const int melodic_prev2 = i > 1 ? static_cast<int>(notes[i - 2].pitch) : -1;
     const int next_pitch = (i + 1 < notes.size()) ? static_cast<int>(notes[i + 1].pitch) : -1;
+    // A bar head may take its chord tone in another octave, which is what lets
+    // this repair reach a clean tone at all. What it may not do is leave two
+    // leaps in a row: a relocation that lands a fifth or more from its
+    // neighbour on both sides -- or a fifth from a neighbour that was already
+    // reached by one -- buys a contrapuntal blemish with a hole in the melody,
+    // and the line is the thing the listener follows. The two triples this can
+    // form are the only ones the move is responsible for; anything further out
+    // was already there.
+    constexpr int kLeap = 7;
+    const auto leavesConsecutiveLeaps = [&](int candidate) {
+      const bool into_leap = melodic_prev >= 0 && std::abs(candidate - melodic_prev) >= kLeap;
+      const bool out_leap = next_pitch >= 0 && std::abs(next_pitch - candidate) >= kLeap;
+      if (into_leap && out_leap)
+        return true;
+      const bool before_leap = melodic_prev2 >= 0 && melodic_prev >= 0 &&
+                               std::abs(melodic_prev - melodic_prev2) >= kLeap;
+      return before_leap && into_leap;
+    };
     bool placed = false;
     // How far the onset may travel depends on where it sits in the bar. A bar
     // head is a structural arrival, and taking the chord tone in another octave
@@ -665,50 +717,72 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
     // tier and the contextual-scale tier below are both re-offered at each
     // accept level, so a clean scale tone is preferred over a triad tone that
     // only downgrades the fault.
-    for (int accept = 0; accept < original_rank && !placed; ++accept) {
-      for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
-        for (int cand : {pitch + dist, pitch - dist}) {
-          if (!isRelocationTarget(cand)) {
-            continue;
+    // The leap constraint is a preference, not a veto. Held as a veto it refuses
+    // every candidate at some onsets and the fault stands -- and where the fault
+    // was what a later gate reads, the piece stops composing at all. So the whole
+    // ladder is walked once refusing a relocation that leaves two leaps in a row,
+    // and only if nothing at all was placed is it walked again allowing one.
+    for (int leap_pass = 0; leap_pass < 2 && !placed; ++leap_pass) {
+      const bool leap_veto = leap_pass == 0;
+      for (int accept = 0; accept < original_rank && !placed; ++accept) {
+        for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
+          for (int cand : {pitch + dist, pitch - dist}) {
+            if (!isRelocationTarget(cand)) {
+              continue;
+            }
+            // The declared seventh is the one chord tone whose dissonance against
+            // the ground is the harmony rather than a fault, so it is the one
+            // relocation target the consonance filter must not reject.
+            //
+            // Every other candidate is read with the bass table, the ground being
+            // the lowest voice of this texture: a perfect fourth over it is a
+            // dissonance, not the consonance the upper-voice table calls it. The
+            // grounds in the tables here root every bar on the tone the chord is
+            // built from, so no chord tone is a fourth above one and the two
+            // tables agree on every candidate this repair actually sees. They
+            // stop agreeing the moment a ground states a bar on anything but its
+            // root, which is a change to a table rather than to this code.
+            const bool is_declared_seventh = plan.seventh && ((cand % 12) + 12) % 12 == chord_pc[3];
+            if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+                (!is_declared_seventh &&
+                 !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
+                                                     static_cast<std::uint8_t>(ground_now)))) {
+              continue;
+            }
+            if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+                (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
+              continue;
+            }
+            if (leap_veto && leavesConsecutiveLeaps(cand)) {
+              continue;
+            }
+            if (groundFaultRank(cand) > accept) {
+              continue;
+            }
+            notes[i].pitch = static_cast<std::uint8_t>(cand);
+            placed = true;
+            break;
           }
-          // The declared seventh is the one chord tone whose dissonance against
-          // the ground is the harmony rather than a fault, so it is the one
-          // relocation target the consonance filter must not reject.
-          const bool is_declared_seventh = plan.seventh && ((cand % 12) + 12) % 12 == chord_pc[3];
-          if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
-              (!is_declared_seventh && !rule_helpers::isConsonantInterval(cand - ground_now))) {
-            continue;
-          }
-          if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-              (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
-            continue;
-          }
-          if (groundFaultRank(cand) > accept) {
-            continue;
-          }
-          notes[i].pitch = static_cast<std::uint8_t>(cand);
-          placed = true;
-          break;
         }
-      }
-      // At a leading-tone bass the structural triad is deliberately a dominant
-      // in first inversion.  If all of those tones would retain the fault, use
-      // another contextual scale tone that is still consonant above the bass
-      // rather than leave the perfect motion in place.
-      for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
-        for (int cand : {pitch + dist, pitch - dist}) {
-          if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
-              !rule_helpers::isConsonantInterval(cand - ground_now) ||
-              !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony, tick,
-                                                    cand - pitch) ||
-              (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-              (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
-              groundFaultRank(cand) > accept) {
-            continue;
+        // At a leading-tone bass the structural triad is deliberately a dominant
+        // in first inversion.  If all of those tones would retain the fault, use
+        // another contextual scale tone that is still consonant above the bass
+        // rather than leave the perfect motion in place.
+        for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
+          for (int cand : {pitch + dist, pitch - dist}) {
+            if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+                !rule_helpers::isConsonantInterval(cand - ground_now) ||
+                !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony,
+                                                      tick, cand - pitch) ||
+                (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
+                (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
+                (leap_veto && leavesConsecutiveLeaps(cand)) || groundFaultRank(cand) > accept) {
+              continue;
+            }
+            notes[i].pitch = static_cast<std::uint8_t>(cand);
+            placed = true;
+            break;
           }
-          notes[i].pitch = static_cast<std::uint8_t>(cand);
-          placed = true;
-          break;
         }
       }
     }
@@ -1445,8 +1519,8 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   // one unsplit statement always opens the piece (cycles >= 2 guard).
   const int split_cycle = cycles >= 2 ? cycles - (cycles + 2) / 3 : cycles;
   std::vector<MaterialNote>& ground = out.material.passacaglia_ground;
-  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, split_cycle, total_bars,
-                         mode);
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, split_cycle, cycles,
+                         total_bars, mode);
   out.material.passacaglia_ground_period = static_cast<Tick>(total_bars) * kTicksPerBar34;
   out.material.passacaglia_ground_cycle = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
   // The realized ground, read at beat grain: what the voices written over it
@@ -1650,7 +1724,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
                            prev_v0_bar_head,
                            cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
                            prev_v0_last, kPassV0BandLo + point.register_shift,
-                           /*every_voice_placed=*/false);
+                           /*every_voice_placed=*/true);
       if (!v0_notes.empty()) {
         prev_v0_last = static_cast<int>(v0_notes.back().pitch);
         prev_v0_bar_head = pitchAtBarHead(
@@ -1946,7 +2020,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // line, so the replay branch lays it down once instead of tiling one cycle. ---
   std::vector<MaterialNote>& ground =
       passacaglia ? out.material.passacaglia_ground : out.material.ground_bass;
-  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, cycles,
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, cycles, cycles,
                          passacaglia ? total_bars : total_bars - 2, mode);
   const Tick ground_line_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
   const Tick ground_cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
