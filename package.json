@@ -48,12 +48,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.12",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "5.0.0",
     "esbuild": "^0.28.2",
-    "lint-staged": "^17.4.1",
+    "lint-staged": "^17.5.0",
     "simple-git-hooks": "^2.14.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   },
   "simple-git-hooks": {
     "pre-commit": "yarn lint-staged"

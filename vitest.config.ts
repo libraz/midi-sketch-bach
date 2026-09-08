@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      '../bach.js': path.resolve(__dirname, 'dist/bach.js'),
+      '../bach.js': path.resolve(import.meta.dirname, 'dist/bach.js'),
     },
   },
   test: {
