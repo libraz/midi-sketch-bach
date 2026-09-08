@@ -41,10 +41,17 @@ struct ArticulationDecl {
  * @brief Apply declared touch separation to the note-off timing.
  *
  * For every note whose voice and onset a declaration covers, shortens the note
- * by the declared separation, capped at a quarter of the note so a fast figure
- * stays joined while a long note gets the full release. Two notes are only
- * separated by touch when a next note follows, so each voice's final onset
- * keeps its whole value and the closing chord is never clipped.
+ * by the declared separation, scaled down below an eighth so no value is
+ * proportionally more detached than the reference the touch is described
+ * against, and never taking more than half of what it follows.
+ *
+ * The stroke reaches only the notes the hand actually has to move between: a
+ * leap, and a repeated pitch the finger must re-strike. A step is taken by the
+ * neighbouring finger and stays joined, which keeps running figuration -- most
+ * of the notes in a contrapuntal texture -- sounding as lines rather than as
+ * chains of separate strokes. Two notes are also only separated by touch when
+ * one immediately follows the other, so a note before a rest and each voice's
+ * final onset keep their whole value and the closing chord is never clipped.
  *
  * Stamps RuleBit::ArticulationApplied on every shortened note. Pitch, onset and
  * order are untouched, so provenance index alignment is preserved.

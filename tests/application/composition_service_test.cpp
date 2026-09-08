@@ -369,6 +369,15 @@ TEST(CompositionServiceTest, NonKeyboardInstrumentUsesPhraseVelocityCurve) {
 // The organ answers nothing to key velocity, so its expression is touch and
 // stop selection. Both must reach the product: a line where every note-off
 // meets the next note-on is a line no organist plays.
+//
+// Which notes the touch parts is the other half of the contract, and pinning
+// only the first half once let the stroke reach every note in the piece. A
+// player parts what the hand has to move between -- a leap, and a repeated
+// pitch the finger re-strikes -- and joins a step, which is most of a
+// contrapuntal texture; parting those too turns the running figuration into a
+// chain of separate strokes. The notated lengths survive in the exported
+// report, so a lift is read exactly rather than inferred from the gap, which
+// on its own cannot be told from a rest.
 TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
   constexpr std::array<FormType, 10> kAllForms = {{
       FormType::Fugue,
@@ -392,25 +401,45 @@ TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
     ASSERT_EQ(compose(request, &product), CompositionStatus::Ok)
         << "form " << static_cast<int>(form);
 
-    std::size_t joined = 0;
-    std::size_t separated = 0;
-    std::map<VoiceId, std::vector<const NoteEvent*>> by_voice;
-    for (const auto& note : product.composition.notes) {
-      by_voice[note.voice].push_back(&note);
+    const std::vector<Tick> notated = jsonDurations(product.generated_json);
+    ASSERT_EQ(notated.size(), product.composition.notes.size())
+        << "form " << static_cast<int>(form);
+
+    std::size_t lifted = 0;
+    std::size_t joined_steps = 0;
+    std::size_t lifted_steps = 0;
+    std::map<VoiceId, std::vector<std::size_t>> by_voice;
+    for (std::size_t idx = 0; idx < product.composition.notes.size(); ++idx) {
+      by_voice[product.composition.notes[idx].voice].push_back(idx);
     }
     for (auto& [voice, line] : by_voice) {
-      std::sort(line.begin(), line.end(), [](const NoteEvent* lhs, const NoteEvent* rhs) {
-        return lhs->start_tick < rhs->start_tick;
+      const auto& notes = product.composition.notes;
+      std::sort(line.begin(), line.end(), [&notes](std::size_t lhs, std::size_t rhs) {
+        return notes[lhs].start_tick < notes[rhs].start_tick;
       });
-      for (std::size_t idx = 0; idx + 1 < line.size(); ++idx) {
-        if (line[idx]->start_tick + line[idx]->duration < line[idx + 1]->start_tick) {
-          ++separated;
-        } else {
-          ++joined;
+      for (std::size_t pos = 0; pos + 1 < line.size(); ++pos) {
+        const std::size_t here = line[pos];
+        const std::size_t next = line[pos + 1];
+        const bool was_lifted = notes[here].duration < notated[here];
+        lifted += was_lifted ? 1 : 0;
+        // Only a pair the notated line runs straight through is the touch's to
+        // decide; a rest between them parts the notes on its own.
+        if (notes[here].start_tick + notated[here] < notes[next].start_tick) {
+          continue;
         }
+        const int move =
+            std::abs(static_cast<int>(notes[next].pitch) - static_cast<int>(notes[here].pitch));
+        if (move == 0 || move > 2) {
+          continue;
+        }
+        lifted_steps += was_lifted ? 1 : 0;
+        joined_steps += was_lifted ? 0 : 1;
       }
     }
-    EXPECT_GT(separated, joined) << "form " << static_cast<int>(form) << " is played legato";
+    EXPECT_GT(lifted, 0u) << "form " << static_cast<int>(form) << " is played legato throughout";
+    EXPECT_EQ(lifted_steps, 0u) << "form " << static_cast<int>(form) << " parts a step";
+    EXPECT_GT(joined_steps, 0u) << "form " << static_cast<int>(form)
+                                << " has no joined stepwise motion to keep";
 
     bool stamped = false;
     for (const auto& prov : product.composition.provenance) {

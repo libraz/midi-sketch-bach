@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -275,7 +276,9 @@ TEST(ExpressionEventsTest, LevelOffsetMovesPhraseDynamicsWithTheRegistration) {
 
 namespace {
 
-// A single voice of joined quarter notes.
+// A single voice of joined quarter notes. One repeated pitch, so every pair is
+// a re-strike and the stroke reaches all of them: these cases are about how
+// much the lift takes, not about which notes it is offered to.
 std::vector<NoteEvent> joinedQuarters(std::size_t count, VoiceId voice = 0) {
   std::vector<NoteEvent> notes;
   for (std::size_t idx = 0; idx < count; ++idx) {
@@ -365,6 +368,53 @@ TEST(ArticulationTest, NoValueIsMoreDetachedThanAnEighth) {
       EXPECT_LE(share_of(value), reference + 1e-9) << "value " << value << " stroke " << stroke;
     }
   }
+}
+
+// The stroke is offered only where the hand has to move. Stated over one line
+// that steps, repeats, and leaps in turn, so the three answers are visible
+// against a single declaration.
+TEST(ArticulationTest, PartsALeapAndARepeatAndJoinsAStep) {
+  // C-D-E: two steps. E-E: a re-strike. E-A: a leap. A: the final onset.
+  const std::uint8_t pitches[] = {60, 62, 64, 64, 69};
+  std::vector<NoteEvent> notes;
+  for (std::size_t idx = 0; idx < std::size(pitches); ++idx) {
+    NoteEvent note;
+    note.start_tick = static_cast<Tick>(idx) * kTicksPerBeat;
+    note.duration = kTicksPerBeat;
+    note.pitch = pitches[idx];
+    notes.push_back(note);
+  }
+  std::vector<NoteProvenance> provenance(notes.size());
+  const std::vector<ArticulationDecl> plan = {{0, 0, 5 * kTicksPerBeat, 40}};
+  applyArticulation(plan, &notes, &provenance);
+
+  EXPECT_EQ(notes[0].duration, kTicksPerBeat) << "C runs by step into D";
+  EXPECT_EQ(notes[1].duration, kTicksPerBeat) << "D runs by step into E";
+  EXPECT_EQ(notes[2].duration, kTicksPerBeat - 40) << "E is struck again";
+  EXPECT_EQ(notes[3].duration, kTicksPerBeat - 40) << "E leaps to A";
+  EXPECT_EQ(notes[4].duration, kTicksPerBeat) << "the voice's last onset stays whole";
+
+  EXPECT_FALSE((provenance[0].satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any());
+  EXPECT_TRUE((provenance[2].satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any());
+}
+
+// A rest already parts the notes by more than any stroke would, so the lift has
+// nothing left to do and the written value stands -- the same reason a voice's
+// final onset is left whole.
+TEST(ArticulationTest, LeavesANoteWholeWhenARestFollowsIt) {
+  std::vector<NoteEvent> notes;
+  for (const Tick onset : {Tick{0}, Tick{2 * kTicksPerBeat}, Tick{3 * kTicksPerBeat}}) {
+    NoteEvent note;
+    note.start_tick = onset;
+    note.duration = kTicksPerBeat;
+    note.pitch = 60;  // repeated, so only the rest can excuse the stroke
+    notes.push_back(note);
+  }
+  const std::vector<ArticulationDecl> plan = {{0, 0, 4 * kTicksPerBeat, 40}};
+  applyArticulation(plan, &notes, nullptr);
+  EXPECT_EQ(notes[0].duration, kTicksPerBeat) << "a beat of rest follows";
+  EXPECT_EQ(notes[1].duration, kTicksPerBeat - 40) << "the next note follows immediately";
+  EXPECT_EQ(notes[2].duration, kTicksPerBeat);
 }
 
 TEST(ArticulationTest, LegatoDeclarationLeavesTheLineJoined) {

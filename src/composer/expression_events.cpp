@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 
 namespace bach::composer {
 
@@ -27,6 +28,11 @@ constexpr int kPhraseSwell = 6;
 /// note the ordinary touch is described against; below it the stroke scales down
 /// with the note rather than the note being asked to absorb a fixed one.
 constexpr Tick kLiftReferenceTicks = kTicksPerBeat / 2;
+
+/// Widest move the hand makes without leaving the keys it already covers. A
+/// second is reached by the neighbouring finger, so the two notes are joined;
+/// anything wider is a leap and the hand has to travel.
+constexpr int kJoinedStepSemitones = 2;
 
 /// Registration terrace design values (CC#7 stop-change steps). The base sits
 /// below the develop level and each step adds one stop, capped below the macro
@@ -255,10 +261,62 @@ void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<No
     last_onset[note.voice] = std::max(last_onset[note.voice], note.start_tick);
   }
 
+  // The note array is grouped by span rather than sorted by tick, so each
+  // voice's line is read off an index ordered by onset. Built once: the
+  // successor lookup below is per note and must not rescan the piece.
+  std::vector<std::size_t> line(notes->size());
+  for (std::size_t idx = 0; idx < line.size(); ++idx) {
+    line[idx] = idx;
+  }
+  std::sort(line.begin(), line.end(), [&notes](std::size_t lhs, std::size_t rhs) {
+    const NoteEvent& left = (*notes)[lhs];
+    const NoteEvent& right = (*notes)[rhs];
+    if (left.voice != right.voice) {
+      return left.voice < right.voice;
+    }
+    return left.start_tick < right.start_tick;
+  });
+  // successor[i] = the note in i's voice with the next onset after i's, or
+  // notes->size() when i is the voice's last onset. Notes sharing an onset are
+  // simultaneous, so they share a successor rather than following each other.
+  std::vector<std::size_t> successor(notes->size(), notes->size());
+  for (std::size_t pos = 0; pos < line.size(); ++pos) {
+    const NoteEvent& note = (*notes)[line[pos]];
+    std::size_t ahead = pos + 1;
+    while (ahead < line.size() && (*notes)[line[ahead]].voice == note.voice &&
+           (*notes)[line[ahead]].start_tick == note.start_tick) {
+      ++ahead;
+    }
+    if (ahead < line.size() && (*notes)[line[ahead]].voice == note.voice) {
+      successor[line[pos]] = line[ahead];
+    }
+  }
+
   for (std::size_t idx = 0; idx < notes->size(); ++idx) {
     NoteEvent& note = (*notes)[idx];
     if (note.start_tick == last_onset[note.voice]) {
       continue;
+    }
+    // The stroke exists because the hand has to move. A leap makes the finger
+    // travel and a repeated pitch makes it re-strike the key it is already on,
+    // so both part however broad or crisp the declared touch is; a step is
+    // taken by the neighbouring finger and the two notes stay joined. Asking
+    // every note for the stroke instead detaches the running figuration, which
+    // is most of what a fugue is made of, and the line reads as a chain of
+    // separate strokes rather than as a line.
+    //
+    // A note its successor does not follow immediately is already parted by the
+    // rest between them and has nothing left to separate from, exactly like a
+    // voice's final onset.
+    if (successor[idx] < notes->size()) {
+      const NoteEvent& next = (*notes)[successor[idx]];
+      if (next.start_tick > note.start_tick + note.duration) {
+        continue;
+      }
+      const int move = std::abs(static_cast<int>(next.pitch) - static_cast<int>(note.pitch));
+      if (move > 0 && move <= kJoinedStepSemitones) {
+        continue;
+      }
     }
     Tick separation = 0;
     for (const auto& decl : plan) {
