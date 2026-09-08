@@ -2053,6 +2053,18 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // fewer voice to answer settles on a repeated pitch, which is what turns
       // a passing fourth above it into a standing second inversion.
       //
+      // Where the bass is that half it alternates its subdivision tier the way
+      // the middle voice does under a full texture, so it carries the running
+      // figure through every other episode and its walking support through the
+      // rest. A pedal that never runs is the one thing separating this texture
+      // from the reference organ fugues: all but two of them let theirs take the
+      // piece's fastest value, and the middle one spends better than a third of
+      // its notes on it, while every fast note here used to belong to the two
+      // upper voices. Alternating rather than running throughout is what keeps
+      // the pedal's share of them near the reference's own -- and the band is
+      // where the reference writes those runs, low enough that the figure sounds
+      // as a pedal line rather than a third manual voice.
+      //
       // Both accompanying lines are verbatim Material scalar-waves whose strong
       // beats anchor on chord tones consonant with the concurrent theme tones;
       // being Material they skip every inter-voice rule but voice_crossing,
@@ -2072,7 +2084,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
       if (!bass_rests) {
         addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
-                          middle_rests ? 2 : 1, fig_offset);
+                          middle_rests ? ((cycle % 2 == 0) ? 4 : 2) : 1, fig_offset);
       }
     }
   }

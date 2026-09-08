@@ -2289,12 +2289,17 @@ TEST(FormFugueTest, CountersubjectThirdEntryRestatementAvoidsSustainedSevenths) 
 // the full-coverage V0 sequence.
 TEST(FormFugueTest, ThinnedEpisodeLowerVoiceMovesFasterThanUnderAnEntry) {
   // A thinned episode is a two-part texture and whichever voice is under the
-  // Fortspinnung is half of it, so it moves at twice the rate it would carry
-  // under a three-voice entry: the bass in eighths rather than its quarter-note
-  // walk, and the middle voice in sixteenths where the bass is the one resting.
-  // A line that keeps the slower tread there parks under the Fortspinnung, and
-  // a parked lowest voice is what turns a passing fourth above it into a
-  // standing second inversion.
+  // Fortspinnung is half of it, so it moves faster than it would under a
+  // three-voice entry: the bass off its quarter-note walk, and the middle voice
+  // in sixteenths where the bass is the one resting. A line that keeps the
+  // slower tread there parks under the Fortspinnung, and a parked lowest voice
+  // is what turns a passing fourth above it into a standing second inversion.
+  //
+  // The bass alternates its own tier across those episodes the way the middle
+  // voice does, so its sections carry eighths and sixteenths in turn rather than
+  // one rate throughout, and both must appear.
+  int bass_eighth_sections = 0;
+  int bass_sixteenth_sections = 0;
   for (std::uint32_t seed : {1u, 5u, 42u}) {
     const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, 64);
     Tick last_episode_start = 0;
@@ -2326,8 +2331,13 @@ TEST(FormFugueTest, ThinnedEpisodeLowerVoiceMovesFasterThanUnderAnEntry) {
           min_dur = std::min(min_dur, note.duration);
         }
         if (section.voice == 2) {
-          EXPECT_EQ(min_dur, kTicksPerBeat / 2)
+          EXPECT_LE(min_dur, kTicksPerBeat / 2)
               << "seed " << seed << " bass under the episode at bar " << (span.start_tick / kBar);
+          if (min_dur == kTicksPerBeat / 2) {
+            ++bass_eighth_sections;
+          } else if (min_dur == kTicksPerBeat / 4) {
+            ++bass_sixteenth_sections;
+          }
           ++bass_under_episodes;
         } else if (section.voice == 1) {
           EXPECT_EQ(min_dur, kTicksPerBeat / 4)
@@ -2340,6 +2350,8 @@ TEST(FormFugueTest, ThinnedEpisodeLowerVoiceMovesFasterThanUnderAnEntry) {
     EXPECT_GT(bass_under_episodes, 0) << "seed " << seed;
     EXPECT_GT(middle_under_episodes, 0) << "seed " << seed;
   }
+  EXPECT_GT(bass_eighth_sections, 0) << "the thinned-episode bass never keeps its eighth tier";
+  EXPECT_GT(bass_sixteenth_sections, 0) << "the thinned-episode bass never takes the running tier";
 }
 
 // --- Long-form parallel ceiling (full pipeline incl. ornament pass) ----------
@@ -2685,6 +2697,42 @@ TEST(FormFugueTest, ExpositionFiguresCloseOnStrongBeatHalfNote) {
   EXPECT_GE(held_seen, (seeds_tested + 1) / 2)
       << "cadential-close half note is dead: only " << held_seen << " of " << seeds_tested
       << " seeds produced a strong-beat held tone in the exposition final bar";
+}
+
+// The pedal has to run. Across the reference organ fugues that write a pedal
+// part, all but two let it take the piece's fastest value and the middle one
+// spends better than a third of its own notes there; a bass that only ever walks
+// under the others is what separates this texture from theirs. The bass under a
+// two-voice episode alternates its subdivision tier, so it carries the running
+// figure through every other episode.
+TEST(FormFugueTest, PedalTakesTheRunningFigure) {
+  // The floor is well under the reference's own third, because the tier
+  // alternates and a natural-length fugue holds few enough episodes that a seed
+  // can land only one running one. What it guards is that the figure reaches the
+  // bass at all -- before it did, every fast note in the piece belonged to the
+  // two upper voices and this share was exactly zero for every seed.
+  constexpr double kRunningFloor = 0.10;
+  const std::uint16_t bars = naturalBars(FormType::Fugue);
+  for (std::uint32_t seed : kSeeds) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, bars);
+    int bass_notes = 0;
+    int bass_running = 0;
+    for (const auto& section : fx.material.figuration_sections) {
+      if (section.voice != 2) {
+        continue;
+      }
+      for (const MaterialNote& note : section.notes) {
+        ++bass_notes;
+        if (note.duration <= duration::kSixteenthNote) {
+          ++bass_running;
+        }
+      }
+    }
+    ASSERT_GT(bass_notes, 0) << "seed " << seed << " writes no bass figuration at all";
+    EXPECT_GE(static_cast<double>(bass_running) / bass_notes, kRunningFloor)
+        << "seed " << seed << ": the pedal never takes the running figure (" << bass_running
+        << " of " << bass_notes << " notes)";
+  }
 }
 
 }  // namespace bach::composer

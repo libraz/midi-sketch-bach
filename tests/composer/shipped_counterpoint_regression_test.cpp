@@ -918,7 +918,23 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // seventy-two, and the figuration line's worst shake share drops from four
     // hundredths above the share the reference corpus writes at that line
     // length to seven hundredths below it.
-    {FormType::Fugue, 0, 0, 35, 36, 2, 0, 2, 2, 1, 54552, 146},
+    //
+    // The pedal takes the running figure. It had never taken one: across the
+    // reference organ fugues that write a pedal part, thirteen of fifteen let
+    // theirs run at the piece's fastest value and the middle one spends better
+    // than a third of its notes there, while this bass spent none of its own on
+    // it and the two upper voices split every fast note in the piece between
+    // them. The bass under a two-voice episode now alternates its subdivision
+    // tier across episodes, which is what the middle voice already does under a
+    // full texture, so the pedal carries the figure through half of them and its
+    // walking support through the other half. Its share of the piece's fastest
+    // notes rises from nothing to about an eighth against a tenth in the
+    // reference, and the share of its own notes lying on that value to about a
+    // third, which is where the reference median sits.
+    //
+    // Nothing on this row pays for it. Every fault column holds exactly and only
+    // the floor moves, rising by fourteen hundred.
+    {FormType::Fugue, 0, 0, 35, 36, 2, 0, 2, 2, 1, 55960, 146},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1915,7 +1931,15 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // most of the piece. Against it the battuta column falls by twenty, the
     // fourths over a held bass by thirty-four, and the floor rises by
     // ninety-three -- the skip states a pitch where the reversal restated one.
-    {FormType::Fugue, 0, 0, 175, 236, 22, 0, 3, 4, 1, 469866, 1772},
+    //
+    // The pedal's running figure reaches a stretched fugue the way the rotating
+    // rest does, and here it is a gain on every column at once: the hidden
+    // approaches hold exactly, the battuta falls by seven, the contrary repeat by
+    // eight, the fourths over a held bass by a hundred and four, and the floor
+    // rises by twenty thousand. A third line that moves is a third line the other
+    // two are measured against, so the sweep examines far more pairs and finds no
+    // more faults among them.
+    {FormType::Fugue, 0, 0, 175, 229, 14, 0, 3, 4, 1, 490345, 1668},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1991,7 +2015,18 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // half runs the same wave as its fugue half, so the change reaches the whole
     // piece here rather than half of it, and the columns move in small amounts
     // in both directions instead of one of them carrying the trade.
-    {FormType::PreludeAndFugue, 0, 0, 105, 201, 6, 0, 3, 3, 1, 418101, 1086},
+    //
+    // The pedal's running figure is the one place this form pays where the fugue
+    // row is paid. Its prelude half never writes the two-voice episode the figure
+    // lives in, so the gain arrives over a smaller share of the piece while the
+    // approaches it adds land in the fugue half all the same: eight hidden ones,
+    // and one more fourth over a held bass. Against that the battuta falls by two
+    // and the floor rises by fifty-seven hundred, so measured per pair of onsets
+    // the sweep examines, the hidden rate rises by about a sixteenth -- the count
+    // grows mostly because there is more counterpoint to count. The trade is
+    // stated rather than assumed: what buys it is a bass that runs at all, which
+    // all but two of the reference organ fugues let theirs do.
+    {FormType::PreludeAndFugue, 0, 0, 113, 199, 6, 0, 3, 3, 1, 423808, 1087},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {
