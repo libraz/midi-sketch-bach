@@ -856,7 +856,20 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // column counts, and the count rose even though the samples fell. A bass
     // that walks in eighths through a thinned episode does not park, and the
     // column ends a tenth below where the middle voice had been hiding it.
-    {FormType::Fugue, 0, 0, 48, 47, 2, 0, 3, 2, 1, 53184, 162},
+    //
+    // The episodes no longer thin the same way every time. Two of them rest the
+    // middle voice and the third rests the bass, leaving the upper pair alone
+    // over an implied harmony. Measured after every voice has entered, the
+    // reference three-voice fugues keep their bass silent for about a tenth of
+    // the piece, where this form's bass had not stopped once after its entry;
+    // one bass-rest episode to every two middle-rest ones puts it at a ninth.
+    // Nothing is removed for it -- the reduction
+    // swaps which voice sounds rather than taking one away -- and because the
+    // lower line of whichever pair sounds moves at twice the rate it would
+    // carry under a three-voice texture, the floor rises instead of falling.
+    // The fourths come down by ten with it: the line covering the bass function
+    // is running in sixteenths, so it never parks for one to stand over.
+    {FormType::Fugue, 0, 0, 48, 47, 2, 0, 3, 2, 1, 54607, 152},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1747,7 +1760,25 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // both its worst cells besides. The fourths fall by a fifth rather than
     // rising, which is the eighth-note episode bass -- the longer the piece the
     // more episodes it walks through.
-    {FormType::Fugue, 0, 0, 188, 271, 18, 0, 3, 5, 1, 452801, 1789},
+    //
+    // The rotating episode rest reaches further here for the reason the
+    // thinning did: a stretched fugue is mostly development, so it holds more
+    // episodes and more of them rest the bass. The floor rises by a
+    // twenty-fifth, battuta falls by about as much with its worst cell, and the
+    // fourths fall by twenty-one.
+    //
+    // Hidden approaches are the one column on this row that rises, by two, and
+    // this is what they buy. With the bass out, the pair under examination is
+    // the episode figuration against the middle voice rather than against the
+    // bass, and those two bands sit close enough that their similar motion
+    // arrives on a perfect interval more often than the outer pair's did. The
+    // floor grows faster than the column does, so the rate falls even as the
+    // count rises -- which is the shape this file warns a count read alone
+    // cannot show -- and the cardinal columns stay at zero. What the two
+    // approaches pay for is a bass that stops: the reference three-voice fugues
+    // rest theirs for about a tenth of the piece, and this one rested it for
+    // none of it.
+    {FormType::Fugue, 0, 0, 190, 260, 18, 0, 3, 4, 1, 470406, 1768},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -1797,7 +1828,14 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // untouched; stretch it and the development grows episodes to thin. Every
     // column falls and the floor with them, in the same proportion the fugue
     // row shows over the half of each piece that is a fugue at all.
-    {FormType::PreludeAndFugue, 0, 0, 110, 235, 7, 0, 3, 4, 1, 415530, 1036},
+    //
+    // The rotating episode rest reaches this form's fugue half only at the
+    // stretched lengths, where it holds more than the single development window
+    // the natural length gives it -- which is why the form row above is
+    // untouched by it. Here every column falls: battuta by a thirteenth with
+    // its worst cell, the fourths by twenty-seven, and the hidden approach the
+    // fugue row pays does not appear at all, against a floor that rises.
+    {FormType::PreludeAndFugue, 0, 0, 109, 217, 7, 0, 3, 3, 1, 418395, 1009},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

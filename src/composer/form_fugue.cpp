@@ -2025,37 +2025,53 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
       pushSpan(asm_ctx, 0, ep_start, ep_start + ep_len - 1, VoiceIntent::FortspinnungSpan);
 
-      // The episode thins to the outer pair: the middle voice rests through it
-      // and returns with the next subject statement, so the reduction marks the
-      // form instead of one texture running end to end. Among the three-voice
-      // fugues in the reference corpus the middle voice is the one that drops --
-      // it is silent for roughly a third of the piece and accounts for about
-      // sixty percent of every two-voice moment, while the outer pair carries
-      // the sequence. The episode that leads into the coda keeps all three so
-      // the home return arrives on a full texture.
+      // The episode thins to two voices: one of the accompanying pair rests
+      // through it and returns with the next subject statement, so the
+      // reduction marks the form instead of one texture running end to end. The
+      // episode that leads into the coda keeps all three so the home return
+      // arrives on a full texture.
       //
-      // The V2 bass stays under every episode. It is a verbatim Material
-      // scalar-wave whose strong beats anchor on chord tones consonant with the
-      // concurrent theme tones; being Material it skips every inter-voice rule
-      // but voice_crossing, which the disjoint per-voice bands already prevent.
-      // A free Compose bass here would instead be forced into parallels against
-      // the fast figuration above it. It walks in eighths rather than quarters
-      // where the middle voice is out, because there it is half of a two-part
-      // texture rather than the support under a three-voice one -- and because
-      // a bass with one fewer line to answer settles on a repeated pitch, which
-      // is what turns a passing fourth above it into a standing second
-      // inversion. Where the V1 figuration does sound it alternates its
-      // subdivision tier (eighths / sixteenths) across episodes and rotates its
-      // register offset, so the development's counterlines vary audibly and the
-      // piece keeps its sixteenth-note duration mass.
-      const bool episode_keeps_middle = cycle + 1 >= static_cast<int>(development_windows.size());
-      if (episode_keeps_middle) {
-        const int v1_notes_per_beat = (cycle % 2 == 1) ? 4 : 2;
+      // Which one rests rotates, because a three-voice fugue does not always
+      // reduce the same way. Measured over the reference three-voice fugues
+      // after every voice has entered, the full complement sounds about half
+      // the time and the middle voice is the usual one to go: it is silent for
+      // about a third of the piece and takes some two thirds of every
+      // two-voice moment, the outer pair carrying the sequence. The rest of
+      // that time is split between the bass and the top voice, each of which is
+      // silent for about a tenth of the piece. Those fugues therefore reduce
+      // three ways where this form reduces two, and the share theirs gives the
+      // top voice is spent on the bass here, which is what two middle-rest
+      // episodes to one bass-rest episode is doing: it leaves the bass silent
+      // for about a ninth of the piece, which is where the corpus keeps it,
+      // against a bass that had not stopped once after its entry.
+      //
+      // The lower of whichever pair sounds moves at twice the rate it would
+      // carry under a three-voice texture. There it is half of a two-part
+      // texture rather than the support under a full one, and a line with one
+      // fewer voice to answer settles on a repeated pitch, which is what turns
+      // a passing fourth above it into a standing second inversion.
+      //
+      // Both accompanying lines are verbatim Material scalar-waves whose strong
+      // beats anchor on chord tones consonant with the concurrent theme tones;
+      // being Material they skip every inter-voice rule but voice_crossing,
+      // which the disjoint per-voice bands already prevent. A free Compose line
+      // here would instead be forced into parallels against the fast figuration
+      // above it. Where the V1 figuration sounds under a full-length episode it
+      // alternates its subdivision tier (eighths / sixteenths) across episodes
+      // and rotates its register offset, so the development's counterlines vary
+      // audibly and the piece keeps its sixteenth-note duration mass.
+      const bool episode_keeps_all = cycle + 1 >= static_cast<int>(development_windows.size());
+      const bool bass_rests = !episode_keeps_all && cycle % 3 == 2;
+      const bool middle_rests = !episode_keeps_all && !bass_rests;
+      if (!middle_rests) {
+        const int v1_notes_per_beat = bass_rests ? 4 : ((cycle % 2 == 1) ? 4 : 2);
         addFigurationSpan(asm_ctx, 1, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
                           v1_notes_per_beat, (fig_offset + cycle) % 4);
       }
-      addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
-                        episode_keeps_middle ? 1 : 2, fig_offset);
+      if (!bass_rests) {
+        addFigurationSpan(asm_ctx, 2, ep_start, ep_start + ep_len - 1, plan, first_bar, mode,
+                          middle_rests ? 2 : 1, fig_offset);
+      }
     }
   }
 
