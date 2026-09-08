@@ -398,6 +398,37 @@ TEST(ArticulationTest, PartsALeapAndARepeatAndJoinsAStep) {
   EXPECT_TRUE((provenance[2].satisfied_rules & ruleBitMask(RuleBit::ArticulationApplied)).any());
 }
 
+// The same leap answered two ways by the value it is taken at. A broken chord
+// in sixteenths is inside the hand's spread and is played in place; the same
+// thirds at an eighth give the hand room to leave the keys. Parting the fast
+// one is what leaves a run of figuration looking like separate strokes.
+TEST(ArticulationTest, JoinsALeapTooFastForTheHandToLeaveTheKeys) {
+  const auto brokenChord = [](Tick value) {
+    const std::uint8_t pitches[] = {60, 64, 67, 64};
+    std::vector<NoteEvent> notes;
+    for (std::size_t idx = 0; idx < std::size(pitches); ++idx) {
+      NoteEvent note;
+      note.start_tick = static_cast<Tick>(idx) * value;
+      note.duration = value;
+      note.pitch = pitches[idx];
+      notes.push_back(note);
+    }
+    const std::vector<ArticulationDecl> plan = {{0, 0, 4 * value, 40}};
+    applyArticulation(plan, &notes, nullptr);
+    return notes;
+  };
+
+  const auto fast = brokenChord(kTicksPerBeat / 4);
+  for (std::size_t idx = 0; idx + 1 < fast.size(); ++idx) {
+    EXPECT_EQ(fast[idx].duration, kTicksPerBeat / 4) << "sixteenth " << idx;
+  }
+
+  const auto ordinary = brokenChord(kTicksPerBeat / 2);
+  for (std::size_t idx = 0; idx + 1 < ordinary.size(); ++idx) {
+    EXPECT_EQ(ordinary[idx].duration, kTicksPerBeat / 2 - 40) << "eighth " << idx;
+  }
+}
+
 // A rest already parts the notes by more than any stroke would, so the lift has
 // nothing left to do and the written value stands -- the same reason a voice's
 // final onset is left whole.

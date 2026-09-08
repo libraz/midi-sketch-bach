@@ -45,13 +45,16 @@ struct ArticulationDecl {
  * proportionally more detached than the reference the touch is described
  * against, and never taking more than half of what it follows.
  *
- * The stroke reaches only the notes the hand actually has to move between: a
- * leap, and a repeated pitch the finger must re-strike. A step is taken by the
- * neighbouring finger and stays joined, which keeps running figuration -- most
- * of the notes in a contrapuntal texture -- sounding as lines rather than as
- * chains of separate strokes. Two notes are also only separated by touch when
- * one immediately follows the other, so a note before a rest and each voice's
- * final onset keep their whole value and the closing chord is never clipped.
+ * The stroke reaches only the notes the hand has a reason and the room to leave:
+ * a repeated pitch, which must be re-struck on the key the finger is already
+ * holding, and a leap at an eighth or broader. A step is taken by the
+ * neighbouring finger, and below an eighth the fingers are already spread over
+ * the figure -- a broken chord in sixteenths is taken in place. Both stay
+ * joined, which keeps running figuration, most of the notes in a contrapuntal
+ * texture, sounding as lines rather than as chains of separate strokes. Two
+ * notes are also only separated by touch when one immediately follows the
+ * other, so a note before a rest and each voice's final onset keep their whole
+ * value and the closing chord is never clipped.
  *
  * Stamps RuleBit::ArticulationApplied on every shortened note. Pitch, onset and
  * order are untouched, so provenance index alignment is preserved.

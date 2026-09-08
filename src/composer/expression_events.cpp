@@ -297,13 +297,20 @@ void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<No
     if (note.start_tick == last_onset[note.voice]) {
       continue;
     }
-    // The stroke exists because the hand has to move. A leap makes the finger
-    // travel and a repeated pitch makes it re-strike the key it is already on,
-    // so both part however broad or crisp the declared touch is; a step is
-    // taken by the neighbouring finger and the two notes stay joined. Asking
-    // every note for the stroke instead detaches the running figuration, which
-    // is most of what a fugue is made of, and the line reads as a chain of
-    // separate strokes rather than as a line.
+    // The stroke exists because the hand has to leave the keys it is holding,
+    // and it needs both a reason and the room to do it.
+    //
+    // The reason: a repeated pitch has to be re-struck on the key the finger is
+    // already resting on, so it parts whatever else is true of it. A step is
+    // taken by the neighbouring finger with the hand still, so it never parts.
+    // Anything wider is a move the hand may have to make.
+    //
+    // The room: only at an eighth or broader. Under that the figure runs faster
+    // than a lift is a gesture, and the fingers are already spread over the
+    // notes a fast figure uses -- a broken chord in sixteenths is taken in
+    // place, not travelled to. Parting those turns a run into a chain of
+    // separate strokes, which is how the running figuration that makes up most
+    // of a contrapuntal texture stops reading as a line.
     //
     // A note its successor does not follow immediately is already parted by the
     // rest between them and has nothing left to separate from, exactly like a
@@ -314,7 +321,9 @@ void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<No
         continue;
       }
       const int move = std::abs(static_cast<int>(next.pitch) - static_cast<int>(note.pitch));
-      if (move > 0 && move <= kJoinedStepSemitones) {
+      const bool restrikes = move == 0;
+      const bool travels = move > kJoinedStepSemitones && note.duration >= kLiftReferenceTicks;
+      if (!restrikes && !travels) {
         continue;
       }
     }
