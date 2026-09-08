@@ -510,6 +510,7 @@ class LengthInvariantFloorTest(unittest.TestCase):
                 "generated",
                 "max_active_voices",
                 "max_repeated_run",
+                "alternation_share",
                 "parallel_perfect",
                 "model_score_v2_length_invariant",
             },
@@ -540,6 +541,89 @@ class LengthInvariantFloorTest(unittest.TestCase):
         self.assertFalse(case.passes_texture_gate)
         case = self._case("passacaglia", target_bars=64, parallel_perfect_count=13)
         self.assertFalse(case.passes_texture_gate)
+
+
+class AlternationShareTest(unittest.TestCase):
+    """The two-pitch-shake share is measured per line, not per voice.
+
+    A generated voice mixes a subject that never shakes with an accompaniment
+    that may do little else; the mixture stays inside the corpus band while the
+    accompaniment alone sits far outside it, which is the case the axis exists
+    to catch.
+    """
+
+    @staticmethod
+    def _notes(pitches: list[int], voice: int = 0) -> list[dict[str, int]]:
+        return [
+            {"start_tick": index * 120, "duration": 120, "voice": voice, "pitch": pitch}
+            for index, pitch in enumerate(pitches)
+        ]
+
+    def test_a_shake_is_counted_and_a_scale_is_not(self) -> None:
+        shake = [60, 62] * 16
+        scale = [60 + (index % 8) for index in range(32)]
+        provenance = [{"voice_intent": "FigurationCarrier"} for _ in range(32)]
+        self.assertEqual(
+            texture_gate.compute_alternation_shares(self._notes(shake), provenance),
+            {"v0/FigurationCarrier": 1.0},
+        )
+        self.assertEqual(
+            texture_gate.compute_alternation_shares(self._notes(scale), provenance),
+            {"v0/FigurationCarrier": 0.0},
+        )
+
+    def test_a_single_neighbour_return_is_not_a_shake(self) -> None:
+        # a-b-a is the ordinary neighbour figure; only four in a row count.
+        line = [60, 62, 60, 64, 65, 67, 65, 69] * 4
+        provenance = [{"voice_intent": "FigurationCarrier"} for _ in line]
+        shares = texture_gate.compute_alternation_shares(self._notes(line), provenance)
+        self.assertEqual(shares["v0/FigurationCarrier"], 0.0)
+
+    def test_one_shaking_line_is_not_diluted_by_a_steady_one(self) -> None:
+        notes = self._notes([60, 62] * 16) + self._notes(
+            [60 + (index % 8) for index in range(32)], voice=1
+        )
+        provenance = [{"voice_intent": "FigurationCarrier"} for _ in range(32)]
+        provenance += [{"voice_intent": "SubjectCarrier"} for _ in range(32)]
+        shares = texture_gate.compute_alternation_shares(notes, provenance)
+        self.assertEqual(shares["v0/FigurationCarrier"], 1.0)
+        self.assertEqual(shares["v1/SubjectCarrier"], 0.0)
+
+    def test_short_lines_and_missing_provenance(self) -> None:
+        short = self._notes([60, 62] * 4)
+        provenance = [{"voice_intent": "FigurationCarrier"} for _ in short]
+        self.assertEqual(texture_gate.compute_alternation_shares(short, provenance), {})
+        # Without provenance the grouping falls back to the voice alone.
+        self.assertEqual(
+            texture_gate.compute_alternation_shares(self._notes([60, 62] * 16), []),
+            {"v0": 1.0},
+        )
+
+    @staticmethod
+    def _fugue_case(share: float) -> texture_gate.GateCase:
+        return texture_gate.GateCase(
+            form="fugue",
+            seed=1,
+            generated=True,
+            num_voices=3,
+            max_active_voices=3,
+            avg_active_voices=2.6,
+            mono_ratio=0.0,
+            max_repeated_run=1,
+            min_piece_voice_occupancy=0.5,
+            piece_voice_occupancy={0: 0.9, 1: 0.6, 2: 0.6},
+            final_quarter_avg_active=2.8,
+            parallel_perfect_count=0,
+            model_score=0.85,
+            max_alternation_share=share,
+        )
+
+    def test_the_axis_gates_on_the_corpus_ceiling(self) -> None:
+        ceiling = texture_gate.MAX_ALTERNATION_SHARE
+        self.assertFalse(
+            self._fugue_case(ceiling + 0.01).axis_results()["alternation_share"]
+        )
+        self.assertTrue(self._fugue_case(ceiling).axis_results()["alternation_share"])
 
 
 class EntryRelativeSilenceTest(unittest.TestCase):
