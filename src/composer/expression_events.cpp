@@ -23,6 +23,11 @@ constexpr std::uint8_t kSettleValue = 88;   ///< Resolve: softened close below t
 /// Mid-phrase swell above the macro-arc value (CC#11 steps, a gentle breath).
 constexpr int kPhraseSwell = 6;
 
+/// Shortest value that carries a declared lift whole. An eighth is the fastest
+/// note the ordinary touch is described against; below it the stroke scales down
+/// with the note rather than the note being asked to absorb a fixed one.
+constexpr Tick kLiftReferenceTicks = kTicksPerBeat / 2;
+
 /// Registration terrace design values (CC#7 stop-change steps). The base sits
 /// below the develop level and each step adds one stop, capped below the macro
 /// climax peak (kClimaxValue = 95) so the arc's climax stays the dynamic summit.
@@ -263,11 +268,26 @@ void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<No
         break;
       }
     }
-    // A running figure is already articulated by its own speed; capping the
-    // release at a quarter of the note keeps short values joined and lets long
-    // values take the whole declared separation. The cap also holds the note
-    // above zero without a floor.
-    separation = std::min(separation, note.duration / 4);
+    // A lift is a physical gesture and takes about the same time whatever note
+    // it follows, so a long value gives up a small proportion of itself and an
+    // ordinary one gives up more. Below an eighth that stops being playable: the
+    // hand shortens the stroke rather than turning a run into a chain of dots,
+    // so the declared lift scales with the note there and the proportion the ear
+    // hears stops rising as the figure gets faster.
+    //
+    // Capping the lift at a quarter of the note instead does the opposite. The
+    // cap binds hardest exactly where the notes are shortest -- a sixteenth
+    // surrenders a quarter of itself while a whole note surrenders a fiftieth --
+    // and because every stroke wider than a sixteenth clamps to the same value
+    // there, it also flattens three of the four characters onto one touch in the
+    // fastest figuration, which is where the touch is most audible.
+    if (note.duration < kLiftReferenceTicks) {
+      separation = separation * note.duration / kLiftReferenceTicks;
+    }
+    // A lift never takes more than half of what it follows, whatever a plan
+    // declares. Nothing the characters ask for comes close; this is what keeps
+    // a wider declaration from silencing a note rather than parting it.
+    separation = std::min(separation, note.duration / 2);
     if (separation == 0) {
       continue;
     }

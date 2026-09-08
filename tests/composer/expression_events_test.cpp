@@ -318,8 +318,9 @@ TEST(ArticulationTest, LeavesEachVoiceFinalOnsetWhole) {
   }
 }
 
-TEST(ArticulationTest, CapsTheReleaseAtAQuarterOfTheNote) {
-  // A sixteenth is 120 ticks, so a 72-tick stroke would swallow most of it.
+TEST(ArticulationTest, ScalesTheLiftDownBelowAnEighth) {
+  // A sixteenth is 120 ticks against an eighth reference of 240, so a 72-tick
+  // stroke is halved rather than being asked of a note half the length.
   std::vector<NoteEvent> notes;
   for (std::size_t idx = 0; idx < 3; ++idx) {
     NoteEvent note;
@@ -330,9 +331,40 @@ TEST(ArticulationTest, CapsTheReleaseAtAQuarterOfTheNote) {
   }
   const std::vector<ArticulationDecl> plan = {{0, 0, 360, 72}};
   applyArticulation(plan, &notes, nullptr);
-  EXPECT_EQ(notes[0].duration, 120 - 30);
-  EXPECT_EQ(notes[1].duration, 120 - 30);
+  EXPECT_EQ(notes[0].duration, 120 - 36);
+  EXPECT_EQ(notes[1].duration, 120 - 36);
   EXPECT_EQ(notes[2].duration, 120) << "the voice's last onset stays whole";
+}
+
+// The property the scaling exists for, stated on its own: no note is
+// proportionally more detached than an eighth, however fast the figure gets. A
+// rule that caps the lift at a fraction of the note inverts this -- the fastest
+// notes become the most detached of all, which is what turns a running figure
+// into a chain of separated dots -- and it also clamps every stroke wider than
+// the cap onto one value there, so the characters stop differing exactly where
+// the touch is most audible.
+TEST(ArticulationTest, NoValueIsMoreDetachedThanAnEighth) {
+  const Tick eighth = kTicksPerBeat / 2;
+  for (const Tick stroke : {24, 40, 56, 72}) {
+    const auto share_of = [&](Tick value) {
+      std::vector<NoteEvent> notes;
+      for (std::size_t idx = 0; idx < 2; ++idx) {
+        NoteEvent note;
+        note.start_tick = static_cast<Tick>(idx) * value;
+        note.duration = value;
+        note.pitch = 62;
+        notes.push_back(note);
+      }
+      const std::vector<ArticulationDecl> plan = {{0, 0, 2 * value, stroke}};
+      applyArticulation(plan, &notes, nullptr);
+      EXPECT_GE(notes[0].duration * 2, value) << "value " << value << " stroke " << stroke;
+      return static_cast<double>(value - notes[0].duration) / static_cast<double>(value);
+    };
+    const double reference = share_of(eighth);
+    for (const Tick value : {1920, 960, 480, 240, 120, 60, 30}) {
+      EXPECT_LE(share_of(value), reference + 1e-9) << "value " << value << " stroke " << stroke;
+    }
+  }
 }
 
 TEST(ArticulationTest, LegatoDeclarationLeavesTheLineJoined) {
