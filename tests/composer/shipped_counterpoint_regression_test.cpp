@@ -1241,34 +1241,54 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Byte-identical under the bass ranking: this form's lowest voice is the
     // ground, and the ground is immutable. Its bass-fourth column is pinned at
     // what the ground table itself produces.
-    // The ground now decorates the last beat of a bar with a diatonic neighbour,
-    // rotating the figure so no two statements come back on the same surface.
-    // Battuta halves: the contrary arrival by downward leap was the bass leaping
-    // from one bar's held tone into the next, and a neighbour on the way out of
-    // the bar turns that leap into a step. The bass repair pass that vets the
-    // voices above now reads the ground at beat grain rather than one tone per
-    // bar, which is what lets it see the decorated tone at all -- at bar grain it
-    // was vetting against a tone the bass had already left. The floor gives up
-    // forty pairs where a decoration is withdrawn for reaching a perfect interval
-    // and the bar falls back to its plain statement.
+    // A ground statement may take a diatonic neighbour on the last beat of a bar,
+    // but the plain statement is this form's norm and a decorated one is an event
+    // against it. The opening statements are plain, one statement in three after
+    // them is decorated, and the closing statement is plain: the variations are
+    // heard as variations because the bass under them keeps coming back the same,
+    // and a ground that never returns to its own surface leaves them nothing to
+    // be measured against. The bass repair pass that vets the voices above reads
+    // the ground at beat grain rather than one tone per bar, so it sees a
+    // decorated tone at all -- at bar grain it was vetting against a tone the
+    // bass had already left.
     //
-    // The battuta column is RAISED here, from eleven to seventeen, and this is
-    // the trade the exception above allows. Every one of this form's hidden
-    // approaches was written by the counter figuration's beat anchor, and none
-    // of them was a misjudgement: at a hundred and twelve of the hundred and
-    // fourteen anchors that kept one, the whole band held no candidate of any
-    // milder class. What the old guard did with the remaining two was veto the
-    // battuta outright, which left it holding the hidden perfect it had been
-    // called to remove. Ranking the classes instead drops the hidden column from
-    // forty-eight to twenty and the contrary-repeat column from five to two,
-    // and the six the battuta column gains are what buys both. That is the
-    // direction the reference corpus prices: it writes a battuta far more freely
-    // than a hidden perfect in this texture, and the worst cell of the raised
-    // column is unchanged at one, so the six are spread across the sweep rather
-    // than piled into a bar. The vertical column falls with them, by
-    // thirty-four, because the candidate filter that made the ladder reachable
-    // is the bass-table reading described above.
-    {FormType::Passacaglia, 0, 0, 20, 17, 2, 0, 1, 1, 1, 27313, 156},
+    // Every one of this form's hidden approaches is written by the counter
+    // figuration's beat anchor, and none of them is a misjudgement: at a hundred
+    // and twelve of the hundred and fourteen anchors that keep one, the whole
+    // band holds no candidate of any milder class. The anchor ranks the four
+    // approach classes rather than vetoing on a subset of them, which is what
+    // took the hidden column from forty-eight to twenty.
+    //
+    // The contrary columns are empty because the variation's own bass repair
+    // reads them. That repair judges every candidate against the ground and
+    // nothing else, so it was held to same-direction faults alone while the
+    // ground was decorated at every statement -- a candidate cleared against a
+    // tone the bass was about to leave is not cleared at all. A ground stated
+    // plainly holds its tone across the beat the relocation lands on, and the
+    // wider remit becomes sound: the arrival by downward leap onto an octave
+    // with the ground is this form's largest bar-head fault and is invisible to
+    // the scan without it. The battuta column falls from seventeen to nine and
+    // the contrary-repeat column from two to zero, both strict columns stay
+    // empty, and the succession floor rises by seventy-six.
+    //
+    // A relocation may take its chord tone in another octave, which is what
+    // lets this repair reach a clean tone at a bar head at all, but it may not
+    // leave two leaps in a row: a tone a fifth or more from its neighbour on
+    // both sides buys a contrapuntal blemish with a hole in the melody. That is
+    // a preference and not a veto -- held as a veto it refuses every candidate
+    // at some onsets, and where the fault it then keeps is one a later gate
+    // reads, the piece stops composing at all. It takes this form's consecutive
+    // leaps down by a fifth of their number and its unprepared dissonance by
+    // more than fifteen hundred.
+    //
+    // The vertical column is RAISED by ten, from a hundred and fifty-six, and
+    // that is the price. It is the named trade the exception above allows and it
+    // is favourable in both directions the clause asks about: what goes is the
+    // contrary arrival by downward leap onto an octave with the ground -- eight
+    // of them, at a bar head where the corpus writes a step, plus both
+    // contrary-repeat arrivals -- and what comes back is ten fourths above a
+    // bass that parks under them.
+    {FormType::Passacaglia, 0, 0, 20, 9, 0, 0, 1, 1, 0, 27386, 166},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1397,12 +1417,21 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Nothing here is paid for. Every column is pinned at zero and stays there.
     //
     // Its middle voice is written by the counter figuration this form shares
-    // with the passacaglia, so the approach ladder and the bass-table candidate
-    // filter described on that row reach here too. The perfect columns were
-    // already empty and stay empty; what moves is the vertical one, down three,
-    // and the floor, up by three hundred and fifty-four onsets the anchor chain
-    // now restrikes rather than sustains.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19052, 43},
+    // with the passacaglia, and its ground and bass repair are the shared ones
+    // described on that row, so the approach ladder, the bass-table candidate
+    // filter, the plain-by-default ground and the leap preference all reach
+    // here. Every perfect column was already empty and stays empty, the vertical
+    // one holds, and the form sheds a fifth of its consecutive leaps and nearly
+    // two thousand unprepared dissonances.
+    //
+    // Its floor is LOWERED, by two hundred and fifty-one, and the reason is not
+    // that the form writes less counterpoint. A relocation moves a pitch and
+    // never an onset, so this repair cannot change what the counter reads
+    // directly. What changes is the ornament pass downstream of it: fewer leaps
+    // in the line means fewer positions it will decorate, so the array it hands
+    // on carries forty fewer notes across a thirty-two cell sample and five more
+    // rests. The counterpoint under the decoration is the same counterpoint.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18801, 43},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
