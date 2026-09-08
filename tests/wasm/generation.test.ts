@@ -63,7 +63,7 @@ describe('BachGenerator - Generation', () => {
     const events = bach.getEvents();
     expect(events.tempos[0]).toMatchObject({ tick: 0, bpm: 100 });
     expect(events.time_signatures[0]).toMatchObject({ tick: 0, numerator: 3, denominator: 4 });
-    expect(events.tracks).toHaveLength(2);
+    expect(events.tracks).toHaveLength(3);
     expect(Array.isArray(events.tracks[0].control_changes)).toBe(true);
   });
 

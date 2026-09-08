@@ -114,7 +114,7 @@ describe('BachGenerator - Form-decided track count', () => {
   // The form, not the config, decides how many tracks are emitted (1-3).
   it.each([
     ['cello_prelude', 1],
-    ['chaconne', 2],
+    ['chaconne', 3],
     ['passacaglia', 3],
     ['fugue', 3],
     ['trio_sonata', 3],
