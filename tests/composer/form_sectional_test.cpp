@@ -988,6 +988,19 @@ int soundingPitch(const std::vector<NoteEvent>& notes, int voice, Tick tick) {
   return pitch;
 }
 
+std::size_t soundingNoteIndex(const ComposeResult& result, int voice, Tick tick) {
+  std::size_t best_idx = result.notes.size();
+  for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+    const NoteEvent& note = result.notes[idx];
+    if (static_cast<int>(note.voice) == voice && note.start_tick <= tick &&
+        tick < note.start_tick + note.duration &&
+        (best_idx == result.notes.size() || note.start_tick > result.notes[best_idx].start_tick)) {
+      best_idx = idx;
+    }
+  }
+  return best_idx;
+}
+
 // Count parallel perfect fifths/octaves across all voice pairs by union-onset
 // sampling, identical to the texture-gate's compute_parallel_counts: at each
 // onset where both voices sound, a parallel = both voices moved in the same
@@ -1040,6 +1053,173 @@ int countParallelPerfects(const std::vector<NoteEvent>& notes) {
 }
 
 }  // namespace
+
+TEST(FormSectionalTest, CountersubjectAvoidsFourthWhenItsSourceIsTheOnlyBass) {
+  for (FormType form : kForms) {
+    for (std::uint16_t bars : {16, 32}) {
+      const HarnessFixture fx = buildFixture(form, 43, false, bars);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << formName(form) << " bars " << bars;
+      ASSERT_EQ(r.notes.size(), r.provenance.size()) << formName(form) << " bars " << bars;
+
+      std::size_t answer_source_notes = 0;
+      std::size_t sustained_answer_source_notes = 0;
+      std::size_t third_entry_source_notes = 0;
+      std::size_t sustained_third_entry_source_notes = 0;
+      for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+        const NoteEvent& note = r.notes[idx];
+        if (r.provenance[idx].voice_intent != VoiceIntent::CountersubjectCarrier) {
+          continue;
+        }
+
+        if (note.voice == 0) {
+          const std::size_t answer_idx = soundingNoteIndex(r, 1, note.start_tick);
+          const std::size_t bass_idx = soundingNoteIndex(r, 2, note.start_tick);
+          if (answer_idx < r.notes.size() && bass_idx == r.notes.size() &&
+              r.provenance[answer_idx].voice_intent == VoiceIntent::AnswerCarrier) {
+            ++answer_source_notes;
+            if (note.duration >= kTicksPerBeat) {
+              ++sustained_answer_source_notes;
+              EXPECT_NE(std::abs(static_cast<int>(note.pitch) -
+                                 static_cast<int>(r.notes[answer_idx].pitch)) %
+                            12,
+                        5)
+                  << formName(form) << " bars " << bars
+                  << " has a parked fourth over the answer at tick " << note.start_tick;
+            }
+          }
+        } else if (note.voice == 1 && bars >= 32) {
+          const std::size_t subject_idx = soundingNoteIndex(r, 2, note.start_tick);
+          if (subject_idx == r.notes.size() ||
+              r.provenance[subject_idx].voice_intent != VoiceIntent::SubjectCarrier) {
+            continue;
+          }
+          ++third_entry_source_notes;
+          if (note.duration >= kTicksPerBeat) {
+            ++sustained_third_entry_source_notes;
+            EXPECT_NE(std::abs(static_cast<int>(note.pitch) -
+                               static_cast<int>(r.notes[subject_idx].pitch)) %
+                          12,
+                      5)
+                << formName(form) << " bars " << bars
+                << " has a parked fourth over the third-entry bass at tick " << note.start_tick;
+          }
+        }
+      }
+      EXPECT_GT(answer_source_notes, 0u) << formName(form) << " bars " << bars;
+      EXPECT_GT(sustained_answer_source_notes, 0u) << formName(form) << " bars " << bars;
+      if (bars >= 32) {
+        EXPECT_GT(third_entry_source_notes, 0u) << formName(form) << " bars " << bars;
+        EXPECT_GT(sustained_third_entry_source_notes, 0u) << formName(form) << " bars " << bars;
+      }
+    }
+  }
+
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, 43, false, 32);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  constexpr Tick kLocatedTick = 36480;
+  const int upper_pitch = soundingPitch(r.notes, 0, kLocatedTick);
+  const int source_pitch = soundingPitch(r.notes, 1, kLocatedTick);
+  EXPECT_GE(upper_pitch, 0);
+  EXPECT_GE(source_pitch, 0);
+  EXPECT_EQ(soundingPitch(r.notes, 2, kLocatedTick), -1);
+  EXPECT_NE(std::abs(upper_pitch - source_pitch) % 12, 5);
+
+  const auto index_at_tick = [&](VoiceId voice) {
+    for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+      const NoteEvent& note = r.notes[idx];
+      if (note.voice == voice && note.start_tick <= kLocatedTick &&
+          kLocatedTick < note.start_tick + note.duration) {
+        return idx;
+      }
+    }
+    return r.notes.size();
+  };
+  const std::size_t upper_idx = index_at_tick(0);
+  const std::size_t source_idx = index_at_tick(1);
+  ASSERT_LT(upper_idx, r.notes.size());
+  ASSERT_LT(source_idx, r.notes.size());
+  EXPECT_EQ(r.provenance[upper_idx].voice_intent, VoiceIntent::CountersubjectCarrier);
+  EXPECT_TRUE(r.provenance[upper_idx].has_authored_note);
+  EXPECT_EQ(r.provenance[upper_idx].authored_pitch, r.notes[upper_idx].pitch);
+  EXPECT_EQ(r.provenance[source_idx].voice_intent, VoiceIntent::AnswerCarrier);
+}
+
+TEST(FormSectionalTest, UpperVoiceFourthRemainsConsonantOverActualBass) {
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, 43, false, 32);
+  const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  ASSERT_EQ(r.validation.status, ValidationStatus::Ok);
+  ASSERT_EQ(r.notes.size(), r.provenance.size());
+  const auto is_consonant = [](int interval) {
+    switch (std::abs(interval) % 12) {
+      case 0:
+      case 3:
+      case 4:
+      case 7:
+      case 8:
+      case 9:
+        return true;
+      default:
+        return false;
+    }
+  };
+  std::vector<Tick> onsets;
+  onsets.reserve(r.notes.size());
+  for (const NoteEvent& note : r.notes) {
+    onsets.push_back(note.start_tick);
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+
+  Tick licensed_tick = 0;
+  bool found_licensed_upper_fourth = false;
+  std::array<int, 3> licensed_pitches = {-1, -1, -1};
+  for (Tick tick : onsets) {
+    if (tick < static_cast<Tick>(freeBarsFor(32) + 8) * kBar ||
+        tick >= static_cast<Tick>(freeBarsFor(32) + 12) * kBar) {
+      continue;
+    }
+    const int upper_pitch = soundingPitch(r.notes, 0, tick);
+    const int middle_pitch = soundingPitch(r.notes, 1, tick);
+    const int bass_pitch = soundingPitch(r.notes, 2, tick);
+    if (upper_pitch < 0 || middle_pitch < 0 || bass_pitch < 0 ||
+        std::abs(upper_pitch - middle_pitch) % 12 != 5 || !is_consonant(upper_pitch - bass_pitch) ||
+        !is_consonant(middle_pitch - bass_pitch)) {
+      continue;
+    }
+    licensed_tick = tick;
+    found_licensed_upper_fourth = true;
+    licensed_pitches = {upper_pitch, middle_pitch, bass_pitch};
+    break;
+  }
+  ASSERT_TRUE(found_licensed_upper_fourth)
+      << "expected a fourth between upper voices when the V2 bass supports both pitches";
+  EXPECT_EQ(std::abs(licensed_pitches[0] - licensed_pitches[1]) % 12, 5);
+  EXPECT_TRUE(is_consonant(licensed_pitches[0] - licensed_pitches[2]));
+  EXPECT_TRUE(is_consonant(licensed_pitches[1] - licensed_pitches[2]));
+
+  const auto index_at_tick = [&](VoiceId voice) {
+    std::size_t best_idx = r.notes.size();
+    for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+      const NoteEvent& note = r.notes[idx];
+      if (note.voice == voice && note.start_tick <= licensed_tick &&
+          licensed_tick < note.start_tick + note.duration &&
+          (best_idx == r.notes.size() || note.start_tick > r.notes[best_idx].start_tick)) {
+        best_idx = idx;
+      }
+    }
+    return best_idx;
+  };
+  const std::size_t upper_idx = index_at_tick(0);
+  const std::size_t middle_idx = index_at_tick(1);
+  const std::size_t bass_idx = index_at_tick(2);
+  ASSERT_LT(upper_idx, r.notes.size());
+  ASSERT_LT(middle_idx, r.notes.size());
+  ASSERT_LT(bass_idx, r.notes.size());
+  EXPECT_EQ(r.provenance[upper_idx].voice_intent, VoiceIntent::FigurationCarrier);
+  EXPECT_EQ(r.provenance[middle_idx].voice_intent, VoiceIntent::CountersubjectCarrier);
+  EXPECT_EQ(r.provenance[bass_idx].voice_intent, VoiceIntent::SubjectCarrier);
+}
 
 // The rewired fugue tail draws every accompaniment pitch through the shared
 // parallel-avoidance machinery (ThemeToneRegistry + consonantChordTone), so the

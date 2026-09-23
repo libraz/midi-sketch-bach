@@ -1249,7 +1249,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
                                         Tick start, Tick end) {
     appendScoredCountersubject(source, static_cast<VoiceId>(voice), start, end, kBandLo[voice],
                                kBandHi[voice], mode, out.material.countersubject, registry,
-                               /*avoid_battuta=*/true);
+                               /*avoid_battuta=*/true, /*source_is_lowest=*/true);
   };
   stamp_subject(first_bar + 0, v0_off, 0, subj_rhythm);
   out.material.canonical_subject_note_count = kSubjectNotes;
