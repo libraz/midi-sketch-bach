@@ -21,8 +21,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -992,6 +994,96 @@ int maxConsecutiveLeap(const std::vector<NoteEvent>& notes) {
     }
   }
   return worst;
+}
+
+int maxVoiceConsecutiveLeap(const std::vector<NoteEvent>& notes, VoiceId target_voice) {
+  std::vector<const NoteEvent*> voice_notes;
+  for (const NoteEvent& note : notes) {
+    if (note.voice == target_voice)
+      voice_notes.push_back(&note);
+  }
+  std::sort(voice_notes.begin(), voice_notes.end(), [](const NoteEvent* lhs, const NoteEvent* rhs) {
+    return lhs->start_tick < rhs->start_tick;
+  });
+  int worst = 0;
+  for (std::size_t idx = 1; idx < voice_notes.size(); ++idx) {
+    if (voice_notes[idx]->start_tick >=
+        voice_notes[idx - 1]->start_tick + voice_notes[idx - 1]->duration) {
+      worst = std::max(worst, std::abs(static_cast<int>(voice_notes[idx]->pitch) -
+                                       static_cast<int>(voice_notes[idx - 1]->pitch)));
+    }
+  }
+  return worst;
+}
+
+TEST(FormCantusRegister, ChoraleCycleBoundaryKeepsFigurationConnected) {
+  const auto voice_pitch_at = [](const ComposeResult& result, Tick tick) {
+    for (const NoteEvent& note : result.notes) {
+      if (note.voice == 0 && note.start_tick == tick)
+        return static_cast<int>(note.pitch);
+    }
+    return -1;
+  };
+
+  const HarnessFixture target =
+      build(FormType::ChoralePrelude, false, SubjectCharacter::Severe, 16, 43);
+  const ComposeResult target_result =
+      Composer{}.run(target.material, target.harmony, target.voice_plan);
+  ASSERT_EQ(target_result.validation.status, ValidationStatus::Ok);
+  EXPECT_LE(maxVoiceConsecutiveLeap(target_result.notes, /*target_voice=*/0), 14);
+  const Tick climax_resolve_tick = 12 * kTicksPerBar;
+  EXPECT_EQ(voice_pitch_at(target_result, climax_resolve_tick), 79);
+  EXPECT_EQ(voice_pitch_at(target_result, climax_resolve_tick + kTicksPerBeat), 76);
+
+  const auto transition_chord =
+      std::find_if(target.harmony.chords.begin(), target.harmony.chords.end(),
+                   [](const ChordEvent& chord) { return chord.start_tick == climax_resolve_tick; });
+  ASSERT_NE(transition_chord, target.harmony.chords.end());
+  const int downbeat_pc = voice_pitch_at(target_result, climax_resolve_tick) % 12;
+  const int third = transition_chord->quality == ChordQuality::Minor ? 3 : 4;
+  EXPECT_TRUE(downbeat_pc == transition_chord->root_pc ||
+              downbeat_pc == (transition_chord->root_pc + third) % 12 ||
+              downbeat_pc == (transition_chord->root_pc + 7) % 12);
+
+  int climax_peak = 0;
+  int resolve_peak = 0;
+  for (const NoteEvent& note : target_result.notes) {
+    if (note.voice != 0)
+      continue;
+    if (note.start_tick >= 8 * kTicksPerBar && note.start_tick < climax_resolve_tick)
+      climax_peak = std::max(climax_peak, static_cast<int>(note.pitch));
+    if (note.start_tick >= climax_resolve_tick && note.start_tick < 14 * kTicksPerBar)
+      resolve_peak = std::max(resolve_peak, static_cast<int>(note.pitch));
+  }
+  EXPECT_GT(climax_peak, resolve_peak);
+
+  for (const auto& [seed, expected_leap] :
+       std::array<std::pair<std::uint32_t, int>, 3>{{{42, 12}, {44, 12}, {45, 13}}}) {
+    const HarnessFixture control =
+        build(FormType::ChoralePrelude, false, SubjectCharacter::Severe, 16, seed);
+    const ComposeResult control_result =
+        Composer{}.run(control.material, control.harmony, control.voice_plan);
+    ASSERT_EQ(control_result.validation.status, ValidationStatus::Ok) << "seed " << seed;
+    EXPECT_EQ(maxVoiceConsecutiveLeap(control_result.notes, /*target_voice=*/0), expected_leap)
+        << "seed " << seed;
+  }
+
+  const HarnessFixture eight_bar =
+      build(FormType::ChoralePrelude, false, SubjectCharacter::Severe, 8, 43);
+  const ComposeResult eight_bar_result =
+      Composer{}.run(eight_bar.material, eight_bar.harmony, eight_bar.voice_plan);
+  ASSERT_EQ(eight_bar_result.validation.status, ValidationStatus::Ok);
+  EXPECT_LE(maxVoiceConsecutiveLeap(eight_bar_result.notes, /*target_voice=*/0), 14);
+
+  for (bool minor : {false, true}) {
+    const HarnessFixture longer =
+        build(FormType::ChoralePrelude, minor, choraleCharacter(minor), 32, 43);
+    const ComposeResult longer_result =
+        Composer{}.run(longer.material, longer.harmony, longer.voice_plan);
+    ASSERT_EQ(longer_result.validation.status, ValidationStatus::Ok) << "minor=" << minor;
+    EXPECT_LE(maxVoiceConsecutiveLeap(longer_result.notes, /*target_voice=*/0), 14)
+        << "minor=" << minor;
+  }
 }
 
 // The goldberg principal line must stay at or under d''' (MIDI 86, the top of

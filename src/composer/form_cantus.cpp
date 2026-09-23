@@ -1044,6 +1044,63 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                     relief_registry, voice, /*num_voices=*/3, bars, mode);
   }
 
+  // A register-shift change can put the next cycle's chord-tone downbeat an
+  // octave below the uninterrupted line that leads into it. When the octave
+  // equivalent connects both adjacent attacks, revoice only that bar head;
+  // the rest of the figure keeps its arc-designed register and contour.
+  constexpr int kMaxFigurationLeap = 14;
+  constexpr int kV0FigurationFloor = 60;
+  for (std::size_t idx = 1; idx + 1 < fig_notes.size(); ++idx) {
+    MaterialNote& previous = fig_notes[idx - 1];
+    MaterialNote& downbeat = fig_notes[idx];
+    MaterialNote& following = fig_notes[idx + 1];
+    if (downbeat.start_tick % kTicksPerBar != 0 ||
+        previous.start_tick + previous.duration != downbeat.start_tick) {
+      continue;
+    }
+    const int bar = static_cast<int>(downbeat.start_tick / kTicksPerBar);
+    if (bar == 0 || bar >= bars - 2 || following.start_tick >= barTick(bar + 1))
+      continue;
+    const int cycle = (bar * cycle_count) / bars;
+    const int previous_cycle = ((bar - 1) * cycle_count) / bars;
+    if (cycle == previous_cycle ||
+        req.arc(static_cast<std::size_t>(cycle)).register_shift ==
+            req.arc(static_cast<std::size_t>(previous_cycle)).register_shift) {
+      continue;
+    }
+
+    const int previous_pitch = static_cast<int>(previous.pitch);
+    const int downbeat_pitch = static_cast<int>(downbeat.pitch);
+    const int following_pitch = static_cast<int>(following.pitch);
+    const int previous_leap = std::abs(previous_pitch - downbeat_pitch);
+    const int following_leap = std::abs(downbeat_pitch - following_pitch);
+    if (previous_leap <= kMaxFigurationLeap && following_leap <= kMaxFigurationLeap)
+      continue;
+
+    const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
+    int best_pitch = -1;
+    std::tuple<int, int, int, int> best_score{kMaxFigurationLeap + 1, 1 << 20, 1 << 20, 1 << 20};
+    for (const int candidate : {downbeat_pitch, downbeat_pitch + 12, downbeat_pitch - 12}) {
+      if (candidate < kV0FigurationFloor || candidate > 127 ||
+          candidate > std::max({previous_pitch, downbeat_pitch, following_pitch}) ||
+          !isChordTone(candidate, chord.root_pc, chord.minor)) {
+        continue;
+      }
+      const int into_leap = std::abs(previous_pitch - candidate);
+      const int out_leap = std::abs(candidate - following_pitch);
+      if (into_leap > kMaxFigurationLeap || out_leap > kMaxFigurationLeap)
+        continue;
+      const auto score = std::make_tuple(std::max(into_leap, out_leap), into_leap + out_leap,
+                                         std::abs(candidate - downbeat_pitch), candidate);
+      if (score < best_score) {
+        best_score = score;
+        best_pitch = candidate;
+      }
+    }
+    if (best_pitch >= 0)
+      downbeat.pitch = static_cast<std::uint8_t>(best_pitch);
+  }
+
   ChordEvent approach;
   approach.start_tick = final_approach_tick;
   approach.root_pc = 7;
