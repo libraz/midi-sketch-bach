@@ -1,0 +1,7 @@
+# Packages `ncu -u` must not raise, and why. Drop an entry once its blocker is
+# gone so the next run picks the package up again.
+reject:
+  # typescript: v7 ships no compiler API; its "." export resolves to
+  # lib/version.cjs, so scripts/build-js.mjs (ts.createSourceFile,
+  # ts.isExportDeclaration, ...) cannot walk dist/index.d.ts.
+  - typescript
