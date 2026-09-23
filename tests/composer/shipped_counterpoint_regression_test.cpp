@@ -1308,7 +1308,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // cardinal columns are unmoved: the doubled toccata line above is what
     // holds this row's octaves, and the counter-line below it does not reach
     // them.
-    {FormType::ToccataAndFugue, 84, 84, 14, 12, 6, 7, 2, 1, 1, 28030, 213},
+    //
+    // The fugue tail's countersubject now knows its source is the only bass, so
+    // it stops parking a fourth over it: the fourths fall by a third, at the cost
+    // of two hidden approaches and eight successions. Every worst cell holds.
+    {FormType::ToccataAndFugue, 84, 84, 16, 12, 6, 7, 2, 1, 1, 28023, 148},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1504,7 +1508,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // anything: every perfect column holds and the floor falls by four, because
     // a skip taken instead of a reversal occasionally lands the pitch the voice
     // beside it already sounds, and a repeat is one onset where there were two.
-    {FormType::FantasiaAndFugue, 0, 0, 9, 0, 14, 0, 1, 0, 1, 28650, 293},
+    //
+    // The fugue tail's lowest-voice countersubject reaches here as on the
+    // toccata's row: the fourths fall by 87, hidden rises by two and the floor
+    // falls by 27 successions. Every worst cell holds.
+    {FormType::FantasiaAndFugue, 0, 0, 11, 0, 14, 0, 1, 0, 1, 28623, 206},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
