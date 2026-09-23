@@ -17,9 +17,9 @@ namespace bach {
 /// cello, guitar, harpsichord, and piano.
 ///
 /// Beat emphasis:
-///   - Beat 0 (downbeat): +10
-///   - Beat 2 (secondary strong): +5
-///   - Beats 1, 3 (weak): -5
+///   - 4/4: downbeat +10, beat 3 +5, other beats -5
+///   - Sarabande 3/4: downbeat +10, beat 2 +5, beat 3 -5
+///   - Standard 3/4: downbeat +10, other beats -5
 ///
 /// Phrase shaping:
 ///   - First bar of phrase: +8
@@ -30,9 +30,12 @@ namespace bach {
 /// @param tick Note start tick.
 /// @param cadence_ticks Sorted cadence tick positions (may be empty).
 /// @param phrase_start_tick Start tick of the current phrase.
+/// @param time_signature The notated time signature used for beat and bar positions.
+/// @param meter_profile Beat hierarchy used for triple meter.
 /// @return Velocity value in [50, 110].
 uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
-                        Tick phrase_start_tick = 0);
+                        Tick phrase_start_tick = 0, TimeSignature time_signature = {4, 4},
+                        MeterProfile meter_profile = MeterProfile::StandardTriple);
 
 /// @brief Apply velocity curves to all notes in a track.
 ///
@@ -41,8 +44,12 @@ uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
 /// @param notes Notes to adjust (modified in place).
 /// @param instrument The instrument type.
 /// @param cadence_ticks Cadence positions for phrase shaping.
+/// @param time_signature The notated time signature used for beat and bar positions.
+/// @param meter_profile Beat hierarchy used for triple meter.
 void applyVelocityCurve(std::vector<NoteEvent>& notes, InstrumentType instrument,
-                        const std::vector<Tick>& cadence_ticks);
+                        const std::vector<Tick>& cadence_ticks,
+                        TimeSignature time_signature = {4, 4},
+                        MeterProfile meter_profile = MeterProfile::StandardTriple);
 
 }  // namespace bach
 

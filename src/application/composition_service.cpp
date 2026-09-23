@@ -263,7 +263,9 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   for (const auto& cadence : fixture.harmony.cadences) {
     cadence_ticks.push_back(cadence.tick);
   }
-  applyVelocityCurve(out->composition.notes, out->instrument, cadence_ticks);
+  const TimeSignature time_signature{fixture.harmony.ts_numerator, fixture.harmony.ts_denominator};
+  applyVelocityCurve(out->composition.notes, out->instrument, cadence_ticks, time_signature,
+                     fixture.harmony.meter_profile);
   // The notated lengths, kept before the touch shortens them. The exported
   // report carries the validator's texture figures, and those measure how many
   // voices the piece has sounding, not how long a player holds them: reading an

@@ -29,6 +29,69 @@ TEST(VelocityCurveTest, Beat2StrongerThanBeat3) {
   EXPECT_GT(beat2_vel, beat3_vel);
 }
 
+TEST(VelocityCurveTest, SarabandeTripleUsesItsThreeBeatHierarchy) {
+  const std::vector<Tick> no_cadences;
+  const TimeSignature sarabande_meter{3, 4};
+
+  EXPECT_EQ(computeVelocity(0, no_cadences, 0, sarabande_meter, MeterProfile::SarabandeTriple), 88);
+  EXPECT_EQ(computeVelocity(kTicksPerBeat, no_cadences, 0, sarabande_meter,
+                            MeterProfile::SarabandeTriple),
+            83);
+  EXPECT_EQ(computeVelocity(kTicksPerBeat * 2, no_cadences, 0, sarabande_meter,
+                            MeterProfile::SarabandeTriple),
+            73);
+}
+
+TEST(VelocityCurveTest, StandardTripleLeavesBothNonDownbeatsWeak) {
+  const std::vector<Tick> no_cadences;
+  const TimeSignature triple_meter{3, 4};
+
+  EXPECT_EQ(
+      computeVelocity(kTicksPerBeat, no_cadences, 0, triple_meter, MeterProfile::StandardTriple),
+      73);
+  EXPECT_EQ(computeVelocity(kTicksPerBeat * 2, no_cadences, 0, triple_meter,
+                            MeterProfile::StandardTriple),
+            73);
+}
+
+TEST(VelocityCurveTest, FourFourValuesAndBarBoundaryStayUnchanged) {
+  std::vector<NoteEvent> notes;
+  for (Tick tick : {0u, 480u, 960u, 1440u, 1919u, 1920u}) {
+    NoteEvent note;
+    note.start_tick = tick;
+    note.duration = 1;
+    note.pitch = 60;
+    notes.push_back(note);
+  }
+
+  applyVelocityCurve(notes, InstrumentType::Violin, {});
+
+  const std::vector<std::uint8_t> expected = {88, 73, 83, 73, 73, 88};
+  ASSERT_EQ(notes.size(), expected.size());
+  for (std::size_t idx = 0; idx < expected.size(); ++idx) {
+    EXPECT_EQ(notes[idx].velocity, expected[idx]) << "tick=" << notes[idx].start_tick;
+  }
+}
+
+TEST(VelocityCurveTest, ThreeFourPhraseBoundaryUsesNotatedBars) {
+  std::vector<NoteEvent> notes;
+  for (Tick tick : {1439u, 1440u, 1920u, 2400u, 2880u}) {
+    NoteEvent note;
+    note.start_tick = tick;
+    note.duration = 1;
+    note.pitch = 60;
+    notes.push_back(note);
+  }
+
+  applyVelocityCurve(notes, InstrumentType::Violin, {}, {3, 4}, MeterProfile::SarabandeTriple);
+
+  const std::vector<std::uint8_t> expected = {73, 88, 83, 73, 88};
+  ASSERT_EQ(notes.size(), expected.size());
+  for (std::size_t idx = 0; idx < expected.size(); ++idx) {
+    EXPECT_EQ(notes[idx].velocity, expected[idx]) << "tick=" << notes[idx].start_tick;
+  }
+}
+
 TEST(VelocityCurveTest, VelocityWithinRange) {
   std::vector<Tick> no_cadences;
   for (Tick tick = 0; tick < kTicksPerBar * 4; tick += kTicksPerBeat) {
@@ -52,6 +115,18 @@ TEST(VelocityCurveTest, OrganNotModified) {
   notes.push_back(note);
 
   applyVelocityCurve(notes, InstrumentType::Organ, {});
+
+  EXPECT_EQ(notes[0].velocity, 80);
+}
+
+TEST(VelocityCurveTest, HarpsichordNotModified) {
+  std::vector<NoteEvent> notes(1);
+  notes[0].start_tick = 0;
+  notes[0].duration = kTicksPerBeat;
+  notes[0].pitch = 60;
+  notes[0].velocity = 80;
+
+  applyVelocityCurve(notes, InstrumentType::Harpsichord, {});
 
   EXPECT_EQ(notes[0].velocity, 80);
 }

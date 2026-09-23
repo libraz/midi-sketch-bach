@@ -10,6 +10,7 @@
 #include <iterator>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "composer/form_director.h"
@@ -68,6 +69,58 @@ std::vector<std::uint8_t> midiPitches(const ParsedMidi& midi) {
     }
   }
   return pitches;
+}
+
+std::vector<std::uint8_t> jsonVelocitiesAtTick(const std::string& json, Tick tick) {
+  constexpr const char* kStartTickKey = "\"start_tick\":";
+  constexpr const char* kVelocityKey = "\"velocity\":";
+  std::vector<std::uint8_t> velocities;
+  std::size_t object_start = 0;
+  while ((object_start = json.find('{', object_start)) != std::string::npos) {
+    const std::size_t object_end = json.find('}', object_start);
+    if (object_end == std::string::npos) {
+      break;
+    }
+    const std::string object = json.substr(object_start, object_end - object_start);
+    const std::size_t start_tick_pos = object.find(kStartTickKey);
+    const std::size_t velocity_pos = object.find(kVelocityKey);
+    if (start_tick_pos != std::string::npos && velocity_pos != std::string::npos) {
+      const std::size_t start_value =
+          start_tick_pos + std::char_traits<char>::length(kStartTickKey);
+      const std::size_t velocity_value =
+          velocity_pos + std::char_traits<char>::length(kVelocityKey);
+      if (static_cast<Tick>(std::stoul(object.substr(start_value))) == tick) {
+        velocities.push_back(static_cast<std::uint8_t>(std::stoul(object.substr(velocity_value))));
+      }
+    }
+    object_start = object_end + 1;
+  }
+  std::sort(velocities.begin(), velocities.end());
+  return velocities;
+}
+
+std::vector<std::uint8_t> noteVelocitiesAtTick(const std::vector<NoteEvent>& notes, Tick tick) {
+  std::vector<std::uint8_t> velocities;
+  for (const auto& note : notes) {
+    if (note.start_tick == tick) {
+      velocities.push_back(note.velocity);
+    }
+  }
+  std::sort(velocities.begin(), velocities.end());
+  return velocities;
+}
+
+std::vector<std::uint8_t> midiVelocitiesAtTick(const ParsedMidi& midi, Tick tick) {
+  std::vector<std::uint8_t> velocities;
+  for (const auto& track : midi.tracks) {
+    for (const auto& note : track.notes) {
+      if (note.start_tick == tick) {
+        velocities.push_back(note.velocity);
+      }
+    }
+  }
+  std::sort(velocities.begin(), velocities.end());
+  return velocities;
 }
 
 TEST(CompositionServiceTest, RejectsInvalidArgumentsByStatus) {
@@ -364,6 +417,36 @@ TEST(CompositionServiceTest, NonKeyboardInstrumentUsesPhraseVelocityCurve) {
   std::sort(velocities.begin(), velocities.end());
   velocities.erase(std::unique(velocities.begin(), velocities.end()), velocities.end());
   EXPECT_GT(velocities.size(), 1u);
+}
+
+TEST(CompositionServiceTest, ChaconneVelocityFollowsSarabandeMeterInJsonAndMidi) {
+  CompositionRequest request;
+  request.form = FormType::Chaconne;
+  request.character = SubjectCharacter::Severe;
+  request.instrument = InstrumentType::Violin;
+  request.instrument_specified = true;
+  request.seed = 42;
+  request.bpm = 100;
+  CompositionProduct product;
+  ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(product.midi_bytes)) << reader.getError();
+  const std::array<std::pair<Tick, std::uint8_t>, 3> expected_velocities = {
+      {{1440, 88}, {1920, 83}, {2880, 88}}};
+  for (const auto& expected : expected_velocities) {
+    const Tick tick = expected.first;
+    const std::uint8_t expected_velocity = expected.second;
+    SCOPED_TRACE(tick);
+    const auto composition_velocities = noteVelocitiesAtTick(product.composition.notes, tick);
+    ASSERT_FALSE(composition_velocities.empty());
+    EXPECT_TRUE(std::all_of(
+        composition_velocities.begin(), composition_velocities.end(),
+        [expected_velocity](std::uint8_t velocity) { return velocity == expected_velocity; }));
+    EXPECT_EQ(jsonVelocitiesAtTick(product.generated_json, tick), composition_velocities);
+    EXPECT_EQ(midiVelocitiesAtTick(reader.getParsedMidi(), tick), composition_velocities);
+  }
+  EXPECT_EQ(product.composition.notes.size(), product.composition.provenance.size());
 }
 
 // The organ answers nothing to key velocity, so its expression is touch and
