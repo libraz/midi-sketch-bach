@@ -135,21 +135,20 @@ enum RuleBit : std::uint8_t {
   //   chord factor (root/third/fifth/seventh).
   // DoublingChecked: the candidate participated in a doubling
   //   verification at its tick (no leading-tone double, no 7th
-  //   double).
-  // SpacingChecked: the candidate participated in spacing
-  //   verification (upper-voice intervals stayed within one octave).
+  //   double); it does not record that the check passed.
+  // SpacingChecked: the candidate's chord is degree-tagged and the plan
+  //   enables the upper-voice spacing rule, so spacing is verified there.
   ChordToneRoman = 22,
   InversionLabel = 23,
   DoublingChecked = 24,
   SpacingChecked = 25,
   // Modulation / Tonicization / Borrowed chords.
-  // ModulationCommitted: the candidate sits at-or-after a
-  //   HarmonicPlan::ModulationEvent tick and its pitch class is
-  //   diatonic in the new key area.
-  // SecondaryDominantResolved: the candidate's chord follows a
-  //   has_secondary_of=true chord and its degree matches the
-  //   secondary_of value (i.e. the secondary dominant resolved as
-  //   declared).
+  // ModulationCommitted: the key in force at the candidate's chord is a
+  //   non-home key set by a HarmonicPlan::ModulationEvent and its pitch
+  //   class is diatonic in that key.
+  // SecondaryDominantResolved: the candidate's chord immediately follows
+  //   a has_secondary_of=true chord and its degree matches the
+  //   secondary_of value (degree succession only).
   // PicardyThird: the candidate is the major third of a final tonic
   //   chord in a minor-mode piece (is_picardy=true on the chord).
   // ModalMixture: the candidate's chord carries is_borrowed=true
@@ -313,14 +312,13 @@ enum RuleBit : std::uint8_t {
   // optional satisfied_rules_high JSON field). Stamped by CandidateSearch on
   // every CountersubjectCarrier note (an identity bit, mirroring the
   // CountersubjectActive marker).
-  // CountersubjectInvertible: the note belongs to a countersubject line designed
-  //   to sound against the subject/answer in invertible (double) counterpoint at
-  //   the octave. The Validator's countersubject_invertible rule collects every
-  //   note carrying this bit, pairs the countersubject voice against any
-  //   overlapping SubjectCarrier / AnswerCarrier voice, and soft-fails
-  //   (MusicalFail) when a strong-beat vertical interval between the pair would
-  //   become a forbidden dissonance under octave inversion (a perfect fifth
-  //   inverts to a fourth).
+  // CountersubjectInvertible: the note belongs to a countersubject line. It marks
+  //   identity only and does not certify invertibility. The Validator's
+  //   countersubject_invertible rule reads these notes, pairs the countersubject
+  //   voice against any overlapping SubjectCarrier / AnswerCarrier voice, and
+  //   records one informational, non-gating whole-piece observation when any
+  //   strong-beat interval between them is a perfect fifth (which inverts to a
+  //   fourth).
   CountersubjectInvertible = 64,
   GoldbergBassReplayed = 65,
   GoldbergVariationRealized = 66,

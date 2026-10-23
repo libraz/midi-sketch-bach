@@ -64,8 +64,13 @@ struct KeyContext {
 };
 
 // Consults only the modulation list, never the chord list, so it stays cheap
-// enough for the validator's pairwise rule loops.
+// enough for the validator's pairwise rule loops. The list need not be sorted:
+// the latest boundary at or before `tick` wins, later entries breaking ties.
 KeyContext keyAt(const HarmonicPlan& plan, Tick tick);
+
+// True iff `pc` belongs to the seven-tone collection of the key; a minor key
+// uses the harmonic form, whose raised 7th is the degree the dominant needs.
+bool isDiatonicPc(std::uint8_t pc, std::uint8_t tonic_pc, bool is_minor);
 
 // Local tonal policy derived from the latest modulation and active harmony.
 // `leading_tone_pc` resolves to `resolution_pc`; `has_active_leading_tone` is
@@ -239,10 +244,10 @@ const CadenceCell* cadenceCellAt(const Material& material, Tick tick);
 // Provenance-bit helpers. Both share the same shape: OR the bits the named
 // idiom implies into `rules`, leaving every other bit untouched.
 
-// Functional-harmony helper: set the four functional-harmony provenance
-// bits on `rules` when the active chord opts into the strict regime
-// (has_degree=true). Caller passes `pc` (candidate pitch class) and
-// `is_chord_tone` so the helper doesn't recompute triad arithmetic.
+// Functional-harmony helper: set the functional-harmony provenance bits on
+// `rules` when the active chord opts into the strict regime (has_degree=true).
+// Caller passes `pc` (candidate pitch class) and `is_chord_tone` so the helper
+// doesn't recompute triad arithmetic.
 //
 //   ChordToneRoman  — set when the candidate is a chord tone of a
 //                     degree-tagged chord. Stricter sibling of
@@ -253,28 +258,31 @@ const CadenceCell* cadenceCellAt(const Material& material, Tick tick);
 //                     could serve as the bass for the inversion). The
 //                     bit fires per-voice; whichever voice carries the
 //                     bass note will be the one that lights the bit.
-//   DoublingChecked — set unconditionally inside a has_degree chord
-//                     region: the doubling rules in the Validator (no
-//                     leading-tone double, no 7th double) sweep the
-//                     tick.
-//   SpacingChecked  — set unconditionally inside a has_degree chord
-//                     region: spacing rule sweeps the tick.
+//   DoublingChecked — set inside every has_degree chord region, where the
+//                     Validator's doubling rules (no leading-tone double, no
+//                     7th double) always run. It records participation in
+//                     the check, not that the sonority passed it.
 void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone);
 
-// Modulation/tonicization helper: set the four corresponding provenance
-// bits when the surrounding context matches each idiom.
+// Plan-dependent provenance bits. `chord` must be the chord active at the
+// candidate's onset; the key is read at that chord's start.
 //
-//   ModulationCommitted        — the active chord sits at or after a
-//                                ModulationEvent boundary (the plan has
-//                                committed to a new key area, and this
-//                                candidate's pitch is participating in
-//                                that area).
-//   SecondaryDominantResolved  — the active chord is the resolution of
-//                                a previous secondary dominant: the
-//                                most recent chord with has_secondary_of=
-//                                true (strictly before the active chord)
-//                                declares secondary_of equal to the
-//                                active chord's degree.
+//   SpacingChecked             — the chord is degree-tagged and the plan
+//                                enables the Validator's upper-voice spacing
+//                                rule (enforce_chordal_upper_voice_spacing),
+//                                so the spacing check runs on this sonority.
+//   ModulationCommitted        — the key in force (keyAt) differs from the
+//                                home key, and the candidate's pitch class is
+//                                diatonic in that key (harmonic minor for a
+//                                minor key). Absent before the first
+//                                modulation, after a return home, and on
+//                                chromatic pitch classes.
+//   SecondaryDominantResolved  — the chord immediately preceding the active
+//                                chord in plan.chords has has_secondary_of=
+//                                true and secondary_of equal to the active
+//                                chord's degree. Degree succession only; the
+//                                secondary leading tone's motion is not
+//                                inspected.
 //   PicardyThird               — the active chord is the final tonic
 //                                with is_picardy=true and the candidate
 //                                lands on the major third (root + 4).

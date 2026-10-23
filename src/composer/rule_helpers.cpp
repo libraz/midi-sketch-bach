@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <iterator>
 
 #include "composer/chord_voicing.h"
 #include "core/pitch_utils.h"
@@ -122,14 +123,12 @@ bool isLeadingToneResolution(std::uint8_t leading, int resolution, const Harmoni
 
 namespace {
 
+// Like activeChord, but null before the first chord instead of a fallback.
 const ChordEvent* chordAt(const HarmonicPlan& plan, Tick tick) {
-  const ChordEvent* active = nullptr;
-  for (const auto& chord : plan.chords) {
-    if (chord.start_tick > tick)
-      break;
-    active = &chord;
-  }
-  return active;
+  const auto next = std::upper_bound(
+      plan.chords.begin(), plan.chords.end(), tick,
+      [](Tick value, const ChordEvent& chord) { return value < chord.start_tick; });
+  return next == plan.chords.begin() ? nullptr : &*std::prev(next);
 }
 
 bool chordContainsPc(const ChordEvent& chord, std::uint8_t pc) {
@@ -218,13 +217,24 @@ KeyContext keyAt(const HarmonicPlan& plan, Tick tick) {
   KeyContext key;
   key.tonic_pc = static_cast<std::uint8_t>(plan.tonic_pc % 12);
   key.is_minor = plan.is_minor;
+  // Latest boundary at or before `tick`, later list entries winning ties, so an
+  // out-of-order list resolves the same as a sorted one.
+  Tick latest = 0;
+  bool found = false;
   for (const auto& modulation : plan.modulations) {
-    if (modulation.tick > tick)
-      break;
+    if (modulation.tick > tick || (found && modulation.tick < latest))
+      continue;
+    latest = modulation.tick;
+    found = true;
     key.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
     key.is_minor = modulation.to_is_minor;
   }
   return key;
+}
+
+bool isDiatonicPc(std::uint8_t pc, std::uint8_t tonic_pc, bool is_minor) {
+  const auto scale = scalePcs(tonic_pc, is_minor);
+  return std::find(scale.begin(), scale.end(), static_cast<std::uint8_t>(pc % 12)) != scale.end();
 }
 
 TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick) {
@@ -698,7 +708,6 @@ void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bo
   if (!chord.has_degree)
     return;
   rules |= ruleBitMask(RuleBit::DoublingChecked);
-  rules |= ruleBitMask(RuleBit::SpacingChecked);
   if (is_chord_tone)
     rules |= ruleBitMask(RuleBit::ChordToneRoman);
   if (pc == bassPitchClassFor(chord))
@@ -707,21 +716,20 @@ void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bo
 
 void applyP8Bits(RuleIdMask& rules, const HarmonicPlan& plan, const ChordEvent& chord,
                  std::uint8_t pc, bool is_chord_tone) {
-  for (const auto& mod : plan.modulations) {
-    if (mod.tick <= chord.start_tick) {
-      rules |= ruleBitMask(RuleBit::ModulationCommitted);
-      break;
-    }
-  }
-  const ChordEvent* prev = nullptr;
-  for (const auto& c : plan.chords) {
-    if (c.start_tick >= chord.start_tick)
-      break;
-    if (c.has_secondary_of)
-      prev = &c;
-  }
-  if (prev != nullptr && chord.has_degree && prev->secondary_of == chord.degree) {
-    rules |= ruleBitMask(RuleBit::SecondaryDominantResolved);
+  // Needs the plan's switch, which applyP7Bits does not receive.
+  if (chord.has_degree && plan.enforce_chordal_upper_voice_spacing)
+    rules |= ruleBitMask(RuleBit::SpacingChecked);
+  const KeyContext key = keyAt(plan, chord.start_tick);
+  const bool away_from_home = key.tonic_pc != plan.tonic_pc % 12 || key.is_minor != plan.is_minor;
+  if (away_from_home && isDiatonicPc(pc, key.tonic_pc, key.is_minor))
+    rules |= ruleBitMask(RuleBit::ModulationCommitted);
+  const auto at =
+      std::lower_bound(plan.chords.begin(), plan.chords.end(), chord.start_tick,
+                       [](const ChordEvent& event, Tick tick) { return event.start_tick < tick; });
+  if (at != plan.chords.begin() && chord.has_degree) {
+    const ChordEvent& previous = *std::prev(at);
+    if (previous.has_secondary_of && previous.secondary_of == chord.degree)
+      rules |= ruleBitMask(RuleBit::SecondaryDominantResolved);
   }
   if (chord.is_picardy) {
     const std::uint8_t major_third_pc = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);

@@ -97,6 +97,9 @@ HarnessFixture buildFugueCompleteFixture(int seed) {
   // pre-filter stays active for the Compose counterlines.
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = false;
+  // The all-technique fixture exercises the upper-voice spacing rule too, so
+  // SpacingChecked is earned by a check that actually runs.
+  out.harmony.enforce_chordal_upper_voice_spacing = true;
   auto harm_idx_for = [&](int blk) { return (harm_a + blk) % 4; };
   const int num_blocks = kBars / 4;  // 10 full 4-bar blocks (bars 0-39).
   for (int blk = 0; blk < num_blocks; ++blk) {

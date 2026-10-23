@@ -4,9 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include "composer/chord_voicing.h"
 #include "composer/form_idiom_rules.h"
@@ -114,67 +116,105 @@ std::uint8_t lowestSoundingPitch(const VoiceOnsetIndex& onset_index,
   return lowest;
 }
 
+// True when `sp` is realized as declared at its suspension tick and forms its
+// declared dissonance-resolution pair against `other_voice`.
+bool suspensionHoldsAgainst(const VoiceOnsetIndex& onset_index, const std::vector<VoiceId>& voices,
+                            const SuspensionPattern& sp, VoiceId other_voice) {
+  if (sp.preparation_tick >= sp.suspension_tick || sp.resolution_tick <= sp.suspension_tick)
+    return false;
+  const Tick tick = sp.suspension_tick;
+  const std::uint8_t prep = onset_index.pitchAt(sp.voice, sp.preparation_tick);
+  const std::uint8_t sus = onset_index.pitchAt(sp.voice, sp.suspension_tick);
+  const std::uint8_t res = onset_index.pitchAt(sp.voice, sp.resolution_tick);
+  const std::uint8_t other_sus = onset_index.pitchAt(other_voice, sp.suspension_tick);
+  const std::uint8_t other_res = onset_index.pitchAt(other_voice, sp.resolution_tick);
+  if (prep != sp.preparation_pitch || sus != sp.suspension_pitch || res != sp.resolution_pitch ||
+      prep != sus || other_sus == 0 || other_res == 0)
+    return false;
+  const int resolution_motion = static_cast<int>(res) - static_cast<int>(sus);
+  const bool ascending = sp.type == SuspensionType::Sus2_3;
+  if ((!ascending && resolution_motion != -1 && resolution_motion != -2) ||
+      (ascending && resolution_motion != 1 && resolution_motion != 2))
+    return false;
+  int sus_ic = 0;
+  int res_ic = 0;
+  if (ascending) {
+    sus_ic = ((static_cast<int>(other_sus) - static_cast<int>(sus)) % 12 + 12) % 12;
+    res_ic = ((static_cast<int>(other_res) - static_cast<int>(res)) % 12 + 12) % 12;
+  } else {
+    // Upper-voice suspensions are dissonant specifically against the lowest
+    // sounding other voice, not against an incidental upper partner.
+    std::uint8_t lowest_other = 0;
+    for (VoiceId voice : voices) {
+      if (voice == sp.voice)
+        continue;
+      const std::uint8_t pitch = onset_index.pitchAt(voice, tick);
+      if (pitch != 0 && (lowest_other == 0 || pitch < lowest_other))
+        lowest_other = pitch;
+    }
+    if (other_sus != lowest_other)
+      return false;
+    sus_ic = ((static_cast<int>(sus) - static_cast<int>(other_sus)) % 12 + 12) % 12;
+    res_ic = ((static_cast<int>(res) - static_cast<int>(other_res)) % 12 + 12) % 12;
+  }
+  switch (sp.type) {
+    case SuspensionType::Sus4_3:
+      return sus_ic == 5 && (res_ic == 3 || res_ic == 4);
+    case SuspensionType::Sus7_6:
+      return (sus_ic == 10 || sus_ic == 11) && (res_ic == 8 || res_ic == 9);
+    case SuspensionType::Sus9_8:
+      return (sus_ic == 1 || sus_ic == 2) && res_ic == 0;
+    case SuspensionType::Sus2_3:
+      return (sus_ic == 1 || sus_ic == 2) && (res_ic == 3 || res_ic == 4);
+  }
+  return false;
+}
+
 bool isDeclaredSuspensionDissonance(const VoiceOnsetIndex& onset_index,
                                     const std::vector<VoiceId>& voices, const Material& material,
                                     VoiceId voice_a, VoiceId voice_b, Tick tick) {
   for (const auto& sp : material.suspension_patterns) {
+    if ((sp.voice != voice_a && sp.voice != voice_b) || sp.suspension_tick != tick)
+      continue;
+    if (suspensionHoldsAgainst(onset_index, voices, sp, sp.voice == voice_a ? voice_b : voice_a))
+      return true;
+  }
+  return false;
+}
+
+// An upper-voice suspension sounds a fourth (or its declared interval) above the
+// bass, so every upper partner standing a fourth from it inherits that
+// dissonance through the bass-sensitive reading. When the suspension holds
+// against the bass voice, such a pair is excused as long as the partner itself
+// is consonant above the bass; any other dissonance in the pair still counts.
+bool isUpperPartnerOfDeclaredSuspension(const VoiceOnsetIndex& onset_index,
+                                        const std::vector<VoiceId>& voices,
+                                        const Material& material, VoiceId voice_a, VoiceId voice_b,
+                                        Tick tick) {
+  for (const auto& sp : material.suspension_patterns) {
     if ((sp.voice != voice_a && sp.voice != voice_b) || sp.suspension_tick != tick ||
-        sp.preparation_tick >= sp.suspension_tick || sp.resolution_tick <= sp.suspension_tick) {
+        sp.type == SuspensionType::Sus2_3)
       continue;
-    }
-    const VoiceId other_voice = sp.voice == voice_a ? voice_b : voice_a;
-    const std::uint8_t prep = onset_index.pitchAt(sp.voice, sp.preparation_tick);
-    const std::uint8_t sus = onset_index.pitchAt(sp.voice, sp.suspension_tick);
-    const std::uint8_t res = onset_index.pitchAt(sp.voice, sp.resolution_tick);
-    const std::uint8_t other_sus = onset_index.pitchAt(other_voice, sp.suspension_tick);
-    const std::uint8_t other_res = onset_index.pitchAt(other_voice, sp.resolution_tick);
-    if (prep != sp.preparation_pitch || sus != sp.suspension_pitch || res != sp.resolution_pitch ||
-        prep != sus || other_sus == 0 || other_res == 0)
-      continue;
-    const int resolution_motion = static_cast<int>(res) - static_cast<int>(sus);
-    const bool ascending = sp.type == SuspensionType::Sus2_3;
-    if ((!ascending && resolution_motion != -1 && resolution_motion != -2) ||
-        (ascending && resolution_motion != 1 && resolution_motion != 2))
-      continue;
-    int sus_ic = 0;
-    int res_ic = 0;
-    if (ascending) {
-      sus_ic = ((static_cast<int>(other_sus) - static_cast<int>(sus)) % 12 + 12) % 12;
-      res_ic = ((static_cast<int>(other_res) - static_cast<int>(res)) % 12 + 12) % 12;
-    } else {
-      // Upper-voice suspensions are dissonant specifically against the lowest
-      // sounding other voice, not against an incidental upper partner.
-      std::uint8_t lowest_other = 0;
-      for (VoiceId voice : voices) {
-        if (voice == sp.voice)
-          continue;
-        const std::uint8_t pitch = onset_index.pitchAt(voice, tick);
-        if (pitch != 0 && (lowest_other == 0 || pitch < lowest_other))
-          lowest_other = pitch;
+    VoiceId bass_voice = sp.voice;
+    std::uint8_t bass_pitch = 0;
+    for (VoiceId voice : voices) {
+      const std::uint8_t pitch = onset_index.pitchAt(voice, tick);
+      if (voice != sp.voice && pitch != 0 && (bass_pitch == 0 || pitch < bass_pitch)) {
+        bass_pitch = pitch;
+        bass_voice = voice;
       }
-      if (other_sus != lowest_other)
-        continue;
-      sus_ic = ((static_cast<int>(sus) - static_cast<int>(other_sus)) % 12 + 12) % 12;
-      res_ic = ((static_cast<int>(res) - static_cast<int>(other_res)) % 12 + 12) % 12;
     }
-    switch (sp.type) {
-      case SuspensionType::Sus4_3:
-        if (sus_ic == 5 && (res_ic == 3 || res_ic == 4))
-          return true;
-        break;
-      case SuspensionType::Sus7_6:
-        if ((sus_ic == 10 || sus_ic == 11) && (res_ic == 8 || res_ic == 9))
-          return true;
-        break;
-      case SuspensionType::Sus9_8:
-        if ((sus_ic == 1 || sus_ic == 2) && res_ic == 0)
-          return true;
-        break;
-      case SuspensionType::Sus2_3:
-        if ((sus_ic == 1 || sus_ic == 2) && (res_ic == 3 || res_ic == 4))
-          return true;
-        break;
-    }
+    const VoiceId partner = sp.voice == voice_a ? voice_b : voice_a;
+    if (bass_pitch == 0 || partner == bass_voice ||
+        !suspensionHoldsAgainst(onset_index, voices, sp, bass_voice))
+      continue;
+    const std::uint8_t suspended = onset_index.pitchAt(sp.voice, tick);
+    const std::uint8_t partner_pitch = onset_index.pitchAt(partner, tick);
+    if (partner_pitch == 0 || partner_pitch == bass_pitch)
+      continue;
+    const int interval = std::abs(static_cast<int>(suspended) - static_cast<int>(partner_pitch));
+    if (interval % 12 == 5 && rule_helpers::isConsonantAboveBass(partner_pitch, bass_pitch))
+      return true;
   }
   return false;
 }
@@ -318,24 +358,44 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   std::sort(boundaries.begin(), boundaries.end());
   boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
 
+  // Every onset and release is a boundary, so a note overlaps the interval
+  // [begin, end) exactly when it started at or before `begin` and has not been
+  // released by then. Sweeping start/release events in tick order keeps a live
+  // note count per voice instead of rescanning the notes per interval.
+  struct VoiceEvent {
+    Tick tick;
+    VoiceId voice;
+    int delta;
+  };
+  std::vector<VoiceEvent> events;
+  events.reserve(notes.size() * 2);
+  for (const auto& note : notes) {
+    const Tick release = note.start_tick + note.duration;
+    if (release < note.start_tick)
+      continue;  // a wrapped release tick never overlaps any interval.
+    events.push_back({note.start_tick, note.voice, 1});
+    events.push_back({release, note.voice, -1});
+  }
+  std::sort(events.begin(), events.end(),
+            [](const VoiceEvent& lhs, const VoiceEvent& rhs) { return lhs.tick < rhs.tick; });
+  std::array<int, 256> live_notes{};
+  int active = 0;
+  std::size_t next_event = 0;
+
   long active_voice_ticks = 0;
   long mono_ticks = 0;
   long total_ticks = 0;
   for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
     const Tick begin = boundaries[i];
     const Tick end = boundaries[i + 1];
+    for (; next_event < events.size() && events[next_event].tick <= begin; ++next_event) {
+      int& live = live_notes[events[next_event].voice];
+      const bool was_sounding = live > 0;
+      live += events[next_event].delta;
+      active += static_cast<int>(live > 0) - static_cast<int>(was_sounding);
+    }
     if (end <= begin) {
       continue;
-    }
-    int active = 0;
-    for (VoiceId voice : voices) {
-      const bool sounding = std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
-        return note.voice == voice && note.start_tick < end &&
-               begin < note.start_tick + note.duration;
-      });
-      if (sounding) {
-        ++active;
-      }
     }
     metrics.max_active_voices = std::max(metrics.max_active_voices, active);
     const Tick span = end - begin;
@@ -452,32 +512,35 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     // one authored carrier.  Per-note bounds alone would miss a deleted middle
     // subdivision or a gap, so group by the immutable authored-note identity
     // and require exact, contiguous coverage ending on the main tone.
+    // Group the expansions by authored-note identity in one sort, then check
+    // each group in order of its first member.
+    std::vector<std::size_t> ornament_notes;
     for (std::size_t i = 0; i < notes.size() && i < provenance.size(); ++i) {
-      const auto& p = provenance[i];
-      if (p.source != NoteSource::Ornament || !p.has_authored_note)
-        continue;
-      const auto same_group = [&](std::size_t j) {
-        return j < provenance.size() && provenance[j].source == NoteSource::Ornament &&
-               provenance[j].has_authored_note && notes[j].voice == notes[i].voice &&
-               provenance[j].span_id == p.span_id && provenance[j].voice_intent == p.voice_intent &&
-               provenance[j].authored_start_tick == p.authored_start_tick &&
-               provenance[j].authored_duration == p.authored_duration &&
-               provenance[j].authored_pitch == p.authored_pitch;
-      };
-      bool already_checked = false;
-      for (std::size_t j = 0; j < i; ++j) {
-        if (same_group(j)) {
-          already_checked = true;
-          break;
-        }
-      }
-      if (already_checked)
-        continue;
-      std::vector<std::size_t> group;
-      for (std::size_t j = i; j < notes.size(); ++j) {
-        if (same_group(j))
-          group.push_back(j);
-      }
+      if (provenance[i].source == NoteSource::Ornament && provenance[i].has_authored_note)
+        ornament_notes.push_back(i);
+    }
+    const auto identity = [&](std::size_t index) {
+      const auto& prov = provenance[index];
+      return std::make_tuple(notes[index].voice, prov.span_id, prov.voice_intent,
+                             prov.authored_start_tick, prov.authored_duration, prov.authored_pitch);
+    };
+    std::sort(ornament_notes.begin(), ornament_notes.end(), [&](std::size_t lhs, std::size_t rhs) {
+      const auto lhs_key = identity(lhs);
+      const auto rhs_key = identity(rhs);
+      return lhs_key != rhs_key ? lhs_key < rhs_key : lhs < rhs;
+    });
+    std::vector<std::vector<std::size_t>> ornament_groups;
+    for (std::size_t pos = 0; pos < ornament_notes.size(); ++pos) {
+      if (pos == 0 || identity(ornament_notes[pos]) != identity(ornament_notes[pos - 1]))
+        ornament_groups.emplace_back();
+      ornament_groups.back().push_back(ornament_notes[pos]);
+    }
+    std::sort(ornament_groups.begin(), ornament_groups.end(),
+              [](const std::vector<std::size_t>& lhs, const std::vector<std::size_t>& rhs) {
+                return lhs.front() < rhs.front();
+              });
+    for (std::vector<std::size_t>& group : ornament_groups) {
+      const auto& p = provenance[group.front()];
       std::sort(group.begin(), group.end(), [&](std::size_t a, std::size_t b) {
         return notes[a].start_tick < notes[b].start_tick;
       });
@@ -854,13 +917,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     if (!ok) {
       SpanId fail_span = kInvalidSpanId;
-      for (std::size_t k = 0; k < notes.size(); ++k) {
-        if (notes[k].voice == bass_voice && notes[k].start_tick == cadence.tick) {
-          if (k < provenance.size())
-            fail_span = provenance[k].span_id;
-          break;
-        }
-      }
+      const std::size_t bass_onset = onset_index.startingAt(bass_voice, cadence.tick);
+      if (bass_onset < provenance.size())
+        fail_span = provenance[bass_onset].span_id;
       ValidationFailure failure;
       failure.span_id = fail_span;
       failure.rule_id = "cadence_voice_leading";
@@ -1022,9 +1081,67 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // two different inflections in different voices, either simultaneous or on
   // adjacent starts. Half-steps between two distinct degrees (E/F and B/C in
   // major, D/Eb and G/Ab in minor) are not cross relations.
+  //
+  // Partners are gathered per other voice from the onset index rather than by
+  // walking every later note: a partner either overlaps note i or holds one of
+  // the three onsets nearest i's onset in its own voice (an onset further away
+  // has another onset of that voice strictly between, so it is never adjacent).
+  // The gathered superset is then sorted by note index and judged by the same
+  // predicate, so findings keep their (i, j) order.
+  const auto generationFixedPair = [&](std::size_t lhs, std::size_t rhs) {
+    return !audit_final_score && lhs < provenance.size() && rhs < provenance.size() &&
+           provenance[lhs].source == NoteSource::Material &&
+           provenance[rhs].source == NoteSource::Material;
+  };
+  std::vector<std::size_t> partners;
   for (std::size_t i = 0; i < notes.size(); ++i) {
-    for (std::size_t j = i + 1; j < notes.size(); ++j) {
-      if (notes[i].voice == notes[j].voice)
+    partners.clear();
+    const Tick onset = notes[i].start_tick;
+    const Tick release = onset + notes[i].duration;
+    for (VoiceId other : voices) {
+      if (other == notes[i].voice)
+        continue;
+      const std::vector<std::size_t>& line = onset_index.voiceNotes(other);
+      const auto onsetOf = [&notes](std::size_t index) { return notes[index].start_tick; };
+      const auto first_at =
+          std::lower_bound(line.begin(), line.end(), onset,
+                           [&](std::size_t index, Tick value) { return onsetOf(index) < value; });
+      // Onsets inside i's sounding window, including i's own onset.
+      for (auto it = first_at; it != line.end() && onsetOf(*it) < release; ++it)
+        partners.push_back(*it);
+      // Notes already sounding when i starts.
+      onset_index.forEachSoundingAt(other, onset, [&partners](std::size_t index) {
+        partners.push_back(index);
+        return true;
+      });
+      // The onset group just before i, at i, and just after i.
+      if (first_at != line.begin()) {
+        const Tick before = onsetOf(*std::prev(first_at));
+        for (auto it = std::prev(first_at);; --it) {
+          if (onsetOf(*it) != before)
+            break;
+          partners.push_back(*it);
+          if (it == line.begin())
+            break;
+        }
+      }
+      auto after_it = first_at;
+      while (after_it != line.end() && onsetOf(*after_it) == onset)
+        partners.push_back(*after_it++);
+      if (after_it != line.end()) {
+        const Tick after = onsetOf(*after_it);
+        for (; after_it != line.end() && onsetOf(*after_it) == after; ++after_it)
+          partners.push_back(*after_it);
+      }
+    }
+    std::sort(partners.begin(), partners.end());
+    partners.erase(std::unique(partners.begin(), partners.end()), partners.end());
+    for (const std::size_t j : partners) {
+      if (j <= i || notes[i].voice == notes[j].voice)
+        continue;
+      // Both Material in Generation: nothing the composer can do, and the
+      // verdict below would be discarded, so skip before any index query.
+      if (generationFixedPair(i, j))
         continue;
       const bool simultaneous = notes[i].start_tick <= notes[j].start_tick &&
                                 notes[j].start_tick < notes[i].start_tick + notes[i].duration;
@@ -1053,18 +1170,6 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       if (!isCrossRelationPc(pitchClass(notes[i].pitch), pitchClass(notes[j].pitch),
                              local_key.tonic_pc, local_key.is_minor))
         continue;
-      // Both Material; nothing the composer can do (mirrors the
-      // parallel/hidden-parallel/vertical-dissonance both_material gate).
-      // notes and provenance are index-aligned, so i,j index provenance.
-      // A Compose-vs-Material or Compose-vs-Compose cross relation still
-      // fires; only the uncontrollable fixed-vs-fixed pair is skipped.
-      const bool generation_fixed_pair = !audit_final_score && i < provenance.size() &&
-                                         j < provenance.size() &&
-                                         provenance[i].source == NoteSource::Material &&
-                                         provenance[j].source == NoteSource::Material;
-      if (generation_fixed_pair) {
-        continue;
-      }
       SpanId fail_span = kInvalidSpanId;
       if (j < provenance.size()) {
         fail_span = provenance[j].span_id;
@@ -1082,6 +1187,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //    cadential 6/4 declaration supplies its preparation and resolution.
   //    A fourth between upper voices remains valid when both notes are
   //    consonant above the bass.
+  std::vector<std::size_t> sounding_pair;
   for (std::size_t va = 0; va < voices.size(); ++va) {
     for (std::size_t vb = va + 1; vb < voices.size(); ++vb) {
       for (Tick t : ticks) {
@@ -1098,6 +1204,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         if (!consonant)
           consonant = isDeclaredSuspensionDissonance(onset_index, voices, material, voices[va],
                                                      voices[vb], t);
+        if (!consonant)
+          consonant = isUpperPartnerOfDeclaredSuspension(onset_index, voices, material, voices[va],
+                                                         voices[vb], t);
         if (!consonant && std::abs(static_cast<int>(pa) - static_cast<int>(pb)) % 12 == 5 &&
             std::min(pa, pb) == bass_pitch) {
           const VoiceId upper_voice = pa > pb ? voices[va] : voices[vb];
@@ -1110,12 +1219,15 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         // Find span_id: prefer the Compose-source side of the pair.
         SpanId compose_span = kInvalidSpanId;
         SpanId fallback_span = kInvalidSpanId;
-        for (std::size_t k = 0; k < notes.size(); ++k) {
-          if (notes[k].voice != voices[va] && notes[k].voice != voices[vb]) {
-            continue;
-          }
-          if (t < notes[k].start_tick || t >= notes[k].start_tick + notes[k].duration)
-            continue;
+        sounding_pair.clear();
+        for (const VoiceId voice : {voices[va], voices[vb]}) {
+          onset_index.forEachSoundingAt(voice, t, [&sounding_pair](std::size_t index) {
+            sounding_pair.push_back(index);
+            return true;
+          });
+        }
+        std::sort(sounding_pair.begin(), sounding_pair.end());
+        for (const std::size_t k : sounding_pair) {
           if (k >= provenance.size())
             continue;
           if (provenance[k].source == NoteSource::Compose) {
@@ -1603,17 +1715,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     for (const auto& exp : expected) {
       SpanId fail_span = kInvalidSpanId;
       bool matched = false;
-      for (std::size_t k = 0; k < notes.size(); ++k) {
-        if (notes[k].voice != frag.voice)
-          continue;
-        if (notes[k].start_tick != exp.start_tick)
-          continue;
+      const std::size_t k = onset_index.startingAt(frag.voice, exp.start_tick);
+      if (k < notes.size()) {
         if (k < provenance.size())
           fail_span = provenance[k].span_id;
-        if (notes[k].pitch == exp.pitch && notes[k].duration == exp.duration) {
-          matched = true;
-        }
-        break;
+        matched = notes[k].pitch == exp.pitch && notes[k].duration == exp.duration;
       }
       if (!matched) {
         ValidationFailure failure;
@@ -1769,41 +1875,6 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // secondary_of value, and the secondary leading tone (the 3rd of the
   // secondary dominant) must rise by step in some voice across the
   // boundary.
-  auto isDiatonicInKey = [](std::uint8_t pc, std::uint8_t tonic_pc, bool is_minor) {
-    // Match scalePcs() above so the diatonic set is consistent.
-    const std::uint8_t t = static_cast<std::uint8_t>(tonic_pc % 12);
-    if (is_minor) {
-      const std::array<std::uint8_t, 7> pcs = {
-          static_cast<std::uint8_t>(t),
-          static_cast<std::uint8_t>((t + 2) % 12),
-          static_cast<std::uint8_t>((t + 3) % 12),
-          static_cast<std::uint8_t>((t + 5) % 12),
-          static_cast<std::uint8_t>((t + 7) % 12),
-          static_cast<std::uint8_t>((t + 8) % 12),
-          static_cast<std::uint8_t>((t + 11) % 12),
-      };
-      for (auto x : pcs) {
-        if (x == pc)
-          return true;
-      }
-      return false;
-    }
-    const std::array<std::uint8_t, 7> pcs = {
-        static_cast<std::uint8_t>(t),
-        static_cast<std::uint8_t>((t + 2) % 12),
-        static_cast<std::uint8_t>((t + 4) % 12),
-        static_cast<std::uint8_t>((t + 5) % 12),
-        static_cast<std::uint8_t>((t + 7) % 12),
-        static_cast<std::uint8_t>((t + 9) % 12),
-        static_cast<std::uint8_t>((t + 11) % 12),
-    };
-    for (auto x : pcs) {
-      if (x == pc)
-        return true;
-    }
-    return false;
-  };
-
   for (const auto& mod : harmonic_plan.modulations) {
     if (mod.type != ModulationType::Pivot)
       continue;
@@ -1822,8 +1893,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const auto pcs = chordPitchClasses(*pivot, &ct_count);
       for (std::size_t i = 0; i < ct_count; ++i) {
         const std::uint8_t pc = pcs[i];
-        if (!isDiatonicInKey(pc, mod.from_tonic_pc, mod.from_is_minor) ||
-            !isDiatonicInKey(pc, mod.to_tonic_pc, mod.to_is_minor)) {
+        if (!rule_helpers::isDiatonicPc(pc, mod.from_tonic_pc, mod.from_is_minor) ||
+            !rule_helpers::isDiatonicPc(pc, mod.to_tonic_pc, mod.to_is_minor)) {
           ok = false;
           break;
         }
@@ -1858,13 +1929,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     // that the next chord's degree == chord.secondary_of (the harmonic
     // "V/X → X" succession). The secondary leading-tone voice-leading
     // (the actual chromatic LT rising by step into the target) is NOT a
-    // failure condition here; it is tracked descriptively via the
-    // RuleBit::SecondaryDominantResolved provenance bit, which the
-    // candidate search wires when the resolution chord is reached. This
-    // keeps the rule from failing free-voice tonicizations where the LT
-    // voice is legitimately forced off-step by P7 doubling/spacing
-    // constraints, while the provenance bit still records whether the
-    // ideal voice-leading shipped.
+    // failure condition here, and nothing else records it either: the
+    // RuleBit::SecondaryDominantResolved provenance bit is degree-only
+    // too (the resolution chord immediately follows the secondary
+    // dominant). This keeps the rule from failing free-voice
+    // tonicizations where the LT voice is legitimately forced off-step
+    // by P7 doubling/spacing constraints.
     const bool degree_ok =
         next != nullptr && next->has_degree && next->degree == chord.secondary_of;
     if (!degree_ok) {
@@ -1901,6 +1971,30 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     return 0;
   };
+  // Declared authored tones, ordered by (voice, authored tick, note index): a
+  // sequence step is found either at its sounding onset or through the
+  // authored tone a note declares.
+  struct AuthoredOnset {
+    VoiceId voice;
+    Tick tick;
+    std::size_t index;
+  };
+  std::vector<AuthoredOnset> authored_onsets;
+  if (!material.sequence_templates.empty()) {
+    for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+      if (provenance[index].has_authored_note)
+        authored_onsets.push_back(
+            {notes[index].voice, provenance[index].authored_start_tick, index});
+    }
+    std::sort(authored_onsets.begin(), authored_onsets.end(),
+              [](const AuthoredOnset& lhs, const AuthoredOnset& rhs) {
+                if (lhs.voice != rhs.voice)
+                  return lhs.voice < rhs.voice;
+                if (lhs.tick != rhs.tick)
+                  return lhs.tick < rhs.tick;
+                return lhs.index < rhs.index;
+              });
+  }
   for (const auto& tmpl : material.sequence_templates) {
     if (tmpl.seed_pitches.empty())
       continue;
@@ -1923,23 +2017,36 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         }
         const Tick expected_tick = beat_cursor;
         const Tick expected_dur = tmpl.seed_durations[i];
-        bool found = false;
-        for (std::size_t note_index = 0; note_index < notes.size(); ++note_index) {
-          const auto& n = notes[note_index];
-          if (n.voice != tmpl.voice)
-            continue;
-          const bool declared_match =
-              note_index < provenance.size() && provenance[note_index].has_authored_note &&
-              provenance[note_index].authored_start_tick == expected_tick &&
-              provenance[note_index].authored_pitch == static_cast<std::uint8_t>(expected_pitch) &&
-              provenance[note_index].authored_duration == expected_dur;
-          if (n.start_tick != expected_tick && !declared_match)
-            continue;
-          if (declared_match || (n.pitch == static_cast<std::uint8_t>(expected_pitch) &&
-                                 n.duration == expected_dur)) {
-            found = true;
+        const auto declaredMatch = [&](std::size_t note_index) {
+          return note_index < provenance.size() && provenance[note_index].has_authored_note &&
+                 provenance[note_index].authored_start_tick == expected_tick &&
+                 provenance[note_index].authored_pitch ==
+                     static_cast<std::uint8_t>(expected_pitch) &&
+                 provenance[note_index].authored_duration == expected_dur;
+        };
+        // The first note of the voice, in note-list order, that either starts
+        // at the expected tick or declares the expected tone.
+        std::size_t note_index = onset_index.startingAt(tmpl.voice, expected_tick);
+        for (auto it = std::lower_bound(authored_onsets.begin(), authored_onsets.end(),
+                                        AuthoredOnset{tmpl.voice, expected_tick, 0},
+                                        [](const AuthoredOnset& lhs, const AuthoredOnset& rhs) {
+                                          return lhs.voice != rhs.voice ? lhs.voice < rhs.voice
+                                                                        : lhs.tick < rhs.tick;
+                                        });
+             it != authored_onsets.end() && it->voice == tmpl.voice && it->tick == expected_tick &&
+             it->index < note_index;
+             ++it) {
+          if (declaredMatch(it->index)) {
+            note_index = it->index;
+            break;
           }
-          break;
+        }
+        bool found = false;
+        if (note_index < notes.size()) {
+          const auto& n = notes[note_index];
+          found =
+              declaredMatch(note_index) ||
+              (n.pitch == static_cast<std::uint8_t>(expected_pitch) && n.duration == expected_dur);
         }
         if (!found) {
           any_mismatch = true;
@@ -2042,11 +2149,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         for (std::size_t offset = 0; offset < count; ++offset) {
           const MaterialNote& material_note = expected[start_index + offset];
           bool found = false;
-          for (std::size_t note_index = 0; note_index < notes.size(); ++note_index) {
+          const auto onsets = onset_index.startingRange(voice, material_note.start_tick);
+          for (auto onset = onsets.first; onset != onsets.second; ++onset) {
+            const std::size_t note_index = *onset;
             const NoteEvent& note = notes[note_index];
             const NoteProvenance& note_provenance = provenance[note_index];
-            if (note.voice != voice || note.start_tick != material_note.start_tick ||
-                note.duration != material_note.duration || note.pitch != material_note.pitch ||
+            if (note.duration != material_note.duration || note.pitch != material_note.pitch ||
                 note_provenance.source != NoteSource::Material ||
                 note_provenance.voice_intent != intent) {
               continue;
@@ -2131,7 +2239,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     for (const auto& n : entry.notes) {
       const std::uint8_t note_pc = static_cast<std::uint8_t>(n.pitch % 12);
       if (harmonic_plan.is_minor ? !isInMinorContext(note_pc, scale_tonic_pc)
-                                 : !isDiatonicInKey(note_pc, scale_tonic_pc, false)) {
+                                 : !rule_helpers::isDiatonicPc(note_pc, scale_tonic_pc, false)) {
         notes_ok = false;
         break;
       }

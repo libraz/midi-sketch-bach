@@ -1079,10 +1079,14 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         rules |= ruleBitMask(RuleBit::SmallStep);
       }
       if (context.placed_notes != nullptr) {
-        rules |= ruleBitMask(RuleBit::ParallelPerfectChecked);
-        rules |= ruleBitMask(RuleBit::HiddenParallelChecked);
+        // Mirror the filter guards above: a cadence-cell bass skips these checks.
+        if (!force_bass_cadence_pc && have_parallel_anchor) {
+          rules |= ruleBitMask(RuleBit::ParallelPerfectChecked);
+          rules |= ruleBitMask(RuleBit::HiddenParallelChecked);
+        }
         rules |= ruleBitMask(RuleBit::VoiceCrossingChecked);
-        rules |= ruleBitMask(RuleBit::CrossRelationChecked);
+        if (!force_bass_cadence_pc)
+          rules |= ruleBitMask(RuleBit::CrossRelationChecked);
         // rule[7] = VerticalConsonanceChecked. Marks the candidate as
         // consonant against all currently-placed voices at this tick.
         // Strong beats are guaranteed (the rejection above would have

@@ -17,7 +17,12 @@
     "status is human-authored judgment of how completely the cited evidence realizes",
     "the technique: 'implemented' (fully), 'partial' (some support / subsumed by a",
     "more general rule / provenance bit without an enforcing rule), 'unimplemented'",
-    "(no evidence; evidence arrays MUST be empty)."
+    "(no evidence; evidence arrays MUST be empty).",
+    "",
+    "status 'implemented' additionally requires at least one cited rule bit or voice",
+    "intent that default generation actually stamps on output notes, as recorded in",
+    "shipped_evidence; an entry whose evidence never reaches shipped output is at most",
+    "'partial'."
   ],
   "expected_domain_counts": {
     "strict_counterpoint": 21,
@@ -28,6 +33,82 @@
     "texture": 6,
     "instrument": 7
   },
+  "shipped_evidence": {
+    "_about": [
+      "Rule bits and voice intents found on the provenance of default-generated pieces.",
+      "Measured, not authored: every form at seeds 1-5 with no options,",
+      "`bach_cli --form <form> --seed <n> --generated-json`, unioning satisfied_rules",
+      "(both lanes) and voice_intent over every note. Re-measure after any change to",
+      "which notes carry which bits; the catalog test can check this list against a",
+      "binary when BACH_CLI points at one."
+    ],
+    "rule_bits": [
+      "ChordTone",
+      "SuspensionPrepared",
+      "SuspensionResolved",
+      "CambiataDetected",
+      "EchappeeDetected",
+      "AnticipationDetected",
+      "NotaCambiataDetected",
+      "TonalAnswerMapped",
+      "CountersubjectActive",
+      "ChordToneRoman",
+      "InversionLabel",
+      "DoublingChecked",
+      "ModulationCommitted",
+      "SecondaryDominantResolved",
+      "FortspinnungSourced",
+      "ImitationEntryMatched",
+      "MiddleEntryCommitted",
+      "StrettoCommitted",
+      "CodaCommitted",
+      "ArticulationApplied",
+      "ArpeggioFlowActive",
+      "ImplicitVoiceTracked",
+      "GroundBassReplayed",
+      "VariationRoleApplied",
+      "TextureDensityShift",
+      "FigurationCommitted",
+      "PedalPreparation",
+      "ToccataArchetypeApplied",
+      "SectionTransition",
+      "CantusFirmusReplayed",
+      "CFEmbellishmentApplied",
+      "PassacagliaGroundReplayed",
+      "VariationApplied",
+      "ClimaxPlaced",
+      "TrioVoiceIndependent",
+      "FantasiaSectionContrast",
+      "CountersubjectInvertible",
+      "GoldbergBassReplayed",
+      "GoldbergVariationRealized",
+      "GoldbergInnerVoiceRealized",
+      "OrnamentRealized"
+    ],
+    "voice_intents": [
+      "AnswerCarrier",
+      "ArpeggioFlow",
+      "CantusFirmusCarrier",
+      "CodaCarrier",
+      "CountersubjectCarrier",
+      "FantasiaCarrier",
+      "FigurationCarrier",
+      "FortspinnungSpan",
+      "GoldbergBassCarrier",
+      "GoldbergInnerVoiceCarrier",
+      "GoldbergVariationCarrier",
+      "GroundCarrier",
+      "MiddleEntryCarrier",
+      "PassacagliaGround",
+      "PassacagliaVariation",
+      "StrettoCarrier",
+      "SubjectCarrier",
+      "SuspensionCarrier",
+      "ToccataCarrier",
+      "TrioVoiceCarrier",
+      "VariationCarrier"
+    ]
+  },
   "domains": {
     "strict_counterpoint": {
       "title": "厳格対位法 (Palestrina 系) 負ルール",
@@ -36,7 +117,7 @@
           "id": "sc_parallel_5_8_direct",
           "name": "Parallel 5/8 (direct)",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "ParallelPerfectChecked"
@@ -52,7 +133,7 @@
           "id": "sc_voice_crossing",
           "name": "Voice crossing",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "VoiceCrossingChecked"
@@ -67,7 +148,7 @@
           "id": "sc_strong_beat_consonance",
           "name": "Strong-beat consonance",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "StrongBeatConsonance",
@@ -83,7 +164,7 @@
           "id": "sc_consecutive_leaps",
           "name": "Consecutive leaps (>=7 semi)",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "LeapResolutionChecked"
@@ -98,7 +179,7 @@
           "id": "sc_vertical_dissonance_strong",
           "name": "Vertical dissonance on strong beat",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "VerticalConsonanceChecked"
@@ -114,7 +195,7 @@
           "id": "sc_passing_tone_stepwise",
           "name": "Passing tone 前後 step",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "WeakBeatPassingChecked"
@@ -129,7 +210,7 @@
           "id": "sc_melodic_aug_dim",
           "name": "旋律 augmented 2/4 / dim 5 / dim 8",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [],
             "validator_rules": [
@@ -143,7 +224,7 @@
           "id": "sc_melodic_tritone",
           "name": "Tritone (旋律内 3 全音)",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [],
             "validator_rules": [
@@ -182,7 +263,7 @@
           "id": "sc_leap_recovery",
           "name": "跳躍後反進歩 (recovery)",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "LeapResolutionChecked"
@@ -304,7 +385,7 @@
           "id": "sc_hidden_parallel",
           "name": "Direct motion to perfect (hidden parallel)",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "HiddenParallelChecked"
@@ -352,7 +433,7 @@
           "id": "fc_vertical_dissonance",
           "name": "Vertical dissonance",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "VerticalConsonanceChecked"
@@ -368,7 +449,7 @@
           "id": "fc_cross_relation",
           "name": "Cross-relation",
           "nature": "禁則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "CrossRelationChecked"
@@ -383,7 +464,7 @@
           "id": "fc_tendency_tone_resolution",
           "name": "Tendency tone resolution (導音 → tonic)",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "LeadingToneResolved"
@@ -465,7 +546,7 @@
           "id": "fc_register_independence",
           "name": "各声部 register 独立",
           "nature": "構造",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "VoiceRangeKept"
@@ -527,7 +608,7 @@
           "id": "fc_invertible_8va",
           "name": "Invertible counterpoint at 8va",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "InvertibleAt8va"
@@ -627,7 +708,7 @@
           "id": "fh_cadential_6_4",
           "name": "Cadential 6/4 (I6/4 → V)",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "CadenceCellCommitted",
@@ -718,7 +799,7 @@
           "id": "fh_modal_mixture",
           "name": "Modal mixture (parallel minor 借用)",
           "nature": "頻出",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "ModalMixture"
@@ -766,7 +847,7 @@
           "id": "fh_picardy_third",
           "name": "Picardy 3rd",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "PicardyThird"
@@ -796,7 +877,7 @@
           "id": "fh_soprano_bass_cadence",
           "name": "Soprano-bass cadence formula",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "CadenceVoiceLeadingChecked"
@@ -840,7 +921,7 @@
           "id": "fh_voice_leading_smallest",
           "name": "Voice leading smallest motion",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "SmallStep",
@@ -914,7 +995,7 @@
           "id": "fh_spacing_limits",
           "name": "Spacing limits (隣接声 ≤ オクターブ)",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "SpacingChecked"
@@ -1084,7 +1165,7 @@
           "id": "bd_pedal_point",
           "name": "Pedal point (V / I 持続低音)",
           "nature": "必須",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "PedalCommitted"
@@ -1116,7 +1197,7 @@
           "id": "bd_augmentation",
           "name": "Augmentation 主題",
           "nature": "テクニック",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "SubjectVariantApplied"
@@ -1131,7 +1212,7 @@
           "id": "bd_diminution",
           "name": "Diminution 主題",
           "nature": "テクニック",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "SubjectVariantApplied"
@@ -1146,7 +1227,7 @@
           "id": "bd_inversion",
           "name": "Inversion 主題",
           "nature": "テクニック",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "SubjectVariantApplied"
@@ -1255,7 +1336,7 @@
           "id": "rm_strong_weak_beat",
           "name": "Strong/weak beat 区別",
           "nature": "規則",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "StrongBeatConsonance",
@@ -1271,7 +1352,7 @@
           "id": "rm_anacrusis",
           "name": "Anacrusis (弱起)",
           "nature": "構造",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "AnacrusisActive"
@@ -1288,7 +1369,7 @@
           "id": "rm_hemiola",
           "name": "Hemiola",
           "nature": "テクニック",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "HemiolaInserted"
@@ -1303,7 +1384,7 @@
           "id": "rm_dotted_figures",
           "name": "Dotted figures",
           "nature": "パターン",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "RhythmicMotifRecurrence"
@@ -1318,7 +1399,7 @@
           "id": "rm_syncopation",
           "name": "Syncopation",
           "nature": "パターン",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "RhythmicMotifRecurrence"
@@ -1333,7 +1414,7 @@
           "id": "rm_rhythmic_motif_recurrence",
           "name": "Rhythmic motif recurrence",
           "nature": "結束",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "RhythmicMotifRecurrence"
@@ -1373,7 +1454,7 @@
           "id": "rm_phrase_periodicity",
           "name": "Phrase periodicity (4 / 8 bar)",
           "nature": "構造",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "PhrasePeriodicityKept"
@@ -1471,7 +1552,7 @@
           "id": "tx_range_integrity_per_voice",
           "name": "Range integrity per voice",
           "nature": "制約",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "VoiceRangeKept"
@@ -1509,7 +1590,7 @@
           "id": "in_organ_manual_assignment",
           "name": "Organ manual assignment",
           "nature": "楽器制約",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [
               "ManualAssigned"
@@ -1522,7 +1603,7 @@
           "id": "in_pedal_range_soft_penalty",
           "name": "Pedal range soft penalty",
           "nature": "制約",
-          "status": "implemented",
+          "status": "partial",
           "evidence": {
             "rule_bits": [],
             "validator_rules": [

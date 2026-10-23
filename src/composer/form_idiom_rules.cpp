@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 #include <vector>
 
@@ -267,30 +268,44 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
         }
       }
     }
-    bool any = false;
+    // The replayed bass tones as sorted (onset, duration, pitch) keys, so each
+    // expected tone is one binary search.
+    struct BassTone {
+      Tick start_tick;
+      Tick duration;
+      std::uint8_t pitch;
+      bool operator<(const BassTone& other) const {
+        if (start_tick != other.start_tick)
+          return start_tick < other.start_tick;
+        if (duration != other.duration)
+          return duration < other.duration;
+        return pitch < other.pitch;
+      }
+    };
+    std::vector<BassTone> replayed;
+    for (std::size_t i = 0; i < notes.size(); ++i) {
+      if (hasRuleBit(provenance, i, RuleBit::GoldbergBassReplayed))
+        replayed.push_back({notes[i].start_tick, notes[i].duration, notes[i].pitch});
+    }
+    std::sort(replayed.begin(), replayed.end());
+    bool searched = false;
     bool ok = true;
     for (Tick base = 0; base < immutable_end && ok; base += material.goldberg_aria_bass_period) {
       for (const auto& expected : material.goldberg_aria_bass) {
         const Tick tick = base + expected.start_tick;
         if (tick >= immutable_end)
           break;
-        bool found = false;
-        for (std::size_t i = 0; i < notes.size(); ++i) {
-          if (!hasRuleBit(provenance, i, RuleBit::GoldbergBassReplayed))
-            continue;
-          any = true;
-          if (notes[i].start_tick == tick && notes[i].duration == expected.duration &&
-              notes[i].pitch == expected.pitch) {
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
+        searched = true;
+        if (!std::binary_search(replayed.begin(), replayed.end(),
+                                BassTone{tick, expected.duration, expected.pitch})) {
           ok = false;
           break;
         }
       }
     }
+    // Without any replayed tone, or without a single expected tone inside the
+    // immutable region, the declared line is not shown to reach the output.
+    const bool any = searched && !replayed.empty();
     if (!any || !ok) {
       ValidationFailure failure;
       failure.rule_id = "goldberg_aria_bass_immutable";
@@ -486,62 +501,58 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
     }
     if (trio_voice_ids.size() >= 2) {
       std::sort(trio_voice_ids.begin(), trio_voice_ids.end());
-      // Per-voice onset->pitch maps, restricted to TrioVoiceIndependent notes.
-      // Returns true and writes the sounding pitch (latest trio onset <= `at`)
-      // into `out_pitch`, or false when `voice` has no trio note sounding at
-      // `at`. A `bool found` flag is used instead of a sentinel because `Tick`
-      // is unsigned: a `-1` seed would wrap to 0xFFFFFFFF and never be exceeded
-      // by a real start_tick, defeating the "latest onset" comparison.
-      auto onsetPitch = [&](VoiceId voice, Tick at, int* out_pitch) -> bool {
-        bool found = false;
-        Tick best = 0;
-        int pitch = -1;
+      // Per-voice trio notes ordered by onset, note-list order on ties.
+      std::vector<std::vector<std::size_t>> trio_notes(trio_voice_ids.size());
+      for (std::size_t slot = 0; slot < trio_voice_ids.size(); ++slot) {
         for (std::size_t i = 0; i < notes.size(); ++i) {
-          if (notes[i].voice != voice)
-            continue;
-          if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
-            continue;
-          if (notes[i].start_tick <= at && (!found || notes[i].start_tick > best)) {
-            found = true;
-            best = notes[i].start_tick;
-            pitch = static_cast<int>(notes[i].pitch);
-          }
+          if (notes[i].voice == trio_voice_ids[slot] &&
+              hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
+            trio_notes[slot].push_back(i);
         }
-        if (found && out_pitch != nullptr)
-          *out_pitch = pitch;
-        return found;
+        std::stable_sort(trio_notes[slot].begin(), trio_notes[slot].end(),
+                         [&](std::size_t lhs, std::size_t rhs) {
+                           return notes[lhs].start_tick < notes[rhs].start_tick;
+                         });
+      }
+      const auto firstOnsetAtOrAfter = [&](const std::vector<std::size_t>& line, Tick at) {
+        return std::lower_bound(line.begin(), line.end(), at, [&](std::size_t index, Tick value) {
+          return notes[index].start_tick < value;
+        });
       };
-      auto hasOnsetAt = [&](VoiceId voice, Tick at) -> bool {
-        for (std::size_t i = 0; i < notes.size(); ++i) {
-          if (notes[i].voice != voice)
-            continue;
-          if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
-            continue;
-          if (notes[i].start_tick == at)
-            return true;
-        }
-        return false;
+      // Writes the pitch of the latest trio onset <= `at` into `out_pitch`, or
+      // returns false when the voice has no trio note there. Among notes sharing
+      // that onset the first in note-list order wins.
+      auto onsetPitch = [&](std::size_t slot, Tick at, int* out_pitch) -> bool {
+        const auto& line = trio_notes[slot];
+        const auto after = std::upper_bound(
+            line.begin(), line.end(), at,
+            [&](Tick value, std::size_t index) { return value < notes[index].start_tick; });
+        if (after == line.begin())
+          return false;
+        const auto latest = firstOnsetAtOrAfter(line, notes[*std::prev(after)].start_tick);
+        if (out_pitch != nullptr)
+          *out_pitch = static_cast<int>(notes[*latest].pitch);
+        return true;
+      };
+      auto hasOnsetAt = [&](std::size_t slot, Tick at) -> bool {
+        const auto& line = trio_notes[slot];
+        const auto it = firstOnsetAtOrAfter(line, at);
+        return it != line.end() && notes[*it].start_tick == at;
       };
 
       double independence_sum = 0.0;
       int pair_count = 0;
       for (std::size_t a = 0; a < trio_voice_ids.size(); ++a) {
         for (std::size_t b = a + 1; b < trio_voice_ids.size(); ++b) {
-          const VoiceId va = trio_voice_ids[a];
-          const VoiceId vb = trio_voice_ids[b];
           // Distinct onset ticks across both voices, sorted ascending.
           std::vector<Tick> boundaries;
-          for (std::size_t i = 0; i < notes.size(); ++i) {
-            if (!hasRuleBit(provenance, i, RuleBit::TrioVoiceIndependent))
-              continue;
-            if (notes[i].voice != va && notes[i].voice != vb)
-              continue;
-            if (std::find(boundaries.begin(), boundaries.end(), notes[i].start_tick) ==
-                boundaries.end()) {
-              boundaries.push_back(notes[i].start_tick);
-            }
+          boundaries.reserve(trio_notes[a].size() + trio_notes[b].size());
+          for (const std::size_t slot : {a, b}) {
+            for (const std::size_t index : trio_notes[slot])
+              boundaries.push_back(notes[index].start_tick);
           }
           std::sort(boundaries.begin(), boundaries.end());
+          boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
           if (boundaries.size() < 2) {
             // Not enough motion to assess; treat as fully independent (no drag).
             independence_sum += 1.0;
@@ -553,8 +564,8 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
           for (std::size_t k = 1; k < boundaries.size(); ++k) {
             const Tick t = boundaries[k];
             const Tick prev = boundaries[k - 1];
-            const bool a_onset = hasOnsetAt(va, t);
-            const bool b_onset = hasOnsetAt(vb, t);
+            const bool a_onset = hasOnsetAt(a, t);
+            const bool b_onset = hasOnsetAt(b, t);
             ++total;
             if (a_onset != b_onset) {
               // Exactly one voice re-articulated: rhythmic independence.
@@ -563,8 +574,8 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
             }
             // Both re-articulated: compare pitch-motion directions.
             int a_now = 0, a_prev = 0, b_now = 0, b_prev = 0;
-            const bool a_known = onsetPitch(va, t, &a_now) && onsetPitch(va, prev, &a_prev);
-            const bool b_known = onsetPitch(vb, t, &b_now) && onsetPitch(vb, prev, &b_prev);
+            const bool a_known = onsetPitch(a, t, &a_now) && onsetPitch(a, prev, &a_prev);
+            const bool b_known = onsetPitch(b, t, &b_now) && onsetPitch(b, prev, &b_prev);
             if (!a_known || !b_known) {
               // No prior sounding pitch for one voice: cannot establish genuine
               // same-direction motion, so this boundary is not dependent.
@@ -675,9 +686,9 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
     }
   }
 
-  // Fugue countersubject: countersubject_invertible. A fugue's countersubject
-  // is conceived in invertible (double) counterpoint at the octave: it must work
-  // both above and below the subject. Under octave inversion a perfect fifth
+  // Fugue countersubject: countersubject_invertible. A countersubject written in
+  // invertible (double) counterpoint at the octave must work both above and
+  // below the subject. Under octave inversion a perfect fifth
   // becomes a perfect fourth (a dissonance against the bass), so a perfect fifth
   // on a strong beat between the countersubject and the subject/answer it sounds
   // against is not strictly invertible at the octave. This rule operates ONLY on
@@ -695,10 +706,12 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   // invertibility is a design constraint of double-counterpoint countersubjects,
   // not of every countersubject), so a hard or soft FAILURE here would penalize
   // established pieces. The observation is recorded for provenance/audit; it
-  // never sets status or empties-failures. Inert when no CountersubjectInvertible
+  // never sets status or empties-failures. It is pushed directly rather than
+  // through the counterpoint-finding recorder, so it carries no span, no rule
+  // geometry and no observation tally. Inert when no CountersubjectInvertible
   // note or no overlapping subject/answer voice exists (most fixtures declare no
-  // countersubject). Deterministic and pure; reuses the same isStrongBeat /
-  // voicePitchAt helpers the invertible_at_octave rule uses.
+  // countersubject). Deterministic and pure; reads pitches through the shared
+  // onset index the invertible_at_octave rule uses.
   {
     std::vector<VoiceId> cs_voices;
     std::vector<VoiceId> sa_voices;
@@ -730,10 +743,10 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
           continue;
         if (!isStructuralAccent(harmonic_plan, t))
           continue;
-        if (std::find(ticks.begin(), ticks.end(), t) == ticks.end())
-          ticks.push_back(t);
+        ticks.push_back(t);
       }
       std::sort(ticks.begin(), ticks.end());
+      ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
 
       bool non_invertible = false;
       for (Tick t : ticks) {

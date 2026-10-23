@@ -98,11 +98,13 @@ enum class RuleGeometry : std::uint8_t {
 //
 // The counts are taken before any routing decision, so a finding that never
 // becomes a failure is still countable. `total - gated - exempted` is the
-// number of findings recorded as informational.
+// number of findings recorded as informational. The counters describe
+// per-finding routing only: the counterpoint budget fails a piece through a
+// separate rule-level failure (no span) and leaves these counts unchanged.
 struct RuleObservation {
   std::string rule_id;
   int total = 0;     // times the rule matched, before any routing decision
-  int gated = 0;     // routed to failures
+  int gated = 0;     // individual findings routed to failures
   int exempted = 0;  // suppressed because every operand is an immutable input
 };
 
@@ -121,12 +123,10 @@ struct RuleObservation {
  * over a handful of seeds says more about the provocation than the layer. Look
  * for a test that drives the layer before reading a zero as removable.
  *
- * The accumulator behind these is process-wide, and compose() clears it at the
- * entry to each piece so the snapshot on the report describes that piece. That
- * makes the per-piece reading correct only while one process composes one piece
- * at a time. Test cases running as separate processes are fine; threading
- * composition inside a process would not merely add noise, it would let one
- * piece's reset erase another's counts.
+ * The accumulator behind these is per-thread, and compose() clears it at the
+ * entry to each piece so the snapshot on the report describes that piece. A
+ * thread composes one piece at a time, so concurrent compositions on separate
+ * threads each read only their own counts.
  */
 struct WaveVetoStats {
   long anchor_parallel_displaced = 0;  ///< Beat anchor moved off a parallel arrival.
@@ -172,7 +172,7 @@ struct ValidationReport {
   // Exported as generated.v1 `counterpoint_observations`. One entry per rule
   // that matched at least once, sorted by `rule_id`.
   std::vector<RuleObservation> observations;
-  // Per-piece snapshot of the process-wide figuration-wave accumulator
+  // Per-piece snapshot of the per-thread figuration-wave accumulator
   // (`waveVetoStats()`). Only meaningful when the caller reset that
   // accumulator at the start of the piece; otherwise it carries whatever
   // earlier pieces in the same process left behind.

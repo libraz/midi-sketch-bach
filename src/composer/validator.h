@@ -22,25 +22,26 @@ enum class ValidationScope : std::uint8_t {
 
 // Composer validator.
 //
-// Counterpoint checks (always run):
-//   * Parallel perfect 5ths and 8ths between any pair of voices.
-//   * Strong-beat dissonance: a note on beat 1 of a bar whose pitch
-//     class is not part of the active chord triad.
-//
-// Suspension checks (when material.suspension_patterns is non-empty):
-//   * suspension_preparation: the preparation note is consonant against
-//     the bass voice and ties (same pitch) into the suspension note.
-//   * suspension_resolution_step_down: suspension → resolution moves by
-//     a single diatonic step in the direction the SuspensionType
-//     prescribes (down for 4-3 / 7-6 / 9-8, up for 2-3).
+// Rule families, each emitting the rule_id literals in validator.cpp:
+//   * Counterpoint, always run: vertical rules (parallel, hidden and
+//     anti-parallel perfects, battuta, cross relation, voice crossing,
+//     strong-beat, vertical and unprepared dissonance, invertibility, doubling)
+//     and linear rules (melodic intervals, leading-tone resolution, consecutive
+//     leaps), most of them routed through the finding recorder and its geometry
+//     table.
+//   * Harmonic-plan rules: cadence voice leading, spacing (opt-in per plan),
+//     pivot modulation and secondary-dominant resolution.
+//   * Declaration rules, inert unless `material` declares the structure:
+//     suspensions, tonal answers, countersubjects, episodes, sequences,
+//     imitation and middle entries, stretto, pedal points, doublings, phrase
+//     periodicity, anacrusis, voice and pedal ranges, ornament expansions.
+//   * Form idiom rules (form_idiom_rules.h), checked last.
 //
 // Validator does not mutate notes. On failure it reports the offending
 // span; the caller decides whether to re-generate, back-jump, or abort.
 //
-// `material` may be left default-constructed; callers that do not
-// declare suspension patterns or cadence cells get the same behavior as
-// before P4. Validator never reads MaterialNote pitches — only the
-// pre-declared marker structs (cadence_cells, suspension_patterns).
+// `material` may be left default-constructed, which leaves every declaration
+// rule inert.
 class Validator {
  public:
   ValidationReport validate(const std::vector<NoteEvent>& notes,

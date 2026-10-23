@@ -277,19 +277,19 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
       fifth_interval = 8;
       break;
     case ChordQuality::AugSixthItalian:
-      // It+6: root(b6), +4(1), +6(#4) -> semitones 0, 4, 6 from root
+      // It+6: root(b6), +4(1), +10(#4) -> semitones 0, 4, 10 from root
       third_interval = 4;
-      fifth_interval = 6;
+      fifth_interval = 10;
       break;
     case ChordQuality::AugSixthFrench:
-      // Fr+6: root(b6), +4(1), +6(2), +8(#4) -> semitones 0, 4, 6, 8 from root
+      // Fr+6: root(b6), +4(1), +6(2), +10(#4) -> semitones 0, 4, 6, 10 from root
       third_interval = 4;
       fifth_interval = 6;
       break;
     case ChordQuality::AugSixthGerman:
-      // Ger+6: root(b6), +4(1), +5(b3), +8(#4) -> semitones 0, 4, 5, 8 from root
+      // Ger+6: root(b6), +4(1), +7(b3), +10(#4) -> semitones 0, 4, 7, 10 from root
       third_interval = 4;
-      fifth_interval = 5;
+      fifth_interval = 7;
       break;
   }
 
@@ -314,10 +314,10 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
       seventh_interval = 9;  // Diminished 7th
       break;
     case ChordQuality::AugSixthFrench:
-      seventh_interval = 8;  // Fr+6 4th tone: #4 = root + 8 semitones
+      seventh_interval = 10;  // Fr+6 4th tone: #4 = root + 10 semitones
       break;
     case ChordQuality::AugSixthGerman:
-      seventh_interval = 8;  // Ger+6 4th tone: #4 = root + 8 semitones
+      seventh_interval = 10;  // Ger+6 4th tone: #4 = root + 10 semitones
       break;
     default:
       break;

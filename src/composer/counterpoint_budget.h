@@ -83,8 +83,11 @@ bool counterpointRuleIsClosed(FormType form, const std::string& rule_id);
  *
  * Reads `report->observations`, which the validator populates before any
  * routing decision, so a match suppressed as informational is still seen. For
- * each closed rule that matched at least once, appends one failure naming it.
- * Leaves `status` alone -- the caller owns the `failures`-empty check.
+ * each closed rule that matched at least once, appends one rule-level failure
+ * naming it (span kInvalidSpanId). That failure is a separate channel from the
+ * per-finding routing the observation counts describe, so `gated` and
+ * `exempted` are left unchanged. Leaves `status` alone -- the caller owns the
+ * `failures`-empty check.
  *
  * @param form The form that produced the notes the report describes.
  * @param report The FinalScore report to gate. Ignored when null.

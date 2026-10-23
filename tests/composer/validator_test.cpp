@@ -2,17 +2,21 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <string>
 #include <vector>
 
+#include "composer/counterpoint_budget.h"
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/motif_ops.h"
 #include "composer/provenance.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
 #include "composer/validation.h"
+#include "composer/voice_onset_index.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -3438,9 +3442,15 @@ TEST(ValidatorTest, CountersubjectInvertibleReportsStrongBeatPerfectFifth) {
   EXPECT_TRUE(hasInformational(r, "countersubject_invertible"));
   EXPECT_FALSE(hasRule(r, "countersubject_invertible"));
   for (const auto& f : r.informational) {
-    if (f.rule_id == "countersubject_invertible")
+    if (f.rule_id == "countersubject_invertible") {
       EXPECT_EQ(f.kind, FailKind::MusicalFail);
+      // A whole-piece observation: no span, outside the finding recorder.
+      EXPECT_EQ(f.span_id, kInvalidSpanId);
+    }
   }
+  for (const auto& observation : r.observations)
+    EXPECT_NE(observation.rule_id, "countersubject_invertible");
+  EXPECT_EQ(counterpointRuleGeometry("countersubject_invertible"), RuleGeometry::Unclassified);
 }
 
 TEST(ValidatorTest, CountersubjectInvertibleInertWithoutBit) {
@@ -3457,6 +3467,315 @@ TEST(ValidatorTest, CountersubjectInvertibleInertWithoutBit) {
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
   EXPECT_FALSE(hasInformational(r, "countersubject_invertible"));
   EXPECT_FALSE(hasRule(r, "countersubject_invertible"));
+}
+
+namespace {
+
+// Deterministic pseudo-random source for the equivalence sweeps below.
+class SweepRandom {
+ public:
+  explicit SweepRandom(std::uint32_t seed) : state_(seed) {}
+  std::uint32_t below(std::uint32_t bound) {
+    state_ = state_ * 1664525u + 1013904223u;
+    return (state_ >> 8) % bound;
+  }
+
+ private:
+  std::uint32_t state_;
+};
+
+// Notes in `voice_count` voices on a sixteenth grid: mostly successive tones,
+// with same-voice overlaps, shared onsets, rests and zero-length notes mixed in.
+std::vector<NoteEvent> sweepNotes(std::uint32_t seed, int voice_count, int per_voice) {
+  SweepRandom random(seed);
+  std::vector<NoteEvent> notes;
+  for (int voice = 0; voice < voice_count; ++voice) {
+    Tick cursor = random.below(4) * 120;
+    for (int idx = 0; idx < per_voice; ++idx) {
+      const Tick duration = random.below(10) == 0 ? 0 : (1 + random.below(8)) * 120;
+      const auto pitch = static_cast<std::uint8_t>(48 + 12 * (2 - voice % 3) + random.below(14));
+      notes.push_back(makeNote(cursor, duration, pitch, static_cast<VoiceId>(voice)));
+      const std::uint32_t step = random.below(12);
+      if (step == 0)
+        continue;  // next note shares this onset
+      cursor += step < 3 ? duration / 2 + 120 : duration + (step == 11 ? 480 : 0);
+      if (duration == 0)
+        cursor += 120;
+    }
+  }
+  // Interleave voices so note-list order differs from onset order.
+  std::vector<NoteEvent> shuffled;
+  while (!notes.empty()) {
+    const std::size_t pick = random.below(static_cast<std::uint32_t>(notes.size()));
+    shuffled.push_back(notes[pick]);
+    notes.erase(notes.begin() + static_cast<std::ptrdiff_t>(pick));
+  }
+  return shuffled;
+}
+
+}  // namespace
+
+TEST(ValidatorEquivalenceTest, TextureMetricsMatchPerIntervalRescan) {
+  for (std::uint32_t seed = 1; seed <= 40; ++seed) {
+    const std::vector<NoteEvent> notes = sweepNotes(seed, 1 + seed % 4, 30);
+    std::vector<Tick> bounds;
+    std::vector<VoiceId> voices;
+    for (const auto& note : notes) {
+      bounds.push_back(note.start_tick);
+      bounds.push_back(note.start_tick + note.duration);
+      if (std::find(voices.begin(), voices.end(), note.voice) == voices.end())
+        voices.push_back(note.voice);
+    }
+    std::sort(bounds.begin(), bounds.end());
+    bounds.erase(std::unique(bounds.begin(), bounds.end()), bounds.end());
+    int max_active = 0;
+    long active_ticks = 0;
+    long mono_ticks = 0;
+    long total_ticks = 0;
+    for (std::size_t idx = 0; idx + 1 < bounds.size(); ++idx) {
+      const Tick begin = bounds[idx];
+      const Tick end = bounds[idx + 1];
+      int active = 0;
+      for (VoiceId voice : voices) {
+        active += std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
+          return note.voice == voice && note.start_tick < end &&
+                 begin < note.start_tick + note.duration;
+        });
+      }
+      max_active = std::max(max_active, active);
+      active_ticks += static_cast<long>(active) * static_cast<long>(end - begin);
+      mono_ticks += active == 1 ? static_cast<long>(end - begin) : 0;
+      total_ticks += static_cast<long>(end - begin);
+    }
+    const TextureMetrics metrics = computeTextureMetrics(notes);
+    EXPECT_EQ(metrics.max_active_voices, max_active) << "seed " << seed;
+    EXPECT_EQ(metrics.avg_active_voices,
+              static_cast<double>(active_ticks) / static_cast<double>(total_ticks))
+        << "seed " << seed;
+    EXPECT_EQ(metrics.mono_ratio,
+              static_cast<double>(mono_ticks) / static_cast<double>(total_ticks))
+        << "seed " << seed;
+  }
+}
+
+TEST(ValidatorEquivalenceTest, OnsetIndexSoundingQueriesMatchLinearScan) {
+  for (std::uint32_t seed = 1; seed <= 20; ++seed) {
+    const std::vector<NoteEvent> notes = sweepNotes(seed, 3, 40);
+    const VoiceOnsetIndex index(notes);
+    Tick last_tick = 0;
+    for (const auto& note : notes)
+      last_tick = std::max<Tick>(last_tick, note.start_tick + note.duration);
+    for (VoiceId voice = 0; voice < 3; ++voice) {
+      for (Tick tick = 0; tick <= last_tick + 120; tick += 60) {
+        // The latest onset wins; among equal onsets, the last in note-list order.
+        std::size_t expected = notes.size();
+        std::vector<std::size_t> sounding;
+        for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+          const NoteEvent& note = notes[idx];
+          if (note.voice != voice ||
+              !(note.start_tick <= tick && tick < note.start_tick + note.duration))
+            continue;
+          sounding.push_back(idx);
+          if (expected == notes.size() || note.start_tick >= notes[expected].start_tick)
+            expected = idx;
+        }
+        EXPECT_EQ(index.soundingAt(voice, tick), expected) << "seed " << seed << " tick " << tick;
+        std::vector<std::size_t> visited;
+        index.forEachSoundingAt(voice, tick, [&visited](std::size_t idx) {
+          visited.push_back(idx);
+          return true;
+        });
+        std::sort(visited.begin(), visited.end());
+        EXPECT_EQ(visited, sounding) << "seed " << seed << " tick " << tick;
+      }
+    }
+  }
+}
+
+TEST(ValidatorEquivalenceTest, CrossRelationFindingsMatchAllPairsWalk) {
+  HarmonicPlan plan = cMajorWhole();
+  plan.modulations.push_back({2 * kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  plan.modulations.push_back({5 * kTicksPerBar, 7, 9, false, true, ModulationType::Phrase});
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    const std::vector<NoteEvent> notes = sweepNotes(seed, 3, 36);
+    SweepRandom random(seed * 7919u);
+    std::vector<NoteProvenance> prov;
+    for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+      prov.push_back(makeProv(static_cast<SpanId>(idx),
+                              random.below(3) == 0 ? NoteSource::Compose : NoteSource::Material));
+    }
+    const VoiceOnsetIndex index(notes);
+    for (const ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore}) {
+      // Every later note of another voice, in index order, judged by the rule's
+      // own predicate. Final-score findings between two composer-authored
+      // (Compose) notes are routed to informational evidence; the rest gate.
+      std::vector<SpanId> expected;
+      std::vector<SpanId> expected_informational;
+      for (std::size_t i = 0; i < notes.size(); ++i) {
+        for (std::size_t j = i + 1; j < notes.size(); ++j) {
+          const NoteEvent& lhs = notes[i];
+          const NoteEvent& rhs = notes[j];
+          if (lhs.voice == rhs.voice)
+            continue;
+          if (scope == ValidationScope::Generation && prov[i].source == NoteSource::Material &&
+              prov[j].source == NoteSource::Material)
+            continue;
+          const bool overlap =
+              (lhs.start_tick <= rhs.start_tick &&
+               rhs.start_tick < lhs.start_tick + lhs.duration) ||
+              (rhs.start_tick <= lhs.start_tick && lhs.start_tick < rhs.start_tick + rhs.duration);
+          const Tick first = std::min(lhs.start_tick, rhs.start_tick);
+          const Tick second = std::max(lhs.start_tick, rhs.start_tick);
+          const bool adjacent = !index.hasOnsetBetween(lhs.voice, first, second) &&
+                                !index.hasOnsetBetween(rhs.voice, first, second);
+          if (!overlap && !adjacent)
+            continue;
+          const auto key = rule_helpers::keyAt(plan, second);
+          if (!rule_helpers::isCrossRelationPc(rule_helpers::pitchClass(lhs.pitch),
+                                               rule_helpers::pitchClass(rhs.pitch), key.tonic_pc,
+                                               key.is_minor))
+            continue;
+          const bool authored_pair = scope == ValidationScope::FinalScore &&
+                                     prov[i].source == NoteSource::Compose &&
+                                     prov[j].source == NoteSource::Compose;
+          (authored_pair ? expected_informational : expected).push_back(prov[j].span_id);
+        }
+      }
+      const ValidationReport report = Validator{}.validate(notes, prov, plan, Material{}, scope);
+      std::vector<SpanId> reported;
+      std::vector<SpanId> reported_informational;
+      for (const auto& finding : report.informational) {
+        if (finding.rule_id == "cross_relation")
+          reported_informational.push_back(finding.span_id);
+      }
+      for (const auto& failure : report.failures) {
+        if (failure.rule_id == "cross_relation")
+          reported.push_back(failure.span_id);
+      }
+      int observed = 0;
+      for (const auto& observation : report.observations) {
+        if (observation.rule_id == "cross_relation")
+          observed = observation.total;
+      }
+      EXPECT_EQ(reported, expected) << "seed " << seed;
+      EXPECT_EQ(reported_informational, expected_informational) << "seed " << seed;
+      EXPECT_EQ(observed, static_cast<int>(expected.size() + expected_informational.size()))
+          << "seed " << seed;
+    }
+  }
+}
+
+TEST(ValidatorEquivalenceTest, TrioIndependenceReadsTheFirstListedNoteOfASharedOnset) {
+  // Voice 0 strikes C5 and C6 together; the earlier-listed C5 is its pitch, so
+  // both voices rise into the next onset and the pair is fully dependent.
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 50, 1),
+      makeNote(0, kTicksPerBeat, 72, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 65, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 1),
+  };
+  std::vector<NoteProvenance> prov;
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    NoteProvenance entry = makeProv(0, NoteSource::Material);
+    entry.satisfied_rules |= ruleBitMask(RuleBit::TrioVoiceIndependent);
+    prov.push_back(entry);
+  }
+  EXPECT_TRUE(hasRule(Validator{}.validate(notes, prov, cMajorWhole(), Material{}),
+                      "voice_independence_threshold"));
+}
+
+TEST(ValidatorEquivalenceTest, GoldbergAriaBassNeedsEveryDeclaredToneReplayed) {
+  Material material;
+  material.goldberg_aria_bass = {{0, kTicksPerBar, 48}, {kTicksPerBar, kTicksPerBar, 43}};
+  material.goldberg_aria_bass_period = 2 * kTicksPerBar;
+  std::vector<NoteEvent> notes;
+  for (Tick base = 0; base < 4 * kTicksPerBar; base += 2 * kTicksPerBar) {
+    notes.push_back(makeNote(base, kTicksPerBar, 48, 1));
+    notes.push_back(makeNote(base + kTicksPerBar, kTicksPerBar, 43, 1));
+  }
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  for (auto& entry : prov)
+    entry.satisfied_rules |= ruleBitMask(RuleBit::GoldbergBassReplayed);
+  const auto fires = [&](const std::vector<NoteEvent>& score,
+                         const std::vector<NoteProvenance>& provenance) {
+    return hasRule(Validator{}.validate(score, provenance, cMajorWhole(), material),
+                   "goldberg_aria_bass_immutable");
+  };
+
+  EXPECT_FALSE(fires(notes, prov));
+  std::vector<NoteEvent> shortened = notes;
+  shortened[3].duration = kTicksPerBeat;
+  EXPECT_TRUE(fires(shortened, prov));
+  std::vector<NoteProvenance> unstamped(notes.size(), makeProv(0, NoteSource::Material));
+  EXPECT_TRUE(fires(notes, unstamped));
+}
+
+namespace {
+
+// Three voices around a declared 4-3 suspension of C5 over a G2 bass on the
+// second downbeat; `middle_pitch` is the inner voice sounding with it.
+int verticalFindingsAroundSuspension(std::uint8_t middle_pitch) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, 2880, 72, 0),         makeNote(2880, 960, 71, 0),
+      makeNote(0, kTicksPerBar, 64, 1), makeNote(kTicksPerBar, 960, middle_pitch, 1),
+      makeNote(0, kTicksPerBar, 48, 2), makeNote(kTicksPerBar, kTicksPerBar, 43, 2),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(1, NoteSource::Compose));
+  Material material;
+  SuspensionPattern suspension;
+  suspension.type = SuspensionType::Sus4_3;
+  suspension.preparation_tick = 0;
+  suspension.suspension_tick = kTicksPerBar;
+  suspension.resolution_tick = 2880;
+  suspension.preparation_pitch = 72;
+  suspension.suspension_pitch = 72;
+  suspension.resolution_pitch = 71;
+  suspension.voice = 0;
+  material.suspension_patterns.push_back(suspension);
+  const ValidationReport report = Validator{}.validate(notes, prov, cMajorWhole(), material);
+  for (const auto& observation : report.observations) {
+    if (observation.rule_id == "vertical_dissonance")
+      return observation.total;
+  }
+  return 0;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, DeclaredSuspensionExcusesTheInnerVoiceAFourthBelowIt) {
+  // G3 is a fourth below the suspended C5 and an octave above the bass.
+  EXPECT_EQ(verticalFindingsAroundSuspension(55), 0);
+}
+
+TEST(ValidatorTest, DeclaredSuspensionDoesNotExcuseAnInnerVoiceDissonantWithTheBass) {
+  // F5 is a fourth above the suspended C5 but a seventh above the bass, so both
+  // of its pairs stay dissonant.
+  EXPECT_EQ(verticalFindingsAroundSuspension(77), 2);
+}
+
+TEST(CounterpointBudgetTest, BudgetFailureLeavesTheFindingTallyUntouched) {
+  ASSERT_TRUE(counterpointRuleIsClosed(FormType::Fugue, "parallel_fifth"));
+  ValidationReport report;
+  ValidationFailure finding;
+  finding.span_id = 3;
+  finding.rule_id = "parallel_fifth";
+  report.informational = {finding, finding};
+  RuleObservation observation;
+  observation.rule_id = "parallel_fifth";
+  observation.total = 2;
+  report.observations.push_back(observation);
+
+  applyCounterpointBudget(FormType::Fugue, &report);
+
+  ASSERT_EQ(report.failures.size(), 1u);
+  EXPECT_EQ(report.failures[0].rule_id, "parallel_fifth");
+  EXPECT_EQ(report.failures[0].span_id, kInvalidSpanId);
+  const RuleObservation& tally = report.observations[0];
+  EXPECT_EQ(tally.gated, 0);
+  EXPECT_EQ(tally.exempted, 0);
+  EXPECT_EQ(tally.total - tally.gated - tally.exempted,
+            static_cast<int>(report.informational.size()));
 }
 
 }  // namespace bach::composer

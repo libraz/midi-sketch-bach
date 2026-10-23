@@ -8,7 +8,12 @@ entry still claims fails CI rather than silently inflating coverage.
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -94,6 +99,83 @@ class DriftGuardTest(unittest.TestCase):
             cov.has_problems(problems),
             f"catalog drifted from source: {problems}",
         )
+
+
+class ShippedEvidenceTest(unittest.TestCase):
+    """'implemented' must rest on evidence that default generation ships."""
+
+    FORMS = (
+        "fugue",
+        "prelude_and_fugue",
+        "trio_sonata",
+        "chorale_prelude",
+        "toccata_and_fugue",
+        "passacaglia",
+        "fantasia_and_fugue",
+        "cello_prelude",
+        "chaconne",
+        "goldberg_variations",
+    )
+    SEEDS = range(1, 6)
+
+    def setUp(self) -> None:
+        self.catalog = cov.load_catalog()
+        self.shipped = self.catalog["shipped_evidence"]
+
+    def test_shipped_tokens_resolve_against_source(self) -> None:
+        vocab = cov.known_tokens()
+        for kind in ("rule_bits", "voice_intents"):
+            unknown = set(self.shipped[kind]) - vocab[kind]
+            self.assertFalse(unknown, f"shipped {kind} not in source: {sorted(unknown)}")
+
+    def test_implemented_entries_cite_shipped_evidence(self) -> None:
+        bits = set(self.shipped["rule_bits"])
+        intents = set(self.shipped["voice_intents"])
+        unsupported = [
+            item["id"]
+            for _, item in cov.iter_items(self.catalog)
+            if item["status"] == "implemented"
+            and not (set(item["evidence"]["rule_bits"]) & bits)
+            and not (set(item["evidence"]["voice_intents"]) & intents)
+        ]
+        self.assertFalse(
+            unsupported, f"implemented without shipped bit or voice intent: {unsupported}"
+        )
+
+    @unittest.skipUnless(os.environ.get("BACH_CLI"), "set BACH_CLI to a bach_cli binary")
+    def test_shipped_evidence_matches_generation(self) -> None:
+        names = {
+            int(index): name
+            for name, index in re.findall(
+                r"(\w+)\s*=\s*(\d+)",
+                cov.PROVENANCE_H.read_text(encoding="utf-8")
+                .split("enum RuleBit", 1)[1]
+                .split("};", 1)[0],
+            )
+        }
+        bits: set[str] = set()
+        intents: set[str] = set()
+        with tempfile.TemporaryDirectory() as out_dir:
+            for form in self.FORMS:
+                for seed in self.SEEDS:
+                    stem = os.path.join(out_dir, f"{form}_{seed}")
+                    subprocess.run(
+                        [os.environ["BACH_CLI"], "--form", form, "--seed", str(seed),
+                         "--generated-json", "-o", stem + ".mid"],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    with open(stem + ".provenance.json", encoding="utf-8") as handle:
+                        notes = json.load(handle)["notes"]
+                    for note in notes:
+                        mask = int(note["satisfied_rules"]) | (
+                            int(note.get("satisfied_rules_high", "0")) << 64
+                        )
+                        bits.update(names[index] for index in names if mask >> index & 1)
+                        intents.add(note["voice_intent"])
+        self.assertEqual(sorted(bits), sorted(self.shipped["rule_bits"]))
+        self.assertEqual(sorted(intents), sorted(self.shipped["voice_intents"]))
 
 
 class CoverageComputationTest(unittest.TestCase):

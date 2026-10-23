@@ -3,9 +3,13 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
+#include "composer/free_counterpoint_search.h"
 #include "composer/harmonic_plan.h"
+#include "composer/material.h"
+#include "composer/span.h"
 #include "core/basic_types.h"
 
 namespace bach::composer::rule_helpers {
@@ -33,6 +37,26 @@ NoteEvent makeNote(Tick start, Tick dur, std::uint8_t pitch, VoiceId voice) {
   n.voice = voice;
   n.velocity = 80;
   return n;
+}
+
+ChordEvent degreeChord(Tick start, std::uint8_t root_pc, RomanNumeral degree) {
+  ChordEvent chord;
+  chord.start_tick = start;
+  chord.root_pc = root_pc;
+  chord.degree = degree;
+  chord.has_degree = true;
+  return chord;
+}
+
+RuleIdMask p7p8Bits(const HarmonicPlan& plan, const ChordEvent& chord, std::uint8_t pc) {
+  RuleIdMask rules = 0;
+  applyP7Bits(rules, chord, pc, false);
+  applyP8Bits(rules, plan, chord, pc, false);
+  return rules;
+}
+
+bool hasBit(RuleIdMask rules, RuleBit bit) {
+  return (rules & ruleBitMask(bit)) != 0;
 }
 
 }  // namespace
@@ -242,6 +266,29 @@ TEST(RuleHelpersTest, KeyAtSwitchesOnTheModulationBoundary) {
   EXPECT_EQ(keyAt(plan, 8 * kTicksPerBar).tonic_pc, 9);
 }
 
+TEST(RuleHelpersTest, KeyAtAgreesWithLocalKeyAtOnSortedAndUnsortedLists) {
+  HarmonicPlan sorted = cMajor();
+  sorted.modulations.push_back({kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  sorted.modulations.push_back({3 * kTicksPerBar, 7, 9, false, true, ModulationType::Phrase});
+  sorted.modulations.push_back({3 * kTicksPerBar, 9, 2, true, true, ModulationType::Phrase});
+  sorted.modulations.push_back({5 * kTicksPerBar, 2, 0, true, false, ModulationType::Phrase});
+  HarmonicPlan unsorted = sorted;
+  std::swap(unsorted.modulations[0], unsorted.modulations[3]);
+  std::swap(unsorted.modulations[1], unsorted.modulations[2]);
+
+  for (const HarmonicPlan* plan : {&sorted, &unsorted}) {
+    for (Tick tick = 0; tick <= 7 * kTicksPerBar; tick += kTicksPerBeat) {
+      const auto local = localKeyAt(*plan, tick);
+      const KeyContext key = keyAt(*plan, tick);
+      EXPECT_EQ(key.tonic_pc, local.tonic_pc) << "tick " << tick;
+      EXPECT_EQ(key.is_minor, local.is_minor) << "tick " << tick;
+    }
+  }
+  // Two boundaries on one tick: the later list entry wins in both orders.
+  EXPECT_EQ(keyAt(sorted, 3 * kTicksPerBar).tonic_pc, 2);
+  EXPECT_EQ(keyAt(unsorted, 3 * kTicksPerBar).tonic_pc, 9);
+}
+
 TEST(RuleHelpersTest, IsCrossRelationPcDetectsInflectedDegreesInMajor) {
   // C major: each chromatic pitch class reads as the raised form of the degree
   // below it, so it clashes with that degree and with nothing else.
@@ -446,6 +493,149 @@ TEST(RuleHelpersTest, ForbiddenMelodicLeapKeepsNaturalMinorDescendingSubtonicLeg
   EXPECT_FALSE(isForbiddenMelodicLeap(70, 67, plan));
   // Ab4 -> B4 remains the actual harmonic-minor augmented second.
   EXPECT_TRUE(isForbiddenMelodicLeap(68, 71, plan));
+}
+
+TEST(ProvenanceBitPredicateTest, SpacingCheckedOnlyWhereTheSpacingRuleRuns) {
+  HarmonicPlan plan = cMajor();
+  plan.chords.push_back(degreeChord(0, 0, RomanNumeral::I));
+  ChordEvent untagged;
+  untagged.start_tick = kTicksPerBar;
+  plan.chords.push_back(untagged);
+
+  const RuleIdMask disabled = p7p8Bits(plan, plan.chords[0], 0);
+  EXPECT_FALSE(hasBit(disabled, RuleBit::SpacingChecked));
+  EXPECT_TRUE(hasBit(disabled, RuleBit::DoublingChecked));
+
+  plan.enforce_chordal_upper_voice_spacing = true;
+  EXPECT_TRUE(hasBit(p7p8Bits(plan, plan.chords[0], 0), RuleBit::SpacingChecked));
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[1], 0), RuleBit::SpacingChecked));
+}
+
+TEST(ProvenanceBitPredicateTest, ModulationCommittedNeedsAForeignKeyAndADiatonicPitch) {
+  HarmonicPlan plan = cMajor();
+  for (int bar = 0; bar < 4; ++bar) {
+    plan.chords.push_back(degreeChord(static_cast<Tick>(bar) * kTicksPerBar, 0, RomanNumeral::I));
+  }
+  plan.modulations.push_back({kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  plan.modulations.push_back({2 * kTicksPerBar, 7, 9, false, true, ModulationType::Phrase});
+  plan.modulations.push_back({3 * kTicksPerBar, 9, 0, true, false, ModulationType::Phrase});
+
+  // Before the first modulation.
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[0], 7), RuleBit::ModulationCommitted));
+  // G major: F# is diatonic, F natural and C# are not.
+  EXPECT_TRUE(hasBit(p7p8Bits(plan, plan.chords[1], 6), RuleBit::ModulationCommitted));
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[1], 5), RuleBit::ModulationCommitted));
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[1], 1), RuleBit::ModulationCommitted));
+  // A minor: the raised leading tone G# is diatonic, Bb is not.
+  EXPECT_TRUE(hasBit(p7p8Bits(plan, plan.chords[2], 8), RuleBit::ModulationCommitted));
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[2], 10), RuleBit::ModulationCommitted));
+  // Back in the home key.
+  EXPECT_FALSE(hasBit(p7p8Bits(plan, plan.chords[3], 0), RuleBit::ModulationCommitted));
+}
+
+TEST(ProvenanceBitPredicateTest, SecondaryDominantResolvedNeedsTheImmediatelyPrecedingChord) {
+  ChordEvent applied = degreeChord(0, 2, RomanNumeral::II);
+  applied.has_secondary_of = true;
+  applied.secondary_of = RomanNumeral::V;
+
+  HarmonicPlan adjacent = cMajor();
+  adjacent.chords.push_back(applied);
+  adjacent.chords.push_back(degreeChord(kTicksPerBar, 7, RomanNumeral::V));
+  EXPECT_TRUE(
+      hasBit(p7p8Bits(adjacent, adjacent.chords[1], 7), RuleBit::SecondaryDominantResolved));
+
+  // The same V ten bars later, after unrelated harmony, is not a resolution.
+  HarmonicPlan distant = cMajor();
+  distant.chords.push_back(applied);
+  for (int bar = 1; bar < 10; ++bar) {
+    distant.chords.push_back(
+        degreeChord(static_cast<Tick>(bar) * kTicksPerBar, 0, RomanNumeral::I));
+  }
+  distant.chords.push_back(degreeChord(10 * kTicksPerBar, 7, RomanNumeral::V));
+  EXPECT_FALSE(
+      hasBit(p7p8Bits(distant, distant.chords.back(), 7), RuleBit::SecondaryDominantResolved));
+
+  // A target without a degree tag never resolves anything.
+  HarmonicPlan untagged = adjacent;
+  untagged.chords[1].has_degree = false;
+  EXPECT_FALSE(
+      hasBit(p7p8Bits(untagged, untagged.chords[1], 7), RuleBit::SecondaryDominantResolved));
+}
+
+namespace {
+
+HarmonicPlan singleCMajorChord() {
+  HarmonicPlan plan = cMajor();
+  ChordEvent chord;
+  chord.root_pc = 0;
+  plan.chords.push_back(chord);
+  return plan;
+}
+
+Span freeSpan(Tick start, Tick end, VoiceId voice) {
+  Span span;
+  span.id = 1;
+  span.start_tick = start;
+  span.end_tick = end;
+  span.voice = voice;
+  span.intent = VoiceIntent::SequentialCounterline;
+  return span;
+}
+
+}  // namespace
+
+TEST(ProvenanceBitPredicateTest, CadenceBassCarriesNoBypassedCheckBits) {
+  HarmonicPlan plan = singleCMajorChord();
+  CadenceEvent cadence;
+  cadence.tick = kTicksPerBeat;
+  cadence.type = CadenceType::Perfect;
+  plan.cadences.push_back(cadence);
+  Material material;
+  annotateCadenceCells(material, plan);
+
+  const std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat, 71, 0),
+                                         makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0)};
+  CandidateContext context;
+  context.voice_center = 64;
+  context.placed_notes = &placed;
+
+  const auto notes =
+      composeFreeSpan(freeSpan(0, 2 * kTicksPerBeat, 1), plan, material, context, nullptr);
+  ASSERT_EQ(notes.size(), 2u);
+  for (const auto& note : notes) {
+    // Scored-loop exit: the cadence cell was committed and voice crossing ran.
+    ASSERT_TRUE(hasBit(note.satisfied_rules, RuleBit::CadenceCellCommitted));
+    EXPECT_TRUE(hasBit(note.satisfied_rules, RuleBit::VoiceCrossingChecked));
+    EXPECT_FALSE(hasBit(note.satisfied_rules, RuleBit::ParallelPerfectChecked));
+    EXPECT_FALSE(hasBit(note.satisfied_rules, RuleBit::HiddenParallelChecked));
+    EXPECT_FALSE(hasBit(note.satisfied_rules, RuleBit::CrossRelationChecked));
+  }
+}
+
+TEST(ProvenanceBitPredicateTest, ParallelCheckBitsNeedAnAnchor) {
+  const std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat, 60, 0)};
+  const Material empty;
+  CandidateContext context;
+  context.voice_center = 55;
+  context.placed_notes = &placed;
+
+  const auto anchorless =
+      composeFreeSpan(freeSpan(0, kTicksPerBeat, 1), singleCMajorChord(), empty, context, nullptr);
+  ASSERT_EQ(anchorless.size(), 1u);
+  const RuleIdMask free_bits = anchorless.front().satisfied_rules;
+  EXPECT_FALSE(hasBit(free_bits, RuleBit::ParallelPerfectChecked));
+  EXPECT_FALSE(hasBit(free_bits, RuleBit::HiddenParallelChecked));
+  EXPECT_TRUE(hasBit(free_bits, RuleBit::CrossRelationChecked));
+  EXPECT_TRUE(hasBit(free_bits, RuleBit::VoiceCrossingChecked));
+
+  context.prev_pitch = 53;
+  const auto anchored =
+      composeFreeSpan(freeSpan(0, kTicksPerBeat, 1), singleCMajorChord(), empty, context, nullptr);
+  ASSERT_EQ(anchored.size(), 1u);
+  const RuleIdMask anchored_bits = anchored.front().satisfied_rules;
+  EXPECT_TRUE(hasBit(anchored_bits, RuleBit::ParallelPerfectChecked));
+  EXPECT_TRUE(hasBit(anchored_bits, RuleBit::HiddenParallelChecked));
+  EXPECT_TRUE(hasBit(anchored_bits, RuleBit::CrossRelationChecked));
 }
 
 }  // namespace bach::composer::rule_helpers

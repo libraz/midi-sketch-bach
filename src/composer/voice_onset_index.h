@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "core/basic_types.h"
@@ -24,7 +25,8 @@ namespace bach::composer {
  */
 class VoiceOnsetIndex {
  public:
-  explicit VoiceOnsetIndex(const std::vector<NoteEvent>& notes) : notes_(notes), by_voice_(256) {
+  explicit VoiceOnsetIndex(const std::vector<NoteEvent>& notes)
+      : notes_(notes), by_voice_(256), reach_(256) {
     std::array<std::size_t, 256> counts{};
     for (const NoteEvent& note : notes)
       ++counts[note.voice];
@@ -32,12 +34,25 @@ class VoiceOnsetIndex {
       by_voice_[voice].reserve(counts[voice]);
     for (std::size_t index = 0; index < notes.size(); ++index)
       by_voice_[notes[index].voice].push_back(index);
-    for (auto& indices : by_voice_) {
+    for (std::size_t voice = 0; voice < by_voice_.size(); ++voice) {
+      auto& indices = by_voice_[voice];
       std::stable_sort(indices.begin(), indices.end(), [&](std::size_t left, std::size_t right) {
         return notes_[left].start_tick < notes_[right].start_tick;
       });
+      // reach_[voice][k]: latest end tick among the first k + 1 notes, so a
+      // backward search can stop once nothing earlier can still be sounding.
+      auto& reach = reach_[voice];
+      reach.reserve(indices.size());
+      Tick latest_end = 0;
+      for (const std::size_t index : indices) {
+        latest_end = std::max<Tick>(latest_end, notes_[index].start_tick + notes_[index].duration);
+        reach.push_back(latest_end);
+      }
     }
   }
+
+  /// @brief Note indices of one voice, ordered by onset (note-list order on ties).
+  const std::vector<std::size_t>& voiceNotes(VoiceId voice) const { return by_voice_[voice]; }
 
   std::size_t startingAt(VoiceId voice, Tick tick) const {
     const auto& indices = by_voice_[voice];
@@ -47,18 +62,48 @@ class VoiceOnsetIndex {
     return it != indices.end() && notes_[*it].start_tick == tick ? *it : notes_.size();
   }
 
-  std::size_t soundingAt(VoiceId voice, Tick tick) const {
+  /// @brief Every note of `voice` that starts exactly at `tick`, in note-list order.
+  std::pair<std::vector<std::size_t>::const_iterator, std::vector<std::size_t>::const_iterator>
+  startingRange(VoiceId voice, Tick tick) const {
     const auto& indices = by_voice_[voice];
+    const auto first = std::lower_bound(
+        indices.begin(), indices.end(), tick,
+        [&](std::size_t index, Tick value) { return notes_[index].start_tick < value; });
+    const auto last = std::upper_bound(
+        first, indices.end(), tick,
+        [&](Tick value, std::size_t index) { return value < notes_[index].start_tick; });
+    return {first, last};
+  }
+
+  /// @brief The latest-starting note of `voice` sounding at `tick`, or notes.size().
+  std::size_t soundingAt(VoiceId voice, Tick tick) const {
+    std::size_t found = notes_.size();
+    forEachSoundingAt(voice, tick, [&found](std::size_t index) {
+      found = index;
+      return false;
+    });
+    return found;
+  }
+
+  /// @brief Visit the notes of `voice` sounding at `tick`, latest onset first.
+  ///
+  /// `visit` returns true to continue and false to stop. Notes sharing an onset
+  /// are visited in reverse note-list order.
+  template <typename Visit>
+  void forEachSoundingAt(VoiceId voice, Tick tick, Visit visit) const {
+    const auto& indices = by_voice_[voice];
+    const auto& reach = reach_[voice];
     auto it = std::upper_bound(
         indices.begin(), indices.end(), tick,
         [&](Tick value, std::size_t index) { return value < notes_[index].start_tick; });
     while (it != indices.begin()) {
       --it;
+      if (reach[static_cast<std::size_t>(it - indices.begin())] <= tick)
+        return;
       const NoteEvent& note = notes_[*it];
-      if (note.start_tick <= tick && tick < note.start_tick + note.duration)
-        return *it;
+      if (note.start_tick <= tick && tick < note.start_tick + note.duration && !visit(*it))
+        return;
     }
-    return notes_.size();
   }
 
   std::uint8_t pitchAt(VoiceId voice, Tick tick) const {
@@ -101,6 +146,7 @@ class VoiceOnsetIndex {
  private:
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;
+  std::vector<std::vector<Tick>> reach_;
 };
 
 }  // namespace bach::composer

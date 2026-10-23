@@ -53,7 +53,7 @@ TEST(AugSixthChordToneTest, Italian_RootIsChordTone) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4 (pitch class 8)
   event.chord.quality = ChordQuality::AugSixthItalian;
-  // It+6: root(Ab), +4(C), +6(F#) -> semitones 0, 4, 6 from root
+  // It+6 in C: b6 (Ab), 1 (C), #4 (F#) -> semitones 0, 4, 10 from root
   EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root)
 }
 
@@ -70,16 +70,18 @@ TEST(AugSixthChordToneTest, Italian_AugSixthIsChordTone) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthItalian;
-  // Ab + 6 = D (pitch class 2) -- this is the #4 / augmented 6th
-  EXPECT_TRUE(isChordTone(62, event));  // D4 (aug 6th interval)
+  // Ab + 10 = F# (pitch class 6) -- the augmented sixth above the bass
+  EXPECT_TRUE(isChordTone(66, event));  // F#4
 }
 
 TEST(AugSixthChordToneTest, Italian_NonChordToneRejected) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthItalian;
-  EXPECT_FALSE(isChordTone(64, event));  // E4 not in It+6 on Ab
-  EXPECT_FALSE(isChordTone(67, event));  // G4 not in It+6 on Ab
+  EXPECT_FALSE(isChordTone(62, event));  // D4 belongs to the French sixth only
+  EXPECT_FALSE(isChordTone(63, event));  // Eb4 belongs to the German sixth only
+  EXPECT_FALSE(isChordTone(64, event));  // E4
+  EXPECT_FALSE(isChordTone(67, event));  // G4
 }
 
 // ---------------------------------------------------------------------------
@@ -90,19 +92,20 @@ TEST(AugSixthChordToneTest, French_AllTonesPresent) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthFrench;
-  // Fr+6: root(Ab), +4(C), +6(D), +8(E) -> semitones 0, 4, 6, 8
+  // Fr+6 in C: b6 (Ab), 1 (C), 2 (D), #4 (F#) -> semitones 0, 4, 6, 10
   EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root)
-  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4 = third)
-  EXPECT_TRUE(isChordTone(62, event));  // D4 (+6 = fifth)
-  EXPECT_TRUE(isChordTone(64, event));  // E4 (+8 = seventh)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4)
+  EXPECT_TRUE(isChordTone(62, event));  // D4 (+6)
+  EXPECT_TRUE(isChordTone(66, event));  // F#4 (+10)
 }
 
 TEST(AugSixthChordToneTest, French_NonChordToneRejected) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthFrench;
-  EXPECT_FALSE(isChordTone(67, event));  // G4 not a chord tone
-  EXPECT_FALSE(isChordTone(65, event));  // F4 not a chord tone
+  EXPECT_FALSE(isChordTone(64, event));  // E4
+  EXPECT_FALSE(isChordTone(67, event));  // G4
+  EXPECT_FALSE(isChordTone(65, event));  // F4
 }
 
 // ---------------------------------------------------------------------------
@@ -113,19 +116,21 @@ TEST(AugSixthChordToneTest, German_AllTonesPresent) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthGerman;
-  // Ger+6: root(Ab), +4(C), +5(Db/C#), +8(E) -> semitones 0, 4, 5, 8
+  // Ger+6 in C: b6 (Ab), 1 (C), b3 (Eb), #4 (F#) -> semitones 0, 4, 7, 10
   EXPECT_TRUE(isChordTone(68, event));  // Ab4 (root, pc=8)
-  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4 = third, pc=0)
-  EXPECT_TRUE(isChordTone(61, event));  // Db4/C#4 (+5 = fifth, pc=1)
-  EXPECT_TRUE(isChordTone(64, event));  // E4 (+8 = seventh, pc=4)
+  EXPECT_TRUE(isChordTone(60, event));  // C4 (+4, pc=0)
+  EXPECT_TRUE(isChordTone(63, event));  // Eb4 (+7, pc=3)
+  EXPECT_TRUE(isChordTone(66, event));  // F#4 (+10, pc=6)
 }
 
 TEST(AugSixthChordToneTest, German_NonChordToneRejected) {
   HarmonicEvent event;
   event.chord.root_pitch = 68;  // Ab4
   event.chord.quality = ChordQuality::AugSixthGerman;
-  EXPECT_FALSE(isChordTone(62, event));  // D4 (pc=2) not in Ger+6 on Ab
-  EXPECT_FALSE(isChordTone(67, event));  // G4 not in Ger+6 on Ab
+  EXPECT_FALSE(isChordTone(62, event));  // D4 (pc=2)
+  EXPECT_FALSE(isChordTone(61, event));  // Db4 (pc=1)
+  EXPECT_FALSE(isChordTone(64, event));  // E4 (pc=4)
+  EXPECT_FALSE(isChordTone(67, event));  // G4
 }
 
 // ---------------------------------------------------------------------------
