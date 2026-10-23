@@ -1142,9 +1142,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   };
   // The piece's ONE canonical countersubject, snapshotted from the exposition
   // (re-based to tick 0) once the answer counterline is derived. Every later
-  // entry restates THIS line -- octave-invertible, degree-shifted to the entry
-  // key -- so the countersubject keeps a single recurring identity the ear can
-  // track, instead of a fresh reactive counterline per entry.
+  // entry restates THIS line -- moved by whole octaves into the entry's band,
+  // degree-shifted to the entry key -- so the countersubject keeps a single
+  // recurring identity the ear can track, instead of a fresh reactive
+  // counterline per entry. The octave move is not vetted for double
+  // counterpoint; the restatement-compatibility checks below gate it.
   std::vector<MaterialNote> canonical_cs;
 
   // Carry the canonical countersubject to an entry by the entry's own

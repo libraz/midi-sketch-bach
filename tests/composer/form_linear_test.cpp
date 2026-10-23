@@ -28,6 +28,7 @@
 #include "composer/composer.h"
 #include "composer/figuration.h"
 #include "composer/form_director.h"
+#include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 
@@ -255,6 +256,46 @@ TEST(FormLinearCello, IsStepwiseDominantWithNoRemoteLeaps) {
                              : 0.0;
         EXPECT_LE(leap_ratio, 0.20) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
         EXPECT_EQ(remote, 0) << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+      }
+    }
+  }
+}
+
+// Every note-to-note step of the composed line, bar seams included, is free of
+// the forbidden melodic leaps (tritone, major seventh, augmented second in
+// minor). The figure vet reads single notes as well as the per-cell streams, so
+// a figure whose cells are smooth but whose notes leap -- the bariolage's
+// pedal-to-seventh, a fourth-wide oscillation from the sixth degree -- never
+// ships.
+TEST(FormLinearCello, EveryNoteStepAvoidsForbiddenLeaps) {
+  for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                     SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : kMinorFlags) {
+        for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+          ComposeRequest req;
+          req.form = FormType::CelloPrelude;
+          req.seed = seed;
+          req.is_minor = minor;
+          req.target_bars = bars;
+          req.character = character;
+          HarnessFixture fx;
+          ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+          const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          std::vector<NoteEvent> notes = result.notes;
+          std::sort(notes.begin(), notes.end(), [](const NoteEvent& x, const NoteEvent& y) {
+            return x.start_tick < y.start_tick;
+          });
+          for (std::size_t idx = 1; idx < notes.size(); ++idx) {
+            EXPECT_FALSE(rule_helpers::isForbiddenMelodicLeap(
+                notes[idx - 1].pitch, notes[idx].pitch, fx.harmony, notes[idx - 1].start_tick,
+                notes[idx].start_tick))
+                << "character=" << static_cast<int>(character) << " seed=" << seed
+                << " minor=" << minor << " bars=" << bars << " tick " << notes[idx].start_tick
+                << " (" << static_cast<int>(notes[idx - 1].pitch) << "->"
+                << static_cast<int>(notes[idx].pitch) << ")";
+          }
+        }
       }
     }
   }
@@ -630,6 +671,69 @@ TEST(FormLinearTrio, ShippedTextureIsFreeOfParallelPerfects) {
       }
     }
   }
+}
+
+// The sparse manual line writes an eighth and an eighth rest per beat, and a
+// parallel is heard note to note across that rest. Each manual's "from" tone is
+// therefore its latest onset before the shared onset, never a one-tick-back
+// sample that a rest silences. Read on the composed notes: the pair the second
+// manual's guard is built against.
+TEST(FormLinearTrio, ManualPairIsFreeOfParallelsAcrossARest) {
+  std::size_t across_rest_pairs = 0;
+  for (bool minor : kMinorFlags) {
+    for (std::uint16_t bars : testLengths(FormType::TrioSonata)) {
+      for (std::uint32_t seed : kSeeds) {
+        const ComposeResult result = build(FormType::TrioSonata, seed, minor, bars, nullptr);
+        std::vector<NoteEvent> manual[2];
+        for (const NoteEvent& note : result.notes) {
+          if (note.voice < 2)
+            manual[note.voice].push_back(note);
+        }
+        const auto sounding = [&](int voice, Tick tick) {
+          int pitch = -1;
+          for (const NoteEvent& note : manual[voice]) {
+            if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+              pitch = note.pitch;
+          }
+          return pitch;
+        };
+        // From tone: the latest onset strictly before `tick` when the voice
+        // attacks at `tick`, else the tone it sustains through it.
+        const auto from_tone = [&](int voice, Tick tick) {
+          int pitch = -1;
+          Tick best = 0;
+          bool attacks = false;
+          for (const NoteEvent& note : manual[voice]) {
+            attacks = attacks || note.start_tick == tick;
+            if (note.start_tick < tick && (pitch < 0 || note.start_tick >= best)) {
+              best = note.start_tick;
+              pitch = note.pitch;
+            }
+          }
+          return attacks ? pitch : sounding(voice, tick);
+        };
+        std::set<Tick> onsets;
+        for (const auto& line : manual) {
+          for (const NoteEvent& note : line)
+            onsets.insert(note.start_tick);
+        }
+        for (Tick tick : onsets) {
+          const int top = sounding(0, tick);
+          const int mid = sounding(1, tick);
+          const int top_prev = from_tone(0, tick);
+          const int mid_prev = from_tone(1, tick);
+          if (top < 0 || mid < 0 || top_prev < 0 || mid_prev < 0)
+            continue;
+          if (sounding(0, tick - 1) < 0 || sounding(1, tick - 1) < 0)
+            ++across_rest_pairs;
+          EXPECT_FALSE(formsStrictPerfectParallel(mid_prev, mid, top_prev, top))
+              << "minor=" << minor << " bars=" << bars << " seed=" << seed << " tick " << tick
+              << " (" << top_prev << "->" << top << " over " << mid_prev << "->" << mid << ")";
+        }
+      }
+    }
+  }
+  ASSERT_GT(across_rest_pairs, 0u) << "no onset followed a manual rest, so nothing was judged";
 }
 
 // The Noble dotted figure (dotted-quarter + eighth) is the only V1 vocabulary

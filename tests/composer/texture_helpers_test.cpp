@@ -309,6 +309,24 @@ TEST(TextureHelpersTest, ThemeToneRegistryRecordAndLookup) {
   EXPECT_EQ(registry.soundingPitchInVoice(2, 480), -1);
 }
 
+TEST(TextureHelpersTest, OnsetPitchBeforeReadsAcrossARest) {
+  ThemeToneRegistry registry;
+  // An eighth and an eighth rest, then the next beat.
+  registry.record(/*tick=*/0, /*voice=*/0, /*pitch=*/81, /*duration=*/240);
+  registry.record(/*tick=*/480, /*voice=*/0, /*pitch=*/79, /*duration=*/240);
+
+  // One tick back lands in the rest; the latest onset still names the tone.
+  EXPECT_EQ(registry.soundingPitchInVoice(0, 479), -1);
+  EXPECT_EQ(registry.onsetPitchBefore(0, 480), 81);
+  // Strictly before: an onset at the tick itself is not its own "from" tone.
+  EXPECT_EQ(registry.onsetPitchBefore(0, 481), 79);
+  EXPECT_EQ(registry.onsetPitchBefore(0, 0), -1);
+  EXPECT_EQ(registry.onsetPitchBefore(1, 480), -1);
+  // A V1 step 62 -> 60 against that pair is a parallel twelfth.
+  EXPECT_TRUE(formsStrictPerfectParallel(62, 60, registry.onsetPitchBefore(0, 480),
+                                         registry.soundingPitchInVoice(0, 480)));
+}
+
 TEST(TextureHelpersTest, ThemeToneRegistryUnsignedSentinelEdge) {
   ThemeToneRegistry registry;
   // No record yet: any lookup is silent.

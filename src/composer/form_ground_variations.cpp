@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -296,6 +297,33 @@ bool formsPerfectMotionAgainst(const std::vector<MaterialNote>& ground,
 }
 
 /**
+ * @brief Join statement-sized note vectors into one time-ordered line per voice.
+ * @param parts Each part's voice and notes; a voice may own several parts.
+ * @return One line per distinct voice, in first-seen voice order.
+ */
+std::vector<std::vector<MaterialNote>> joinLinesByVoice(
+    const std::vector<std::pair<VoiceId, const std::vector<MaterialNote>*>>& parts) {
+  std::vector<VoiceId> voices;
+  std::vector<std::vector<MaterialNote>> lines;
+  for (const auto& [voice, notes] : parts) {
+    const auto found = std::find(voices.begin(), voices.end(), voice);
+    const std::size_t slot = static_cast<std::size_t>(found - voices.begin());
+    if (found == voices.end()) {
+      voices.push_back(voice);
+      lines.emplace_back();
+    }
+    lines[slot].insert(lines[slot].end(), notes->begin(), notes->end());
+  }
+  for (std::vector<MaterialNote>& line : lines) {
+    std::stable_sort(line.begin(), line.end(),
+                     [](const MaterialNote& lhs, const MaterialNote& rhs) {
+                       return lhs.start_tick < rhs.start_tick;
+                     });
+  }
+  return lines;
+}
+
+/**
  * @brief Withdraw a bar's diminution wherever it walks into a voice above it.
  *
  * The decoration is written before the voices over the ground, so those voices
@@ -313,11 +341,13 @@ bool formsPerfectMotionAgainst(const std::vector<MaterialNote>& ground,
  * not against the decorated surface.
  *
  * @param ground The emitted ground line, edited in place.
- * @param upper The lines written above it.
+ * @param upper The voices written above it, one continuous line per voice (see
+ *        joinLinesByVoice), so the motion out of a statement's last bar is read
+ *        against the next statement's first onset.
  * @param total_bars Bars in the piece.
  */
 void withdrawClashingDiminution(std::vector<MaterialNote>& ground,
-                                const std::vector<const std::vector<MaterialNote>*>& upper,
+                                const std::vector<std::vector<MaterialNote>>& upper,
                                 int total_bars) {
   for (int bar = 0; bar < total_bars; ++bar) {
     const Tick bar_start = static_cast<Tick>(bar) * kTicksPerBar34;
@@ -337,8 +367,8 @@ void withdrawClashingDiminution(std::vector<MaterialNote>& ground,
     const Tick from_tick = bar_start >= kTicksPerBeat ? bar_start - kTicksPerBeat : 0;
     const Tick to_tick = bar_end + kTicksPerBeat;
     const auto clashes = [&](const std::vector<MaterialNote>& line) {
-      for (const std::vector<MaterialNote>* voice : upper) {
-        if (formsPerfectMotionAgainst(line, *voice, from_tick, to_tick))
+      for (const std::vector<MaterialNote>& voice : upper) {
+        if (formsPerfectMotionAgainst(line, voice, from_tick, to_tick))
           return true;
       }
       return false;
@@ -1960,12 +1990,12 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   }
 
   {
-    std::vector<const std::vector<MaterialNote>*> upper;
+    std::vector<std::pair<VoiceId, const std::vector<MaterialNote>*>> parts;
     for (const auto& variation : out.material.passacaglia_variations)
-      upper.push_back(&variation.notes);
+      parts.emplace_back(variation.voice, &variation.notes);
     for (const TrioVoiceLine& line : out.material.trio_voices)
-      upper.push_back(&line.notes);
-    withdrawClashingDiminution(ground, upper, total_bars);
+      parts.emplace_back(line.voice, &line.notes);
+    withdrawClashingDiminution(ground, joinLinesByVoice(parts), total_bars);
   }
 
   // --- VoicePlan: 3 voices, register order V0 > V1 > V2. ---
@@ -2533,12 +2563,12 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   }
 
   {
-    std::vector<const std::vector<MaterialNote>*> upper;
+    std::vector<std::pair<VoiceId, const std::vector<MaterialNote>*>> parts;
     for (const auto& variation : out.material.variations)
-      upper.push_back(&variation.notes);
+      parts.emplace_back(variation.voice, &variation.notes);
     for (const TrioVoiceLine& line : out.material.trio_voices)
-      upper.push_back(&line.notes);
-    withdrawClashingDiminution(ground, upper, total_bars);
+      parts.emplace_back(line.voice, &line.notes);
+    withdrawClashingDiminution(ground, joinLinesByVoice(parts), total_bars);
   }
 
   // --- VoicePlan: V2 ground carrier, V1 middle voice per statement and V0

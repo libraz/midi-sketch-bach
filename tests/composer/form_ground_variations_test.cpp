@@ -520,8 +520,9 @@ TEST(GroundVariationPassacaglia, MinorHasNoAugmentedSecond) {
 // and its residue is held by the shipped-counterpoint ratchet instead.
 // Every (variation, ground) motion the chaconne ships, read the way the audit
 // reads it: at each union onset, whatever sounds in the two voices.
-void expectNoChaconneMotion(bool (*forbidden)(int, int, int, int), const char* label) {
-  for (const Case& c : casesFor(FormType::Chaconne)) {
+void expectNoChaconneMotion(bool (*forbidden)(int, int, int, int), const char* label,
+                            const std::vector<Case>& cases = casesFor(FormType::Chaconne)) {
+  for (const Case& c : cases) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
     auto sounding = [&](VoiceId voice, Tick at) -> int {
@@ -571,6 +572,18 @@ TEST(GroundVariationChaconne, NoBattutaOverTheGround) {
 // carry the whole repair.
 TEST(GroundVariationChaconne, NoTrueParallelOverTheGround) {
   expectNoChaconneMotion(isParallelPerfectMotion, "true parallel perfect");
+}
+
+// A ground decoration on a statement's last bar moves the bass under the next
+// statement's first onset, so the diminution scrub reads each upper voice as
+// one continuous line across the statement boundary.
+TEST(GroundVariationChaconne, NoContraryPerfectArrivalOverTheGround) {
+  // 64 bars, seed 5: the statement seam where a lower-neighbour decoration
+  // once met the next statement's first onset in contrary octaves.
+  std::vector<Case> cases = casesFor(FormType::Chaconne);
+  cases.push_back({FormType::Chaconne, 5, false, 64});
+  cases.push_back({FormType::Chaconne, 5, true, 64});
+  expectNoChaconneMotion(formsAntiParallelPerfect, "contrary-motion perfect arrival", cases);
 }
 
 // --- 9. Picardy: minor + even seed final chord major ------------------------

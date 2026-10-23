@@ -123,9 +123,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     auto guard_sounding = [&](Tick tick) -> int {
       return guard_registry->soundingPitchInVoice(0, tick);
     };
-    // The union-onset pair at our onset `tick` is (guard just before tick ->
-    // guard at tick): when the guard does not onset at `tick` the two samples
-    // are equal, its motion is zero, and oblique motion is always allowed.
+    // The union-onset pair at our onset `tick` is (guard's latest onset before
+    // tick -> guard at tick): when the guard does not onset at `tick` the two
+    // samples are equal, its motion is zero, and oblique motion is always allowed.
     // `line_prev` is explicit rather than always `prev_emitted` so a figure can
     // be judged as a whole before any of it is emitted: the second tone of a
     // two-tone cell follows the first, not the last note already shipped.
@@ -151,7 +151,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       if (guard_registry == nullptr || line_prev < 0)
         return kGuardClean;
       const int other_curr = guard_sounding(tick);
-      const int other_prev = guard_sounding(tick - 1);
+      // Latest onset, not tick - 1: a parallel is heard across a guard rest.
+      const int other_prev = guard_registry->onsetPitchBefore(0, tick);
       if (other_curr < 0 || other_prev < 0)
         return kGuardClean;
       if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
@@ -518,9 +519,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     tier = std::max(0, std::min(3, tier));
 
     // The DENSE upper voice is always sixteenths (4/beat). The SECONDARY upper
-    // voice's note rate scales with the arc tier (quarter at tier 0, eighths at
-    // tier 1+), so total upper density genuinely rises toward the climax while
-    // the two upper voices keep DISTINCT rhythms (the trio independence trait).
+    // voice's note rate scales with the arc tier (one eighth and an eighth rest
+    // per beat at tier 0, two eighths at tier 1+), so total upper density rises
+    // toward the climax while the two upper voices keep DISTINCT rhythms (the
+    // trio independence trait).
     // The climax intensity comes from this note-rate rise rather than a register
     // jump, so the lines stay leap-free across bar boundaries.
     const int dense_notes = 4;

@@ -232,6 +232,19 @@ int ThemeToneRegistry::soundingPitchInVoice(VoiceId voice, Tick tick) const {
   return pitch;
 }
 
+int ThemeToneRegistry::onsetPitchBefore(VoiceId voice, Tick tick) const {
+  int pitch = -1;
+  long long best_start = -1;
+  for (const ThemeTone& tone : tones_) {
+    const long long start = static_cast<long long>(tone.tick);
+    if (tone.voice == voice && tone.tick < tick && start > best_start) {
+      best_start = start;
+      pitch = tone.pitch;
+    }
+  }
+  return pitch;
+}
+
 void ThemeToneRegistry::concurrentThemePitches(Tick tick, VoiceId voice,
                                                std::vector<int>& out_pitches) const {
   out_pitches.clear();

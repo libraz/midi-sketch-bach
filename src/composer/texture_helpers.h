@@ -206,6 +206,13 @@ class ThemeToneRegistry {
   /// a beat onset so the line under construction can avoid a parallel against it.
   int soundingPitchInVoice(VoiceId voice, Tick tick) const;
 
+  /// @brief Pitch of the latest onset in `voice` strictly before `tick`, or -1.
+  ///
+  /// Unlike soundingPitchInVoice(tick - 1), a rest does not hide the tone: a
+  /// parallel is heard note to note across a rest, so a guard reads this as the
+  /// other voice's "from" tone.
+  int onsetPitchBefore(VoiceId voice, Tick tick) const;
+
   /// @brief Collect concurrent theme-tone pitches at `tick` excluding `voice`.
   ///
   /// The figuration on `voice` must not clash with any statement sounding at the

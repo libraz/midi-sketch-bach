@@ -149,6 +149,9 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   // the first bar), used to vet each bar figure across the bar seam.
   int prev_cell_lo = -1;
   int prev_cell_hi = -1;
+  // The previous bar's last sixteenth (-1 before the first bar), the note the
+  // next bar's first note follows across the bar line.
+  int prev_last = -1;
   // Stop two bars short: the final two bars are the cadential landing appended
   // below (a held leading tone then the tonic), not sixteenth figuration. The
   // last iteration (bar == bars - 3) is the final audible figuration bar, so
@@ -231,7 +234,7 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         {0, -1, 1, -1},  // fold-back: anchor, reach, +1, reach.
         {0, 1, 0, -1},   // under-then-over: anchor, +1, anchor, reach.
     };
-    auto oscillation_bar = [&](std::array<int, 16>& p) {
+    auto oscillation_at = [&](std::array<int, 16>& p, int cell_reach) {
       // The shape rotates per CELL, not only per cycle: all three shapes share
       // the same tone set {anchor, +1, reach}, so every cell's implicit
       // min/max extremes are identical regardless of shape and the validator
@@ -247,11 +250,12 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
                                         static_cast<std::uint32_t>(cell)) %
                                        3u];
         for (int idx = 0; idx < 4; ++idx) {
-          const int degree = shape[idx] < 0 ? reach : shape[idx];
+          const int degree = shape[idx] < 0 ? cell_reach : shape[idx];
           p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degree, harmonic);
         }
       }
     };
+    auto oscillation_bar = [&](std::array<int, 16>& p) { oscillation_at(p, reach); };
     auto run_triangle_bar = [&](std::array<int, 16>& p) {
       // Two half-bar scale-run arches (climb four steps, fold back), the
       // second shifted one scale degree above the first (order swapped on odd
@@ -306,10 +310,39 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         p[static_cast<std::size_t>(cell * 4 + 3)] = top;
       }
     };
-    // Vet a candidate bar exactly the way the validator will read it: per-cell
-    // min/max streams, adjacent-cell forbidden leaps (including the seam from
-    // the previous bar's last cell), implicit parallel perfects, and the
-    // cello's practical register ceiling.
+    // Forbidden note-to-note leaps the line itself would sound: every step in
+    // the bar, the seam from the previous bar's last note, and (final
+    // figuration bar) the step into both the written leading tone and the
+    // trill's opening note.
+    auto note_faults = [&](const std::array<int, 16>& p) {
+      int faults = 0;
+      const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar;
+      for (int slot = 0; slot < kNotesPerBar; ++slot) {
+        const int from = slot == 0 ? prev_last : p[static_cast<std::size_t>(slot - 1)];
+        const Tick to_tick = bar_tick + static_cast<Tick>(slot) * kSix;
+        if (from >= 0 && rule_helpers::isForbiddenMelodicLeap(
+                             static_cast<std::uint8_t>(from),
+                             static_cast<std::uint8_t>(p[static_cast<std::size_t>(slot)]),
+                             out.harmony, to_tick - kSix, to_tick)) {
+          ++faults;
+        }
+      }
+      if (landing_lo >= 0) {
+        const Tick to_tick = bar_tick + kTicksPerBar;
+        for (const int landing : {landing_hi - 1, landing_lo}) {
+          if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(p[15]),
+                                                   static_cast<std::uint8_t>(landing), out.harmony,
+                                                   to_tick - kSix, to_tick)) {
+            ++faults;
+          }
+        }
+      }
+      return faults;
+    };
+    // Vet a candidate bar exactly the way the validator's implicit-voice rules
+    // read it: per-cell min/max streams, adjacent-cell forbidden leaps
+    // (including the seam from the previous bar's last cell), implicit parallel
+    // perfects, and the cello's practical register ceiling.
     auto cells_safe = [&](const std::array<int, 16>& p) {
       int lo[4];
       int hi[4];
@@ -385,6 +418,23 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     const int pref = static_cast<int>(detail::figureChoice(
         req.character, 4,
         req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)));
+    // The cell-safe candidate with the fewest forbidden note steps, kept for
+    // the case where no candidate is clean.
+    int best_faults = kNotesPerBar + 3;
+    int best_oidx = -1;
+    std::array<int, 16> best_pitches{};
+    int anchor_idx = 0;
+    auto accept = [&]() {
+      if (!cells_safe(pitches))
+        return false;
+      const int faults = note_faults(pitches);
+      if (faults < best_faults) {
+        best_faults = faults;
+        best_oidx = anchor_idx;
+        best_pitches = pitches;
+      }
+      return faults == 0;
+    };
     auto try_figures = [&]() {
       for (int attempt = 0; attempt < 4; ++attempt) {
         switch ((pref + attempt) % 4) {
@@ -401,40 +451,52 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
             pedal_bariolage_bar(pitches);
             break;
         }
-        if (cells_safe(pitches))
+        if (accept())
           return true;
       }
       return false;
     };
-    if (bar == bars - 3) {
-      // Final figuration bar: enumerate the realized triad-tone anchors
-      // nearest-first, trying the four figures per anchor, and take the first
-      // pair whose closing cell voice-leads into the cadential landing without
-      // a forbidden seam. From the harmonic-minor sixth every figure's seam
-      // into the landing leading tone is an augmented second, so a nearer
-      // anchor alone cannot always clear it -- a farther chord tone can.
-      // The trill opens on the lower turn note (tonic - 3) or the leading tone
-      // (tonic - 1); the seam must be vetted against the one the ornament pass
-      // will pick for this piece.
-      // The landing's held leading tone becomes a cadential trill whose opening
-      // the ornament pass keys to placementHash(seed, bar, voice). It sits in
-      // the penultimate (dominant) bar -- bar index bars - 2 -- on the solo flow
-      // line (voice 0), so vet the closing seam against that exact opening.
-      const VoiceId solo_flow_voice = 0;
-      const bool opens_on_turn = cadenceTrillOpensVonUnten(req.seed, bars - 2, solo_flow_voice);
-      for (int oidx = 0; oidx < 3 && !placed; ++oidx) {
-        anchor = cand_anchors[anchor_order[oidx]];
-        const int final_tonic = landingTonicFor(anchor);
-        landing_hi = final_tonic;
-        landing_lo = final_tonic - (opens_on_turn ? 3 : 1);
-        placed = try_figures();
+    // Final figuration bar: the closing cell must also voice-lead into the
+    // cadential landing. From the harmonic-minor sixth every figure's seam into
+    // the landing leading tone is an augmented second, so a nearer anchor alone
+    // cannot always clear it -- a farther chord tone can. The landing's held
+    // leading tone becomes a cadential trill whose opening (the lower turn note
+    // tonic - 3, or the leading tone tonic - 1) the ornament pass keys to
+    // placementHash(seed, bar, voice). It sits in the penultimate (dominant) bar
+    // -- bar index bars - 2 -- on the solo flow line (voice 0), so the seam is
+    // vetted against that exact opening.
+    const bool final_figuration_bar = bar == bars - 3;
+    const VoiceId solo_flow_voice = 0;
+    const bool opens_on_turn =
+        final_figuration_bar && cadenceTrillOpensVonUnten(req.seed, bars - 2, solo_flow_voice);
+    auto use_anchor = [&](int oidx) {
+      anchor_idx = oidx;
+      anchor = cand_anchors[anchor_order[oidx]];
+      if (final_figuration_bar) {
+        landing_hi = landingTonicFor(anchor);
+        landing_lo = landing_hi - (opens_on_turn ? 3 : 1);
       }
-      if (!placed)
-        anchor = cand_anchors[anchor_order[0]];  // restore the nearest for the fallback.
-    } else {
+    };
+    // Realized triad-tone anchors nearest-first, the four figures per anchor; a
+    // farther chord tone only when no figure on a nearer one is clean.
+    for (int oidx = 0; oidx < 3 && !placed; ++oidx) {
+      use_anchor(oidx);
       placed = try_figures();
     }
+    // A fourth-wide oscillation from the sixth degree outlines a tritone; the
+    // third-wide one cannot.
+    for (int oidx = 0; oidx < 3 && !placed && reach != 2; ++oidx) {
+      use_anchor(oidx);
+      oscillation_at(pitches, 2);
+      placed = accept();
+    }
+    if (!placed && best_oidx >= 0) {
+      use_anchor(best_oidx);
+      pitches = best_pitches;
+      placed = true;
+    }
     if (!placed) {
+      use_anchor(0);
       oscillation_bar(pitches);  // constant-stream fallback (prior behavior).
     }
     for (int slot = 0; slot < kNotesPerBar; ++slot) {
@@ -446,6 +508,7 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     }
     prev_cell_lo = std::min({pitches[12], pitches[13], pitches[14], pitches[15]});
     prev_cell_hi = std::max({pitches[12], pitches[13], pitches[14], pitches[15]});
+    prev_last = pitches[15];
     prev_anchor = anchor;  // voice-lead the next bar from this bar's anchor.
   }
 
