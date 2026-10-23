@@ -21,8 +21,9 @@ namespace bach::composer {
 // Material verbatim and never saturate, so this only ever reflects free
 // Compose voices. A non-zero count is NOT a validation failure (resting is
 // the correct no-fallback response to "no consonant candidate" — better a
-// rest than a wrong note); it is a quality/density signal the caller can
-// inspect, log, or gate on explicitly.
+// rest than a wrong note); it is a quality/density signal for in-process
+// callers of Composer::run only (the CLI, C API and JSON output do not
+// expose it).
 struct ComposeResult {
   std::vector<NoteEvent> notes;
   std::vector<NoteProvenance> provenance;
@@ -36,9 +37,9 @@ struct ComposeResult {
 //
 // No-fallback principle: a Compose position that exhausts all candidates
 // emits no note (a rest) rather than a default/fallback pitch. run() makes
-// these holes VISIBLE by counting them into ComposeResult::saturated_positions
-// (CandidateSearch::enumerate reports the per-span count), so a silent hole
-// can no longer pass unnoticed. Resting is not itself a failure, so run()
+// these holes countable in ComposeResult::saturated_positions
+// (CandidateSearch::enumerate reports the per-span count) for in-process
+// callers. Resting is not itself a failure, so run()
 // does NOT set ValidationStatus::FailedSeed for it; FailedSeed stays reserved
 // for the future span re-generation / back-jump / seed-retry loop described in
 // validation.h, which is NOT implemented yet (tracked future work).

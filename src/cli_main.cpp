@@ -76,6 +76,20 @@ bool equalsIgnoreCase(const std::string& lhs, const char* rhs) {
   return true;
 }
 
+/// @brief Write @p content to @p path and report whether every byte reached the stream.
+/// @param path Destination file path.
+/// @param content Text to write.
+/// @return False when the file cannot be opened or the write or close fails.
+bool writeTextFile(const std::string& path, const std::string& content) {
+  std::ofstream file(path);
+  if (!file.is_open()) {
+    return false;
+  }
+  file << content;
+  file.close();
+  return !file.fail();
+}
+
 bool parseUnsignedArgument(const char* text, std::uint64_t maximum, std::uint64_t* out) {
   if (text == nullptr || *text == '\0' || out == nullptr) {
     return false;
@@ -216,19 +230,21 @@ void printUsage() {
   std::printf("bach_cli - J.S. Bach Instrumental MIDI Generator\n\n");
   std::printf("Usage: bach_cli [options]\n\n");
   std::printf("Options:\n");
-  std::printf("  --seed N         Random seed (0 = auto)\n");
+  std::printf(
+      "  --seed N         Random seed (0 = auto; at most 2147483647 with --composer-phase)\n");
   std::printf("  --key KEY        Key (e.g. g_minor, C_major, d_minor, F_major)\n");
   std::printf("  --form FORM      Form type\n");
   std::printf("  --character CH   Subject character: severe, playful, noble, restless\n");
-  std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello, guitar\n");
-  std::printf("  --bpm N          BPM (40-200, default 100)\n");
+  std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello\n");
+  std::printf("  --bpm N          BPM (40-200; 0 or omitted = default 100)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
   std::printf("                   Default: short for every form\n");
   std::printf("  --bars N         Target bar count (overrides --scale)\n");
   std::printf(
-      "  --free-counterpoint  Experimental: generate the inner accompaniment\n"
-      "                   voice via the scored candidate search instead of its\n"
-      "                   designed counter-line (off by default; lowers quality)\n");
+      "  --free-counterpoint  Experimental: generate the Passacaglia secondary\n"
+      "                   counter-line via the scored candidate search instead of\n"
+      "                   its designed counter-line (off by default; lowers\n"
+      "                   quality). Other forms exit with an unavailable error\n");
   std::printf(
       "  --composer-phase P  (internal) Run the closure harness layout with phase\n"
       "                   "
@@ -245,6 +261,7 @@ void printUsage() {
       "reused.\n");
   std::printf("  --json           JSON output\n");
   std::printf("  --generated-json Emit generated.v1 + provenance.v1 JSON for scoring\n");
+  std::printf("                   (not available with --composer-phase)\n");
   std::printf("  -o FILE          Output file path\n");
   std::printf("  --help           Show this help\n");
   std::printf("\nForms:\n");
@@ -277,7 +294,8 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
         std::strcmp(argv[idx], "--form") == 0 || std::strcmp(argv[idx], "--character") == 0 ||
         std::strcmp(argv[idx], "--instrument") == 0 || std::strcmp(argv[idx], "--bpm") == 0 ||
         std::strcmp(argv[idx], "--scale") == 0 || std::strcmp(argv[idx], "--bars") == 0 ||
-        std::strcmp(argv[idx], "--free-counterpoint") == 0;
+        std::strcmp(argv[idx], "--free-counterpoint") == 0 ||
+        std::strcmp(argv[idx], "--generated-json") == 0;
     opts.composer_phase_product_option = opts.composer_phase_product_option || product_only_option;
     if (std::strcmp(argv[idx], "--help") == 0 || std::strcmp(argv[idx], "-h") == 0) {
       printUsage();
@@ -296,8 +314,10 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
     } else if (std::strcmp(argv[idx], "--bpm") == 0 && idx + 1 < argc) {
       const char* value = argv[++idx];
       std::uint64_t bpm = 0;
-      if (!parseUnsignedArgument(value, 200, &bpm) || bpm < 40) {
-        std::fprintf(stderr, "Error: --bpm must be an integer in [40, 200] (got '%s')\n", value);
+      if (!parseUnsignedArgument(value, 200, &bpm) || (bpm != 0 && bpm < 40)) {
+        std::fprintf(stderr,
+                     "Error: --bpm must be 0 (default) or an integer in [40, 200] (got '%s')\n",
+                     value);
         ok = false;
         return false;
       }
@@ -406,6 +426,15 @@ bool parseArgs(int argc, char* argv[], CliOptions& opts, bool& ok) {
     ok = false;
     return false;
   }
+  // The harness fixture derives table indices from a signed seed; larger seeds would go negative.
+  constexpr std::uint32_t kMaxComposerPhaseSeed =
+      static_cast<std::uint32_t>(std::numeric_limits<int>::max());
+  if (opts.composer_mode && opts.seed > kMaxComposerPhaseSeed) {
+    std::fprintf(stderr, "Error: --seed must be in [0, %u] with --composer-phase (got %u)\n",
+                 kMaxComposerPhaseSeed, opts.seed);
+    ok = false;
+    return false;
+  }
   return true;
 }
 
@@ -494,41 +523,35 @@ int runComposerMode(const CliOptions& opts) {
   // Writes generated + provenance JSON next to opts.output. Also used on
   // validation failure so failing spans can be located from the note dump.
   const auto dump_json = [&result, &opts, effective_bpm]() {
+    bool all_written = true;
     const std::string json_path = deriveJsonPath(opts.output);
     const std::vector<bach::TempoEvent> tempo_events = {{0, effective_bpm}};
-    const std::string generated =
-        bach::composer::emitGeneratedJson(result.notes, result.validation, tempo_events);
-    const std::string provenance = bach::composer::emitProvenanceJson(result.provenance);
-    std::ofstream f(json_path);
-    if (f.is_open()) {
-      f << generated;
-      f.close();
+    if (writeTextFile(json_path, bach::composer::emitGeneratedJson(result.notes, result.validation,
+                                                                   tempo_events))) {
       std::printf("JSON:      %s\n", json_path.c_str());
     } else {
-      std::fprintf(stderr, "Warning: failed to write %s\n", json_path.c_str());
+      std::fprintf(stderr, "Error: failed to write %s\n", json_path.c_str());
+      all_written = false;
     }
     const std::string provenance_path = deriveSuffixedJsonPath(opts.output, ".provenance.json");
-    std::ofstream pf(provenance_path);
-    if (pf.is_open()) {
-      pf << provenance;
-      pf.close();
+    if (writeTextFile(provenance_path, bach::composer::emitProvenanceJson(result.provenance))) {
       std::printf("Provenance:%s\n", provenance_path.c_str());
     } else {
-      std::fprintf(stderr, "Warning: failed to write %s\n", provenance_path.c_str());
+      std::fprintf(stderr, "Error: failed to write %s\n", provenance_path.c_str());
+      all_written = false;
     }
 
     if (result.validation.status != bach::composer::ValidationStatus::Ok) {
       const std::string diagnostic_path = deriveSuffixedJsonPath(opts.output, ".diagnostic.json");
-      std::ofstream diagnostic_file(diagnostic_path);
-      if (diagnostic_file.is_open()) {
-        diagnostic_file << bach::composer::emitDiagnosticJson(result.notes, result.provenance,
-                                                              result.validation);
-        diagnostic_file.close();
+      if (writeTextFile(diagnostic_path, bach::composer::emitDiagnosticJson(
+                                             result.notes, result.provenance, result.validation))) {
         std::fprintf(stderr, "Diagnostic:%s\n", diagnostic_path.c_str());
       } else {
-        std::fprintf(stderr, "Warning: failed to write %s\n", diagnostic_path.c_str());
+        std::fprintf(stderr, "Error: failed to write %s\n", diagnostic_path.c_str());
+        all_written = false;
       }
     }
+    return all_written;
   };
 
   if (result.validation.status != bach::composer::ValidationStatus::Ok) {
@@ -561,8 +584,8 @@ int runComposerMode(const CliOptions& opts) {
   }
   std::printf("Output:    %s\n", opts.output.c_str());
 
-  if (opts.json_output) {
-    dump_json();
+  if (opts.json_output && !dump_json()) {
+    return kExitOutput;
   }
   return 0;
 }
@@ -658,10 +681,10 @@ int runDefaultMode(const CliOptions& opts) {
     }
     if (opts.generated_json_output && !product.diagnostic_json.empty()) {
       const std::string diagnostic_path = deriveSuffixedJsonPath(opts.output, ".diagnostic.json");
-      std::ofstream diagnostic_file(diagnostic_path);
-      if (diagnostic_file.is_open()) {
-        diagnostic_file << product.diagnostic_json;
+      if (writeTextFile(diagnostic_path, product.diagnostic_json)) {
         std::fprintf(stderr, "Diagnostic (failed run):%s\n", diagnostic_path.c_str());
+      } else {
+        std::fprintf(stderr, "Error: failed to write %s\n", diagnostic_path.c_str());
       }
     }
     return kExitGeneration;
@@ -710,9 +733,7 @@ int runDefaultMode(const CliOptions& opts) {
   bool sidecar_ok = true;
   if (opts.json_output) {
     const std::string json_path = deriveJsonPath(opts.output);
-    std::ofstream json_file(json_path);
-    if (json_file.is_open()) {
-      json_file << product.homepage_events_json;
+    if (writeTextFile(json_path, product.homepage_events_json)) {
       std::printf("JSON:      %s\n", json_path.c_str());
     } else {
       std::fprintf(stderr, "Error: failed to write %s\n", json_path.c_str());
@@ -724,18 +745,14 @@ int runDefaultMode(const CliOptions& opts) {
     const std::string generated_path = deriveSuffixedJsonPath(opts.output, ".generated.json");
     const std::string provenance_path = deriveSuffixedJsonPath(opts.output, ".provenance.json");
 
-    std::ofstream generated_file(generated_path);
-    if (generated_file.is_open()) {
-      generated_file << product.generated_json;
+    if (writeTextFile(generated_path, product.generated_json)) {
       std::printf("Generated JSON:%s\n", generated_path.c_str());
     } else {
       std::fprintf(stderr, "Error: failed to write %s\n", generated_path.c_str());
       sidecar_ok = false;
     }
 
-    std::ofstream provenance_file(provenance_path);
-    if (provenance_file.is_open()) {
-      provenance_file << product.provenance_json;
+    if (writeTextFile(provenance_path, product.provenance_json)) {
       std::printf("Provenance:%s\n", provenance_path.c_str());
     } else {
       std::fprintf(stderr, "Error: failed to write %s\n", provenance_path.c_str());

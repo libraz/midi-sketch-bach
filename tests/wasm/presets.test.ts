@@ -55,10 +55,10 @@ describe('Presets', () => {
 
     it('should include all character types', () => {
       const names = getCharacters().map((c) => c.name);
-      expect(names).toContain('Severe');
-      expect(names).toContain('Playful');
-      expect(names).toContain('Noble');
-      expect(names).toContain('Restless');
+      expect(names).toContain('severe');
+      expect(names).toContain('playful');
+      expect(names).toContain('noble');
+      expect(names).toContain('restless');
     });
   });
 

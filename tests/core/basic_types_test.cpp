@@ -83,10 +83,10 @@ TEST(BasicTypesTest, FuguePhaseToString) {
 // ---------------------------------------------------------------------------
 
 TEST(BasicTypesTest, SubjectCharacterToString) {
-  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Severe), "Severe");
-  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Playful), "Playful");
-  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Noble), "Noble");
-  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Restless), "Restless");
+  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Severe), "severe");
+  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Playful), "playful");
+  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Noble), "noble");
+  EXPECT_STREQ(subjectCharacterToString(SubjectCharacter::Restless), "restless");
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +232,31 @@ TEST(BasicTypesTest, FormInstrumentCompatibilityProtectsDesignedCompass) {
       isInstrumentCompatibleWithForm(FormType::GoldbergVariations, InstrumentType::Violin));
   EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::CelloPrelude, InstrumentType::Cello));
   EXPECT_TRUE(isInstrumentCompatibleWithForm(FormType::Chaconne, InstrumentType::Violin));
+}
+
+TEST(BasicTypesTest, EveryFormDefaultInstrumentIsAcceptedByItsForm) {
+  for (int form_id = 0; form_id <= static_cast<int>(FormType::GoldbergVariations); ++form_id) {
+    const auto form = static_cast<FormType>(form_id);
+    EXPECT_TRUE(isInstrumentCompatibleWithForm(form, defaultInstrumentForForm(form)))
+        << formTypeToString(form);
+  }
+}
+
+TEST(BasicTypesTest, OnlyTheReservedInstrumentIsAcceptedByNoForm) {
+  for (int inst_id = 0; inst_id <= static_cast<int>(InstrumentType::Guitar); ++inst_id) {
+    const auto instrument = static_cast<InstrumentType>(inst_id);
+    int accepting_forms = 0;
+    for (int form_id = 0; form_id <= static_cast<int>(FormType::GoldbergVariations); ++form_id) {
+      if (isInstrumentCompatibleWithForm(static_cast<FormType>(form_id), instrument)) {
+        ++accepting_forms;
+      }
+    }
+    if (instrument == InstrumentType::Guitar) {
+      EXPECT_EQ(accepting_forms, 0) << "guitar is reserved; documentation must not advertise it";
+    } else {
+      EXPECT_GT(accepting_forms, 0) << instrumentTypeToString(instrument);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

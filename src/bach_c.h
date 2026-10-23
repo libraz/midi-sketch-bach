@@ -17,7 +17,8 @@ extern "C" {
 /// @brief Opaque handle to a Bach generator instance.
 typedef void* BachHandle;
 
-/// @brief Error codes returned by API functions.
+/// @brief Error codes returned by API functions. BACH_ERROR_INVALID_CONFIG is
+///        reserved and never returned.
 typedef enum {
   BACH_OK = 0,
   BACH_ERROR_INVALID_PARAM = 1,
@@ -100,16 +101,32 @@ void bach_destroy(BachHandle handle);
 ///         else BACH_ERROR_INVALID_BPM.
 ///   seed: number. 0 or absent => a random non-zero seed is generated; the
 ///         resolved value is reported via BachInfo::seed_used.
-///   character: string ("severe", "playful", "noble", "restless") or number
-///         (0-3). Strict: unknown name / out-of-range number =>
-///         BACH_ERROR_INVALID_CHARACTER.
-///   instrument: string ("organ", "violin", "cello", ...) or number (0-5).
-///         Absent => default for the form. Strict: unknown name /
-///         out-of-range number => BACH_ERROR_INVALID_INSTRUMENT.
+///   character: exact name returned by bach_character_name() ("severe",
+///         "playful", "noble", "restless") or number (0-3). Default "severe".
+///         Unknown name / out-of-range number => BACH_ERROR_INVALID_CHARACTER.
+///         A character the form cannot carry (chorale_prelude with playful or
+///         restless, toccata_and_fugue with noble) =>
+///         BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM.
+///   instrument: exact name returned by bach_instrument_name() or number (0-5).
+///         Absent => default for the form. Unknown name / out-of-range number
+///         => BACH_ERROR_INVALID_INSTRUMENT. An instrument the form does not
+///         accept => BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM: organ forms accept
+///         "organ", cello_prelude "cello", chaconne "violin" and
+///         goldberg_variations "harpsichord" or "piano". "guitar" (5) is
+///         reserved: it is enumerated but no form accepts it.
 ///   scale: string ("short", "medium", "long", "full") or number (0-3).
-///         Strict: unknown => BACH_ERROR_INVALID_SCALE. Default "short".
-///   target_bars: number (0 = use scale, >0 = override scale).
+///         Unknown name / out-of-range number => BACH_ERROR_INVALID_SCALE.
+///         Default "short".
+///   target_bars: number (0 = use scale, >0 = override scale). Must be an
+///         unsigned 16-bit integer; otherwise BACH_ERROR_INVALID_TARGET_BARS.
 ///   Unknown fields are rejected with BACH_ERROR_UNKNOWN_CONFIG_FIELD.
+///
+/// Other results: BACH_ERROR_INVALID_JSON for malformed or oversized JSON,
+/// BACH_ERROR_INVALID_SEED for a seed that is not an unsigned 32-bit integer,
+/// BACH_ERROR_GENERATION_FAILED when composition or final validation fails (the
+/// diagnostic.v1 document is then available from bach_get_diagnostic()), and
+/// BACH_ERROR_INVALID_PARAM for a null handle or JSON pointer.
+/// BACH_ERROR_INVALID_CONFIG is reserved and never returned.
 ///
 /// @param handle Bach handle
 /// @param json JSON config string
@@ -193,6 +210,7 @@ const char* bach_form_display(uint8_t id);
 uint8_t bach_instrument_count(void);
 
 /// @brief Get instrument name. @param id Instrument ID @return Name (e.g. "organ")
+///        "guitar" is enumerated but reserved: no form accepts it.
 const char* bach_instrument_name(uint8_t id);
 
 // ============================================================================

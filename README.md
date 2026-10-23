@@ -51,8 +51,13 @@ slots; `--scale full` produces 128 bars: aria, 30 variations (nine canons and a
 two-tune Quodlibet slot), and an aria restatement with an explicit terminal
 coda.
 
-Every fugue builds an exposition, real/tonal answer, countersubject, episodes,
-and stretto. The final-score validator audits parallel fifths/octaves and voice
+Every fugue builds an exposition, a real or tonal answer and a countersubject.
+Later devices depend on the form and length: `fugue` adds episodes and middle
+entries, and a stretto only when the development has room for one (not every
+seed at the default length); the `prelude_and_fugue` default length has a
+single episode and no stretto; the `toccata_and_fugue` and
+`fantasia_and_fugue` fugue tails are exposition, stretto and cadence. The
+final-score validator audits parallel fifths/octaves and voice
 crossing on the emitted notes and reports any authored-material findings.
 
 ## Quick Start
@@ -61,7 +66,7 @@ crossing on the emitted notes and reports any authored-material findings.
 
 ```bash
 make build
-./build/bin/bach_cli                                        # Prelude and Fugue in C major
+./build/bin/bach_cli                                        # Fugue in C major
 ./build/bin/bach_cli --form fugue --key g_minor --seed 42
 ./build/bin/bach_cli --form chaconne --scale full
 ./build/bin/bach_cli --form cello_prelude --bpm 120 -o prelude.mid
@@ -96,7 +101,7 @@ make demo   # http://localhost:8080/demo/
 | `--form FORM` | Composition form | `fugue` |
 | `--key KEY` | Key (e.g. `g_minor`, `D_major`) | `C_major` |
 | `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
-| `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | auto |
+| `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello` (accepted instruments per form: see below) | form default |
 | `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
 | `--bars N` | Target bar count (overrides `--scale`) | - |
 | `--bpm N` | Tempo (40-200) | `100` |
@@ -105,6 +110,15 @@ make demo   # http://localhost:8080/demo/
 | `--generated-json` | Output generated.v1 + provenance.v1 JSON | - |
 | `--free-counterpoint` | Experimental: generate the Passacaglia secondary counterline via scored search (off by default); other forms report an explicit unavailable diagnostic | - |
 | `-o FILE` | Output path | `output.mid` |
+
+Accepted instruments per form (any other combination is rejected):
+
+| Form | Instruments (first is the default) |
+|------|------------------------------------|
+| `fugue`, `prelude_and_fugue`, `trio_sonata`, `chorale_prelude`, `toccata_and_fugue`, `passacaglia`, `fantasia_and_fugue` | `organ` |
+| `cello_prelude` | `cello` |
+| `chaconne` | `violin` |
+| `goldberg_variations` | `harpsichord`, `piano` |
 
 ## Build
 

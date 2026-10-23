@@ -18,6 +18,11 @@ export type KeyId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 export type KeyName = 'C' | 'C#' | 'D' | 'Eb' | 'E' | 'F' | 'F#' | 'G' | 'Ab' | 'A' | 'Bb' | 'B';
 export type CharacterName = 'severe' | 'playful' | 'noble' | 'restless';
 export type CharacterId = 0 | 1 | 2 | 3;
+/**
+ * Instrument names as enumerated by getInstruments(). 'guitar' is reserved: no
+ * form accepts it. Accepted per form: organ forms 'organ', cello_prelude
+ * 'cello', chaconne 'violin', goldberg_variations 'harpsichord' or 'piano'.
+ */
 export type InstrumentName = 'organ' | 'harpsichord' | 'piano' | 'violin' | 'cello' | 'guitar';
 export type InstrumentId = 0 | 1 | 2 | 3 | 4 | 5;
 export type DurationScaleName = 'short' | 'medium' | 'long' | 'full';
@@ -37,7 +42,7 @@ export interface BachConfig {
   seed?: number;
   /** Subject character ID (0-3) or name string. */
   character?: CharacterId | CharacterName;
-  /** Instrument type ID (0-5) or name string. */
+  /** Instrument type ID (0-5) or name string; must be one the form accepts. */
   instrument?: InstrumentId | InstrumentName;
   /** Duration scale ID (0-3) or name string ("short", "medium", "long", "full"). */
   scale?: DurationScaleId | DurationScaleName;

@@ -50,7 +50,11 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 アリア、30変奏（9つのカノンと2旋律のクォドリベット枠）、終端コーダを伴う
 アリア再提示の全128小節を生成します。
 
-フーガでは提示部・真正/変格応答・対主題・嬉遊部・ストレッタを構成します。
+フーガは提示部・真正/変格応答・対主題を構成します。以降の技法は形式と長さに
+よって異なります。`fugue` は嬉遊部と中間提示を持ち、ストレッタは展開部に余地が
+ある場合のみ入ります（既定長ではシードによって入りません）。`prelude_and_fugue`
+の既定長は嬉遊部が1つでストレッタを持ちません。`toccata_and_fugue` と
+`fantasia_and_fugue` のフーガ部は提示部・ストレッタ・終止です。
 最終スコア validator は出力ノート上の平行5度・平行8度と声部交差を監査し、
 固定素材に由来する検出結果も報告します。
 
@@ -60,7 +64,7 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 
 ```bash
 make build
-./build/bin/bach_cli                                        # ハ長調の前奏曲とフーガ
+./build/bin/bach_cli                                        # ハ長調のフーガ
 ./build/bin/bach_cli --form fugue --key g_minor --seed 42
 ./build/bin/bach_cli --form chaconne --scale full
 ./build/bin/bach_cli --form cello_prelude --bpm 120 -o prelude.mid
@@ -95,15 +99,24 @@ make demo   # http://localhost:8080/demo/
 | `--form FORM` | 楽曲形式 | `fugue` |
 | `--key KEY` | 調（例: `g_minor`, `D_major`） | `C_major` |
 | `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
-| `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`, `guitar` | 自動 |
+| `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`（形式ごとの受理楽器は下表） | 形式の既定 |
 | `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
 | `--bars N` | 目標小節数（`--scale`を上書き） | - |
 | `--bpm N` | テンポ（40-200） | `100` |
 | `--seed N` | 乱数シード（0 = ランダム） | `0` |
 | `--json` | JSONイベントデータ出力 | - |
 | `--generated-json` | generated.v1 + provenance.v1 JSON出力 | - |
-| `--free-counterpoint` | 実験的: 内声をスコア付き探索で生成（デフォルト無効） | - |
+| `--free-counterpoint` | 実験的: パッサカリアの副次対旋律をスコア付き探索で生成（デフォルト無効）。他の形式は利用不可の診断を返す | - |
 | `-o FILE` | 出力ファイルパス | `output.mid` |
+
+形式ごとに受理される楽器（これ以外の組み合わせは拒否されます）:
+
+| 形式 | 楽器（先頭が既定） |
+|------|-------------------|
+| `fugue`, `prelude_and_fugue`, `trio_sonata`, `chorale_prelude`, `toccata_and_fugue`, `passacaglia`, `fantasia_and_fugue` | `organ` |
+| `cello_prelude` | `cello` |
+| `chaconne` | `violin` |
+| `goldberg_variations` | `harpsichord`, `piano` |
 
 ## ビルド
 

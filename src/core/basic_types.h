@@ -198,7 +198,8 @@ const char* fuguePhaseToString(FuguePhase phase);
 /// Phase restrictions: Severe/Playful (Ph1-2), Noble (Ph3+), Restless (Ph4+).
 enum class SubjectCharacter : uint8_t { Severe, Playful, Noble, Restless };
 
-/// @brief Convert SubjectCharacter to human-readable string.
+/// @brief Convert SubjectCharacter to its lowercase canonical name ("severe", ...), the
+///        spelling every parser accepts.
 const char* subjectCharacterToString(SubjectCharacter character);
 
 // ---------------------------------------------------------------------------
@@ -366,7 +367,8 @@ const char* instrumentTypeToString(InstrumentType inst);
 InstrumentType defaultInstrumentForForm(FormType form);
 
 /// @brief Whether an explicitly requested instrument preserves the form's
-///        designed compass and texture.
+///        designed compass and texture. This is the single per-form acceptance
+///        table; no form accepts InstrumentType::Guitar, which is reserved.
 bool isInstrumentCompatibleWithForm(FormType form, InstrumentType instrument);
 
 /// @brief Parse an InstrumentType from a string.

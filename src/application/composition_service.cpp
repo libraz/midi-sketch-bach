@@ -73,6 +73,20 @@ void appendSectionTempoChanges(std::vector<TempoEvent>* events, FormType form,
   }
 }
 
+// Tempo of the last event at or before `tick`; `fallback` when none precede it.
+std::uint16_t tempoInForceAt(const std::vector<TempoEvent>& events, Tick tick,
+                             std::uint16_t fallback) {
+  std::uint16_t bpm = fallback;
+  Tick best_tick = 0;
+  for (const TempoEvent& event : events) {
+    if (event.tick <= tick && event.tick >= best_tick) {
+      bpm = event.bpm;
+      best_tick = event.tick;
+    }
+  }
+  return bpm;
+}
+
 void sortTempoEvents(std::vector<TempoEvent>* events) {
   if (events == nullptr) {
     return;
@@ -149,7 +163,7 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
     return CompositionStatus::InvalidArgument;
   }
   *out = CompositionProduct{};
-  // The wave's veto counters are a process-wide accumulator; compose() is the
+  // The wave's veto counters are a per-thread accumulator; compose() is the
   // per-piece boundary, so clearing here is what makes the snapshot below
   // describe this piece and not every piece the process built before it.
   composer::waveVetoStats().reset();
@@ -320,8 +334,14 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   out->tempo_events.push_back({0, effective.bpm});
   appendSectionTempoChanges(&out->tempo_events, effective.form, fixture.section_cadence_ticks,
                             ticks_per_bar, out->total_ticks, effective.bpm);
+  // The ritardando steps are percentages of the tempo in force where it starts,
+  // which is the section tempo when a contrasting fugue section precedes it.
+  const Tick ritard_start = out->total_ticks > 2 * ticks_per_bar
+                                ? out->total_ticks - 2 * ticks_per_bar
+                                : out->total_ticks / 2;
+  const std::uint16_t ritard_bpm = tempoInForceAt(out->tempo_events, ritard_start, effective.bpm);
   const auto ritard =
-      composer::buildFinalRitardando(effective.bpm, out->total_ticks, ticks_per_bar,
+      composer::buildFinalRitardando(ritard_bpm, out->total_ticks, ticks_per_bar,
                                      out->performance_profile.final_ritardando, spec.ts_numerator);
   out->tempo_events.insert(out->tempo_events.end(), ritard.begin(), ritard.end());
   sortTempoEvents(&out->tempo_events);

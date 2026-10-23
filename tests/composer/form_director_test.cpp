@@ -108,15 +108,13 @@ TEST(FormDirectorResolveBars, ShortScaleYieldsSnappedNaturalLength) {
 }
 
 TEST(FormDirectorResolveBars, ScaleMultipliersApplyThenSnapAndClamp) {
-  // Fugue: natural 42, snap 4, max 128.
-  // Short -> 42 -> snap 44 (nearest multiple of 4: 42 -> 44? 40 vs 44, 42 is
-  // mid; round-half-up gives 44).
+  // Fugue: natural 44, snap 4, max 128.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 0), 44);
-  // Medium ~2x -> 84 -> already a multiple of 4.
-  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Medium, 0), 84);
-  // Long ~3x -> 126 -> snap to 128 -> within cap.
+  // Medium 2x -> 88.
+  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Medium, 0), 88);
+  // Long 3x -> 132 -> clamps to 128.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Long, 0), 128);
-  // Full ~4x -> 168 -> clamps to 128.
+  // Full 4x -> 176 -> clamps to 128.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Full, 0), 128);
   EXPECT_EQ(resolveBars(FormType::GoldbergVariations, DurationScale::Full, 0), 128);
 }
@@ -139,6 +137,40 @@ TEST(FormDirectorResolveBars, TargetBarsOverridesScaleButStillSnapsAndClamps) {
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 999), 128);
   // Override snaps: Fugue snap 4, target 30 -> 32.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 30), 32);
+}
+
+TEST(FormDirectorResolveBars, EveryTargetStaysClampedAndNonDecreasing) {
+  for (FormType form : kAllForms) {
+    const FormSpec& spec = formSpec(form);
+    std::uint16_t previous = 0;
+    for (std::uint32_t target = 1; target <= 65535; ++target) {
+      const std::uint16_t resolved =
+          resolveBars(form, DurationScale::Short, static_cast<std::uint16_t>(target));
+      ASSERT_GE(resolved, spec.min_bars) << "form " << static_cast<int>(form) << " t=" << target;
+      ASSERT_LE(resolved, 128) << "form " << static_cast<int>(form) << " t=" << target;
+      ASSERT_GE(resolved, previous) << "form " << static_cast<int>(form) << " t=" << target;
+      previous = resolved;
+    }
+    EXPECT_EQ(resolveBars(form, DurationScale::Short, 65534), 128);
+    EXPECT_EQ(resolveBars(form, DurationScale::Short, 65535), 128);
+  }
+}
+
+TEST(FormDirectorResolveBars, ScalesBelowFullDoNotSnapOntoTheCap) {
+  for (FormType form : kAllForms) {
+    const FormSpec& spec = formSpec(form);
+    EXPECT_EQ(spec.natural_bars % spec.snap_bars, 0) << "form " << static_cast<int>(form);
+    EXPECT_EQ(resolveBars(form, DurationScale::Short, 0), spec.natural_bars)
+        << "form " << static_cast<int>(form);
+    for (DurationScale scale : {DurationScale::Medium, DurationScale::Long}) {
+      const std::uint32_t raw =
+          static_cast<std::uint32_t>(spec.natural_bars) * (scale == DurationScale::Medium ? 2 : 3);
+      if (raw < 128 && form != FormType::GoldbergVariations) {
+        EXPECT_LT(resolveBars(form, scale, 0), 128)
+            << "form " << static_cast<int>(form) << " raw=" << raw;
+      }
+    }
+  }
 }
 
 // --- 3. isFormCharacterCompatible ------------------------------------------
@@ -205,6 +237,20 @@ TEST(FormDirectorArc, MonotoneRiseAndSingleClimax) {
   checkArc(30);
 }
 
+TEST(FormDirectorArc, ClimaxNeverSitsOnTheOpeningCycle) {
+  for (std::size_t cycle_count = 2; cycle_count <= 64; ++cycle_count) {
+    std::size_t climax_idx = 0;
+    for (std::size_t idx = 0; idx < cycle_count; ++idx) {
+      if (arcPoint(idx, cycle_count).is_climax) {
+        climax_idx = idx;
+      }
+    }
+    EXPECT_GT(climax_idx, 0u) << "cc=" << cycle_count;
+    EXPECT_NE(arcPoint(0, cycle_count).stage, ArcStage::Climax) << "cc=" << cycle_count;
+    EXPECT_EQ(arcPoint(climax_idx, cycle_count).register_shift, 12) << "cc=" << cycle_count;
+  }
+}
+
 TEST(FormDirectorArc, SingleCycleIsItsOwnClimax) {
   const ArcPoint pt = arcPoint(0, 1);
   EXPECT_TRUE(pt.is_climax);
@@ -227,14 +273,24 @@ TEST(FormDirectorArc, Deterministic) {
 }
 
 TEST(FormDirectorArc, RegisterReturnsToBaselineAtEnd) {
-  // Every multi-cycle arc reserves a final resolve cycle. Only a one-cycle
-  // piece necessarily combines the climax and close.
-  for (std::size_t cc : {2u, 3u, 4u, 5u, 8u, 16u, 30u}) {
+  // Arcs of three or more cycles reserve a final resolve cycle. A one-cycle
+  // piece combines climax and close; a two-cycle piece keeps the opening off
+  // the climax, so its second cycle is the climax (see below).
+  for (std::size_t cc : {3u, 4u, 5u, 8u, 16u, 30u}) {
     const ArcPoint last = arcPoint(cc - 1, cc);
     EXPECT_EQ(last.stage, ArcStage::Resolve) << "cc=" << cc;
     EXPECT_FALSE(last.is_climax) << "cc=" << cc;
     EXPECT_EQ(last.register_shift, 0) << "cc=" << cc;
   }
+}
+
+TEST(FormDirectorArc, TwoCycleArcClosesOnItsClimax) {
+  const ArcPoint opening = arcPoint(0, 2);
+  EXPECT_FALSE(opening.is_climax);
+  EXPECT_NE(opening.stage, ArcStage::Climax);
+  const ArcPoint closing = arcPoint(1, 2);
+  EXPECT_TRUE(closing.is_climax);
+  EXPECT_EQ(closing.stage, ArcStage::Climax);
 }
 
 // --- 5. buildFormFixture end-to-end ----------------------------------------

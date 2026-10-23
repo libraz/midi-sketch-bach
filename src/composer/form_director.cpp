@@ -26,7 +26,7 @@ constexpr std::array<std::uint16_t, 4> kScaleMultiplier = {{1, 2, 3, 4}};
 // HarnessFixture time-signature field.
 constexpr std::array<FormSpec, 10> kFormSpecs = {{
     // num_voices, natural, min, max, snap, ts_num, ts_den, meter profile
-    {3, 42, 20, 128, 4, 4, 4, MeterProfile::StandardTriple},  // Fugue
+    {3, 44, 20, 128, 4, 4, 4, MeterProfile::StandardTriple},  // Fugue
     {3, 24, 24, 128, 4, 4, 4, MeterProfile::StandardTriple},  // PreludeAndFugue
     {3, 16, 8, 128, 4, 4, 4, MeterProfile::StandardTriple},   // TrioSonata
     {3, 16, 8, 128, 4, 4, 4, MeterProfile::StandardTriple},   // ChoralePrelude
@@ -34,17 +34,17 @@ constexpr std::array<FormSpec, 10> kFormSpecs = {{
     {3, 24, 16, 128, 8, 3, 4, MeterProfile::StandardTriple},  // Passacaglia
     {3, 32, 16, 128, 4, 4, 4, MeterProfile::StandardTriple},  // FantasiaAndFugue
     {1, 8, 8, 128, 4, 4, 4, MeterProfile::StandardTriple},    // CelloPrelude
-    {2, 16, 8, 128, 4, 3, 4, MeterProfile::SarabandeTriple},  // Chaconne
+    {3, 16, 8, 128, 4, 3, 4, MeterProfile::SarabandeTriple},  // Chaconne
     {3, 20, 12, 128, 4, 4, 4, MeterProfile::StandardTriple},  // GoldbergVariations
 }};
 
 // Snap `value` to the nearest multiple of `snap` (round-to-nearest, ties up).
-std::uint16_t snapToMultiple(std::uint32_t value, std::uint16_t snap) {
+// Stays 32-bit so the caller clamps before any narrowing.
+std::uint32_t snapToMultiple(std::uint32_t value, std::uint16_t snap) {
   if (snap <= 1) {
-    return static_cast<std::uint16_t>(value);
+    return value;
   }
-  const std::uint32_t snapped = ((value + snap / 2) / snap) * snap;
-  return static_cast<std::uint16_t>(snapped);
+  return ((value + snap / 2) / snap) * snap;
 }
 
 // Free counterpoint may replace only a genuinely accompanimental secondary
@@ -252,15 +252,15 @@ std::uint16_t resolveBars(FormType form, DurationScale scale, std::uint16_t targ
 
   // Snap to the form's granularity, then clamp into [min_bars, max_bars]
   // (max never exceeds the global cap).
-  std::uint16_t snapped = snapToMultiple(raw, spec.snap_bars);
-  const std::uint16_t hi = spec.max_bars < kMaxBarsCap ? spec.max_bars : kMaxBarsCap;
+  std::uint32_t snapped = snapToMultiple(raw, spec.snap_bars);
+  const std::uint32_t hi = spec.max_bars < kMaxBarsCap ? spec.max_bars : kMaxBarsCap;
   if (snapped < spec.min_bars) {
     snapped = spec.min_bars;
   }
   if (snapped > hi) {
     snapped = hi;
   }
-  return snapped;
+  return static_cast<std::uint16_t>(snapped);
 }
 
 ArcPoint arcPoint(std::size_t cycle_index, std::size_t cycle_count) {
@@ -278,6 +278,10 @@ ArcPoint arcPoint(std::size_t cycle_index, std::size_t cycle_count) {
   std::size_t climax_idx = (last * 4) / 5;  // ~80% position
   if (cycle_count >= 2 && climax_idx >= last) {
     climax_idx = last - 1;
+  }
+  // The opening cycle never carries the climax, so the register lift can fire.
+  if (cycle_count >= 2 && climax_idx == 0) {
+    climax_idx = 1;
   }
   // Establish occupies roughly the first quarter of the span.
   const std::size_t establish_end = cycle_count / 4;  // exclusive boundary

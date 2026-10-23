@@ -277,7 +277,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
                              int notes_per_beat, int offset, int& prev_anchor, int band_lo,
                              int band_hi, VoiceId num_voices, bool cadential_close = false);
 
-/// @brief Process-wide accumulator for the wave's reactive-layer firings.
+/// @brief Per-thread accumulator for the wave's reactive-layer firings.
 /// @note The counters live on WaveVetoStats (composer/validation.h) so a
 ///       per-piece snapshot can ride out on the validation report.
 WaveVetoStats& waveVetoStats();

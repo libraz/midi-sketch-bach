@@ -10,6 +10,8 @@
 
 #include "application/composition_service.h"
 #include "bach_c.h"
+#include "composer/form_director.h"
+#include "core/basic_types.h"
 #include "midi/midi_reader.h"
 
 namespace {
@@ -318,6 +320,112 @@ TEST(BachCApiTest, DefaultConfigurationMatchesSharedServiceDefaults) {
   EXPECT_EQ(direct.form, bach::FormType::Fugue);
   EXPECT_EQ(direct.scale, bach::DurationScale::Short);
   EXPECT_EQ(direct.bpm, 100);
+}
+
+std::string formConfig(const char* form, const char* extra) {
+  return std::string("{\"form\":\"") + form + "\"," + extra + "}";
+}
+
+TEST(BachCApiTest, IncompatibleCharacterIsRejectedWithItsOwnCode) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  const struct {
+    const char* form;
+    const char* character;
+  } kRefused[] = {
+      {"chorale_prelude", "playful"},
+      {"chorale_prelude", "restless"},
+      {"toccata_and_fugue", "noble"},
+  };
+  for (const auto& cell : kRefused) {
+    const std::string json = formConfig(
+        cell.form, (std::string("\"character\":\"") + cell.character + "\",\"seed\":42").c_str());
+    EXPECT_EQ(generate(owner.get(), json), BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM) << json;
+    EXPECT_EQ(bach_get_info(owner.get()), nullptr) << json;
+    EXPECT_EQ(bach_get_diagnostic(owner.get()), nullptr) << json;
+  }
+  EXPECT_STREQ(bach_error_string(BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM),
+               "Incompatible character for this form");
+}
+
+TEST(BachCApiTest, BpmBoundsAreInclusiveAtFortyAndTwoHundred) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  for (const int bpm : {39, 201}) {
+    EXPECT_EQ(generate(owner.get(), "{\"seed\":42,\"bpm\":" + std::to_string(bpm) + "}"),
+              BACH_ERROR_INVALID_BPM)
+        << bpm;
+  }
+  for (const int bpm : {0, 40, 200}) {
+    ASSERT_EQ(generate(owner.get(), "{\"seed\":42,\"bpm\":" + std::to_string(bpm) + "}"), BACH_OK)
+        << bpm;
+    EXPECT_EQ(static_cast<int>(bach_get_info(owner.get())->bpm), bpm == 0 ? 100 : bpm) << bpm;
+  }
+}
+
+TEST(BachCApiTest, InstrumentAcceptanceFollowsTheCoreCompatibilityTable) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  ASSERT_EQ(bach_instrument_count(), static_cast<uint8_t>(bach::InstrumentType::Guitar) + 1);
+  for (uint8_t form_id = 0; form_id < bach_form_count(); ++form_id) {
+    const auto form = static_cast<bach::FormType>(form_id);
+    for (uint8_t inst_id = 0; inst_id < bach_instrument_count(); ++inst_id) {
+      const auto instrument = static_cast<bach::InstrumentType>(inst_id);
+      const std::string json = formConfig(
+          bach_form_name(form_id),
+          (std::string("\"instrument\":\"") + bach_instrument_name(inst_id) + "\",\"seed\":42")
+              .c_str());
+      const BachError err = generate(owner.get(), json);
+      if (!bach::isInstrumentCompatibleWithForm(form, instrument)) {
+        EXPECT_EQ(err, BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM) << json;
+      } else {
+        EXPECT_EQ(err, BACH_OK) << json;
+      }
+    }
+  }
+}
+
+TEST(BachCApiTest, EveryFormEmitsItsPlannedVoiceCountOnItsDefaultInstrument) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  for (uint8_t form_id = 0; form_id < bach_form_count(); ++form_id) {
+    const auto form = static_cast<bach::FormType>(form_id);
+    ASSERT_EQ(generate(owner.get(), formConfig(bach_form_name(form_id), "\"seed\":42")), BACH_OK)
+        << bach_form_name(form_id);
+    EXPECT_EQ(bach_get_info(owner.get())->track_count, bach::composer::formSpec(form).num_voices)
+        << bach_form_name(form_id);
+  }
+}
+
+TEST(BachCApiTest, CharacterNamesAreExactLowercaseTokens) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+
+  for (uint8_t id = 0; id < bach_character_count(); ++id) {
+    const std::string name = bach_character_name(id);
+    for (const char chr : name) {
+      EXPECT_TRUE(chr >= 'a' && chr <= 'z') << name;
+    }
+    std::string capitalized = name;
+    capitalized[0] = static_cast<char>(capitalized[0] - 'a' + 'A');
+    EXPECT_EQ(generate(owner.get(), "{\"character\":\"" + capitalized + "\",\"seed\":42}"),
+              BACH_ERROR_INVALID_CHARACTER)
+        << capitalized;
+  }
+}
+
+TEST(BachCApiTest, EveryReturnableErrorCodeHasItsOwnMessage) {
+  for (int code = BACH_OK; code <= BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM; ++code) {
+    const std::string text = bach_error_string(static_cast<BachError>(code));
+    EXPECT_FALSE(text.empty()) << code;
+    EXPECT_NE(text, "Unknown error") << code;
+  }
+  // Key names are accepted as well as pitch classes, so the message says so.
+  EXPECT_NE(std::string(bach_error_string(BACH_ERROR_INVALID_KEY)).find("name"), std::string::npos);
 }
 
 }  // namespace

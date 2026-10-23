@@ -659,7 +659,8 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
 }
 
 WaveVetoStats& waveVetoStats() {
-  static WaveVetoStats stats;
+  // Per-thread so concurrent compositions on distinct handles share no storage.
+  thread_local WaveVetoStats stats;
   return stats;
 }
 

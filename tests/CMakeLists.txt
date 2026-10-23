@@ -76,13 +76,16 @@ target_include_directories(bach_c_api_tests
 gtest_discover_tests(bach_c_api_tests DISCOVERY_TIMEOUT 30)
 
 add_executable(bach_application_tests
+  application/cli_options_test.cpp
   application/composition_service_test.cpp
   application/counterpoint_budget_test.cpp
+  application/wave_veto_isolation_test.cpp
 )
 target_link_libraries(bach_application_tests
   PRIVATE
     bach_application_lib
     GTest::gtest_main
+    Threads::Threads
 )
 target_include_directories(bach_application_tests
   PRIVATE

@@ -7,8 +7,6 @@
 
 #include "bach_c.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -168,21 +166,15 @@ BachError parseCharacter(const std::map<std::string, bach::JsonValue>& kv,
     return BACH_OK;  // Default Severe.
   }
   if (iter->second.type == bach::JsonValue::String) {
-    std::string val = iter->second.string_val;
-    std::transform(val.begin(), val.end(), val.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (val == "severe") {
-      *out = bach::SubjectCharacter::Severe;
-    } else if (val == "playful") {
-      *out = bach::SubjectCharacter::Playful;
-    } else if (val == "noble") {
-      *out = bach::SubjectCharacter::Noble;
-    } else if (val == "restless") {
-      *out = bach::SubjectCharacter::Restless;
-    } else {
-      return BACH_ERROR_INVALID_CHARACTER;
+    const std::string& name = iter->second.string_val;
+    for (std::uint8_t char_id = 0; char_id < kCharacterCount; ++char_id) {
+      const auto character = static_cast<bach::SubjectCharacter>(char_id);
+      if (name == bach::subjectCharacterToString(character)) {
+        *out = character;
+        return BACH_OK;
+      }
     }
-    return BACH_OK;
+    return BACH_ERROR_INVALID_CHARACTER;
   }
   if (iter->second.type == bach::JsonValue::Number) {
     std::int64_t char_id = 0;
@@ -199,7 +191,8 @@ BachError parseCharacter(const std::map<std::string, bach::JsonValue>& kv,
 /// @param kv Parsed JSON object.
 /// @param form Form used to pick the default instrument when absent.
 /// @param out Receives the parsed InstrumentType on success.
-/// @return BACH_OK or BACH_ERROR_INVALID_INSTRUMENT.
+/// @return BACH_OK or BACH_ERROR_INVALID_INSTRUMENT. Whether the form accepts the
+///         instrument is decided later (BACH_ERROR_INCOMPATIBLE_INSTRUMENT_FORM).
 BachError parseInstrument(const std::map<std::string, bach::JsonValue>& kv, bach::FormType form,
                           bach::InstrumentType* out) {
   auto iter = kv.find("instrument");
@@ -232,7 +225,7 @@ BachError parseInstrument(const std::map<std::string, bach::JsonValue>& kv, bach
 /// @brief Strict-parse the "scale" field.
 /// @param kv Parsed JSON object.
 /// @param out Receives the parsed DurationScale on success.
-/// @return BACH_OK or BACH_ERROR_INVALID_CONFIG.
+/// @return BACH_OK or BACH_ERROR_INVALID_SCALE.
 BachError parseScale(const std::map<std::string, bach::JsonValue>& kv, bach::DurationScale* out) {
   auto iter = kv.find("scale");
   if (iter == kv.end()) {
@@ -661,7 +654,7 @@ const char* bach_error_string(BachError error) {
     case BACH_ERROR_INVALID_FORM:
       return "Invalid form type";
     case BACH_ERROR_INVALID_KEY:
-      return "Invalid key (must be 0-11)";
+      return "Invalid key (must be a key name or 0-11)";
     case BACH_ERROR_INVALID_CHARACTER:
       return "Invalid character";
     case BACH_ERROR_INVALID_INSTRUMENT:

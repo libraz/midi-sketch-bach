@@ -270,7 +270,7 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
 
   CandidateSearch search;
   // Count of Compose positions that exhausted with no admissible candidate
-  // (silent holes) across every span pass. Escalated to FailedSeed below.
+  // (silent holes) across every span pass. Reported only; never a failure.
   std::size_t saturated_total = 0;
   // Voice center heuristic: voice 0 = soprano area, voice 1 = alto, etc.
   // 4-voice Bach ranges cluster roughly at 72 / 64 / 57 / 48 MIDI.
@@ -410,8 +410,9 @@ ComposeResult Composer::run(const Material& material, const HarmonicPlan& harmon
   // free-counterpoint opt-in, ComposeRequest::enable_free_counterpoint).
   // Record the count so the hole is no longer invisible; resting is the correct
   // response to "no consonant candidate" (better a rest than a wrong note), so
-  // this is NOT escalated to a validation failure. Callers that want exhaustion
-  // to be fatal can gate on this count explicitly.
+  // this is NOT escalated to a validation failure. The count is available to
+  // in-process callers of Composer::run only; the CLI, C API and JSON output
+  // do not expose it.
   result.saturated_positions = saturated_total;
 
   Renderer renderer;

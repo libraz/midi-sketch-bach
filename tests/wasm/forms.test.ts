@@ -228,7 +228,7 @@ describe('BachGenerator - Key and Character', () => {
     },
   );
 
-  it.each(['Severe', 'Playful', 'Noble', 'Restless'])(
+  it.each(['severe', 'playful', 'noble', 'restless'])(
     'should generate fugue with enumerated character=%s',
     (character) => {
       bach = new BachGenerator();
@@ -243,15 +243,15 @@ describe('BachGenerator - Key and Character', () => {
     // Restless character is not compatible with ChoralePrelude.
     expect(() => {
       generator.generate({ form: 'chorale_prelude', character: 'restless', seed: 42 });
-    }).toThrow();
+    }).toThrow(/Incompatible character for this form/);
     // Playful character is also incompatible with ChoralePrelude.
     expect(() => {
       generator.generate({ form: 'chorale_prelude', character: 'playful', seed: 42 });
-    }).toThrow();
+    }).toThrow(/Incompatible character for this form/);
     // Noble character is not compatible with Toccata and Fugue.
     expect(() => {
       generator.generate({ form: 'toccata_and_fugue', character: 'noble', seed: 42 });
-    }).toThrow();
+    }).toThrow(/Incompatible character for this form/);
     generator.destroy();
   });
 });

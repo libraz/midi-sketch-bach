@@ -71,11 +71,10 @@
         </div>
         <div class="form-group">
           <label>Character</label>
-          <select v-model.number="config.characterId" :disabled="!ready || !isOrganForm">
+          <select v-model.number="config.characterId" :disabled="!ready">
             <option v-for="c in compatibleCharacters" :value="c.id">{{ c.name }}</option>
           </select>
-          <div v-if="isKeyboardForm" class="hint">Character set per variation</div>
-          <div v-else-if="!isOrganForm" class="hint">Organ forms only</div>
+          <div class="hint">One character profile for the whole piece</div>
         </div>
       </div>
 
@@ -175,10 +174,8 @@
             {{ generationResult.form }}
           </dd>
           <dt>Key</dt><dd>{{ generationResult.key }}</dd>
-          <template v-if="generationResult.showVoicesAndCharacter">
-            <dt>Voices</dt><dd>{{ generationResult.voices }}</dd>
-            <dt>Character</dt><dd>{{ generationResult.character }}</dd>
-          </template>
+          <dt>Voices</dt><dd>{{ generationResult.voices }}</dd>
+          <dt>Character</dt><dd>{{ generationResult.character }}</dd>
           <dt>Instrument</dt><dd>{{ generationResult.instrument }}</dd>
           <dt>BPM</dt><dd>{{ generationResult.bpm }}</dd>
           <dt>Scale</dt><dd>{{ generationResult.scale }}</dd>
@@ -217,63 +214,62 @@
     import * as bach from '../dist/index.mjs';
     import { Soundfont } from 'https://unpkg.com/smplr/dist/index.mjs';
 
-    const FORM_DESCRIPTIONS = {
-      'fugue': 'Strict 3-voice fugue with subject, answer, and countersubject',
-      'prelude_and_fugue': 'Prelude followed by fugue (BWV 532 style)',
-      'trio_sonata': 'Three-voice sonata (BWV 525-530 style)',
-      'chorale_prelude': 'Chorale melody with counterpoint (BWV 599-650 style)',
-      'toccata_and_fugue': 'Virtuosic toccata with fugue (BWV 565 style)',
-      'passacaglia': 'Variations over ground bass (BWV 582 style)',
-      'fantasia_and_fugue': 'Free fantasia followed by fugue (BWV 537 style)',
-      'cello_prelude': 'Arpeggiated prelude for solo cello (BWV 1007 style)',
-      'chaconne': 'Monumental arch-form variations for solo violin (BWV 1004 style)',
-      'goldberg_variations': '32-variation harpsichord suite over ground bass (BWV 988 style)',
+    // One row per form: the system it is grouped under, its fixed voice count
+    // (decided by the form, not by config; the Result panel reports the actual
+    // generated track count) and the instruments the library accepts for it
+    // (isInstrumentCompatibleWithForm in the core library). A drift test checks
+    // this table against the core library and the texture gate.
+    const FORMS = {
+      'fugue': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Strict 3-voice fugue with subject, answer, and countersubject',
+      },
+      'prelude_and_fugue': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Prelude followed by fugue (BWV 532 style)',
+      },
+      'trio_sonata': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Three-voice sonata (BWV 525-530 style)',
+      },
+      'chorale_prelude': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Chorale melody with counterpoint (BWV 599-650 style)',
+      },
+      'toccata_and_fugue': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Virtuosic toccata with fugue (BWV 565 style)',
+      },
+      'passacaglia': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Variations over ground bass (BWV 582 style)',
+      },
+      'fantasia_and_fugue': {
+        system: 'organ', voices: 3, instruments: ['organ'],
+        description: 'Free fantasia followed by fugue (BWV 537 style)',
+      },
+      'cello_prelude': {
+        system: 'solo', voices: 1, instruments: ['cello'],
+        description: 'Arpeggiated prelude for solo cello (BWV 1007 style)',
+      },
+      'chaconne': {
+        system: 'solo', voices: 3, instruments: ['violin'],
+        description: 'Monumental arch-form variations for solo violin (BWV 1004 style)',
+      },
+      'goldberg_variations': {
+        system: 'keyboard', voices: 3, instruments: ['harpsichord', 'piano'],
+        description: 'Aria, 30 variations and an aria restatement over a ground bass (BWV 988 style)',
+      },
     };
 
-    // Voice count is decided by the form, not by config (the C API accepts and
-    // ignores num_voices). These are the fixed counts each form emits; the
-    // Result panel always reports the actual generated track count as ground truth.
-    const FORM_VOICE_COUNT = {
-      'fugue': 3,
-      'prelude_and_fugue': 3,
-      'trio_sonata': 3,
-      'chorale_prelude': 3,
-      'toccata_and_fugue': 3,
-      'passacaglia': 3,
-      'fantasia_and_fugue': 3,
-      'goldberg_variations': 3,
-      'chaconne': 2,
-      'cello_prelude': 1,
-    };
-
-    const ORGAN_FORM_NAMES = new Set([
-      'fugue', 'prelude_and_fugue', 'trio_sonata', 'chorale_prelude',
-      'toccata_and_fugue', 'passacaglia', 'fantasia_and_fugue',
-    ]);
-
-    const KEYBOARD_FORM_NAMES = new Set([
-      'goldberg_variations',
-    ]);
+    const formsInSystem = (system) =>
+      new Set(Object.keys(FORMS).filter(name => FORMS[name].system === system));
+    const ORGAN_FORM_NAMES = formsInSystem('organ');
+    const KEYBOARD_FORM_NAMES = formsInSystem('keyboard');
 
     const INCOMPATIBLE_CHARACTERS_BY_FORM = {
       'chorale_prelude': new Set(['playful', 'restless']),
       'toccata_and_fugue': new Set(['noble']),
-    };
-
-    // The library rejects an instrument that a form cannot idiomatically carry,
-    // so the selector offers only the compatible set. Mirrors
-    // isInstrumentCompatibleWithForm in the core library.
-    const FORM_INSTRUMENTS = {
-      'fugue': ['organ'],
-      'prelude_and_fugue': ['organ'],
-      'trio_sonata': ['organ'],
-      'chorale_prelude': ['organ'],
-      'toccata_and_fugue': ['organ'],
-      'passacaglia': ['organ'],
-      'fantasia_and_fugue': ['organ'],
-      'cello_prelude': ['cello'],
-      'chaconne': ['violin'],
-      'goldberg_variations': ['harpsichord', 'piano'],
     };
 
     // provenance.v1 source tags, in the order they read best on screen.
@@ -290,7 +286,6 @@
       piano: 'acoustic_grand_piano',
       violin: 'violin',
       cello: 'cello',
-      guitar: 'acoustic_guitar_nylon',
     };
 
     // SoundFont-based instrument player using smplr
@@ -395,15 +390,14 @@
         if (!f) return this.characters;
         const incompatible = INCOMPATIBLE_CHARACTERS_BY_FORM[f.name];
         if (!incompatible) return this.characters;
-        // The C API exposes display names (for example "Playful") while the
-        // compatibility table uses parser tokens.  Compare the normalized
-        // token so an incompatible preset cannot remain selectable.
+        // The enumerated character names are the parser tokens, so they compare
+        // directly against the compatibility table.
         return this.characters.filter(c => !incompatible.has(c.name.toLowerCase()));
       },
       get compatibleInstruments() {
         const f = this.currentForm;
         if (!f) return this.instruments;
-        const allowed = FORM_INSTRUMENTS[f.name];
+        const allowed = FORMS[f.name]?.instruments;
         if (!allowed) return this.instruments;
         return this.instruments.filter(inst => allowed.includes(inst.name));
       },
@@ -426,11 +420,11 @@
       },
       get formDescription() {
         const f = this.currentForm;
-        return f ? (FORM_DESCRIPTIONS[f.name] || '') : '';
+        return f ? (FORMS[f.name]?.description || '') : '';
       },
       get formVoices() {
         const f = this.currentForm;
-        return f ? (FORM_VOICE_COUNT[f.name] ?? '–') : '–';
+        return f ? (FORMS[f.name]?.voices ?? '–') : '–';
       },
       get playbackProgress() {
         return this.totalDuration > 0 ? (this.playbackTime / this.totalDuration) * 100 : 0;
@@ -523,7 +517,7 @@
       },
 
       ensureCompatibleCharacter() {
-        if (!this.isOrganForm || this.compatibleCharacters.length === 0) return;
+        if (this.compatibleCharacters.length === 0) return;
         const current = this.characters.find(c => c.id === this.config.characterId);
         if (!current || !this.compatibleCharacters.some(c => c.id === current.id)) {
           this.config.characterId = this.compatibleCharacters[0].id;
@@ -555,12 +549,9 @@
             cfg.targetBars = this.config.targetBars;
           }
 
-          // Only include organ-specific options for organ forms.
           // Voice count is decided by the form, so num_voices is not sent.
-          if (this.isOrganForm) {
-            this.ensureCompatibleCharacter();
-            cfg.character = this.config.characterId;
-          }
+          this.ensureCompatibleCharacter();
+          cfg.character = this.config.characterId;
 
           this.bach.generate(cfg);
           this.midiData = this.bach.getMidi();
@@ -588,7 +579,6 @@
 
           this.generationResult = {
             form: formName,
-            showVoicesAndCharacter: this.isOrganForm,
             systemBadge,
             systemLabel,
             key: `${keyName} ${this.config.isMinor ? 'minor' : 'major'}`,

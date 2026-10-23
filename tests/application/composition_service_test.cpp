@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -433,7 +434,7 @@ TEST(CompositionServiceTest, ChaconneVelocityFollowsSarabandeMeterInJsonAndMidi)
   MidiReader reader;
   ASSERT_TRUE(reader.read(product.midi_bytes)) << reader.getError();
   const std::array<std::pair<Tick, std::uint8_t>, 3> expected_velocities = {
-      {{1440, 88}, {1920, 83}, {2880, 88}}};
+      {{1440, 80}, {1920, 75}, {2880, 80}}};  // downbeat 70+10; sarabande beat 2 70+5
   for (const auto& expected : expected_velocities) {
     const Tick tick = expected.first;
     const std::uint8_t expected_velocity = expected.second;
@@ -478,7 +479,10 @@ TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
     CompositionRequest request;
     request.form = form;
     request.character = SubjectCharacter::Severe;
-    request.seed = 42;
+    // The cello prelude is an unbroken sixteenth flow, so a stroke has something
+    // to part only where the figuration repeats a pitch; seed 42 composes a
+    // piece with no such repeat, which says nothing about the touch itself.
+    request.seed = form == FormType::CelloPrelude ? 43 : 42;
     request.bpm = 100;
     CompositionProduct product;
     ASSERT_EQ(compose(request, &product), CompositionStatus::Ok)
@@ -629,6 +633,43 @@ TEST(CompositionServiceTest, ContrastingSectionAddsFugueTempoChange) {
       [&](const TempoEvent& event) { return event.tick > 0 && event.bpm > product.bpm; }));
 }
 
+TEST(CompositionServiceTest, FinalRitardandoStepsScaleTheTempoInForce) {
+  for (const FormType form : {FormType::ToccataAndFugue, FormType::PreludeAndFugue}) {
+    for (const std::uint32_t seed : {1u, 2u}) {
+      CompositionRequest request;
+      request.form = form;
+      request.character = SubjectCharacter::Severe;
+      request.scale = DurationScale::Short;
+      request.seed = seed;
+      request.bpm = 100;
+      CompositionProduct product;
+      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+
+      const composer::FormSpec& spec = composer::formSpec(form);
+      const Tick ticks_per_bar = kTicksPerBeat * spec.ts_numerator;
+      ASSERT_GT(product.total_ticks, 2 * ticks_per_bar);
+      const Tick start = product.total_ticks - 2 * ticks_per_bar;
+
+      std::uint16_t in_force = 0;
+      std::uint16_t first_step = 0;
+      for (const TempoEvent& event : product.tempo_events) {
+        if (event.tick < start) {
+          in_force = event.bpm;
+        } else if (event.tick == start) {
+          first_step = event.bpm;
+        }
+      }
+      ASSERT_GT(in_force, 0u);
+      ASSERT_GT(first_step, 0u);
+      const int percent =
+          product.performance_profile.final_ritardando == composer::RitardandoStyle::Gentle ? 98
+                                                                                            : 94;
+      EXPECT_EQ(first_step, static_cast<std::uint16_t>(in_force * percent / 100))
+          << "form " << static_cast<int>(form) << " seed " << seed;
+    }
+  }
+}
+
 TEST(CompositionServiceTest, HarpsichordUsesRegistrationTerraces) {
   CompositionRequest request;
   request.form = FormType::GoldbergVariations;
@@ -681,7 +722,7 @@ TEST(CompositionServiceTest, PassacagliaRestlessLongSeedSixCompletesWithoutVoice
   EXPECT_FALSE(product.midi_bytes.empty());
 }
 
-TEST(CompositionServiceTest, FantasiaRestlessShortSeedSixteenKeepsSectionContrast) {
+TEST(CompositionServiceTest, FantasiaRestlessShortSeedSixteenComposesValidly) {
   CompositionRequest request;
   request.form = FormType::FantasiaAndFugue;
   request.character = SubjectCharacter::Restless;
@@ -910,12 +951,12 @@ bool sameNotatedTones(const std::vector<NoteEvent>& lhs, const std::vector<NoteE
 // status. Read on the composed product, not on the composer's own result: the
 // ornament pass is part of the piece and carries some of the differentiation.
 //
-// The three forms below are the open exceptions, each for the same reason: they
-// derive their figuration from a palette walked by a seed rotation, and the
-// levers that would let a character walk that palette differently move their
-// counterpoint ceilings the wrong way. Their gap is pinned rather than waived --
-// the check below fails if one of them starts separating its characters, so the
-// exception cannot outlive its cause.
+// The three forms in kPinnedIdenticalPairs are the open exceptions, each for the
+// same reason: they derive their figuration from a palette walked by a seed
+// rotation, and the levers that would let a character walk that palette
+// differently move their counterpoint ceilings the wrong way. The identical
+// (form, mode, seed, character pair) set is pinned exactly -- a wider collapse
+// and a closed gap both fail, so the exception cannot outlive its cause.
 TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
   constexpr std::array<FormType, 10> kAllForms = {{
       FormType::Fugue,
@@ -932,12 +973,15 @@ TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
   constexpr std::array<SubjectCharacter, 4> kCharacters = {
       {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
        SubjectCharacter::Restless}};
-  const auto is_open_gap = [](FormType form) {
-    return form == FormType::Passacaglia || form == FormType::Chaconne ||
-           form == FormType::GoldbergVariations;
+  // Entries are "<form ordinal>:<minor>:<seed>:<lhs character>=<rhs character>".
+  const std::set<std::string> kPinnedIdenticalPairs = {
+      "5:0:1:severe=noble",   "5:0:7:severe=noble", "5:1:1:severe=noble",  "5:1:7:severe=noble",
+      "8:0:1:severe=noble",   "8:0:2:severe=noble", "8:0:42:severe=noble", "8:0:7:severe=noble",
+      "8:1:1:severe=noble",   "8:1:2:severe=noble", "8:1:42:severe=noble", "8:1:7:severe=noble",
+      "9:0:42:playful=noble",
   };
+  std::set<std::string> observed;
   for (FormType form : kAllForms) {
-    bool saw_identical_pair = false;
     for (bool minor : {false, true}) {
       for (std::uint32_t seed : {1u, 2u, 7u, 42u}) {
         std::array<std::vector<NoteEvent>, 4> streams;
@@ -947,25 +991,18 @@ TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
           if (streams[lhs].empty())
             continue;
           for (std::size_t rhs = lhs + 1; rhs < kCharacters.size(); ++rhs) {
-            if (streams[rhs].empty())
+            if (streams[rhs].empty() || !sameNotatedTones(streams[lhs], streams[rhs]))
               continue;
-            if (!sameNotatedTones(streams[lhs], streams[rhs]))
-              continue;
-            saw_identical_pair = true;
-            EXPECT_TRUE(is_open_gap(form))
-                << "form " << static_cast<int>(form) << ", minor=" << minor << ", seed=" << seed
-                << ", " << subjectCharacterToString(kCharacters[lhs])
-                << " == " << subjectCharacterToString(kCharacters[rhs]);
+            observed.insert(std::to_string(static_cast<int>(form)) + ":" + std::to_string(minor) +
+                            ":" + std::to_string(seed) + ":" +
+                            subjectCharacterToString(kCharacters[lhs]) + "=" +
+                            subjectCharacterToString(kCharacters[rhs]));
           }
         }
       }
     }
-    if (is_open_gap(form)) {
-      EXPECT_TRUE(saw_identical_pair)
-          << "form " << static_cast<int>(form)
-          << " now separates every character it accepts; drop it from the open-gap list";
-    }
   }
+  EXPECT_EQ(observed, kPinnedIdenticalPairs);
 }
 
 }  // namespace

@@ -48,13 +48,13 @@ const char* fuguePhaseToString(FuguePhase phase) {
 const char* subjectCharacterToString(SubjectCharacter character) {
   switch (character) {
     case SubjectCharacter::Severe:
-      return "Severe";
+      return "severe";
     case SubjectCharacter::Playful:
-      return "Playful";
+      return "playful";
     case SubjectCharacter::Noble:
-      return "Noble";
+      return "noble";
     case SubjectCharacter::Restless:
-      return "Restless";
+      return "restless";
   }
   return "Unknown";
 }

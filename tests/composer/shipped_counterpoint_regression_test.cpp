@@ -1946,7 +1946,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // rises by twenty thousand. A third line that moves is a third line the other
     // two are measured against, so the sweep examines far more pairs and finds no
     // more faults among them.
-    {FormType::Fugue, 0, 0, 175, 229, 14, 0, 3, 4, 1, 490345, 1668},
+    //
+    // A snap-aligned natural length makes the medium fugue 88 bars, not 84: the
+    // longer piece adds eight hidden approaches and removes ten battuta arrivals.
+    {FormType::Fugue, 0, 0, 183, 219, 14, 0, 3, 4, 1, 489584, 1667},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
