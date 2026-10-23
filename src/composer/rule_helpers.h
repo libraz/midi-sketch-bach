@@ -9,6 +9,7 @@
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/provenance.h"
+#include "composer/voice_onset_index.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -153,26 +154,18 @@ bool isDiminishedMelodicInterval(std::uint8_t from, std::uint8_t to);
 bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPlan& plan,
                             Tick from_tick = 0, Tick to_tick = 0);
 
-// Pitch-at-time queries over the composer's incremental commit log.
-// `notes` is voice-grouped: spans for one voice are contiguous, but
-// voices are not interleaved by start_tick, so loops must `continue`
-// rather than `break` on a higher start_tick.
-
-std::uint8_t voicePitchAt(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick);
-
-std::uint8_t sameVoiceStartingAt(const std::vector<NoteEvent>& placed, VoiceId voice, Tick tick);
-
 // Pre-commit rule checks. Each returns true iff committing
 // `(candidate_pitch, candidate_voice)` at `cur_tick` would violate the
-// named rule against any already-placed voice in `placed`.
+// named rule against any already-placed voice in `placed`. `placed` indexes the
+// commit log, which must stay unmodified while the index is in use.
 
-bool createsVoiceCrossing(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsVoiceCrossing(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick);
 
-bool createsVerticalDissonance(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsVerticalDissonance(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                std::uint8_t candidate_pitch, Tick cur_tick);
 
-bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                             std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                             Tick prev_tick);
 
@@ -184,9 +177,9 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
 // by comparing the candidate's move against the other voice's latest
 // intermediate onset. Used where a slow Compose voice accompanies a fast
 // Material figuration voice.
-bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
-                                       VoiceId candidate_voice, std::uint8_t candidate_pitch,
-                                       Tick cur_tick, std::uint8_t prev_pitch, Tick prev_tick);
+bool createsParallelPerfectAcrossOnset(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                       std::uint8_t candidate_pitch, Tick cur_tick,
+                                       std::uint8_t prev_pitch, Tick prev_tick);
 
 // Like createsParallelPerfect but restricted to parallel OCTAVES (unison
 // reduced mod 12 == 0). Parallel fifths are NOT checked. Cadence cells
@@ -194,7 +187,7 @@ bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
 // pin specific bass pitch classes, but parallel octaves remain a hard
 // stylistic prohibition (the bass line cannot ride in lockstep with an
 // upper voice an octave higher into the cadence).
-bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsParallelOctave(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                            Tick prev_tick);
 
@@ -203,7 +196,7 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
 // same-direction motion, so this class is invisible to every one of them, and
 // the search needs it separately or it keeps offering candidates the validator
 // then refuses.
-bool createsAntiParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsAntiParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                 std::uint8_t candidate_pitch, Tick cur_tick,
                                 std::uint8_t prev_pitch, Tick prev_tick);
 
@@ -212,20 +205,19 @@ bool createsAntiParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId ca
 // so it is disjoint from every parallel check above rather than a variant of
 // one, and the search needs it separately or it keeps offering candidates the
 // validator then refuses.
-bool createsBattuta(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsBattuta(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                     std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                     Tick prev_tick);
 
-bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsHiddenParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                   std::uint8_t candidate_pitch, Tick cur_tick,
                                   std::uint8_t prev_pitch, Tick prev_tick);
 
 // Faster-voice complement of createsHiddenParallelPerfect (see
 // createsParallelPerfectAcrossOnset for the blind-spot rationale).
-bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
-                                             VoiceId candidate_voice, std::uint8_t candidate_pitch,
-                                             Tick cur_tick, std::uint8_t prev_pitch,
-                                             Tick prev_tick);
+bool createsHiddenParallelPerfectAcrossOnset(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                             std::uint8_t candidate_pitch, Tick cur_tick,
+                                             std::uint8_t prev_pitch, Tick prev_tick);
 
 // `plan` supplies the local key: each pair is judged in the key of the later
 // of the two onsets, so an alteration arriving after a modulation is read in
@@ -237,7 +229,7 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
 // will come to stand between the two tones is not yet decided, so the wider
 // window is the conservative reading. The rule that judges a finished score can
 // see what actually stands between them and asks that instead.
-bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsCrossRelation(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick, const HarmonicPlan& plan);
 
 // Material queries.

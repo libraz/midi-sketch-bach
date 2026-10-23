@@ -374,23 +374,24 @@ TEST(RuleHelpersTest, IsCrossRelationPcIsSymmetricAndIgnoresUnisons) {
   }
 }
 
-TEST(RuleHelpersTest, VoicePitchAtReturnsLastSoundingPitch) {
+TEST(RuleHelpersTest, IndexedPitchAtReturnsSoundingPitch) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat * 2, 72, 0),
       makeNote(kTicksPerBeat * 2, kTicksPerBeat, 74, 0),
   };
-  EXPECT_EQ(voicePitchAt(notes, 0, 0), 72);
-  EXPECT_EQ(voicePitchAt(notes, 0, kTicksPerBeat), 72);
-  EXPECT_EQ(voicePitchAt(notes, 0, kTicksPerBeat * 2), 74);
-  EXPECT_EQ(voicePitchAt(notes, 1, 0), 0);
+  const VoiceOnsetIndex index(notes);
+  EXPECT_EQ(index.pitchAt(0, 0), 72);
+  EXPECT_EQ(index.pitchAt(0, kTicksPerBeat), 72);
+  EXPECT_EQ(index.pitchAt(0, kTicksPerBeat * 2), 74);
+  EXPECT_EQ(index.pitchAt(1, 0), 0);
 }
 
 TEST(RuleHelpersTest, CreatesVoiceCrossingRejectsLowerVoiceAboveUpper) {
   // Placed: voice 0 (soprano) at C4 (60). New voice 1 (alto) attempts E4 (64).
   // Voice 1 must stay below voice 0; 64 > 60 is a crossing.
   std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat, 60, 0)};
-  EXPECT_TRUE(createsVoiceCrossing(placed, 1, 64, 0));
-  EXPECT_FALSE(createsVoiceCrossing(placed, 1, 55, 0));
+  EXPECT_TRUE(createsVoiceCrossing(VoiceOnsetIndex(placed), 1, 64, 0));
+  EXPECT_FALSE(createsVoiceCrossing(VoiceOnsetIndex(placed), 1, 55, 0));
 }
 
 TEST(RuleHelpersTest, CreatesParallelPerfectDetectsP5InOuterVoices) {
@@ -401,7 +402,7 @@ TEST(RuleHelpersTest, CreatesParallelPerfectDetectsP5InOuterVoices) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
       makeNote(0, kTicksPerBeat, 60, 1),
   };
-  EXPECT_TRUE(createsParallelPerfect(placed, /*candidate_voice=*/1,
+  EXPECT_TRUE(createsParallelPerfect(VoiceOnsetIndex(placed), /*candidate_voice=*/1,
                                      /*candidate_pitch=*/62, /*cur_tick=*/kTicksPerBeat,
                                      /*prev_pitch=*/60, /*prev_tick=*/0));
 }
@@ -420,7 +421,7 @@ TEST(RuleHelpersTest, CreatesHiddenParallelDetectsSimilarMotionToFifth) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 79, 0),
       makeNote(0, kTicksPerBeat, 57, 1),
   };
-  EXPECT_TRUE(createsHiddenParallelPerfect(placed, 1, 60, kTicksPerBeat, 57, 0));
+  EXPECT_TRUE(createsHiddenParallelPerfect(VoiceOnsetIndex(placed), 1, 60, kTicksPerBeat, 57, 0));
 }
 
 TEST(RuleHelpersTest, CreatesHiddenOctaveWhenPreviousIntervalWasPerfectFifth) {
@@ -431,7 +432,7 @@ TEST(RuleHelpersTest, CreatesHiddenOctaveWhenPreviousIntervalWasPerfectFifth) {
       makeNote(0, kTicksPerBeat, 65, 2),
       makeNote(kTicksPerBeat, kTicksPerBeat, 67, 2),
   };
-  EXPECT_TRUE(createsHiddenParallelPerfect(placed, /*candidate_voice=*/1,
+  EXPECT_TRUE(createsHiddenParallelPerfect(VoiceOnsetIndex(placed), /*candidate_voice=*/1,
                                            /*candidate_pitch=*/79,
                                            /*cur_tick=*/kTicksPerBeat,
                                            /*prev_pitch=*/72, /*prev_tick=*/0));
@@ -446,7 +447,7 @@ TEST(RuleHelpersTest, CreatesParallelOctaveDetectsLockstepOctaves) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 74, 0),
       makeNote(0, kTicksPerBeat, 60, 1),
   };
-  EXPECT_TRUE(createsParallelOctave(placed, /*candidate_voice=*/1,
+  EXPECT_TRUE(createsParallelOctave(VoiceOnsetIndex(placed), /*candidate_voice=*/1,
                                     /*candidate_pitch=*/62, /*cur_tick=*/kTicksPerBeat,
                                     /*prev_pitch=*/60, /*prev_tick=*/0));
 }
@@ -460,7 +461,7 @@ TEST(RuleHelpersTest, CreatesParallelOctaveDoesNotFireOnParallelFifth) {
       makeNote(kTicksPerBeat, kTicksPerBeat, 69, 0),
       makeNote(0, kTicksPerBeat, 60, 1),
   };
-  EXPECT_FALSE(createsParallelOctave(placed, /*candidate_voice=*/1,
+  EXPECT_FALSE(createsParallelOctave(VoiceOnsetIndex(placed), /*candidate_voice=*/1,
                                      /*candidate_pitch=*/62, /*cur_tick=*/kTicksPerBeat,
                                      /*prev_pitch=*/60, /*prev_tick=*/0));
 }
@@ -469,10 +470,10 @@ TEST(RuleHelpersTest, CreatesCrossRelationDetectsChromaticConflictInOtherVoice) 
   // Voice 0 sounds C natural (60) at tick 0..2. Voice 1 candidate is C#
   // (61) at tick 0. Cross-relation since lower voice's note is sounding.
   std::vector<NoteEvent> placed = {makeNote(0, kTicksPerBeat * 2, 60, 0)};
-  EXPECT_TRUE(createsCrossRelation(placed, 1, 61, 0, cMajor()));
+  EXPECT_TRUE(createsCrossRelation(VoiceOnsetIndex(placed), 1, 61, 0, cMajor()));
   // Adjacent degrees E↔F: not a cross relation.
   std::vector<NoteEvent> placed_ef = {makeNote(0, kTicksPerBeat * 2, 64, 0)};
-  EXPECT_FALSE(createsCrossRelation(placed_ef, 1, 65, 0, cMajor()));
+  EXPECT_FALSE(createsCrossRelation(VoiceOnsetIndex(placed_ef), 1, 65, 0, cMajor()));
 }
 
 TEST(RuleHelpersTest, CreatesCrossRelationJudgesInTheLocalKey) {
@@ -482,14 +483,14 @@ TEST(RuleHelpersTest, CreatesCrossRelationJudgesInTheLocalKey) {
   HarmonicPlan c_minor;
   c_minor.tonic_pc = 0;
   c_minor.is_minor = true;
-  EXPECT_FALSE(createsCrossRelation(placed, 1, 68, 0, c_minor));
-  EXPECT_TRUE(createsCrossRelation(placed, 1, 68, 0, cMajor()));
+  EXPECT_FALSE(createsCrossRelation(VoiceOnsetIndex(placed), 1, 68, 0, c_minor));
+  EXPECT_TRUE(createsCrossRelation(VoiceOnsetIndex(placed), 1, 68, 0, cMajor()));
 
   // After a modulation to C minor the same pair is judged in the new key.
   HarmonicPlan modulating = cMajor();
   modulating.modulations.push_back({kTicksPerBeat, 0, 0, false, true, ModulationType::Phrase});
-  EXPECT_TRUE(createsCrossRelation(placed, 1, 68, 0, modulating));
-  EXPECT_FALSE(createsCrossRelation(placed, 1, 68, kTicksPerBeat, modulating));
+  EXPECT_TRUE(createsCrossRelation(VoiceOnsetIndex(placed), 1, 68, 0, modulating));
+  EXPECT_FALSE(createsCrossRelation(VoiceOnsetIndex(placed), 1, 68, kTicksPerBeat, modulating));
 }
 
 // Melodic-interval rules (shared with the CandidateSearch pre-filter and the

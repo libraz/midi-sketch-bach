@@ -36,6 +36,8 @@ class VoiceOnsetIndex {
       by_voice_[notes[index].voice].push_back(index);
     for (std::size_t voice = 0; voice < by_voice_.size(); ++voice) {
       auto& indices = by_voice_[voice];
+      if (!indices.empty())
+        voices_.push_back(static_cast<VoiceId>(voice));
       std::stable_sort(indices.begin(), indices.end(), [&](std::size_t left, std::size_t right) {
         return notes_[left].start_tick < notes_[right].start_tick;
       });
@@ -53,6 +55,21 @@ class VoiceOnsetIndex {
 
   /// @brief Note indices of one voice, ordered by onset (note-list order on ties).
   const std::vector<std::size_t>& voiceNotes(VoiceId voice) const { return by_voice_[voice]; }
+
+  const NoteEvent& note(std::size_t index) const { return notes_[index]; }
+
+  std::size_t size() const { return notes_.size(); }
+
+  /// @brief First entry of `voiceNotes(voice)` whose onset is at or after `tick`.
+  std::vector<std::size_t>::const_iterator firstStartingFrom(VoiceId voice, Tick tick) const {
+    const auto& indices = by_voice_[voice];
+    return std::lower_bound(
+        indices.begin(), indices.end(), tick,
+        [&](std::size_t index, Tick value) { return notes_[index].start_tick < value; });
+  }
+
+  /// @brief Voices that own at least one note, in ascending order.
+  const std::vector<VoiceId>& activeVoices() const { return voices_; }
 
   std::size_t startingAt(VoiceId voice, Tick tick) const {
     const auto& indices = by_voice_[voice];
@@ -143,10 +160,37 @@ class VoiceOnsetIndex {
     return it != indices.end() && notes_[*it].start_tick < before;
   }
 
+  /// @brief The earliest note of `voice` starting strictly after `after`, or notes.size().
+  std::size_t firstStartingAfter(VoiceId voice, Tick after) const {
+    const auto& indices = by_voice_[voice];
+    const auto it = std::upper_bound(
+        indices.begin(), indices.end(), after,
+        [&](Tick value, std::size_t index) { return value < notes_[index].start_tick; });
+    return it != indices.end() ? *it : notes_.size();
+  }
+
+  /// @brief Latest onset of `voice` in the open interval (after, before).
+  /// @param onset Receives the onset tick when one exists.
+  /// @return True when an onset of `voice` lies in the interval.
+  bool lastOnsetBetween(VoiceId voice, Tick after, Tick before, Tick* onset) const {
+    const auto& indices = by_voice_[voice];
+    const auto it = std::lower_bound(
+        indices.begin(), indices.end(), before,
+        [&](std::size_t index, Tick value) { return notes_[index].start_tick < value; });
+    if (it == indices.begin())
+      return false;
+    const Tick start = notes_[*(it - 1)].start_tick;
+    if (start <= after)
+      return false;
+    *onset = start;
+    return true;
+  }
+
  private:
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;
   std::vector<std::vector<Tick>> reach_;
+  std::vector<VoiceId> voices_;
 };
 
 }  // namespace bach::composer

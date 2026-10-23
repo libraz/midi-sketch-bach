@@ -429,99 +429,59 @@ bool isForbiddenMelodicLeap(std::uint8_t from, std::uint8_t to, const HarmonicPl
          isDiminishedMelodicInterval(from, to);
 }
 
-std::uint8_t voicePitchAt(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
-  std::uint8_t pitch = 0;
-  for (const auto& note : notes) {
-    if (note.voice != voice)
-      continue;
-    if (note.start_tick > tick)
-      continue;
-    if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
-      pitch = note.pitch;
-    }
-  }
-  return pitch;
-}
-
-std::uint8_t sameVoiceStartingAt(const std::vector<NoteEvent>& placed, VoiceId voice, Tick tick) {
-  for (const auto& note : placed) {
-    if (note.voice != voice)
-      continue;
-    if (note.start_tick == tick)
-      return note.pitch;
-  }
-  return 0;
-}
-
-bool createsVoiceCrossing(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsVoiceCrossing(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick) {
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
+  bool crossing = false;
+  for (const VoiceId other : placed.activeVoices()) {
+    if (other == candidate_voice)
       continue;
-    if (note.start_tick > cur_tick)
-      continue;
-    const bool sounding = note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
-    if (!sounding)
-      continue;
-    if (candidate_voice < note.voice && candidate_pitch < note.pitch) {
+    placed.forEachSoundingAt(other, cur_tick, [&](std::size_t index) {
+      const std::uint8_t pitch = placed.note(index).pitch;
+      crossing = (candidate_voice < other && candidate_pitch < pitch) ||
+                 (candidate_voice > other && candidate_pitch > pitch);
+      return !crossing;
+    });
+    if (crossing)
       return true;
-    }
-    if (candidate_voice > note.voice && candidate_pitch > note.pitch) {
-      return true;
-    }
   }
   return false;
 }
 
-bool createsVerticalDissonance(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsVerticalDissonance(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                std::uint8_t candidate_pitch, Tick cur_tick) {
   std::uint8_t bass_pitch = candidate_pitch;
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice || note.start_tick > cur_tick)
+  for (const VoiceId other : placed.activeVoices()) {
+    if (other == candidate_voice)
       continue;
-    if (note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration)
-      bass_pitch = std::min(bass_pitch, note.pitch);
-  }
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
-      continue;
-    if (note.start_tick > cur_tick)
-      continue;
-    const bool sounding = note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
-    if (!sounding)
-      continue;
-    if (!isBassSensitiveConsonance(candidate_pitch, note.pitch, bass_pitch)) {
+    placed.forEachSoundingAt(other, cur_tick, [&](std::size_t index) {
+      bass_pitch = std::min(bass_pitch, placed.note(index).pitch);
       return true;
-    }
+    });
+  }
+  for (const VoiceId other : placed.activeVoices()) {
+    if (other == candidate_voice)
+      continue;
+    bool dissonant = false;
+    placed.forEachSoundingAt(other, cur_tick, [&](std::size_t index) {
+      dissonant = !isBassSensitiveConsonance(candidate_pitch, placed.note(index).pitch, bass_pitch);
+      return !dissonant;
+    });
+    if (dissonant)
+      return true;
   }
   return false;
 }
 
-namespace {
-
-std::vector<VoiceId> collectOtherVoices(const std::vector<NoteEvent>& placed,
-                                        VoiceId candidate_voice) {
-  std::vector<VoiceId> other_voices;
-  for (const auto& n : placed) {
-    if (n.voice == candidate_voice)
-      continue;
-    if (std::find(other_voices.begin(), other_voices.end(), n.voice) == other_voices.end()) {
-      other_voices.push_back(n.voice);
-    }
-  }
-  return other_voices;
-}
-
-}  // namespace
-
-bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                             std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                             Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     const bool parallel =
@@ -535,12 +495,14 @@ bool createsParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candid
   return false;
 }
 
-bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
-                                       VoiceId candidate_voice, std::uint8_t candidate_pitch,
-                                       Tick cur_tick, std::uint8_t prev_pitch, Tick prev_tick) {
+bool createsParallelPerfectAcrossOnset(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                       std::uint8_t candidate_pitch, Tick cur_tick,
+                                       std::uint8_t prev_pitch, Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
     // Closing the faster-voice blind spot: the candidate voice's own previous
     // onset (prev_tick) may be older than the other voice's most recent onset.
     // The validator samples the union of onsets, so it compares the candidate's
@@ -550,21 +512,11 @@ bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
     // cur_tick relative to that union tick, and a parallel can form even though
     // it did not move between prev_tick and cur_tick.
     Tick mid_tick = prev_tick;
-    bool have_mid = false;
-    for (const auto& note : placed) {
-      if (note.voice != ov)
-        continue;
-      if (note.start_tick > prev_tick && note.start_tick < cur_tick) {
-        if (!have_mid || note.start_tick > mid_tick) {
-          mid_tick = note.start_tick;
-          have_mid = true;
-        }
-      }
-    }
+    const bool have_mid = placed.lastOnsetBetween(ov, prev_tick, cur_tick, &mid_tick);
     if (!have_mid)
       continue;  // no intermediate onset; createsParallelPerfect covers this.
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_mid = placed.pitchAt(ov, mid_tick);
     if (op_now == 0 || op_mid == 0)
       continue;
     const bool parallel =
@@ -577,14 +529,16 @@ bool createsParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
   return false;
 }
 
-bool createsBattuta(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsBattuta(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                     std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                     Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     const bool battuta = candidate_voice < ov
@@ -597,14 +551,16 @@ bool createsBattuta(const std::vector<NoteEvent>& placed, VoiceId candidate_voic
   return false;
 }
 
-bool createsAntiParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsAntiParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                 std::uint8_t candidate_pitch, Tick cur_tick,
                                 std::uint8_t prev_pitch, Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     // The predicate is symmetric in its two pairs, so the ordering here is for
@@ -620,14 +576,16 @@ bool createsAntiParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId ca
   return false;
 }
 
-bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsParallelOctave(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                            std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                            Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     const PerfectMotionKind kind =
@@ -640,14 +598,16 @@ bool createsParallelOctave(const std::vector<NoteEvent>& placed, VoiceId candida
   return false;
 }
 
-bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsHiddenParallelPerfect(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                                   std::uint8_t candidate_pitch, Tick cur_tick,
                                   std::uint8_t prev_pitch, Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     const PerfectMotionKind kind =
@@ -660,32 +620,23 @@ bool createsHiddenParallelPerfect(const std::vector<NoteEvent>& placed, VoiceId 
   return false;
 }
 
-bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& placed,
-                                             VoiceId candidate_voice, std::uint8_t candidate_pitch,
-                                             Tick cur_tick, std::uint8_t prev_pitch,
-                                             Tick prev_tick) {
+bool createsHiddenParallelPerfectAcrossOnset(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                             std::uint8_t candidate_pitch, Tick cur_tick,
+                                             std::uint8_t prev_pitch, Tick prev_tick) {
   if (prev_pitch == 0)
     return false;
-  for (VoiceId ov : collectOtherVoices(placed, candidate_voice)) {
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
+      continue;
     // Same faster-voice blind spot as createsParallelPerfectAcrossOnset: the
     // validator compares against the union tick immediately before cur_tick,
     // which may be an intermediate onset of the faster other voice.
     Tick mid_tick = prev_tick;
-    bool have_mid = false;
-    for (const auto& note : placed) {
-      if (note.voice != ov)
-        continue;
-      if (note.start_tick > prev_tick && note.start_tick < cur_tick) {
-        if (!have_mid || note.start_tick > mid_tick) {
-          mid_tick = note.start_tick;
-          have_mid = true;
-        }
-      }
-    }
+    const bool have_mid = placed.lastOnsetBetween(ov, prev_tick, cur_tick, &mid_tick);
     if (!have_mid)
       continue;
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_mid = voicePitchAt(placed, ov, mid_tick);
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_mid = placed.pitchAt(ov, mid_tick);
     if (op_now == 0 || op_mid == 0)
       continue;
     const PerfectMotionKind kind =
@@ -698,25 +649,33 @@ bool createsHiddenParallelPerfectAcrossOnset(const std::vector<NoteEvent>& place
   return false;
 }
 
-bool createsCrossRelation(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool createsCrossRelation(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                           std::uint8_t candidate_pitch, Tick cur_tick, const HarmonicPlan& plan) {
   const std::uint8_t pc = pitchClass(candidate_pitch);
   const KeyContext candidate_key = keyAt(plan, cur_tick);
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
-      continue;
-    const bool simultaneous =
-        note.start_tick <= cur_tick && cur_tick < note.start_tick + note.duration;
-    const bool adjacent = std::abs(static_cast<int>(note.start_tick) -
-                                   static_cast<int>(cur_tick)) <= static_cast<int>(kTicksPerBeat);
-    if (!simultaneous && !adjacent)
-      continue;
-    // Judge the pair in the key of the later onset, so an alteration arriving
-    // after a modulation is read in the key it arrives in.
+  // Judge the pair in the key of the later onset, so an alteration arriving
+  // after a modulation is read in the key it arrives in.
+  const auto clashes = [&](const NoteEvent& note) {
     const KeyContext key =
         note.start_tick > cur_tick ? keyAt(plan, note.start_tick) : candidate_key;
-    if (isCrossRelationPc(pc, pitchClass(note.pitch), key.tonic_pc, key.is_minor)) {
+    return isCrossRelationPc(pc, pitchClass(note.pitch), key.tonic_pc, key.is_minor);
+  };
+  const Tick window_begin = cur_tick > kTicksPerBeat ? cur_tick - kTicksPerBeat : 0;
+  for (const VoiceId other : placed.activeVoices()) {
+    if (other == candidate_voice)
+      continue;
+    bool found = false;
+    placed.forEachSoundingAt(other, cur_tick, [&](std::size_t index) {
+      found = clashes(placed.note(index));
+      return !found;
+    });
+    if (found)
       return true;
+    const auto& onsets = placed.voiceNotes(other);
+    for (auto it = placed.firstStartingFrom(other, window_begin);
+         it != onsets.end() && placed.note(*it).start_tick <= cur_tick + kTicksPerBeat; ++it) {
+      if (clashes(placed.note(*it)))
+        return true;
     }
   }
   return false;

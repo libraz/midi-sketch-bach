@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -130,8 +131,6 @@ using rule_helpers::createsParallelPerfectAcrossOnset;
 using rule_helpers::createsVerticalDissonance;
 using rule_helpers::createsVoiceCrossing;
 using rule_helpers::isStrongBeat;
-using rule_helpers::sameVoiceStartingAt;
-using rule_helpers::voicePitchAt;
 
 // Guard form: returns true if `previous` is not a leading tone OR
 // `candidate` is a valid stepwise upward resolution. Used by the
@@ -143,13 +142,18 @@ bool resolvesLeadingTone(std::uint8_t previous, int candidate, const HarmonicPla
   return rule_helpers::isContextualLeadingToneResolution(previous, candidate, plan, leading_tick);
 }
 
-// Cross-span lookahead context for sameVoiceStartingAt: when a Carrier
-// (SubjectCarrier or AnswerCarrier) span has already been placed at the
-// next tick, the current weak non-chord-tone pick must remain within ±2
-// semitones of that fixed pitch or the Validator's `unprepared_dissonance`
-// rule will fire on the last weak position of the preceding Compose span.
+// Pitch of this voice's note starting exactly at `tick`, or 0. Cross-span
+// lookahead: when a Carrier (SubjectCarrier or AnswerCarrier) span has already
+// been placed at the next tick, the current weak non-chord-tone pick must remain
+// within ±2 semitones of that fixed pitch or the Validator's
+// `unprepared_dissonance` rule will fire on the last weak position of the
+// preceding Compose span.
+std::uint8_t sameVoiceStartingAt(const VoiceOnsetIndex& placed, VoiceId voice, Tick tick) {
+  const auto range = placed.startingRange(voice, tick);
+  return range.first != range.second ? placed.note(*range.first).pitch : 0;
+}
 
-bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
+bool hasContraryMotion(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
                        std::uint8_t candidate_pitch, Tick cur_tick, std::uint8_t prev_pitch,
                        Tick prev_tick) {
   if (prev_pitch == 0)
@@ -158,17 +162,11 @@ bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_v
   if (this_motion == 0)
     return false;
 
-  std::vector<VoiceId> other_voices;
-  for (const auto& n : placed) {
-    if (n.voice == candidate_voice)
+  for (const VoiceId ov : placed.activeVoices()) {
+    if (ov == candidate_voice)
       continue;
-    if (std::find(other_voices.begin(), other_voices.end(), n.voice) == other_voices.end()) {
-      other_voices.push_back(n.voice);
-    }
-  }
-  for (VoiceId ov : other_voices) {
-    const std::uint8_t op_now = voicePitchAt(placed, ov, cur_tick);
-    const std::uint8_t op_prev = voicePitchAt(placed, ov, prev_tick);
+    const std::uint8_t op_now = placed.pitchAt(ov, cur_tick);
+    const std::uint8_t op_prev = placed.pitchAt(ov, prev_tick);
     if (op_now == 0 || op_prev == 0)
       continue;
     const int other_motion = static_cast<int>(op_now) - static_cast<int>(op_prev);
@@ -181,37 +179,52 @@ bool hasContraryMotion(const std::vector<NoteEvent>& placed, VoiceId candidate_v
   return false;
 }
 
-bool createsVoiceCrossingDuring(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                                std::uint8_t candidate_pitch, Tick start, Tick duration) {
+// Visits every note of another voice that overlaps [start, start + duration);
+// `visit` returns false to stop.
+template <typename Visit>
+void forEachOtherOverlapping(const VoiceOnsetIndex& placed, VoiceId candidate_voice, Tick start,
+                             Tick duration, Visit visit) {
   const Tick end = start + duration;
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
+  for (const VoiceId other : placed.activeVoices()) {
+    if (other == candidate_voice)
       continue;
-    if (note.start_tick >= end || note.start_tick + note.duration <= start)
-      continue;
-    if (candidate_voice < note.voice && candidate_pitch < note.pitch)
-      return true;
-    if (candidate_voice > note.voice && candidate_pitch > note.pitch)
-      return true;
-  }
-  return false;
-}
-
-bool createsVerticalDissonanceDuring(const std::vector<NoteEvent>& placed, VoiceId candidate_voice,
-                                     std::uint8_t candidate_pitch, Tick start, Tick duration) {
-  const Tick end = start + duration;
-  for (const auto& note : placed) {
-    if (note.voice == candidate_voice)
-      continue;
-    if (note.start_tick >= end || note.start_tick + note.duration <= start)
-      continue;
-    const Tick sample_tick = std::max(start, note.start_tick);
-    if (rule_helpers::createsVerticalDissonance(placed, candidate_voice, candidate_pitch,
-                                                sample_tick)) {
-      return true;
+    bool go_on = true;
+    placed.forEachSoundingAt(other, start, [&](std::size_t index) {
+      go_on = visit(placed.note(index));
+      return go_on;
+    });
+    if (!go_on)
+      return;
+    const auto& onsets = placed.voiceNotes(other);
+    for (auto it = placed.firstStartingFrom(other, start + 1);
+         it != onsets.end() && placed.note(*it).start_tick < end; ++it) {
+      if (!visit(placed.note(*it)))
+        return;
     }
   }
-  return false;
+}
+
+bool createsVoiceCrossingDuring(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                std::uint8_t candidate_pitch, Tick start, Tick duration) {
+  bool crossing = false;
+  forEachOtherOverlapping(placed, candidate_voice, start, duration, [&](const NoteEvent& note) {
+    crossing = (candidate_voice < note.voice && candidate_pitch < note.pitch) ||
+               (candidate_voice > note.voice && candidate_pitch > note.pitch);
+    return !crossing;
+  });
+  return crossing;
+}
+
+bool createsVerticalDissonanceDuring(const VoiceOnsetIndex& placed, VoiceId candidate_voice,
+                                     std::uint8_t candidate_pitch, Tick start, Tick duration) {
+  bool dissonant = false;
+  forEachOtherOverlapping(placed, candidate_voice, start, duration, [&](const NoteEvent& note) {
+    const Tick sample_tick = std::max(start, note.start_tick);
+    dissonant = rule_helpers::createsVerticalDissonance(placed, candidate_voice, candidate_pitch,
+                                                        sample_tick);
+    return !dissonant;
+  });
+  return dissonant;
 }
 
 int trailingPitchRunLength(const std::vector<std::uint8_t>& pitches, std::uint8_t pitch) {
@@ -225,21 +238,9 @@ int trailingPitchRunLength(const std::vector<std::uint8_t>& pitches, std::uint8_
   return run;
 }
 
-std::uint8_t nextSameVoiceStartingAfter(const std::vector<NoteEvent>& placed, VoiceId voice,
-                                        Tick tick) {
-  Tick best_tick = 0;
-  std::uint8_t best_pitch = 0;
-  for (const auto& note : placed) {
-    if (note.voice != voice)
-      continue;
-    if (note.start_tick <= tick)
-      continue;
-    if (best_pitch == 0 || note.start_tick < best_tick) {
-      best_tick = note.start_tick;
-      best_pitch = note.pitch;
-    }
-  }
-  return best_pitch;
+std::uint8_t nextSameVoiceStartingAfter(const VoiceOnsetIndex& placed, VoiceId voice, Tick tick) {
+  const std::size_t index = placed.firstStartingAfter(voice, tick);
+  return index < placed.size() ? placed.note(index).pitch : 0;
 }
 
 }  // namespace
@@ -256,6 +257,9 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
   // note position and is stride-agnostic.
   const Tick stride = (span.subdivision == Subdivision::Eighth) ? kQuarter / 2 : kQuarter;
   const MelodicScoringConfig scoring_config = melodicScoringConfig();
+  std::optional<VoiceOnsetIndex> placed_index;
+  if (context.placed_notes != nullptr)
+    placed_index.emplace(*context.placed_notes);
 
   // Local cursor used for vertical (other-voice) parallel checks.
   // Holds the candidate this enumerate() call just committed, or the
@@ -339,13 +343,12 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // Vertical rule: reject candidate that crosses any already-placed
       // voice (lower voice index must stay above higher voice index).
       if (context.placed_notes != nullptr &&
-          createsVoiceCrossing(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
-                               t)) {
+          createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(p), t)) {
         continue;
       }
       if (strict_harmonic_support && context.placed_notes != nullptr &&
-          createsVoiceCrossingDuring(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(p), t, stride)) {
+          createsVoiceCrossingDuring(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                     stride)) {
         continue;
       }
 
@@ -359,19 +362,15 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // and forces a seed-level fail.
       if (chord.has_degree && context.placed_notes != nullptr) {
         bool spacing_violation = false;
-        for (const auto& placed : *context.placed_notes) {
-          if (placed.voice == span.voice)
-            continue;
-          if (placed.start_tick > t)
-            continue;
-          if (t >= placed.start_tick + placed.duration)
+        for (const VoiceId other : placed_index->activeVoices()) {
+          if (other == span.voice)
             continue;
           // Spacing check only applies to upper-voice pairs: skip
           // when the lower-indexed voice of the pair (this voice or
           // the placed voice) is the bottom voice of the texture.
           // Voice id convention: V0 = top, V_{N-1} = bottom.
-          const VoiceId hi_voice = std::min(placed.voice, span.voice);
-          const VoiceId lo_voice = std::max(placed.voice, span.voice);
+          const VoiceId hi_voice = std::min(other, span.voice);
+          const VoiceId lo_voice = std::max(other, span.voice);
           // Only adjacent voice pairs constrained.
           if (lo_voice != hi_voice + 1)
             continue;
@@ -382,11 +381,14 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           // skipped because lo_voice = 2 = N - 1.
           if (context.num_voices >= 2 && lo_voice == context.num_voices - 1)
             continue;
-          const int gap = std::abs(static_cast<int>(p) - static_cast<int>(placed.pitch));
-          if (gap > 12) {
-            spacing_violation = true;
+          placed_index->forEachSoundingAt(other, t, [&](std::size_t index) {
+            const int gap =
+                std::abs(static_cast<int>(p) - static_cast<int>(placed_index->note(index).pitch));
+            spacing_violation = gap > 12;
+            return !spacing_violation;
+          });
+          if (spacing_violation)
             break;
-          }
         }
         if (spacing_violation)
           continue;
@@ -410,17 +412,16 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             ((triad[0] == lt_pc) || (triad[1] == lt_pc) || (triad[2] == lt_pc));
         if (chord_owns_lt && pc == lt_pc) {
           bool other_voice_has_lt = false;
-          for (const auto& placed : *context.placed_notes) {
-            if (placed.voice == span.voice)
+          for (const VoiceId other : placed_index->activeVoices()) {
+            if (other == span.voice)
               continue;
-            if (placed.start_tick > t)
-              continue;
-            if (t >= placed.start_tick + placed.duration)
-              continue;
-            if (static_cast<std::uint8_t>(placed.pitch % 12) == lt_pc) {
-              other_voice_has_lt = true;
+            placed_index->forEachSoundingAt(other, t, [&](std::size_t index) {
+              other_voice_has_lt =
+                  static_cast<std::uint8_t>(placed_index->note(index).pitch % 12) == lt_pc;
+              return !other_voice_has_lt;
+            });
+            if (other_voice_has_lt)
               break;
-            }
           }
           if (other_voice_has_lt)
             continue;
@@ -432,15 +433,15 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // sounding at this tick. Weak beats apply a soft score penalty
       // instead (handled below in the score block) so passing-tone
       // dissonances remain reachable when no consonant option fits.
-      const bool vertically_dissonant = context.placed_notes != nullptr &&
-                                        createsVerticalDissonance(*context.placed_notes, span.voice,
-                                                                  static_cast<std::uint8_t>(p), t);
+      const bool vertically_dissonant =
+          context.placed_notes != nullptr &&
+          createsVerticalDissonance(*placed_index, span.voice, static_cast<std::uint8_t>(p), t);
       if ((strong || strict_harmonic_support) && vertically_dissonant) {
         continue;
       }
       if (strict_harmonic_support && context.placed_notes != nullptr &&
-          createsVerticalDissonanceDuring(*context.placed_notes, span.voice,
-                                          static_cast<std::uint8_t>(p), t, stride)) {
+          createsVerticalDissonanceDuring(*placed_index, span.voice, static_cast<std::uint8_t>(p),
+                                          t, stride)) {
         continue;
       }
 
@@ -455,7 +456,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // span. Parallel octaves remain prohibited even under a cadence
       // cell (see createsParallelOctave below).
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          createsParallelPerfect(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+          createsParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
                                  parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
@@ -463,13 +464,12 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // (slower) Compose voice's onsets, so a parallel can form at the
       // intermediate union tick that the onset-to-onset check above misses.
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          createsParallelPerfectAcrossOnset(*context.placed_notes, span.voice,
-                                            static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
-                                            parallel_prev_tick)) {
+          createsParallelPerfectAcrossOnset(*placed_index, span.voice, static_cast<std::uint8_t>(p),
+                                            t, parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
       if (context.placed_notes != nullptr && have_parallel_anchor &&
-          rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+          rule_helpers::createsParallelOctave(*placed_index, span.voice,
                                               static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
                                               parallel_prev_tick)) {
         continue;
@@ -479,32 +479,30 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // same cadence bypass: a cadence cell pins its bass pitch class and has no
       // candidate left to move to.
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          rule_helpers::createsAntiParallelPerfect(*context.placed_notes, span.voice,
+          rule_helpers::createsAntiParallelPerfect(*placed_index, span.voice,
                                                    static_cast<std::uint8_t>(p), t,
                                                    parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          rule_helpers::createsBattuta(*context.placed_notes, span.voice,
-                                       static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
-                                       parallel_prev_tick)) {
+          rule_helpers::createsBattuta(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                       parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
 
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          createsHiddenParallelPerfect(*context.placed_notes, span.voice,
-                                       static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
-                                       parallel_prev_tick)) {
+          createsHiddenParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                       parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr && have_parallel_anchor &&
-          createsHiddenParallelPerfectAcrossOnset(*context.placed_notes, span.voice,
+          createsHiddenParallelPerfectAcrossOnset(*placed_index, span.voice,
                                                   static_cast<std::uint8_t>(p), t,
                                                   parallel_prev_pitch, parallel_prev_tick)) {
         continue;
       }
       if (!force_bass_cadence_pc && context.placed_notes != nullptr &&
-          createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+          createsCrossRelation(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
                                harmonic_plan)) {
         continue;
       }
@@ -605,14 +603,13 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         const Tick t_next = t + stride;
         bool has_resolution = false;
         if (context.placed_notes != nullptr) {
-          const std::uint8_t fixed_next =
-              sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+          const std::uint8_t fixed_next = sameVoiceStartingAt(*placed_index, span.voice, t_next);
           if (fixed_next != 0) {
             has_resolution =
                 resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan, t);
           } else {
             const std::uint8_t future_fixed =
-                nextSameVoiceStartingAfter(*context.placed_notes, span.voice, t_next);
+                nextSameVoiceStartingAfter(*placed_index, span.voice, t_next);
             if (future_fixed != 0) {
               has_resolution =
                   resolvesLeadingTone(static_cast<std::uint8_t>(p), future_fixed, harmonic_plan, t);
@@ -663,30 +660,29 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             if (!resolvesLeadingTone(static_cast<std::uint8_t>(p), q, harmonic_plan, t))
               continue;
             if (context.placed_notes != nullptr &&
-                createsVoiceCrossing(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next)) {
+                createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                     t_next)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsVerticalDissonance(*context.placed_notes, span.voice,
-                                          static_cast<std::uint8_t>(q), t_next)) {
+                createsVerticalDissonance(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                          t_next)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsParallelPerfect(*context.placed_notes, span.voice,
-                                       static_cast<std::uint8_t>(q), t_next,
-                                       static_cast<std::uint8_t>(p), t)) {
+                createsParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                       t_next, static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                createsHiddenParallelPerfect(*placed_index, span.voice,
                                              static_cast<std::uint8_t>(q), t_next,
                                              static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsCrossRelation(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next, harmonic_plan)) {
+                createsCrossRelation(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                     t_next, harmonic_plan)) {
               continue;
             }
             const ChordEvent& q_chord = activeChord(harmonic_plan, t_next);
@@ -700,7 +696,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
                 context.placed_notes != nullptr) {
               const Tick q_next_tick = t_next + stride;
               const std::uint8_t fixed_after_q =
-                  sameVoiceStartingAt(*context.placed_notes, span.voice, q_next_tick);
+                  sameVoiceStartingAt(*placed_index, span.voice, q_next_tick);
               if (fixed_after_q == 0 || std::abs(q - static_cast<int>(fixed_after_q)) > 2) {
                 continue;
               }
@@ -740,15 +736,14 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         // different span. A V1 counterline note in bar 3 feeding into a
         // V1 AnswerCarrier note in bar 4 is the canonical case.
         if (context.placed_notes != nullptr) {
-          const std::uint8_t fixed_next =
-              sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+          const std::uint8_t fixed_next = sameVoiceStartingAt(*placed_index, span.voice, t_next);
           bool has_known_followup = fixed_next != 0;
           if (fixed_next != 0 && std::abs(p - static_cast<int>(fixed_next)) > 2) {
             continue;
           }
           if (fixed_next == 0) {
             const std::uint8_t future_fixed =
-                nextSameVoiceStartingAfter(*context.placed_notes, span.voice, t_next);
+                nextSameVoiceStartingAfter(*placed_index, span.voice, t_next);
             has_known_followup = future_fixed != 0;
             if (future_fixed != 0 && std::abs(p - static_cast<int>(future_fixed)) > 2) {
               continue;
@@ -774,36 +769,35 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             if (next_strong && !q_is_triad)
               continue;
             if (context.placed_notes != nullptr &&
-                createsVoiceCrossing(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next)) {
+                createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                     t_next)) {
               continue;
             }
             if (context.placed_notes != nullptr && next_strong &&
-                createsVerticalDissonance(*context.placed_notes, span.voice,
-                                          static_cast<std::uint8_t>(q), t_next)) {
+                createsVerticalDissonance(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                          t_next)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsParallelPerfect(*context.placed_notes, span.voice,
-                                       static_cast<std::uint8_t>(q), t_next,
-                                       static_cast<std::uint8_t>(p), t)) {
+                createsParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                       t_next, static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+                rule_helpers::createsParallelOctave(*placed_index, span.voice,
                                                     static_cast<std::uint8_t>(q), t_next,
                                                     static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsHiddenParallelPerfect(*context.placed_notes, span.voice,
+                createsHiddenParallelPerfect(*placed_index, span.voice,
                                              static_cast<std::uint8_t>(q), t_next,
                                              static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             if (context.placed_notes != nullptr &&
-                createsCrossRelation(*context.placed_notes, span.voice,
-                                     static_cast<std::uint8_t>(q), t_next, harmonic_plan)) {
+                createsCrossRelation(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                     t_next, harmonic_plan)) {
               continue;
             }
             has_step_followup = true;
@@ -825,8 +819,8 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             if (!q_is_triad)
               continue;
             if (context.placed_notes != nullptr &&
-                createsVerticalDissonance(*context.placed_notes, span.voice,
-                                          static_cast<std::uint8_t>(q), t_next)) {
+                createsVerticalDissonance(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                          t_next)) {
               continue;
             }
             // Parallel-perfect against placed voices at t_next, with
@@ -836,9 +830,8 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             // reject for parallel motion (observed: V2 58→60 across a
             // bar boundary forms a parallel P5 with V0 77→79).
             if (context.placed_notes != nullptr &&
-                createsParallelPerfect(*context.placed_notes, span.voice,
-                                       static_cast<std::uint8_t>(q), t_next,
-                                       static_cast<std::uint8_t>(p), t)) {
+                createsParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(q),
+                                       t_next, static_cast<std::uint8_t>(p), t)) {
               continue;
             }
             has_strong_followup = true;
@@ -884,7 +877,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         independent_adjustment -= 0.15f;
       }
       if (context.placed_notes != nullptr && have_parallel_anchor &&
-          hasContraryMotion(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+          hasContraryMotion(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
                             parallel_prev_pitch, parallel_prev_tick)) {
         score += 0.10f;
         independent_adjustment += 0.10f;
@@ -1054,16 +1047,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         if (strong) {
           // Sounding pitch of the immediately-higher voice (V-1).
           const VoiceId upper_adjacent = static_cast<VoiceId>(span.voice - 1);
-          std::uint8_t upper_pitch = 0;
-          for (const auto& placed : *context.placed_notes) {
-            if (placed.voice != upper_adjacent)
-              continue;
-            if (placed.start_tick > t)
-              continue;
-            if (t >= placed.start_tick + placed.duration)
-              continue;
-            upper_pitch = placed.pitch;
-          }
+          const std::uint8_t upper_pitch = placed_index->pitchAt(upper_adjacent, t);
           if (upper_pitch != 0) {
             const int cls = std::abs(static_cast<int>(upper_pitch) - p) % 12;
             forms_strong_fourth = (cls == 5);
@@ -1200,8 +1184,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           const Tick t_next = t + stride;
           bool leaves_by_step = false;
           if (context.placed_notes != nullptr) {
-            const std::uint8_t fixed_next =
-                sameVoiceStartingAt(*context.placed_notes, span.voice, t_next);
+            const std::uint8_t fixed_next = sameVoiceStartingAt(*placed_index, span.voice, t_next);
             if (fixed_next != 0 && std::abs(p - static_cast<int>(fixed_next)) <= 2) {
               leaves_by_step = true;
             }
@@ -1210,34 +1193,31 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
             continue;
         }
         if (context.placed_notes != nullptr &&
-            createsVoiceCrossing(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
-                                 t)) {
+            createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(p), t)) {
           continue;
         }
         if (context.placed_notes != nullptr &&
-            createsVerticalDissonance(*context.placed_notes, span.voice,
-                                      static_cast<std::uint8_t>(p), t)) {
+            createsVerticalDissonance(*placed_index, span.voice, static_cast<std::uint8_t>(p), t)) {
           continue;
         }
         if (context.placed_notes != nullptr && have_parallel_anchor &&
-            createsParallelPerfect(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p),
-                                   t, parallel_prev_pitch, parallel_prev_tick)) {
+            createsParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                   parallel_prev_pitch, parallel_prev_tick)) {
           continue;
         }
         if (context.placed_notes != nullptr && have_parallel_anchor &&
-            rule_helpers::createsParallelOctave(*context.placed_notes, span.voice,
+            rule_helpers::createsParallelOctave(*placed_index, span.voice,
                                                 static_cast<std::uint8_t>(p), t,
                                                 parallel_prev_pitch, parallel_prev_tick)) {
           continue;
         }
         if (context.placed_notes != nullptr && have_parallel_anchor &&
-            createsHiddenParallelPerfect(*context.placed_notes, span.voice,
-                                         static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
-                                         parallel_prev_tick)) {
+            createsHiddenParallelPerfect(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                         parallel_prev_pitch, parallel_prev_tick)) {
           continue;
         }
         if (context.placed_notes != nullptr &&
-            createsCrossRelation(*context.placed_notes, span.voice, static_cast<std::uint8_t>(p), t,
+            createsCrossRelation(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
                                  harmonic_plan)) {
           continue;
         }
