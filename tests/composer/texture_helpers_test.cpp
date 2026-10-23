@@ -122,7 +122,8 @@ TEST(TextureHelpersTest, SharedCountersubjectUsesScoredAnchorsAndPassTwoRhythm) 
   ThemeToneRegistry registry;
   appendScoredCountersubject(source, /*voice=*/0, /*start=*/0,
                              /*end=*/4 * kTicksPerBeat, /*band_lo=*/60,
-                             /*band_hi=*/84, detail::Mode::Major, countersubject, registry);
+                             /*band_hi=*/84, detail::Mode::Major, countersubject, registry,
+                             /*harmony=*/nullptr);
 
   ASSERT_GT(countersubject.size(), source.size())
       << "pass-two realization merely copied the source rhythm";
@@ -195,9 +196,13 @@ TEST(TextureHelpersTest, MelodicScaleStepRaisesLeadingToneOnlyOverMinorDominant)
   const detail::ChordSpec dominant{7, false};
   // In C minor, natural minor remains in force away from V.
   EXPECT_EQ(detail::melodicScaleStep(68, 1, detail::Mode::Minor, &tonic), 70);
-  // Over V, the same upper tetrachord uses A natural then B natural.
-  EXPECT_EQ(detail::melodicScaleStep(68, 1, detail::Mode::Minor, &dominant), 69);
+  // Over V, the same upper tetrachord uses A natural then B natural, in both
+  // directions, and a step always reaches the next letter: A-flat rises to B,
+  // never to A natural, and B falls to A, never to B-flat.
+  EXPECT_EQ(detail::melodicScaleStep(67, 1, detail::Mode::Minor, &dominant), 69);
   EXPECT_EQ(detail::melodicScaleStep(69, 1, detail::Mode::Minor, &dominant), 71);
+  EXPECT_EQ(detail::melodicScaleStep(68, 1, detail::Mode::Minor, &dominant), 71);
+  EXPECT_EQ(detail::melodicScaleStep(71, -1, detail::Mode::Minor, &dominant), 69);
 }
 
 TEST(TextureHelpersTest, ScaleDownIsNotNegatedScaleUp) {

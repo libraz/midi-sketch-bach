@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "composer/figuration.h"
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/provenance.h"
@@ -27,6 +28,9 @@ std::array<std::uint8_t, 3> triadPitchClasses(const ChordEvent& chord);
 // is <= at. Empty plans return a neutral C-major fallback so callers can
 // report validation failure without dereferencing an empty vector.
 const ChordEvent& activeChord(const HarmonicPlan& plan, Tick at);
+
+// Like activeChord, but null before the first chord instead of a fallback.
+const ChordEvent* chordAt(const HarmonicPlan& plan, Tick tick);
 
 // Beat / pitch primitives.
 
@@ -57,11 +61,8 @@ bool isLeadingToneResolution(std::uint8_t leading, int resolution, const Harmoni
 
 // The key in force at a tick: the plan's home key updated by every modulation
 // whose boundary the tick has reached. This is the single source of truth for
-// "what key is it here"; TonalContext is built on top of it.
-struct KeyContext {
-  std::uint8_t tonic_pc = 0;
-  bool is_minor = false;
-};
+// "what key is it here"; TonalContext and localKeyAt are built on top of it.
+using KeyContext = bach::composer::KeyContext;
 
 // Consults only the modulation list, never the chord list, so it stays cheap
 // enough for the validator's pairwise rule loops. The list need not be sorted:
@@ -87,6 +88,11 @@ struct TonalContext {
 TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick);
 bool isContextualScalePitch(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick,
                             int melodic_motion);
+
+// Tones of the chord sounding at `tick`, seventh included, as the pitch-class
+// set detail::spellScale reads; 0 before the first chord. A minor triad whose
+// fifth the local minor key lacks reads as that key's diminished triad.
+detail::PcMask chordPcsAt(const HarmonicPlan& plan, Tick tick);
 bool isContextualLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick);
 bool isContextualLeadingToneResolution(std::uint8_t leading, int resolution,
                                        const HarmonicPlan& plan, Tick tick);

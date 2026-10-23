@@ -873,15 +873,17 @@ int settledMotionRank(const std::vector<std::vector<MaterialNote>>& settled_line
 
 /// @brief Bend the notes from `first` onward into the key sounding under them.
 ///
-/// The bar's own chord tones are left where they are: the harmony's spelling
-/// outranks the collection, so a local dominant's raised third survives a bend
-/// into a natural-minor collection that does not contain it, and every downbeat
-/// anchor stays the chord tone the figuration rule requires. Notes in the home
+/// The key is spelled under the bar's chord (detail::spellScale), so a passing
+/// tone over a minor key's dominant bends onto the leading tone rather than the
+/// lowered 7th. The bar's own chord tones are left where they are, so every
+/// downbeat anchor stays the chord tone the figuration rule requires. Notes in the home
 /// key are untouched as well, which preserves the raised leading tones the
 /// minor-key cadence formulas write.
 ///
 /// A bend is refused only when it reads WORSE against the settled lines than the
-/// tone it replaces; an equal or better motion is taken. Those lines are
+/// tone it replaces; an equal or better motion is taken, and so is one that
+/// removes a simultaneous false relation with a settled line short of a true
+/// parallel. Those lines are
 /// verbatim material chosen before this one was restated, so nothing downstream
 /// can answer for the pair, and this restatement runs after the
 /// parallel-avoidance machinery that chose them. Refusing outright on any
@@ -907,15 +909,35 @@ void bendIntoLocalKeys(std::vector<MaterialNote>& notes, std::size_t first,
     if (isChordTone(pitch, plan[bar]))
       continue;
     const KeyContext local = localKeyAt(harmony, note.start_tick);
-    const int bent = std::clamp(bendIntoKey(pitch, local), 0, 127);
+    const detail::PcMask harmony = detail::chordPcMaskInKey(
+        plan[bar], local.tonic_pc, local.is_minor ? detail::Mode::Minor : detail::Mode::Major);
+    const int bent = std::clamp(bendIntoKey(pitch, local, harmony), 0, 127);
     if (bent == pitch)
       continue;
     // The previous tone is the one this line will actually sound, bent and all,
     // because the restatement walks the line in order.
     const Tick prev_tick = idx > 0 ? notes[idx - 1].start_tick : 0;
     const int prev_pitch = idx > 0 ? static_cast<int>(notes[idx - 1].pitch) : -1;
-    if (settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, bent) >
-        settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, pitch)) {
+    const int bent_rank =
+        settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, bent);
+    // A bend that takes the tone off the other spelling of a letter a settled
+    // line sounds at the same moment is taken unless it lands in a true parallel:
+    // the false relation is the fault the bend exists to remove.
+    const detail::Mode local_mode = local.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+    const auto false_relation = [&](int candidate) {
+      for (const std::vector<MaterialNote>& line : settled_lines) {
+        const int theme = soundingMaterialPitch(line, note.start_tick);
+        if (theme >= 0 && theme % 12 != candidate % 12 &&
+            detail::diatonicLetter(theme % 12 + 60, local.tonic_pc, local_mode) % 7 ==
+                detail::diatonicLetter(candidate % 12 + 60, local.tonic_pc, local_mode) % 7)
+          return true;
+      }
+      return false;
+    };
+    const bool clears_false_relation = false_relation(pitch) && !false_relation(bent);
+    if (!(clears_false_relation && bent_rank < kBendParallel) &&
+        bent_rank >
+            settledMotionRank(settled_lines, prev_tick, prev_pitch, note.start_tick, pitch)) {
       continue;
     }
     note.pitch = static_cast<std::uint8_t>(bent);
@@ -1201,7 +1223,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
             for (const int sgn : {-1, 1}) {
               const int cand = original + sgn * dist;
               if (cand < kBandLo[voice] || cand > kBandHi[voice] || cand > order_ceiling ||
-                  !detail::inScale(cand, mode)) {
+                  !detail::inScale(cand, mode, &plan[static_cast<std::size_t>(bar)])) {
                 continue;
               }
               bool consonant = true;
@@ -1249,7 +1271,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
                                         Tick start, Tick end) {
     appendScoredCountersubject(source, static_cast<VoiceId>(voice), start, end, kBandLo[voice],
                                kBandHi[voice], mode, out.material.countersubject, registry,
-                               /*avoid_battuta=*/true, /*source_is_lowest=*/true);
+                               &out.harmony, /*avoid_battuta=*/true, /*source_is_lowest=*/true);
   };
   stamp_subject(first_bar + 0, v0_off, 0, subj_rhythm);
   out.material.canonical_subject_note_count = kSubjectNotes;

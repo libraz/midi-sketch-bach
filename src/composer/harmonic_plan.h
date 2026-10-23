@@ -224,8 +224,9 @@ struct HarmonicPlan {
 };
 
 /// Fill the diatonic Roman-numeral metadata for every chord whose root belongs
-/// to this plan's home major or minor collection. Existing explicit metadata
-/// is preserved. Returns false when a chromatic chord needs a form-specific
+/// to the major or minor collection of the key in force at the chord (the home
+/// key, or a modulation's destination). Existing explicit metadata is
+/// preserved. Returns false when a chromatic chord needs a form-specific
 /// secondary/borrowed declaration rather than a fabricated degree.
 bool annotateDiatonicChordMetadata(HarmonicPlan* plan);
 

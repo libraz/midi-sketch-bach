@@ -121,15 +121,14 @@ bool isLeadingToneResolution(std::uint8_t leading, int resolution, const Harmoni
          std::abs(resolution - static_cast<int>(leading)) <= 2;
 }
 
-namespace {
-
-// Like activeChord, but null before the first chord instead of a fallback.
 const ChordEvent* chordAt(const HarmonicPlan& plan, Tick tick) {
   const auto next = std::upper_bound(
       plan.chords.begin(), plan.chords.end(), tick,
       [](Tick value, const ChordEvent& chord) { return value < chord.start_tick; });
   return next == plan.chords.begin() ? nullptr : &*std::prev(next);
 }
+
+namespace {
 
 bool chordContainsPc(const ChordEvent& chord, std::uint8_t pc) {
   int third = 4;
@@ -254,10 +253,16 @@ TonalContext tonalContextAt(const HarmonicPlan& plan, Tick tick) {
     context.resolution_pc = static_cast<std::uint8_t>((chord->root_pc + 5) % 12);
     return context;
   }
-  const bool dominant = chord->function == HarmonicFunction::D ||
-                        chord->degree == RomanNumeral::V ||
-                        chord->quality == ChordQuality::Dominant7;
-  context.has_active_leading_tone = dominant;
+  // A chord carries the leading tone when it is the local key's major dominant
+  // or its leading-tone triad, read against the same key as leading_tone_pc.
+  const int relative = (static_cast<int>(chord->root_pc) - context.tonic_pc + 12) % 12;
+  const bool major_quality =
+      chord->quality == ChordQuality::Major || chord->quality == ChordQuality::Dominant7;
+  const bool diminished_quality = chord->quality == ChordQuality::Diminished ||
+                                  chord->quality == ChordQuality::HalfDiminished7 ||
+                                  chord->quality == ChordQuality::Diminished7;
+  context.has_active_leading_tone =
+      (relative == 7 && major_quality) || (relative == 11 && diminished_quality);
   return context;
 }
 
@@ -284,6 +289,27 @@ bool isContextualScalePitch(std::uint8_t pitch, const HarmonicPlan& plan, Tick t
   if (relative == 11)
     return melodic_motion > 0 || context.has_active_leading_tone;
   return false;
+}
+
+detail::PcMask chordPcsAt(const HarmonicPlan& plan, Tick tick) {
+  const ChordEvent* chord = chordAt(plan, tick);
+  if (chord == nullptr)
+    return 0;
+  detail::PcMask mask = 0;
+  for (int pc = 0; pc < 12; ++pc) {
+    if (chordContainsPc(*chord, static_cast<std::uint8_t>(pc)))
+      mask = static_cast<detail::PcMask>(mask | detail::pcBit(pc));
+  }
+  // A minor-quality chord whose perfect fifth the local minor does not hold is
+  // the key's diminished ii or vii written as a plain minor triad.
+  const KeyContext key = keyAt(plan, tick);
+  const int fifth = chord->root_pc + 7;
+  if (key.is_minor &&
+      (chord->quality == ChordQuality::Minor || chord->quality == ChordQuality::Minor7) &&
+      !detail::inSpelledScale(fifth, key.tonic_pc, detail::Mode::Minor, 0)) {
+    mask = static_cast<detail::PcMask>((mask & ~detail::pcBit(fifth)) | detail::pcBit(fifth - 1));
+  }
+  return mask;
 }
 
 bool isContextualLeadingTone(std::uint8_t pitch, const HarmonicPlan& plan, Tick tick) {

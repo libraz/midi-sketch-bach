@@ -247,6 +247,9 @@ class ThemeToneRegistry {
 ///        Off by default: the line this derives is also the line later entries
 ///        restate, and callers that restate it must first check that the
 ///        avoiding line still combines with the entry it will meet.
+/// @param harmony Plan whose local key and chord spell the line (detail::spellScale)
+///        together with the source tone it sounds against; nullptr spells it in
+///        the home key with only the source tone.
 /// @param source_is_lowest The source line is the lowest voice sounding under
 ///        this one. The pass-1 consonance term reads isConsonantIc, which
 ///        admits the perfect fourth because a fourth between upper voices sits
@@ -258,7 +261,8 @@ class ThemeToneRegistry {
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
                                 std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
-                                bool avoid_battuta = false, bool source_is_lowest = false);
+                                const HarmonicPlan* harmony, bool avoid_battuta = false,
+                                bool source_is_lowest = false);
 
 /// @brief Replace part of one carrier span with an explicit suspension carrier.
 ///
@@ -276,14 +280,17 @@ int soundingMaterialPitch(const std::vector<MaterialNote>& notes, Tick tick);
 ///
 /// Supports 4-3, 7-6, and 9-8. The preparation pitch equals the suspended
 /// pitch, is consonant over `bass_at_preparation`, and resolves down one
-/// diatonic-sized semitone step to the type-specific consonance. Returns false
-/// when the supplied bass motion and band admit no valid pattern.
+/// diatonic-sized semitone step to the type-specific consonance. Both tones are
+/// spelled under `resolution_chord` when given, so a 4-3 over the minor
+/// dominant resolves to its leading tone. Returns false when the supplied bass
+/// motion and band admit no valid pattern.
 bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick suspension_tick,
                            Tick resolution_tick, VoiceId voice, std::uint8_t bass_at_preparation,
                            std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
                            std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
-                           detail::Mode mode, SuspensionPattern* pattern);
+                           detail::Mode mode, SuspensionPattern* pattern,
+                           const detail::ChordSpec* resolution_chord);
 
 /// @brief Pick the band chord tone that is consonant and parallel-free.
 ///
@@ -358,9 +365,9 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
 /// penultimate bar (`penult_bar_start`) and appends:
 ///   * an eighth-note approach run through the cadence's first structural
 ///     beat (four eighths in 4/4, two in 3/4) that walks diatonically INTO the
-///     pre-final tone — ascending when the run fits the band (in minor the
-///     ascent into the leading tone raises the sixth degree, melodic-minor
-///     fashion), otherwise descending from above;
+///     pre-final tone, spelled over the closing dominant (in minor the raised
+///     6th and leading tone) — ascending when the run fits the band, otherwise
+///     descending from above;
 ///   * the held pre-final tone from beat three in 4/4 or beat two in 3/4 — the
 ///     trill site on the real beat grid inside the cadence window;
 ///   * a full-bar final tone — the held resolution (a voice's last attack is

@@ -70,11 +70,16 @@ struct CycleBar {
  * below any figuration register, so indices stay non-negative). Working in
  * degree indices makes fills stepwise by construction.
  *
+ * A degree index names a letter; the chord decides its inflection (see
+ * detail::spellScale), so the same index is B over the minor dominant and
+ * B-flat elsewhere.
+ *
  * @param degree Diatonic degree index (0 = C0).
  * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ * @param chord Harmony the degree sounds over (nullptr = none known).
  * @return The MIDI pitch of the degree.
  */
-int degreeToMidi(int degree, detail::Mode mode);
+int degreeToMidi(int degree, detail::Mode mode, const detail::ChordSpec* chord = nullptr);
 
 /**
  * @brief Invert degreeToMidi for any pitch, snapping down to the nearest
@@ -97,15 +102,15 @@ int fitPitchClass(int pitch_class, int center);
  * @brief Collect the chord-tone anchor pitch classes for one bar.
  *
  * The anchors are the bar's chord tones (root / third / fifth), each consonant
- * with the held ground (the chord root tracks the ground pitch class). In minor
- * the leading tone B natural (pc 11) is filtered out so the line stays in
- * natural minor and no Ab->B augmented 2nd can arise. A bar that declares a
+ * with the held ground (the chord root tracks the ground pitch class). A tone
+ * the scale does not spell under the bar's chord is flattened onto the scale;
+ * the minor dominant's leading tone is spelled and kept. A bar that declares a
  * seventh contributes it as a fourth anchor, exempt from the consonance filter:
  * the ground is the bass of the chord it belongs to, so the interval it makes
  * with the ground is the harmony rather than a clash against it.
  *
  * @param bar The bar's harmonic data.
- * @param mode Diatonic mode (selects the third quality filter behaviour).
+ * @param mode Diatonic mode selecting the scale.
  * @return Up to four chord-tone pitch classes, the seventh last (non-empty).
  */
 std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode);

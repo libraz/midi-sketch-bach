@@ -26,6 +26,7 @@
 
 #include "composer/arc.h"
 #include "composer/composer.h"
+#include "composer/figuration.h"
 #include "composer/form_director.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
@@ -570,29 +571,42 @@ TEST(FormLinearTrio, EscapeToTheAnchorNeverFlattensALine) {
 }
 
 TEST(FormLinearTrio, CadenceHasMomentaryManualExchangeWithoutPerfectParallel) {
-  // This seed reaches the deliberately prepared cadence meeting. The exchange
-  // must last exactly one union onset; the ordinary validator then proves that
-  // no parallel fifth or octave was introduced by allowing it.
-  HarnessFixture fixture;
-  const ComposeResult result = build(FormType::TrioSonata, /*seed=*/99, /*is_minor=*/true,
-                                     /*bars=*/16, &fixture);
-  ASSERT_TRUE(result.validation.failures.empty()) << firstFailure(result);
-
-  bool saw_exchange = false;
-  for (const NoteEvent& lower : result.notes) {
-    if (lower.voice != 1)
-      continue;
-    for (const NoteEvent& upper : result.notes) {
-      if (upper.voice != 0 || upper.start_tick > lower.start_tick ||
-          lower.start_tick >= upper.start_tick + upper.duration) {
-        continue;
+  // Seeds that reach the prepared cadence meeting. The raised tone must be a
+  // degree the scale spells over that bar's chord, so a meeting that would need
+  // a chromatic raise keeps its plain cadence -- in minor, over the spelled
+  // dominant, that is nearly every meeting; the ordinary validator then proves
+  // that no parallel fifth or octave was introduced by allowing the exchange.
+  constexpr detail::ChordSpec kDominant{7, false};
+  std::size_t exchanges = 0;
+  for (bool minor : kMinorFlags) {
+    const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
+    for (std::uint32_t seed = 1; seed <= 60; ++seed) {
+      HarnessFixture fixture;
+      const ComposeResult result = build(FormType::TrioSonata, seed, minor, /*bars=*/16, &fixture);
+      ASSERT_TRUE(result.validation.failures.empty())
+          << "seed " << seed << ": " << firstFailure(result);
+      bool saw_exchange = false;
+      for (const NoteEvent& lower : result.notes) {
+        if (lower.voice != 1)
+          continue;
+        for (const NoteEvent& upper : result.notes) {
+          if (upper.voice != 0 || upper.start_tick > lower.start_tick ||
+              lower.start_tick >= upper.start_tick + upper.duration || lower.pitch <= upper.pitch) {
+            continue;
+          }
+          saw_exchange = true;
+          EXPECT_TRUE(detail::inScale(lower.pitch, mode) ||
+                      detail::inScale(lower.pitch, mode, &kDominant))
+              << "seed " << seed << ": exchange raised V1 to chromatic pitch "
+              << static_cast<int>(lower.pitch);
+        }
       }
-      saw_exchange = saw_exchange || lower.pitch > upper.pitch;
+      exchanges += saw_exchange ? 1 : 0;
+      EXPECT_FALSE(hasRule(result.validation, "parallel_fifth")) << "seed " << seed;
+      EXPECT_FALSE(hasRule(result.validation, "parallel_octave")) << "seed " << seed;
     }
   }
-  EXPECT_TRUE(saw_exchange);
-  EXPECT_FALSE(hasRule(result.validation, "parallel_fifth"));
-  EXPECT_FALSE(hasRule(result.validation, "parallel_octave"));
+  EXPECT_GT(exchanges, 0u) << "no seed reached the cadence exchange";
 }
 
 // Both true-parallel classes are closed for this form, so the shipped surface

@@ -523,6 +523,9 @@ constexpr int kV0RepairCeiling = 91;
 // The chaconne coda's dominant bass (G2): the tone the bass steps to on the
 // penultimate bar's closing beat before stating the tonic under the final bar.
 constexpr int kCodaBassDominant = 43;
+// The chord over that bass: the approach into the coda's final tonic is spelled
+// with its leading tone.
+constexpr detail::ChordSpec kCodaDominantChord{7, false};
 
 /// @brief Displace V0 beat onsets that form a moving-ground parallel perfect.
 ///
@@ -708,10 +711,16 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
     // neighbour works the parallel stands. A repair that trades a contrapuntal
     // blemish for a hole in the melody is not a repair.
     const int max_displacement = (beat == 0) ? kV0RepairCeiling - band_lo : 2;
-    const auto createsMinorAugmentedSecond = [](int from, int to) {
-      const int from_pc = ((from % 12) + 12) % 12;
-      const int to_pc = ((to % 12) + 12) % 12;
-      return (from_pc == 8 && to_pc == 11) || (from_pc == 11 && to_pc == 8);
+    // The local key as spelled under the chord at the onset (detail::spellScale).
+    const auto inSpelledScaleAt = [&](int cand, Tick at) {
+      const rule_helpers::KeyContext key = rule_helpers::keyAt(harmony, at);
+      return detail::inSpelledScale(cand, key.tonic_pc,
+                                    key.is_minor ? detail::Mode::Minor : detail::Mode::Major,
+                                    rule_helpers::chordPcsAt(harmony, at));
+    };
+    const auto createsAugmentedSecond = [&](int from, int to) {
+      return detail::isAugmentedSecondClass(
+          from, to, 0, harmony.is_minor ? detail::Mode::Minor : detail::Mode::Major);
     };
     // Cleanest first, and never worse than what is already there: the triad
     // tier and the contextual-scale tier below are both re-offered at each
@@ -749,8 +758,8 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                                                      static_cast<std::uint8_t>(ground_now)))) {
               continue;
             }
-            if ((melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-                (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch))) {
+            if ((melodic_prev >= 0 && createsAugmentedSecond(melodic_prev, cand)) ||
+                (next_pitch >= 0 && createsAugmentedSecond(cand, next_pitch))) {
               continue;
             }
             if (leap_veto && leavesConsecutiveLeaps(cand)) {
@@ -772,10 +781,9 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
           for (int cand : {pitch + dist, pitch - dist}) {
             if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
                 !rule_helpers::isConsonantInterval(cand - ground_now) ||
-                !rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), harmony,
-                                                      tick, cand - pitch) ||
-                (melodic_prev >= 0 && createsMinorAugmentedSecond(melodic_prev, cand)) ||
-                (next_pitch >= 0 && createsMinorAugmentedSecond(cand, next_pitch)) ||
+                !inSpelledScaleAt(cand, tick) ||
+                (melodic_prev >= 0 && createsAugmentedSecond(melodic_prev, cand)) ||
+                (next_pitch >= 0 && createsAugmentedSecond(cand, next_pitch)) ||
                 (leap_veto && leavesConsecutiveLeaps(cand)) || groundFaultRank(cand) > accept) {
               continue;
             }
@@ -875,19 +883,18 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     chord.minor = plan.minor;
     chord.seventh = plan.seventh;
     // Nearest DIFFERENT chord tone in band (prefer above): shared by the
-    // anti-stall escape and the off-beat oscillation below. Out-of-scale triad
-    // tones flatten to the scale tone a semitone below (matching the V0
-    // anchor policy in barAnchorPitchClasses) so the counter-line never sounds
-    // a chromatic tone against the natural-minor V0 figuration (a B against
-    // V0's Bb). The declared seventh joins the set: reading a bare triad here
-    // while the beat anchor reads four tones would let the escape push the line
-    // off a seventh the selector deliberately placed, or judge the chord spent
-    // while one of its tones was still free.
+    // anti-stall escape and the off-beat oscillation below. A triad tone the
+    // scale does not spell under this chord flattens onto it (the V0 anchor
+    // policy in barAnchorPitchClasses); V0 spells the minor dominant with its
+    // leading tone, so this line does too. The declared seventh joins the set:
+    // reading a bare triad here while the beat anchor reads four tones would let
+    // the escape push the line off a seventh the selector deliberately placed,
+    // or judge the chord spent while one of its tones was still free.
     const int chord_third = chord.minor ? 3 : 4;
     int chord_pc[4] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
                        (chord.root_pc + 7) % 12, detail::chordSeventhPc(chord)};
     for (int& pc : chord_pc) {
-      if (!detail::inScale(pc, mode))
+      if (!detail::inScale(pc, mode, &chord))
         pc = (pc + 11) % 12;
     }
     const int chord_tones = chord.seventh ? 4 : 3;
@@ -928,7 +935,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     };
     ladder.clear();
     for (int cand = band_lo; cand <= band_hi; ++cand) {
-      if (detail::inScale(cand, mode) && clean_over_ground(cand))
+      if (detail::inScale(cand, mode, &chord) && clean_over_ground(cand))
         ladder.push_back(cand);
     }
     // The rung nearest a pitch, so the walk can start from whatever the beat
@@ -1081,7 +1088,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         if (design_rank != kAnchorClean) {
           auto admissible = [&](int cand) {
             if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-                !detail::inScale(cand, mode)) {
+                !detail::inScale(cand, mode, &chord)) {
               return false;
             }
             for (int upper : theme_pitches) {
@@ -2406,7 +2413,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
                 for (const int sgn : {-1, 1}) {
                   const int prev_cand = prev_original + sgn * dist;
                   if (prev_cand < line_lo || prev_cand > line_hi ||
-                      !detail::inScale(prev_cand, mode)) {
+                      !detail::inScale(prev_cand, mode, &kCodaDominantChord)) {
                     continue;
                   }
                   int trial = -1;
@@ -2455,7 +2462,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
             for (int dist = 1; dist <= 12 && !placed; ++dist) {
               for (const int sgn : {-1, 1}) {
                 const int cand = original + sgn * dist;
-                if (cand < 67 || cand > 81 || !detail::inScale(cand, mode) ||
+                if (cand < 67 || cand > 81 || !detail::inScale(cand, mode, &kCodaDominantChord) ||
                     tailFaultRank(cand) > accept)
                   continue;
                 tail_note->pitch = static_cast<std::uint8_t>(cand);
@@ -2846,6 +2853,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     }
     const CycleBar& suspension_chord =
         plan[static_cast<std::size_t>(sus_bar % kPassacagliaCycleBars)];
+    const detail::ChordSpec suspension_spec{suspension_chord.root_pc, suspension_chord.minor,
+                                            suspension_chord.seventh};
     const int chord_third = suspension_chord.minor ? 3 : 4;
     const std::array<int, 3> chord_pcs = {suspension_chord.root_pc,
                                           (suspension_chord.root_pc + chord_third) % 12,
@@ -2913,10 +2922,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             continue;
           bool creates_augmented_second = false;
           if (req.mode == detail::Mode::Minor) {
-            const auto isAbBPair = [](int a, int b) {
-              const int a_pc = ((a % 12) + 12) % 12;
-              const int b_pc = ((b % 12) + 12) % 12;
-              return (a_pc == 8 && b_pc == 11) || (a_pc == 11 && b_pc == 8);
+            const auto formsAugmentedSecond = [&](int a, int b) {
+              return detail::isAugmentedSecondClass(a, b, 0, req.mode);
             };
             for (const auto& variation : out.material.passacaglia_variations) {
               for (std::size_t i = 0; i < variation.notes.size(); ++i) {
@@ -2925,9 +2932,9 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                     suspension_tick >= note.start_tick + note.duration)
                   continue;
                 creates_augmented_second =
-                    (i > 0 && isAbBPair(variation.notes[i - 1].pitch, upper_sus)) ||
+                    (i > 0 && formsAugmentedSecond(variation.notes[i - 1].pitch, upper_sus)) ||
                     (i + 1 < variation.notes.size() &&
-                     isAbBPair(upper_sus, variation.notes[i + 1].pitch));
+                     formsAugmentedSecond(upper_sus, variation.notes[i + 1].pitch));
               }
             }
           }
@@ -2944,7 +2951,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                     static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                     static_cast<std::uint8_t>(upper_res),
                     /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
-                    &suspension))
+                    &suspension, &suspension_spec))
               continue;
             // The suspension's own three tones are a voice, and nothing has judged
             // them: the test above only asks whether relocating V0 to `upper_sus`

@@ -67,9 +67,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // vertical sample consonant against the pedal and the other manual voice (the
   // beat-sampled vertical_dissonance_ratio stays low); the inner subdivisions
   // are stepwise neighbours, so the line is predominantly stepwise (no leaps).
-  // `harmonic` selects the harmonic-minor ascending tetrachord on dominant bars
-  // so the leading tone is reached without an augmented second; in major it is
-  // ignored.
+  // The scalar figures walk the scale as spelled under the bar's chord
+  // (detail::spellScale), so a minor dominant bar keeps its leading tone and
+  // raised 6th in both directions.
   // `shape` rotates the intra-beat figure VOCABULARY per bar (the beat anchors
   // themselves never change, so every contract -- per-beat chord-tone
   // consonance, conjunct off-beats, banded registers -- holds for every shape):
@@ -105,7 +105,6 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                              detail::chordSeventhPc(bc)};
     const int accent_tones = bc.seventh ? 4 : 3;
     constexpr int kTriadTones = 3;
-    const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
 
     // Audible-grain parallel guard against the already-built other manual
     // voice. The opposite zigzag parities make the BEAT anchors contrary by
@@ -197,12 +196,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     };
 
     auto walk = [&](int midi, int steps) {
-      if (steps == 0)
-        return midi;
-      if (steps < 0)
-        return detail::scaleDown(midi, -steps, mode);
-      return (mode == Mode::Minor) ? detail::minorScaleUp(midi, steps, harmonic)
-                                   : detail::scaleUp(midi, steps, Mode::Major);
+      return steps < 0 ? detail::scaleDown(midi, -steps, mode, &bc)
+                       : detail::scaleUp(midi, steps, mode, &bc);
     };
 
     // Find the chord tone (of any triad pitch class) NEAREST `near`, realized in
@@ -601,9 +596,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // One brief manual exchange near the cadence makes the overlapping manual
   // tessitura audible without turning it into a sustained role inversion. The
   // candidate is selected from already-written carrier notes: V1 meets V0 on
-  // one sub-beat, rises by a scale-neighbour semitone, and the following union
-  // onset restores V0 above it. If a particular length/seed has no such safe
-  // meeting, the form simply keeps its ordinary contrary-motion cadence.
+  // one sub-beat, rises by a semitone the scale spells under that bar's chord,
+  // and the following union onset restores V0 above it. If a particular
+  // length/seed has no such safe meeting, the form simply keeps its ordinary
+  // contrary-motion cadence.
   const auto sounding_pitch = [](const std::vector<MaterialNote>& line, Tick tick) -> int {
     for (auto it = line.rbegin(); it != line.rend(); ++it) {
       if (it->start_tick <= tick && tick < it->start_tick + it->duration)
@@ -634,7 +630,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       continue;
     const int v0_now = sounding_pitch(v0.notes, note.start_tick);
     const int v0_next = sounding_pitch(v0.notes, note.start_tick + note.duration);
-    if (v0_now == static_cast<int>(note.pitch) && v0_next >= v0_now + 1 && note.pitch < 127) {
+    const ChordSpec& exchange_chord = chords[std::min(
+        static_cast<std::size_t>(note.start_tick / kTicksPerBar), chords.size() - 1)];
+    if (v0_now == static_cast<int>(note.pitch) && v0_next >= v0_now + 1 && note.pitch < 127 &&
+        detail::inScale(note.pitch + 1, mode, &exchange_chord)) {
       ++note.pitch;
       break;
     }
@@ -790,12 +789,14 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // cheapest because one diatonic tone bridges it into two steps; a fourth or a
   // fifth is an ordinary walking leap; anything wider breaks the line, and a
   // repeated tone is what stops it being a line at all.
-  const auto gap_cost = [](int from, int to) {
+  const auto gap_cost = [&](int from, int to) {
     const int gap = std::abs(to - from);
     if (gap == 0)
       return 8;
     if (gap <= 2)
       return 2;
+    if (detail::isAugmentedSecond(from, to, 0, mode))
+      return 6;  // the raised 7th against the 6th is a step the line cannot take.
     if (gap <= 4)
       return 0;
     if (gap <= 7)
@@ -1140,7 +1141,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
             for (const int cand : {pitch - away, pitch + away}) {
               if (cand < kPedalFloor || cand > kPedalCeil)
                 continue;
-              if (!detail::inScale(cand, mode) || !walkable(cand))
+              if (!detail::inScale(cand, mode, &bar_chord) || !walkable(cand))
                 continue;
               if (escape_rank(cand) <= accept) {
                 pitch = cand;
@@ -1320,7 +1321,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                 static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
                 static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                 static_cast<std::uint8_t>(upper_res),
-                /*band_lo=*/design_lo, design_hi, mode, &suspension))
+                /*band_lo=*/design_lo, design_hi, mode, &suspension,
+                &chords[static_cast<std::size_t>(bars - bar_offset)]))
           continue;
         // Safety net for the register clamp above: the resolution steps one or
         // two semitones below the suspended tone, so it can still fall just

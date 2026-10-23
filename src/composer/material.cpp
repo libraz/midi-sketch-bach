@@ -2,6 +2,8 @@
 
 #include <array>
 
+#include "composer/rule_helpers.h"
+
 namespace bach::composer {
 
 namespace {
@@ -10,13 +12,14 @@ std::uint8_t pitchClass(std::uint8_t pitch) {
   return static_cast<std::uint8_t>(pitch % 12);
 }
 
-// Semitone offsets of the seven degrees above the tonic. Minor is the natural
-// minor, matching the collection the figuration helpers walk.
-constexpr std::array<int, 7> kMajorDegrees = {0, 2, 4, 5, 7, 9, 11};
-constexpr std::array<int, 7> kMinorDegrees = {0, 2, 3, 5, 7, 8, 10};
+detail::Mode modeOf(const KeyContext& key) {
+  return key.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+}
 
-const std::array<int, 7>& degreesOf(const KeyContext& key) {
-  return key.is_minor ? kMinorDegrees : kMajorDegrees;
+// Semitone offsets of the seven degrees above the tonic, with no harmony: minor
+// is the natural minor (detail::spellScale).
+detail::ScaleSpelling degreesOf(const KeyContext& key) {
+  return detail::spellScale(0, modeOf(key), 0);
 }
 
 // Euclidean division, so a pitch below the tonic still resolves to the degree
@@ -60,21 +63,7 @@ void annotateFragment(std::vector<LeadingToneMarker>& markers,
 }  // namespace
 
 KeyContext localKeyAt(const HarmonicPlan& plan, Tick tick) {
-  KeyContext key{static_cast<std::uint8_t>(plan.tonic_pc % 12), plan.is_minor};
-  // The modulation list is emitted in tick order by every builder that fills
-  // it, but a scan for the latest boundary at or before `tick` does not depend
-  // on that, so a plan assembled out of order still resolves correctly.
-  Tick best = 0;
-  bool found = false;
-  for (const ModulationEvent& modulation : plan.modulations) {
-    if (modulation.tick <= tick && (!found || modulation.tick >= best)) {
-      best = modulation.tick;
-      found = true;
-      key.tonic_pc = static_cast<std::uint8_t>(modulation.to_tonic_pc % 12);
-      key.is_minor = modulation.to_is_minor;
-    }
-  }
-  return key;
+  return rule_helpers::keyAt(plan, tick);
 }
 
 bool inKey(int pitch, const KeyContext& key) {
@@ -83,7 +72,7 @@ bool inKey(int pitch, const KeyContext& key) {
 
 int degreeInKey(int pitch, const KeyContext& key) {
   const int offset = ((pitch - static_cast<int>(key.tonic_pc)) % 12 + 12) % 12;
-  const std::array<int, 7>& degrees = degreesOf(key);
+  const detail::ScaleSpelling degrees = degreesOf(key);
   for (int degree = 0; degree < 7; ++degree) {
     if (degrees[static_cast<std::size_t>(degree)] == offset)
       return degree;
@@ -95,8 +84,8 @@ int transposeIntoKey(int pitch, const KeyContext& from, const KeyContext& to) {
   const int relative = pitch - static_cast<int>(from.tonic_pc);
   const int octave = floorDiv(relative, 12);
   const int offset = relative - 12 * octave;
-  const std::array<int, 7>& source = degreesOf(from);
-  const std::array<int, 7>& target = degreesOf(to);
+  const detail::ScaleSpelling source = degreesOf(from);
+  const detail::ScaleSpelling target = degreesOf(to);
   // Walk down to the degree at or below the pitch and carry whatever semitone
   // separates them, so a chromatic tone stays an inflection of the same degree
   // instead of collapsing onto a diatonic neighbour.
@@ -108,17 +97,20 @@ int transposeIntoKey(int pitch, const KeyContext& from, const KeyContext& to) {
          inflection;
 }
 
-int bendIntoKey(int pitch, const KeyContext& key) {
-  if (inKey(pitch, key))
+int bendIntoKey(int pitch, const KeyContext& key, detail::PcMask chord_pcs) {
+  const auto member = [&](int candidate) {
+    return detail::inSpelledScale(candidate, key.tonic_pc, modeOf(key), chord_pcs);
+  };
+  if (member(pitch))
     return pitch;
-  // A diatonic set never leaves a three-semitone gap, so one of the two
-  // immediate neighbours is always a member and the search settles at distance
-  // one or two. Upward is tried first, which spells a raised leading tone
-  // rather than flattening onto the degree below it.
-  for (int distance = 1; distance <= 2; ++distance) {
-    if (inKey(pitch + distance, key))
+  // A spelled scale leaves at most a three-semitone gap (only where both ends are
+  // chord tones), so the search settles within that distance. Upward is tried
+  // first, which spells a raised leading tone rather than flattening onto the
+  // degree below it.
+  for (int distance = 1; distance <= 3; ++distance) {
+    if (member(pitch + distance))
       return pitch + distance;
-    if (inKey(pitch - distance, key))
+    if (member(pitch - distance))
       return pitch - distance;
   }
   return pitch;

@@ -974,11 +974,14 @@ TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
       {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
        SubjectCharacter::Restless}};
   // Entries are "<form ordinal>:<minor>:<seed>:<lhs character>=<rhs character>".
+  // The minor goldberg pair at seed 42 differed only by one trill whose
+  // auxiliary was a chromatic alteration of its main note; spelled
+  // diatonically, that trill is no longer placed.
   const std::set<std::string> kPinnedIdenticalPairs = {
-      "5:0:1:severe=noble",   "5:0:7:severe=noble", "5:1:1:severe=noble",  "5:1:7:severe=noble",
-      "8:0:1:severe=noble",   "8:0:2:severe=noble", "8:0:42:severe=noble", "8:0:7:severe=noble",
-      "8:1:1:severe=noble",   "8:1:2:severe=noble", "8:1:42:severe=noble", "8:1:7:severe=noble",
-      "9:0:42:playful=noble",
+      "5:0:1:severe=noble",   "5:0:7:severe=noble",   "5:1:1:severe=noble",  "5:1:7:severe=noble",
+      "8:0:1:severe=noble",   "8:0:2:severe=noble",   "8:0:42:severe=noble", "8:0:7:severe=noble",
+      "8:1:1:severe=noble",   "8:1:2:severe=noble",   "8:1:42:severe=noble", "8:1:7:severe=noble",
+      "9:0:42:playful=noble", "9:1:42:playful=noble",
   };
   std::set<std::string> observed;
   for (FormType form : kAllForms) {

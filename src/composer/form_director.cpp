@@ -9,6 +9,7 @@
 #include "composer/figuration.h"
 #include "composer/form_builders.h"
 #include "composer/harness_fixture.h"
+#include "composer/rule_helpers.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -58,24 +59,9 @@ bool isFreeCounterpointTarget(FormType form, const Span& span) {
          span.voice == 1;
 }
 
-const ChordEvent* chordAtOrBefore(const HarmonicPlan& plan, Tick tick) {
-  const ChordEvent* active = nullptr;
-  for (const ChordEvent& chord : plan.chords) {
-    if (chord.start_tick > tick)
-      break;
-    active = &chord;
-  }
-  return active;
-}
-
 CadenceType cadenceTypeAt(const HarmonicPlan& plan, Tick tick) {
-  const ChordEvent* current = chordAtOrBefore(plan, tick);
-  const ChordEvent* previous = nullptr;
-  for (const ChordEvent& chord : plan.chords) {
-    if (chord.start_tick >= tick)
-      break;
-    previous = &chord;
-  }
+  const ChordEvent* current = rule_helpers::chordAt(plan, tick);
+  const ChordEvent* previous = tick > 0 ? rule_helpers::chordAt(plan, tick - 1) : nullptr;
   if (current == nullptr)
     return CadenceType::ImperfectAuthentic;
   const int tonic = plan.tonic_pc % 12;

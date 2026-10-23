@@ -151,7 +151,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
                            std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
                            std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
-                           detail::Mode mode, SuspensionPattern* pattern) {
+                           detail::Mode mode, SuspensionPattern* pattern,
+                           const detail::ChordSpec* resolution_chord) {
   if (pattern == nullptr || type == SuspensionType::Sus2_3 || preparation_tick >= suspension_tick ||
       suspension_tick >= resolution_tick || bass_at_preparation == 0 || bass_at_suspension == 0 ||
       bass_at_resolution == 0 || upper_at_preparation == 0 || upper_at_suspension == 0 ||
@@ -161,7 +162,7 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
     return false;
   auto intervalClass = [](int upper, int bass) { return ((upper - bass) % 12 + 12) % 12; };
   for (int suspended = band_hi; suspended >= band_lo; --suspended) {
-    if (!detail::inScale(suspended, mode))
+    if (!detail::inScale(suspended, mode, resolution_chord))
       continue;
     if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(suspended),
                                             bass_at_preparation))
@@ -171,7 +172,7 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
       continue;
     for (int step = 1; step <= 2; ++step) {
       const int resolution = suspended - step;
-      if (resolution < band_lo || !detail::inScale(resolution, mode))
+      if (resolution < band_lo || !detail::inScale(resolution, mode, resolution_chord))
         continue;
       if (!isConsonantPair(resolution, upper_at_resolution))
         continue;
@@ -262,11 +263,52 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
                                 std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,
-                                bool avoid_battuta, bool source_is_lowest) {
+                                const HarmonicPlan* harmony, bool avoid_battuta,
+                                bool source_is_lowest) {
   struct Anchor {
     Tick tick = 0;
     Tick duration = 0;
     int pitch = 0;
+  };
+  // The key the line is spelled in at a tick: the plan's local key and chord,
+  // plus the source tone sounding there, so the line never inflects a letter
+  // the entry it accompanies spells the other way.
+  struct Spelling {
+    int tonic_pc = 0;
+    detail::Mode mode = detail::Mode::Major;
+    detail::PcMask chord_pcs = 0;
+  };
+  const auto spelling_at = [&](Tick tick) {
+    Spelling spelling;
+    spelling.mode = mode;
+    if (harmony != nullptr) {
+      const rule_helpers::KeyContext key = rule_helpers::keyAt(*harmony, tick);
+      spelling.tonic_pc = key.tonic_pc;
+      spelling.mode = key.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+      spelling.chord_pcs = rule_helpers::chordPcsAt(*harmony, tick);
+    }
+    spelling.chord_pcs = detail::withSoundingTone(
+        spelling.chord_pcs, soundingMaterialPitch(source, tick), spelling.tonic_pc, spelling.mode);
+    return spelling;
+  };
+  // Whatever key the plan declares, the line never sounds the other inflection
+  // of a letter the source tone is spelling at that moment.
+  const auto in_scale_at = [&](int pitch, Tick tick) {
+    const Spelling spelling = spelling_at(tick);
+    const int sounding = soundingMaterialPitch(source, tick);
+    const auto letter = [&](int midi) {
+      return detail::diatonicLetter(midi % 12 + 60, spelling.tonic_pc, spelling.mode) % 7;
+    };
+    if (sounding >= 0 && sounding % 12 != pitch % 12 && letter(sounding) == letter(pitch))
+      return false;
+    return detail::inSpelledScale(pitch, spelling.tonic_pc, spelling.mode, spelling.chord_pcs);
+  };
+  const auto walk_at = [&](int pitch, int steps, Tick tick) {
+    const Spelling spelling = spelling_at(tick);
+    for (int step = 0; step < std::abs(steps); ++step)
+      pitch = detail::spelledScaleStep(pitch, steps, spelling.tonic_pc, spelling.mode,
+                                       spelling.chord_pcs);
+    return pitch;
   };
 
   const int center = (band_lo + band_hi) / 2;
@@ -287,7 +329,7 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
     int best_pitch = -1;
     int best_score = 1 << 30;
     for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
-      if (!detail::inScale(pitch, mode)) {
+      if (!in_scale_at(pitch, note.start_tick)) {
         continue;
       }
       const bool consonant = isConsonantIc(pitch - source_pitch);
@@ -368,28 +410,31 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
   // sixteenth returning from an arpeggio can leap into an octave the anchor it
   // was derived from approached by step.
   //
-  // The two faults are ranked, never pooled: a candidate that sounds a true
-  // parallel is refused however clean it is of anything else, and the battuta
-  // is only allowed to choose among the candidates that already cleared the
-  // parallel. When nothing clears both, the parallel-free tone stands and keeps
-  // its battuta, because that trade only ever runs one way.
+  // The faults are ranked, never pooled: a candidate that sounds a true
+  // parallel is refused however clean it is of anything else, the contrary
+  // repeat of a perfect class only chooses among the parallel-free candidates,
+  // and the battuta among those clear of both. A repair never takes a tone that
+  // ranks worse than the one it replaces, so when nothing ranks better the
+  // proposed tone stands.
   auto refineAgainstEmitted = [&](int proposed, Tick tick) {
     if (previous_emitted < 0)
       return proposed;
     std::vector<ConcurrentMotion> motions;
     registry.concurrentMotions(previous_tick, tick, voice, /*num_voices=*/3, motions);
-    const auto has_parallel = [&](int candidate) {
-      return std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
-        return formsStrictPerfectParallel(previous_emitted, candidate, motion.prev, motion.curr);
-      });
+    const auto fault_rank = [&](int candidate) {
+      int rank = 0;
+      for (const ConcurrentMotion& motion : motions) {
+        if (formsStrictPerfectParallel(previous_emitted, candidate, motion.prev, motion.curr))
+          rank = std::max(rank, 3);
+        else if (formsAntiParallelPerfect(previous_emitted, candidate, motion.prev, motion.curr))
+          rank = std::max(rank, 2);
+        else if (formsBattuta(previous_emitted, candidate, motion.prev, motion.curr))
+          rank = std::max(rank, 1);
+      }
+      return rank;
     };
-    const auto has_battuta = [&](int candidate) {
-      return std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
-        return formsBattuta(previous_emitted, candidate, motion.prev, motion.curr);
-      });
-    };
-    const bool proposed_parallel = has_parallel(proposed);
-    if (!proposed_parallel && !has_battuta(proposed))
+    const int proposed_rank = fault_rank(proposed);
+    if (proposed_rank == 0)
       return proposed;
 
     std::vector<int> sounding;
@@ -398,17 +443,13 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
       return std::all_of(sounding.begin(), sounding.end(),
                          [&](int other) { return isConsonantIc(candidate - other); });
     };
-    // Nearest first in both sweeps, so a repair moves the line as little as the
-    // fault allows.
-    for (const bool also_battuta_free : {true, false}) {
-      if (!also_battuta_free && !proposed_parallel)
-        break;  // the proposed tone is already parallel-free; nothing to fall back to.
+    // Cleanest rank first, nearest first within it, so a repair moves the line
+    // as little as the fault allows.
+    for (int accept = 0; accept < proposed_rank; ++accept) {
       for (int degrees = 1; degrees <= 4; ++degrees) {
-        for (int candidate : {detail::scaleUp(proposed, degrees, mode),
-                              detail::scaleDown(proposed, degrees, mode)}) {
-          if (candidate < band_lo || candidate > band_hi || has_parallel(candidate))
-            continue;
-          if (also_battuta_free && has_battuta(candidate))
+        for (int candidate :
+             {walk_at(proposed, degrees, tick), walk_at(proposed, -degrees, tick)}) {
+          if (candidate < band_lo || candidate > band_hi || fault_rank(candidate) > accept)
             continue;
           if (consonant_here(candidate))
             return candidate;
@@ -443,15 +484,13 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
     // rotation already offers and needs no shape of its own.
     const int run_target = anchors[index + 1].pitch;
     const int toward = run_target >= anchor.pitch ? 1 : -1;
-    const int reach = toward > 0 ? detail::scaleUp(anchor.pitch, 3, mode)
-                                 : detail::scaleDown(anchor.pitch, 3, mode);
+    const int reach = walk_at(anchor.pitch, 3 * toward, anchor.tick);
     const bool has_room = toward > 0 ? run_target >= reach : run_target <= reach;
     if (figure == 1) {
       if (has_room) {
         int current = anchor.pitch;
         for (int slot = 1; slot < 4; ++slot) {
-          current =
-              toward > 0 ? detail::scaleUp(current, 1, mode) : detail::scaleDown(current, 1, mode);
+          current = walk_at(current, toward, anchor.tick + static_cast<Tick>(slot) * sixteenth);
           pitches[static_cast<std::size_t>(slot)] = std::clamp(current, band_lo, band_hi);
         }
       } else {
@@ -462,19 +501,15 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
         // beat that does not raise the contrary repeat: a beat of leaps here
         // arrives on perfect intervals against the entry it accompanies, and a
         // beat that crosses over its own tone reaches them by contrary motion.
-        const int away = toward > 0 ? detail::scaleDown(anchor.pitch, 1, mode)
-                                    : detail::scaleUp(anchor.pitch, 1, mode);
-        const int into = toward > 0 ? detail::scaleUp(anchor.pitch, 1, mode)
-                                    : detail::scaleDown(anchor.pitch, 1, mode);
+        const int away = walk_at(anchor.pitch, -toward, anchor.tick + sixteenth);
+        const int into = walk_at(anchor.pitch, toward, anchor.tick + 3 * sixteenth);
         pitches = {anchor.pitch, std::clamp(away, band_lo, band_hi), anchor.pitch,
                    std::clamp(into, band_lo, band_hi)};
       }
     } else {
       const int direction = anchor.pitch + 7 <= band_hi ? 1 : -1;
-      const int third = direction > 0 ? detail::scaleUp(anchor.pitch, 2, mode)
-                                      : detail::scaleDown(anchor.pitch, 2, mode);
-      const int fifth = direction > 0 ? detail::scaleUp(anchor.pitch, 4, mode)
-                                      : detail::scaleDown(anchor.pitch, 4, mode);
+      const int third = walk_at(anchor.pitch, 2 * direction, anchor.tick + sixteenth);
+      const int fifth = walk_at(anchor.pitch, 4 * direction, anchor.tick + 2 * sixteenth);
       pitches = {anchor.pitch, third, fifth, third};
     }
     for (int slot = 0; slot < 4; ++slot) {
@@ -566,7 +601,8 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     const int pcl = ((midi % 12) + 12) % 12;
     if (seventh_taken && pcl == seventh_pc)
       return false;
-    return downbeat ? is_chord_tone(midi) : (is_chord_tone(midi) || detail::inScale(midi, mode));
+    return downbeat ? is_chord_tone(midi)
+                    : (is_chord_tone(midi) || detail::inScale(midi, mode, &chord));
   };
   auto is_parallel = [&](int cand) {
     for (const ConcurrentMotion& motion : motions) {
@@ -942,6 +978,9 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
                             bool prefer_descending, bool lift_to_context,
                             std::uint8_t ts_numerator) {
   const Tick eighth = duration::kEighthNote;
+  // The approach sounds over the closing dominant, so it walks that chord's
+  // spelling: the minor run reaches the leading tone through the raised 6th.
+  constexpr detail::ChordSpec kDominant{7, false};
   const Tick prefinal_tick =
       ts_numerator == 3 ? ticks_per_bar / static_cast<Tick>(3) : ticks_per_bar / 2;
   const int run_len = static_cast<int>(prefinal_tick / eighth);  // 4 in 4/4, 2 in 3/4.
@@ -965,7 +1004,7 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
       }
     }
     if (last_pitch >= 0) {
-      const int run_entry = detail::scaleDown(prefinal, run_len, mode);
+      const int run_entry = detail::scaleDown(prefinal, run_len, mode, &kDominant);
       const int gap_plain = std::abs(last_pitch - run_entry);
       const int gap_lifted = std::abs(last_pitch - (run_entry + 12));
       if (gap_plain > 9 && gap_lifted < gap_plain && prefinal + 14 <= 86) {
@@ -981,25 +1020,18 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
                      [&](const MaterialNote& note) { return note.start_tick >= penult_bar_start; }),
       line.end());
 
-  // Approach run INTO the pre-final tone. Ascending by preference: in minor an
-  // ascent into the raised leading tone takes the melodic-minor sixth degree
-  // (A natural), avoiding the augmented second the natural-minor walk would
-  // make. When the ascent would dip below the band floor (a narrow band whose
-  // tonic hugs the floor), the run flips to a descent from above instead.
+  // Approach run INTO the pre-final tone. Ascending by preference; when the
+  // ascent would dip below the band floor (a narrow band whose tonic hugs the
+  // floor), the run flips to a descent from above instead.
   std::vector<int> run(static_cast<std::size_t>(run_len));
-  if (mode == detail::Mode::Minor && ((prefinal % 12) == 11)) {
-    // Melodic-minor ascent into the leading tone: ... Eb F G A(natural) -> B.
-    static constexpr int kMelodicOffsets[4] = {-8, -6, -4, -2};
-    for (int idx = 0; idx < run_len; ++idx)
-      run[static_cast<std::size_t>(idx)] = prefinal + kMelodicOffsets[4 - run_len + idx];
-  } else {
-    for (int idx = 0; idx < run_len; ++idx)
-      run[static_cast<std::size_t>(idx)] = detail::scaleDown(prefinal, run_len - idx, mode);
-  }
+  for (int idx = 0; idx < run_len; ++idx)
+    run[static_cast<std::size_t>(idx)] =
+        detail::scaleDown(prefinal, run_len - idx, mode, &kDominant);
   if (prefer_descending || run.front() < band_lo) {
     // Descending run from above: e.g. F E D C -> B.
     for (int idx = 0; idx < run_len; ++idx)
-      run[static_cast<std::size_t>(idx)] = detail::scaleUp(prefinal, run_len - idx, mode);
+      run[static_cast<std::size_t>(idx)] =
+          detail::scaleUp(prefinal, run_len - idx, mode, &kDominant);
   }
   if (downbeat_chord != nullptr) {
     // Snap the downbeat eighth to the nearest chord tone (the figuration

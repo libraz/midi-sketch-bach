@@ -45,6 +45,7 @@
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
 #include "composer/ornament_pass.h"
+#include "composer/rule_helpers.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
 #include "composer/validator.h"
@@ -1500,8 +1501,31 @@ TEST(FormFugueTest, FigurationBarsNeverStayCollapsedOnTwoPitchOscillation) {
 // whose every pitch stays inside the home (C-major) scale. A real +9
 // transposition would state it in A MAJOR, whose C#/F#/G# read as a second key
 // against the home-key figuration around the entry.
+// A minor stretto's leader is degree-shifted inside the home collection, so its
+// followers stay there too: no real transposition to the dominant key whose
+// raised 6th would strike a false relation against the leader.
+TEST(FormFugueTest, MinorStrettoFollowersStayInTheHomeCollection) {
+  const std::set<int> home_minor = {0, 2, 3, 5, 7, 8, 10, 11};  // with the leading tone
+  std::size_t followers = 0;
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, true, 64);
+    for (const StrettoDecl& stretto : fx.material.stretto_entries) {
+      ++followers;
+      for (const MaterialNote& note : stretto.follower_notes) {
+        EXPECT_TRUE(home_minor.count(note.pitch % 12) > 0)
+            << "seed " << seed << ": follower pitch " << static_cast<int>(note.pitch)
+            << " leaves the home minor collection";
+      }
+    }
+  }
+  EXPECT_GT(followers, 0u);
+}
+
+// The vi entry is spelled in A minor: the home collection, plus G sharp where
+// the subject's leading tone resolves up to the station's tonic.
 TEST(FormFugueTest, ViMiddleEntryStaysInsideHomeScale) {
   const std::set<int> home_scale = {0, 2, 4, 5, 7, 9, 11};
+  std::size_t raised_resolutions = 0;
   for (std::uint32_t seed : {8u, 42u, 99u}) {
     const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, 128);
     bool saw_vi = false;
@@ -1510,14 +1534,24 @@ TEST(FormFugueTest, ViMiddleEntryStaysInsideHomeScale) {
         continue;
       }
       saw_vi = true;
-      for (const auto& note : decl.notes) {
-        EXPECT_TRUE(home_scale.count(note.pitch % 12) > 0)
-            << "seed " << seed << ": vi middle-entry pitch " << static_cast<int>(note.pitch)
-            << " (pc " << static_cast<int>(note.pitch % 12) << ") leaves the home scale";
+      for (std::size_t idx = 0; idx < decl.notes.size(); ++idx) {
+        const int pitch = decl.notes[idx].pitch;
+        if (pitch % 12 == 8) {
+          const bool resolves =
+              idx + 1 < decl.notes.size() && decl.notes[idx + 1].pitch == pitch + 1;
+          EXPECT_TRUE(resolves) << "seed " << seed << ": vi G sharp at " << pitch
+                                << " does not resolve to the station's tonic";
+          ++raised_resolutions;
+          continue;
+        }
+        EXPECT_TRUE(home_scale.count(pitch % 12) > 0)
+            << "seed " << seed << ": vi middle-entry pitch " << pitch << " (pc " << pitch % 12
+            << ") leaves the home scale";
       }
     }
     EXPECT_TRUE(saw_vi) << "seed " << seed << ": 128-bar fugue declared no vi middle entry";
   }
+  EXPECT_GT(raised_resolutions, 0u) << "no vi entry kept its leading-tone resolution";
 }
 
 // A development long enough to spare a canonical restatement (>= 3 entry
@@ -1934,9 +1968,9 @@ TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
   // collection, so a note is admitted when it belongs to the key of its bar OR
   // to the home key -- what the contract forbids is a tone that belongs to
   // neither, which is what the negation trick produced. In minor the bar chords
-  // come from kHarmonyPatternsMinor whose major dominant contributes the
-  // harmonic leading tone, so that single chromatic degree is admitted for the
-  // home key and for the key of the bar alike;
+  // come from kHarmonyPatternsMinor whose major dominant raises the 6th and 7th
+  // (detail::spellScale), so those degrees are admitted under the chord at the
+  // note for the home key and for the key of the bar alike;
   // the held Picardy third (pc 4) in the final bar's inner voice is likewise a
   // sanctioned chromatic colour.
   for (std::uint32_t seed : kSeeds) {
@@ -1951,11 +1985,19 @@ TEST(FormFuguePreludeAndFugueTest, FigurationStaysDiatonic) {
                                 fx.harmony.is_minor};
           const bool picardy_third =
               minor && note.pitch % 12 == 4 && note.start_tick >= last_bar_tick;
+          // Minor degrees 6 and 7 take the spelling of the chord at the note
+          // (detail::spellScale): raised over the dominant.
+          const detail::PcMask harmony = rule_helpers::chordPcsAt(fx.harmony, note.start_tick);
+          const auto spelled = [&](const KeyContext& in) {
+            return detail::inSpelledScale(note.pitch, in.tonic_pc,
+                                          in.is_minor ? detail::Mode::Minor : detail::Mode::Major,
+                                          harmony);
+          };
           const bool leading_tone =
               (home.is_minor && note.pitch % 12 == (home.tonic_pc + 11) % 12) ||
               (key.is_minor && note.pitch % 12 == (key.tonic_pc + 11) % 12);
-          const bool diatonic =
-              inKey(note.pitch, key) || inKey(note.pitch, home) || leading_tone || picardy_third;
+          const bool diatonic = inKey(note.pitch, key) || inKey(note.pitch, home) || spelled(key) ||
+                                spelled(home) || leading_tone || picardy_third;
           EXPECT_TRUE(diatonic) << "seed " << seed << (minor ? " minor" : " major")
                                 << " figuration note pitch " << note.pitch << " (pc "
                                 << note.pitch % 12 << ") at tick " << note.start_tick

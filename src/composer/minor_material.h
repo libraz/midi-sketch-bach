@@ -150,25 +150,14 @@ inline constexpr std::array<std::array<std::uint8_t, 4>, 3> kGoldbergGroundsMino
 /**
  * @brief Walk `steps` scale degrees upward from `midi` in a C-minor context.
  *
- * Harmonic-context-aware minor scale walker. When `harmonic_context` is false
- * the scale is C natural minor (degrees C D Eb F G Ab Bb), identical in spirit
- * to chaconneScaleUp (but a NEW function -- chaconneScaleUp stays byte-pinned).
- *
- * When `harmonic_context` is true (an ascending line over a V chord that wants
- * the leading tone B natural) the scale switches to the MELODIC minor ascending
- * upper tetrachord: degree 6 is raised to A natural (pc 9) and degree 7 to B
- * natural (pc 11). This is the deliberate substitution that AVOIDS the Ab->B
- * augmented 2nd: an ascending run through the 6-7 region produces
- * ...G(7) -> A natural(9) -> B natural(11) -> C(0) rather than
- * ...G(7) -> Ab(8) -> B natural(11) (the forbidden aug-2nd). The lower
- * tetrachord (C D Eb F) is unchanged. When `harmonic_context` is false the
- * descending/plain natural-minor degrees Ab(8) and Bb(10) are used.
+ * With `harmonic_context` the walk is spelled over the dominant (spellScale):
+ * the 6th and 7th are raised, so an ascent reaches the leading tone through A
+ * natural rather than across the Ab-B augmented 2nd. Without it the walk is the
+ * plain C natural minor.
  *
  * @param midi Starting MIDI pitch.
  * @param steps Number of scale degrees to ascend (>= 0).
- * @param harmonic_context When true, use the melodic-minor ascending upper
- *        tetrachord (A natural / B natural) to reach the leading tone without
- *        an augmented 2nd; when false, use plain C natural minor.
+ * @param harmonic_context True over the dominant.
  * @return The MIDI pitch `steps` scale degrees above `midi`.
  */
 int minorScaleUp(int midi, int steps, bool harmonic_context);

@@ -127,9 +127,9 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, detail::Mode mod
   }
   const Tick step =
       notes_per_beat == 1 ? kQuarterDur : (notes_per_beat == 2 ? kEighth : kSixteenth);
-  auto step_dir = [&](int p, int d) {
-    return (d > 0) ? detail::scaleUp(p, 1, mode) : (detail::inScale(p - 1, mode) ? p - 1 : p - 2);
-  };
+  // Fills walk the scale as spelled under the bar's chord (detail::spellScale).
+  const detail::ChordSpec harmony{chord.root_pc, chord.minor};
+  auto step_dir = [&](int p, int d) { return detail::melodicScaleStep(p, d, mode, &harmony); };
   for (int beat = 0; beat < 4; ++beat) {
     const int from = anchor[static_cast<std::size_t>(beat)];
     const int to = anchor[static_cast<std::size_t>((beat + 1) % 4)];
@@ -141,7 +141,7 @@ void emitAnchoredBar(int bar, int start, const BarChord& chord, detail::Mode mod
       int cur = from;
       for (int sub = 0; sub < 4; ++sub) {
         if (sub == 1) {
-          cur = detail::scaleUp(from, 5, mode);
+          cur = detail::scaleUp(from, 5, mode, &harmony);
         } else if (sub > 1) {
           cur = step_dir(cur, -1);
         }

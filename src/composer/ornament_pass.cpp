@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <initializer_list>
 #include <vector>
 
@@ -43,7 +44,6 @@ bool cadenceTrillOpensVonUnten(std::uint32_t seed, int bar, VoiceId voice) {
 
 namespace {
 
-using detail::inScale;
 using detail::Mode;
 
 constexpr Tick kQuarter = duration::kQuarterNote;  // 480
@@ -52,61 +52,58 @@ constexpr Tick kEighth = duration::kEighthNote;    // 240
 constexpr int kMidiMin = 0;
 constexpr int kMidiMax = 127;
 
-// Diatonic upper neighbour of `pitch` in `mode`. Walks up by semitone until a
-// scale member is reached. Returns -1 when no in-range neighbour exists.
-//
-// Minor-mode auxiliaries need no melodic-minor raising here: the cadential
-// trill sites are the leading tone (B natural, upper auxiliary C = tonic, a
-// half step) and the supertonic (D, upper auxiliary Eb = the diatonic third, a
-// half-step trill that is the idiomatic minor-cadence figure). The natural
-// minor membrane already yields both.
-int upperNeighbour(int pitch, Mode mode, const HarmonicPlan* plan, Tick tick) {
-  for (int add = 1; add <= 2; ++add) {
-    const int cand = pitch + add;
-    if (cand > kMidiMax)
-      return -1;
-    if ((plan != nullptr &&
-         rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), *plan, tick, 1)) ||
-        (plan == nullptr && inScale(cand, mode)))
-      return cand;
+// Auxiliary tones are the next letter above or below the main note in the key
+// as spelled at the note (detail::spellScale): the local key and its chord when
+// a plan is supplied, the home key without one. A cadence context spells the
+// local dominant, so the tonic's lower auxiliary is the leading tone and the
+// leading tone's is the raised 6th.
+struct AuxiliarySpelling {
+  int tonic_pc = 0;
+  Mode mode = Mode::Major;
+  detail::PcMask chord_pcs = 0;
+};
+
+AuxiliarySpelling auxiliarySpellingAt(Mode mode, bool cadence_context, const HarmonicPlan* plan,
+                                      Tick tick) {
+  AuxiliarySpelling spelling;
+  spelling.mode = mode;
+  if (plan != nullptr) {
+    const rule_helpers::KeyContext key = rule_helpers::keyAt(*plan, tick);
+    spelling.tonic_pc = key.tonic_pc;
+    spelling.mode = key.is_minor ? Mode::Minor : Mode::Major;
+    spelling.chord_pcs = rule_helpers::chordPcsAt(*plan, tick);
   }
-  return -1;
+  if (cadence_context) {
+    const detail::ChordSpec dominant{static_cast<std::uint8_t>((spelling.tonic_pc + 7) % 12),
+                                     false};
+    spelling.chord_pcs =
+        static_cast<detail::PcMask>(spelling.chord_pcs | detail::chordPcMask(dominant));
+  }
+  return spelling;
 }
 
-// Diatonic lower neighbour of `pitch` in `mode`. In minor at a cadence the
-// degree just below the tonic must be the raised leading tone (B natural below
-// C), not the natural-minor subtonic (Bb), so a descending neighbour reaching
-// the tonic does not undershoot to a whole step where a half step is wanted.
-// `cadence_context` selects that raised-leading-tone neighbour when the main
-// tone is a tonic-class pitch in minor mode. Returns -1 when no in-range
+// One letter away from `pitch` in `direction`, or -1 when it leaves the MIDI
+// range or is wider than a whole tone (an augmented second is no auxiliary).
+int auxiliaryStep(int pitch, int direction, const AuxiliarySpelling& spelling) {
+  const int cand = detail::spelledScaleStep(pitch, direction, spelling.tonic_pc, spelling.mode,
+                                            spelling.chord_pcs);
+  if (cand < kMidiMin || cand > kMidiMax || std::abs(cand - pitch) > 2)
+    return -1;
+  return cand;
+}
+
+// Diatonic upper neighbour of `pitch`. Returns -1 when no in-range neighbour
+// exists.
+int upperNeighbour(int pitch, Mode mode, const HarmonicPlan* plan, Tick tick) {
+  return auxiliaryStep(pitch, 1, auxiliarySpellingAt(mode, /*cadence_context=*/false, plan, tick));
+}
+
+// Diatonic lower neighbour of `pitch`. `cadence_context` spells it over the
+// local dominant (see auxiliarySpellingAt). Returns -1 when no in-range
 // neighbour exists.
 int lowerNeighbour(int pitch, Mode mode, bool cadence_context, const HarmonicPlan* plan,
                    Tick tick) {
-  if (mode == Mode::Minor && cadence_context) {
-    const int pc = pitch % 12;
-    if (pc == 0) {
-      // Leading tone B natural sits one semitone below the C tonic.
-      const int cand = pitch - 1;
-      return cand >= kMidiMin ? cand : -1;
-    }
-    if (pc == 11) {
-      // Below the raised leading tone the melodic-minor sixth degree (A
-      // natural) is wanted, not the natural-minor Bb which would put a
-      // chromatic Bb-B step inside the Nachschlag.
-      const int cand = pitch - 2;
-      return cand >= kMidiMin ? cand : -1;
-    }
-  }
-  for (int sub = 1; sub <= 2; ++sub) {
-    const int cand = pitch - sub;
-    if (cand < kMidiMin)
-      return -1;
-    if ((plan != nullptr &&
-         rule_helpers::isContextualScalePitch(static_cast<std::uint8_t>(cand), *plan, tick, -1)) ||
-        (plan == nullptr && inScale(cand, mode)))
-      return cand;
-  }
-  return -1;
+  return auxiliaryStep(pitch, -1, auxiliarySpellingAt(mode, cadence_context, plan, tick));
 }
 
 // A ready-to-emit ornament expansion: the sub-notes that replace one candidate
@@ -241,16 +238,16 @@ Expansion buildTurn(const NoteEvent& base, int upper, int lower) {
 // third below (two steps below, then one step below), then the held main
 // tone -- the figure fills the gap a rising leap left open underneath the
 // arrival tone. Total duration is preserved.
-Expansion buildSlide(const NoteEvent& base, Mode mode) {
+Expansion buildSlide(const NoteEvent& base, Mode mode, const HarmonicPlan* plan) {
   Expansion exp;
   const Tick sub = duration::kThirtySecondNote;
   if (base.duration < 4 * sub)
     return exp;
-  const int below1 = lowerNeighbour(base.pitch, mode, /*cadence_context=*/false,
-                                    /*plan=*/nullptr, base.start_tick);
-  const int below2 = below1 >= 0 ? lowerNeighbour(below1, mode, /*cadence_context=*/false,
-                                                  /*plan=*/nullptr, base.start_tick)
-                                 : -1;
+  const int below1 =
+      lowerNeighbour(base.pitch, mode, /*cadence_context=*/false, plan, base.start_tick);
+  const int below2 =
+      below1 >= 0 ? lowerNeighbour(below1, mode, /*cadence_context=*/false, plan, base.start_tick)
+                  : -1;
   if (below2 < 0)
     return exp;
 
@@ -1062,7 +1059,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           } else if (want_turn) {
             exp = buildTurn(note, upper, lower);
           } else if (want_slide) {
-            exp = buildSlide(note, params.mode);
+            exp = buildSlide(note, params.mode, params.harmonic_plan);
           } else if (want_mordent) {
             exp = buildMordent(note, lower);
           } else if (want_trill) {

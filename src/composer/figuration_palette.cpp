@@ -74,6 +74,31 @@ bool arrivesOnPerfectWithGround(int previous_pitch, int arrival_pitch, int groun
   return interval_class == 0 || interval_class == 7;
 }
 
+/// @brief The chord a ground-cycle bar declares, as the scale walkers read it.
+detail::ChordSpec cycleBarChord(const CycleBar& bar) {
+  return detail::ChordSpec{bar.root_pc, bar.minor, bar.seventh};
+}
+
+/// @brief Keep the last fill tone before a cycle anchor off an augmented second.
+///
+/// The fill is spelled under its own bar's chord and the anchor under the next
+/// bar's, so a fill reaching the minor dominant's leading tone from the lowered
+/// 6th (or leaving it for that 6th) forms an augmented second at the bar line.
+/// Such a fill approaches the anchor from its other side instead.
+/// @return The fill's degree, possibly moved to the anchor's other neighbour.
+int fillClearOfAugmentedSecond(int fill_deg, int anchor_deg, const detail::ChordSpec& fill_chord,
+                               const detail::ChordSpec& anchor_chord, detail::Mode mode) {
+  const int anchor = degreeToMidi(anchor_deg, mode, &anchor_chord);
+  if (fill_deg == anchor_deg ||
+      !detail::isAugmentedSecondClass(degreeToMidi(fill_deg, mode, &fill_chord), anchor, 0, mode))
+    return fill_deg;
+  const int other_side = anchor_deg + (fill_deg < anchor_deg ? 1 : -1);
+  return detail::isAugmentedSecondClass(degreeToMidi(other_side, mode, &fill_chord), anchor, 0,
+                                        mode)
+             ? fill_deg
+             : other_side;
+}
+
 /// @brief Resolve a ground cycle's per-beat chord-tone anchor-degree chain.
 ///
 /// Each anchor takes the octave of its chord tone NEAREST the previous anchor,
@@ -103,6 +128,11 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
   // so the bar-to-bar step at one beat is the only motion it can parallel.
   int prior_beat_pitch[3] = {-1, -1, -1};
   int beat_pitch[3] = {-1, -1, -1};
+  // The previous anchor's parallel-free alternatives and the pitch it was
+  // reached from, so a bar head forced onto a tone the previous anchor reaches
+  // by an augmented second can re-pick that anchor instead.
+  std::vector<int> previous_choices;
+  int previous_from = -1;
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
     const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
@@ -151,20 +181,69 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
           fit += 12;
         return fit;
       };
+      // An anchor the line reaches across an augmented second: from the anchor
+      // before it directly, or from the fill tone a step short of it, which is
+      // spelled under the chord it sounds in (the previous bar's at a bar head).
+      // Keeping the minor dominant's leading tone makes this reachable from a
+      // lowered 6th in the bar before.
+      const detail::ChordSpec arriving_from = cycleBarChord(
+          beat == 0 && bar > 0 ? cycle_bar_plan[static_cast<std::size_t>(bar - 1)] : plan);
+      const auto reachedFrom = [&](int from, int candidate) {
+        if (candidate == from)
+          return false;
+        const int approach =
+            detail::melodicScaleStep(candidate, from - candidate, mode, &arriving_from);
+        return detail::isAugmentedSecondClass(from, candidate, 0, mode) ||
+               detail::isAugmentedSecond(approach, candidate, 0, mode);
+      };
+      const auto reachedByAugmentedSecond = [&](int candidate) {
+        return reachedFrom(running, candidate);
+      };
       // The seventh is offered last by barAnchorPitchClasses.
       const int base = (beat == seventh_beat) ? choices - 1 : (anchor_rotation + beat) % choices;
       int fit = 0;
-      for (int offset = 0; offset < choices; ++offset) {
-        const int anchor_pc = pcs[static_cast<std::size_t>((base + offset) % choices)];
-        const int candidate = realizeAnchor(anchor_pc);
-        if (offset == 0)
-          fit = candidate;  // the rotation's own class, kept when no alternative is clean.
-        if (!arrivesOnPerfectWithGround(prior_beat_pitch[beat], candidate, plan.ground_pc,
-                                        ground_dir)) {
-          fit = candidate;
+      bool placed = false;
+      std::vector<int> choices_here;
+      for (int pass = 0; pass < 2 && !placed; ++pass) {
+        for (int offset = 0; offset < choices; ++offset) {
+          const int anchor_pc = pcs[static_cast<std::size_t>((base + offset) % choices)];
+          const int candidate = realizeAnchor(anchor_pc);
+          if (pass == 0 && offset == 0)
+            fit = candidate;  // the rotation's own class, kept when no alternative is clean.
+          if (arrivesOnPerfectWithGround(prior_beat_pitch[beat], candidate, plan.ground_pc,
+                                         ground_dir))
+            continue;
+          if (pass == 0)
+            choices_here.push_back(candidate);
+          if (pass == 0 && reachedByAugmentedSecond(candidate))
+            continue;
+          if (!placed) {
+            fit = candidate;
+            placed = true;
+          }
+          if (pass == 1)
+            break;
+        }
+      }
+      // Forced onto a tone the previous anchor reaches by an augmented second:
+      // re-pick the previous anchor from its own clean alternatives.
+      if (!anchor_deg.empty() && reachedByAugmentedSecond(fit)) {
+        for (int alternative : previous_choices) {
+          if (alternative == running || reachedFrom(alternative, fit) ||
+              (previous_from >= 0 &&
+               detail::isAugmentedSecondClass(previous_from, alternative, 0, mode)))
+            continue;
+          anchor_deg.back() = midiToDegree(alternative, mode);
+          if (beat == 0)
+            prior_beat_pitch[2] = alternative;
+          else
+            beat_pitch[beat - 1] = alternative;
+          running = alternative;
           break;
         }
       }
+      previous_choices = std::move(choices_here);
+      previous_from = running;
       anchor_deg.push_back(midiToDegree(fit, mode));
       beat_pitch[beat] = fit;
       running = fit;
@@ -179,15 +258,11 @@ std::vector<int> resolveAnchorDegrees(const std::vector<CycleBar>& cycle_bar_pla
 ///
 /// The bass is the lowest root-class pitch at or above `band_lo`; the third
 /// and fifth stack upward from it. Any tone that escapes `band_hi` folds down
-/// by whole octaves (it stays a chord tone, only the voicing inverts). In
-/// minor the leading tone B natural (pc 11, the harmonic-minor dominant
-/// third) is lowered to the natural-minor third so the broken-chord line
-/// stays in natural minor and no Ab->B augmented 2nd can arise.
-void stackTriadInBand(std::uint8_t root_pc, bool minor, detail::Mode mode, int band_lo, int band_hi,
+/// by whole octaves (it stays a chord tone, only the voicing inverts). The
+/// tones are the chord's own, so the minor dominant sounds its leading tone.
+void stackTriadInBand(std::uint8_t root_pc, bool minor, int band_lo, int band_hi,
                       int out_tones[3]) {
-  int third_interval = minor ? 3 : 4;
-  if (mode == detail::Mode::Minor && (root_pc + third_interval) % 12 == 11)
-    third_interval = 3;  // natural-minor third: keep the line off the leading tone.
+  const int third_interval = minor ? 3 : 4;
   const int pcs[3] = {root_pc % 12, (root_pc + third_interval) % 12, (root_pc + 7) % 12};
   int cursor = band_lo;
   for (int i = 0; i < 3; ++i) {
@@ -233,8 +308,8 @@ int chordToneAbove(int from, std::uint8_t root_pc, bool minor) {
 
 }  // namespace
 
-int degreeToMidi(int degree, detail::Mode mode) {
-  return detail::scaleUp(kDegreeBase, degree, mode);
+int degreeToMidi(int degree, detail::Mode mode, const detail::ChordSpec* chord) {
+  return detail::scaleUp(kDegreeBase, degree, mode, chord);
 }
 
 int midiToDegree(int midi, detail::Mode mode) {
@@ -254,21 +329,19 @@ int fitPitchClass(int pitch_class, int center) {
 
 std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
   const int third = bar.minor ? 3 : 4;
+  const detail::ChordSpec harmony = cycleBarChord(bar);
   std::vector<int> anchors;
   anchors.reserve(4);
   for (int interval : {0, third, 7}) {
     int pitch_class = (bar.root_pc + interval) % 12;
-    // Flatten out-of-scale triad tones to the scale tone a semitone below
-    // (every chromatic pitch class sits one semitone above a scale member in
-    // both C major and C natural minor) BEFORE the consonance filter. The
-    // anchors feed degree-space chains (midiToDegree / degreeToMidi) that can
-    // only realize scale tones, so an unflattened tone would degrade there
-    // silently and SKIP the consonance check -- e.g. the A of a D-F-A triad
-    // realizing as Ab, a tritone over a D ground. Explicit flattening keeps
-    // the useful cases (a major-mode B-root triad's D# anchoring as D) and
-    // lets the filter reject the dissonant ones (that triad's F# -> F, a
-    // tritone over the B ground).
-    if (!detail::inScale(pitch_class, mode))
+    // Flatten a triad tone the scale does not spell under this chord to the
+    // scale tone a semitone below BEFORE the consonance filter. The anchors
+    // feed degree-space chains (midiToDegree / degreeToMidi) that realize only
+    // spelled tones, so an unflattened tone would degrade there silently and
+    // SKIP the consonance check -- e.g. the A of a D-F-A triad realizing as Ab,
+    // a tritone over a D ground. The minor dominant's own leading tone is
+    // spelled under its chord and stays.
+    if (!detail::inScale(pitch_class, mode, &harmony))
       pitch_class = (pitch_class + 11) % 12;
     if (!isConsonantIc(pitch_class - bar.ground_pc))
       continue;
@@ -283,10 +356,8 @@ std::vector<int> barAnchorPitchClasses(const CycleBar& bar, detail::Mode mode) {
   // one. Filtering it would take the dominant's own defining interval away from
   // the only voice able to state it. It joins the rotation last so a bar still
   // opens on a triad tone at rotation zero.
-  if (bar.seventh) {
-    const detail::ChordSpec chord{bar.root_pc, bar.minor, true};
-    anchors.push_back(detail::chordSeventhPc(chord));
-  }
+  if (bar.seventh)
+    anchors.push_back(detail::chordSeventhPc(harmony));
   if (anchors.empty())
     anchors.push_back(bar.root_pc % 12);  // defensive: root is always consonant.
   return anchors;
@@ -335,18 +406,25 @@ void appendSawtoothCycle(std::vector<MaterialNote>& notes, Tick block_start,
       // repeats this one (span == 0, possible across a chord change that keeps
       // the anchor pitch class), the fill oscillates to the diatonic neighbour
       // toward the register center instead of holding.
+      const detail::ChordSpec harmony =
+          cycleBarChord(cycle_bar_plan[static_cast<std::size_t>(bar)]);
       int degree = from_deg;
       if (sub > 0) {
         if (span == 0) {
-          const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
+          const int osc = (degreeToMidi(from_deg, mode, &harmony) >= center) ? -1 : 1;
           degree = from_deg + ((sub % 2 == 1) ? osc : 0);
         } else {
           degree = from_deg + dir * sub;
           if (sub == notes_per_beat - 1 && degree == to_deg)
             degree = to_deg + dir;
         }
+        if (sub == notes_per_beat - 1 && onset + 1 < onset_count) {
+          degree = fillClearOfAugmentedSecond(
+              degree, to_deg, harmony,
+              cycleBarChord(cycle_bar_plan[static_cast<std::size_t>((onset + 1) / 3)]), mode);
+        }
       }
-      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
+      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode, &harmony));
       notes.push_back(mnote);
     }
   }
@@ -371,6 +449,7 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
+    const detail::ChordSpec harmony = cycleBarChord(plan);
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -394,19 +473,23 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
         // harmony rather than a wave tone that wandered off it. Snapping it
         // would take the dominant's defining tone back out of the only voice
         // sounding above the ground.
-        const int wave_midi = degreeToMidi(degree, mode);
+        const int wave_midi = degreeToMidi(degree, mode, &harmony);
         const bool holds_declared_seventh =
-            plan.seventh && ((wave_midi % 12) == detail::chordSeventhPc(detail::ChordSpec{
-                                                     plan.root_pc, plan.minor, true}));
+            plan.seventh && ((wave_midi % 12) == detail::chordSeventhPc(harmony));
         // A bar the plan spells as a dominant snaps whatever the wave tone is
         // doing, not only when it clashes with the ground. Everywhere else the
         // wave's contract is negative -- do not contradict the bass -- and a
         // consonant free tone satisfies it; a dominant is a harmony that has to
         // be STATED, and a wave that merely avoids the ground states nothing.
+        // A wave crossing into the dominant's leading tone from the lowered 6th
+        // of the bar before is an augmented second, and snaps like a clash.
+        const bool augmented_arrival =
+            last_midi >= 0 && detail::isAugmentedSecondClass(last_midi, wave_midi, 0, mode);
         if (sub == 0 && !holds_declared_seventh &&
-            (plan.seventh || !isConsonantIc(wave_midi - static_cast<int>(plan.ground_pc)))) {
+            (plan.seventh || augmented_arrival ||
+             !isConsonantIc(wave_midi - static_cast<int>(plan.ground_pc)))) {
           const std::vector<int> pcs = barAnchorPitchClasses(plan, mode);
-          const int cur_midi = degreeToMidi(degree, mode);
+          const int cur_midi = degreeToMidi(degree, mode, &harmony);
           int best_midi = cur_midi;
           int best_dist = 128;
           int best_fwd_midi = cur_midi;
@@ -418,7 +501,8 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
                 continue;
               // Never snap back onto the pitch just emitted: a backward snap
               // re-attacks the previous note and reads as a stalled repeat.
-              if (oct == last_midi)
+              if (oct == last_midi ||
+                  (last_midi >= 0 && detail::isAugmentedSecondClass(last_midi, oct, 0, mode)))
                 continue;
               const int dist = std::abs(oct - cur_midi);
               if (dist < best_dist) {
@@ -441,7 +525,7 @@ void appendScalarWaveCycle(std::vector<MaterialNote>& notes, Tick block_start,
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
-        mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode));
+        mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(degree, mode, &harmony));
         notes.push_back(mnote);
         last_midi = static_cast<int>(mnote.pitch);
         // Advance one diatonic step, folding direction at the band edges so the
@@ -481,9 +565,9 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
     while (!is_triad(anchor)) {
       ++anchor;
     }
-    anchor = detail::scaleUp(anchor, offset, mode);
+    anchor = detail::scaleUp(anchor, offset, mode, &chord);
     while (!is_triad(anchor)) {
-      anchor = detail::scaleUp(anchor, 1, mode);
+      anchor = detail::scaleUp(anchor, 1, mode, &chord);
     }
     if (anchor > anchor_hi) {
       anchor = base_midi;
@@ -532,13 +616,14 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
   int dir = 1;
   wave.push_back(cursor);
   for (int idx = 1; idx <= notes / 2; ++idx) {
-    int next = (dir > 0) ? detail::scaleUp(cursor, 1, mode) : detail::scaleDown(cursor, 1, mode);
+    int next = (dir > 0) ? detail::scaleUp(cursor, 1, mode, &chord)
+                         : detail::scaleDown(cursor, 1, mode, &chord);
     if (next > ceil_midi) {
       dir = -1;
-      next = detail::scaleDown(cursor, 1, mode);
+      next = detail::scaleDown(cursor, 1, mode, &chord);
     } else if (next < base_midi) {
       dir = 1;
-      next = detail::scaleUp(cursor, 1, mode);
+      next = detail::scaleUp(cursor, 1, mode, &chord);
     }
     cursor = std::clamp(next, base_midi, ceil_midi);
     wave.push_back(cursor);
@@ -559,8 +644,8 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
       // into thirds while the contour endpoints stay put.
       for (std::size_t idx = 1; idx + 1 < wave.size(); idx += 2) {
         const int local_dir = (wave[idx + 1] >= wave[idx - 1]) ? 1 : -1;
-        const int cand = (local_dir > 0) ? detail::scaleUp(wave[idx], 1, mode)
-                                         : detail::scaleDown(wave[idx], 1, mode);
+        const int cand = (local_dir > 0) ? detail::scaleUp(wave[idx], 1, mode, &chord)
+                                         : detail::scaleDown(wave[idx], 1, mode, &chord);
         if (cand >= base_midi && cand <= ceil_midi) {
           wave[idx] = cand;
         }
@@ -572,10 +657,10 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
       // nearest-chord-tone anchor chain.
       const std::size_t dive_start = wave.size() / 2;
       const int degrees = (((bar + offset) / 4) % 2 == 0) ? 3 : 4;
-      const bool down_ok = detail::scaleDown(wave[dive_start], degrees, mode) >= base_midi;
+      const bool down_ok = detail::scaleDown(wave[dive_start], degrees, mode, &chord) >= base_midi;
       for (std::size_t idx = dive_start; idx < wave.size(); ++idx) {
-        const int cand = down_ok ? detail::scaleDown(wave[idx], degrees, mode)
-                                 : detail::scaleUp(wave[idx], degrees, mode);
+        const int cand = down_ok ? detail::scaleDown(wave[idx], degrees, mode, &chord)
+                                 : detail::scaleUp(wave[idx], degrees, mode, &chord);
         if (cand >= base_midi && cand <= ceil_midi) {
           wave[idx] = cand;
         }
@@ -602,8 +687,8 @@ void appendScalarWaveBar(std::vector<MaterialNote>& dst, int bar, const detail::
         int cur = std::clamp(anchor, floor_tone, leap_to);
         cascade.push_back(cur);
         while (cascade.size() < wave.size()) {
-          cur =
-              (cur <= floor_tone) ? leap_to : std::max(detail::scaleDown(cur, 1, mode), floor_tone);
+          cur = (cur <= floor_tone) ? leap_to
+                                    : std::max(detail::scaleDown(cur, 1, mode, &chord), floor_tone);
           cascade.push_back(cur);
         }
         wave = std::move(cascade);
@@ -672,9 +757,9 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // shifted by the seed offset, kept clear of the band ceiling so a stepwise
   // fill never runs out of band. The per-beat anchor chain is gently pulled
   // back toward this centre so the conjunct walk cannot drift out of band.
-  int center = detail::scaleUp(band_lo, offset + 2, mode);
+  int center = detail::scaleUp(band_lo, offset + 2, mode, &chord);
   if (center > band_hi - 4) {
-    center = detail::scaleUp(band_lo, offset, mode);
+    center = detail::scaleUp(band_lo, offset, mode, &chord);
   }
   if (prev_anchor <= 0) {
     // Section seam: a fresh figuration span has no threaded anchor, but this
@@ -720,7 +805,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // chain keeps its net slope until it reflects at the working band edge.
   int arc_dir = dir;
   auto stepScale = [&](int from, int direction) {
-    return direction > 0 ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
+    return direction > 0 ? detail::scaleUp(from, 1, mode, &chord)
+                         : detail::scaleDown(from, 1, mode, &chord);
   };
   // Fold a clamped candidate back into the diatonic set, stepping toward the
   // roomier side of [lo, hi]. The voice-band edges themselves are chromatic
@@ -730,7 +816,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // voice, where the unison-class tone is at least order-safe).
   auto foldIntoScale = [&](int candidate, int lo, int hi) {
     int folded = candidate;
-    while (!detail::inScale(folded, mode)) {
+    while (!detail::inScale(folded, mode, &chord)) {
       folded += (hi - folded >= folded - lo) ? 1 : -1;
       if (folded < lo || folded > hi) {
         return candidate;
@@ -742,11 +828,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
   // at the working band edges (like the single-step wave) and clamping to the
   // voice band.
   auto leapScale = [&](int from_pitch, int degrees, int direction) {
-    int candidate = direction > 0 ? detail::scaleUp(from_pitch, degrees, mode)
-                                  : detail::scaleDown(from_pitch, degrees, mode);
+    int candidate = direction > 0 ? detail::scaleUp(from_pitch, degrees, mode, &chord)
+                                  : detail::scaleDown(from_pitch, degrees, mode, &chord);
     if (candidate > wave_hi || candidate < wave_lo) {
-      candidate = direction > 0 ? detail::scaleDown(from_pitch, degrees, mode)
-                                : detail::scaleUp(from_pitch, degrees, mode);
+      candidate = direction > 0 ? detail::scaleDown(from_pitch, degrees, mode, &chord)
+                                : detail::scaleUp(from_pitch, degrees, mode, &chord);
     }
     return foldIntoScale(std::clamp(candidate, band_lo, band_hi), band_lo, band_hi);
   };
@@ -990,7 +1076,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               for (int dist = 1; dist <= span && !relaxed; ++dist) {
                 for (const int sgn : {-1, 1}) {
                   const int cand = snapped + sgn * dist;
-                  if (!detail::inScale(cand, mode) || !anchor_free(cand)) {
+                  if (!detail::inScale(cand, mode, &chord) || !anchor_free(cand)) {
                     continue;
                   }
                   if (!allow_grind && grinds(cand)) {
@@ -1305,8 +1391,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           // candidates the escape already holds equal and never buys the change
           // with a worse approach.
           const int reversed = step_from(-dir);
-          const int skip_up = detail::scaleUp(from, 2, mode);
-          const int skip_down = detail::scaleDown(from, 2, mode);
+          const int skip_up = detail::scaleUp(from, 2, mode, &chord);
+          const int skip_down = detail::scaleDown(from, 2, mode, &chord);
           bool escaped = false;
           for (int accept = kStepClean; accept < next_rank && !escaped; ++accept) {
             if (step_rank(reversed) <= accept && !completes_shake(reversed)) {
@@ -1413,8 +1499,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             // A scale-third skip is the smallest non-step move and reads as an
             // ordinary chord-tone skip inside figuration.
             for (const int skip_dir : {dir, -dir}) {
-              const int skip = (skip_dir > 0) ? detail::scaleUp(from, 2, mode)
-                                              : detail::scaleDown(from, 2, mode);
+              const int skip = (skip_dir > 0) ? detail::scaleUp(from, 2, mode, &chord)
+                                              : detail::scaleDown(from, 2, mode, &chord);
               if (skip < wave_lo || skip > wave_hi) {
                 continue;
               }
@@ -1460,7 +1546,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           // diatonic tone inside it so the line never stalls into a long run.
           if (next == from && order_floor < order_ceiling) {
             int up = stepScale(from, 1);
-            int down = detail::scaleDown(from, 1, mode);
+            int down = detail::scaleDown(from, 1, mode, &chord);
             if (up <= order_ceiling && up != from) {
               next = up;
             } else if (down >= order_floor && down != from) {
@@ -1509,14 +1595,26 @@ constexpr int kArpeggioFigures[4][4] = {
 void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
                          const std::vector<CycleBar>& cycle_bar_plan, int band_lo, int band_hi,
                          int figure_index, int notes_per_beat, detail::Mode mode) {
-  const int* figure = kArpeggioFigures[((figure_index % 4) + 4) % 4];
+  const int base_figure = ((figure_index % 4) + 4) % 4;
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
 
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  int previous = -1;
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan_bar = cycle_bar_plan[static_cast<std::size_t>(bar)];
     int tones[3];
-    stackTriadInBand(plan_bar.root_pc, plan_bar.minor, mode, band_lo, band_hi, tones);
+    stackTriadInBand(plan_bar.root_pc, plan_bar.minor, band_lo, band_hi, tones);
+    // Each bar is stacked on its own chord, so the bar line joins two chords'
+    // tones; a contour opening an augmented second (or its diminished seventh)
+    // from the last tone yields to the next contour that does not.
+    const int* figure = kArpeggioFigures[base_figure];
+    for (int shift = 0; shift < 4 && previous >= 0; ++shift) {
+      const int* trial = kArpeggioFigures[(base_figure + shift) % 4];
+      if (!detail::isAugmentedSecondClass(previous, tones[trial[0]], 0, mode)) {
+        figure = trial;
+        break;
+      }
+    }
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -1529,6 +1627,7 @@ void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
         // tier walks the contour one element per BEAT for the same reason.
         mnote.pitch = static_cast<std::uint8_t>(tones[figure[notes_per_beat == 1 ? beat : sub]]);
         notes.push_back(mnote);
+        previous = mnote.pitch;
       }
     }
   }
@@ -1537,10 +1636,11 @@ void appendArpeggioCycle(std::vector<MaterialNote>& notes, Tick block_start,
 void appendArpeggioBar(std::vector<MaterialNote>& notes, int bar, const detail::ChordSpec& chord,
                        detail::Mode mode, int band_lo, int band_hi, int figure_index,
                        int notes_per_beat) {
+  (void)mode;  // chord tones only; the triad spells itself.
   const int* figure = kArpeggioFigures[((figure_index % 4) + 4) % 4];
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
   int tones[3];
-  stackTriadInBand(chord.root_pc, chord.minor, mode, band_lo, band_hi, tones);
+  stackTriadInBand(chord.root_pc, chord.minor, band_lo, band_hi, tones);
   for (int beat = 0; beat < 4; ++beat) {
     const Tick beat_tick = barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat;
     for (int sub = 0; sub < notes_per_beat; ++sub) {
@@ -1596,22 +1696,26 @@ void appendFiguraCortaBar(std::vector<MaterialNote>& notes, int bar, int start,
     // double of the following attack) is bent instead of held: the reference
     // corpus almost never repeats a pitch, so a held short reads as a stalled
     // line, not an idiom.
-    int w1 = (dir > 0) ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
-    int w2 = (dir > 0) ? detail::scaleUp(w1, 1, mode) : detail::scaleDown(w1, 1, mode);
+    int w1 = (dir > 0) ? detail::scaleUp(from, 1, mode, &chord)
+                       : detail::scaleDown(from, 1, mode, &chord);
+    int w2 =
+        (dir > 0) ? detail::scaleUp(w1, 1, mode, &chord) : detail::scaleDown(w1, 1, mode, &chord);
     if (to == from) {
       // Held anchor: a turn figure (upper then lower neighbour) keeps all four
       // boundary transitions stepwise and repeat-free.
-      w1 = detail::scaleUp(from, 1, mode);
-      w2 = detail::scaleDown(from, 1, mode);
+      w1 = detail::scaleUp(from, 1, mode, &chord);
+      w2 = detail::scaleDown(from, 1, mode, &chord);
     } else if ((dir > 0 && w1 >= to) || (dir < 0 && w1 <= to)) {
       // Adjacent anchors: a returning neighbour on the far side, so the cell
       // closes on `from` and the next attack is a fresh step.
-      w1 = (dir > 0) ? detail::scaleDown(from, 1, mode) : detail::scaleUp(from, 1, mode);
+      w1 = (dir > 0) ? detail::scaleDown(from, 1, mode, &chord)
+                     : detail::scaleUp(from, 1, mode, &chord);
       w2 = from;
     } else if ((dir > 0 && w2 >= to) || (dir < 0 && w2 <= to)) {
       // Anchors a third apart: passing tone, then an echappee one step beyond
       // the next anchor, resolving onto it by step at the next attack.
-      w2 = (dir > 0) ? detail::scaleUp(to, 1, mode) : detail::scaleDown(to, 1, mode);
+      w2 =
+          (dir > 0) ? detail::scaleUp(to, 1, mode, &chord) : detail::scaleDown(to, 1, mode, &chord);
     }
     if (dotted) {
       // A written dotted cell, not merely a "dotted feel": the held anchor
@@ -1653,12 +1757,14 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
     const int dir = (delta >= 0) ? 1 : -1;
     const int span = std::abs(delta);
 
+    const detail::ChordSpec harmony =
+        cycleBarChord(cycle_bar_plan[static_cast<std::size_t>(onset / 3)]);
     int w1_deg;
     int w2_deg;
     if (span == 0) {
       // Held anchor: a turn figure toward the register center keeps every
       // boundary transition stepwise and repeat-free.
-      const int osc = (degreeToMidi(from_deg, mode) >= center) ? -1 : 1;
+      const int osc = (degreeToMidi(from_deg, mode, &harmony) >= center) ? -1 : 1;
       w1_deg = from_deg + osc;
       w2_deg = from_deg - osc;
     } else if (span == 1) {
@@ -1677,6 +1783,11 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
       w2_deg = from_deg + 2 * dir;
     }
 
+    if (onset + 1 < onset_count) {
+      w2_deg = fillClearOfAugmentedSecond(
+          w2_deg, to_deg, harmony,
+          cycleBarChord(cycle_bar_plan[static_cast<std::size_t>((onset + 1) / 3)]), mode);
+    }
     const int bar = onset / 3;
     const int beat = onset % 3;
     const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
@@ -1686,7 +1797,7 @@ void appendFiguraCortaCycle(std::vector<MaterialNote>& notes, Tick block_start,
       MaterialNote mnote;
       mnote.start_tick = beat_tick + kCellOffset[sub];
       mnote.duration = kCellDur[sub];
-      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(cell_deg[sub], mode));
+      mnote.pitch = static_cast<std::uint8_t>(degreeToMidi(cell_deg[sub], mode, &harmony));
       notes.push_back(mnote);
     }
   }
@@ -1705,9 +1816,9 @@ void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::Cho
   // fits the band (the mordent must not poke above the ceiling).
   int main_tone = band_hi;
   while (main_tone > band_lo &&
-         (!is_triad(main_tone) || detail::scaleUp(main_tone, 1, mode) > band_hi))
+         (!is_triad(main_tone) || detail::scaleUp(main_tone, 1, mode, &chord) > band_hi))
     --main_tone;
-  const int upper = detail::scaleUp(main_tone, 1, mode);
+  const int upper = detail::scaleUp(main_tone, 1, mode, &chord);
 
   // Resolve the octave drop: each octave lowers the whole gesture by 12, but the
   // drop is pulled back toward 0 in whole octaves until the main-tone anchor
@@ -1727,7 +1838,7 @@ void appendGestureBar(std::vector<MaterialNote>& dst, int bar, const detail::Cho
   // (its pitches are the base gesture transposed down by `shift`).
   int cursor = main_tone;
   for (int idx = 2; idx < 8; ++idx) {
-    const int next = detail::scaleDown(cursor, 1, mode);
+    const int next = detail::scaleDown(cursor, 1, mode, &chord);
     if (next < band_lo)
       break;
     cursor = next;

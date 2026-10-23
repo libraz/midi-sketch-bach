@@ -117,6 +117,11 @@ std::vector<MaterialNote> buildCfSkeleton(int bars, std::uint32_t seed, Mode mod
 // vi (A C E). Minor: i (C Eb G), iv (F Ab C), V (G B D, harmonic-minor major
 // dominant), VI (Ab C Eb). The choice keeps the CF tone consonant and gives a
 // hymn-like I / IV / V / vi (or i / iv / V / VI) harmonization.
+// A bar chord as the scale walkers read it (detail::spellScale).
+detail::ChordSpec spellingOf(const BarChord& chord) {
+  return detail::ChordSpec{chord.root_pc, chord.minor};
+}
+
 BarChord chordForCfTone(int cf_pitch, Mode mode) {
   const int pc = ((cf_pitch % 12) + 12) % 12;
   if (mode == Mode::Major) {
@@ -171,8 +176,9 @@ BarChord chordForCfTone(int cf_pitch, Mode mode) {
 void appendFigurationBar(FigurationSection& section, int bar, const BarChord& chord, Mode mode,
                          int notes_per_beat, int register_base, int offset, int figure = 0,
                          bool leap_fill = false) {
-  const int snapped =
-      snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
+  const detail::ChordSpec harmony = spellingOf(chord);
+  const int snapped = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
+                                        chord.root_pc, chord.minor);
   emitAnchoredBar(
       bar, snapped, chord, mode, notes_per_beat,
       [&](Tick start, Tick dur, int pitch) {
@@ -236,20 +242,19 @@ int fitPcToBand(int pitch_class, int center, int lo, int hi) {
 // Returns the connecting tone, or -1 when the pair admits none: a gap wider
 // than a third has no single-step fill, and a candidate outside the bass band
 // would take the line out of its register.
-int connectingBassTone(int from, int to, Mode mode) {
+int connectingBassTone(int from, int to, Mode mode, const detail::ChordSpec& harmony) {
   const int gap = to - from;
   const int span = std::abs(gap);
   int candidate = -1;
   if (span == 3 || span == 4) {
     // A third: the scale degree between the two anchors passes through.
-    candidate = gap > 0 ? detail::scaleUp(from, 1, mode) : detail::scaleDown(from, 1, mode);
+    candidate = detail::melodicScaleStep(from, gap, mode, &harmony);
   } else if (span <= 2) {
     // A step or a repeat: a neighbour on the far side keeps the beat moving,
     // and it is still left by step. The lower neighbour is preferred so the
     // fill leans away from the voices above rather than toward them.
     for (const int direction : {-1, 1}) {
-      const int neighbour =
-          direction < 0 ? detail::scaleDown(from, 1, mode) : detail::scaleUp(from, 1, mode);
+      const int neighbour = detail::melodicScaleStep(from, direction, mode, &harmony);
       if (neighbour != to && std::abs(neighbour - from) <= 2 && std::abs(to - neighbour) <= 2) {
         candidate = neighbour;
         break;
@@ -347,11 +352,10 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
         int step_target = cursor;
         if (static_bar) {
           const int degree = kStaticWalkDegrees[bar % 2][beat - 1];
-          step_target = detail::scaleUp(bar_root_fit, degree, mode);
-        } else if (next_root > cursor)
-          step_target = detail::inScale(cursor + 1, mode) ? cursor + 1 : cursor + 2;
-        else if (next_root < cursor)
-          step_target = detail::inScale(cursor - 1, mode) ? cursor - 1 : cursor - 2;
+          step_target = detail::scaleUp(bar_root_fit, degree, mode, &spec);
+        } else if (next_root != cursor) {
+          step_target = detail::melodicScaleStep(cursor, next_root - cursor, mode, &spec);
+        }
         step_target = std::min(std::max(step_target, kBassBandLo), kBassBandHi);
         pitch = consonantChordTone(spec, /*voice=*/2, kBassBandLo, kBassBandHi, step_target,
                                    theme_pitches, line_prev, motions, mode, /*downbeat=*/false);
@@ -368,7 +372,8 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
       // displaced); the off-beat fills carry the variety.
       if (pitch == prev_pitch && beat != 0) {
         int alt = -1;
-        for (int cand : {detail::scaleUp(pitch, 1, mode), detail::scaleDown(pitch, 1, mode)}) {
+        for (int cand :
+             {detail::scaleUp(pitch, 1, mode, &spec), detail::scaleDown(pitch, 1, mode, &spec)}) {
           if (cand >= kBassBandLo && cand <= kBassBandHi && bassCarriesUnder(cand, theme_pitches)) {
             alt = cand;
             break;
@@ -407,7 +412,7 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
         if (bass_is_parallel(pitch)) {
           auto admissible = [&](int cand) {
             if (cand < kBassBandLo || cand > kBassBandHi || cand == pitch || cand == prev_pitch ||
-                !detail::inScale(cand, mode)) {
+                !detail::inScale(cand, mode, &spec)) {
               return false;
             }
             return bassCarriesUnder(cand, theme_pitches) && !bass_is_parallel(cand);
@@ -476,7 +481,7 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
             bool placed = false;
             for (const int sgn : {-1, 1}) {
               const int cand = pitch + sgn * dist;
-              if (cand < kBassBandLo || cand > kBassBandHi || !detail::inScale(cand, mode) ||
+              if (cand < kBassBandLo || cand > kBassBandHi || !detail::inScale(cand, mode, &spec) ||
                   !bassCarriesUnder(cand, theme_pitches)) {
                 continue;
               }
@@ -525,7 +530,9 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
     const int before = static_cast<int>(out_notes[idx - 1].pitch);
     const int standing = static_cast<int>(out_notes[idx].pitch);
     const int after = static_cast<int>(out_notes[idx + 1].pitch);
-    const int fill = connectingBassTone(before, after, mode);
+    const BarChord& fill_chord = bar_chords[std::min(
+        static_cast<std::size_t>(out_notes[idx].start_tick / kTicksPerBar), bar_chords.size() - 1)];
+    const int fill = connectingBassTone(before, after, mode, spellingOf(fill_chord));
     if (fill < 0 || fill == standing)
       continue;
     const Tick beat_tick = out_notes[idx].start_tick;
@@ -603,13 +610,13 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       --down;
     return (up - target) <= (target - down) ? up : down;
   };
-  // One diatonic step from `from` toward `to` (stepwise off-beat passing tone).
-  auto stepToward = [&](int from, int to) -> int {
-    if (to > from)
-      return detail::inScale(from + 1, mode) ? from + 1 : from + 2;
-    if (to < from)
-      return detail::inScale(from - 1, mode) ? from - 1 : from - 2;
-    return from;
+  // One diatonic step from `from` toward `to` (stepwise off-beat passing tone),
+  // spelled under the chord of the bar it sounds in.
+  auto stepToward = [&](int from, int to, const BarChord& chord) -> int {
+    if (to == from)
+      return from;
+    const detail::ChordSpec harmony = spellingOf(chord);
+    return detail::melodicScaleStep(from, to - from, mode, &harmony);
   };
 
   // V0 figuration: one FigurationSection covering all `bars` bars, a
@@ -635,6 +642,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     // above the C3-region cantus firmus.
     const int register_base = 60 + static_cast<int>(point.register_shift);
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
+    const detail::ChordSpec harmony = spellingOf(chord);
     // Pattern rotation per 4-bar cycle: the anchored scalar wave alternates
     // with the figura corta cell (eighth + two sixteenths per beat -- the
     // dotted-feel chorale figuration idiom), so consecutive cycles trace
@@ -651,7 +659,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int corta_figure =
           static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
       appendFiguraCortaBar(fig.notes, bar,
-                           snapUpToChordTone(detail::scaleUp(register_base, offset, mode),
+                           snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
                                              chord.root_pc, chord.minor),
                            detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure,
                            profile.prefer_dotted);
@@ -696,7 +704,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       return true;
     };
     int prefinal = kFigTonic;  // anticipation fallback.
-    const int step_above = detail::scaleUp(kFigTonic, 1, mode);
+    const int step_above = detail::scaleUp(kFigTonic, 1, mode, &penult_spec);
     if (consonant_with_penult(step_above)) {
       prefinal = step_above;
     } else if (consonant_with_penult(kFigTonic - 1)) {
@@ -740,8 +748,9 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int fig_now = fig_registry.soundingPitchInVoice(/*voice=*/0, onset);
       const int fig_prev = fig_registry.soundingPitchInVoice(/*voice=*/0, onset - kQuarterDur);
       // Candidate neighbours: a whole/half step up, then down, staying diatonic.
-      const int up = detail::inScale(cand + 1, mode) ? cand + 1 : cand + 2;
-      const int down = detail::inScale(cand - 1, mode) ? cand - 1 : cand - 2;
+      const detail::ChordSpec harmony = spellingOf(chord);
+      const int up = detail::melodicScaleStep(cand, 1, mode, &harmony);
+      const int down = detail::melodicScaleStep(cand, -1, mode, &harmony);
       for (int neighbour : {up, down}) {
         // Stay inside the V1 register window (see the departure picks).
         if (neighbour == cand || neighbour <= kBassBandHi || neighbour > kV1EmbellishCeiling)
@@ -850,9 +859,11 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     if (cand_rank == 0)
       return cand;
     const int cand_consonant = isConsonantPair(cand, fig_now);
-    const int alternatives[] = {detail::scaleUp(from, 1, mode), detail::scaleDown(from, 1, mode),
-                                detail::scaleUp(from, 2, mode), detail::scaleDown(from, 2, mode),
-                                from};
+    const detail::ChordSpec harmony = spellingOf(bar_chords[std::min(
+        static_cast<std::size_t>(onset / kTicksPerBar), bar_chords.size() - 1)]);
+    const int alternatives[] = {
+        detail::scaleUp(from, 1, mode, &harmony), detail::scaleDown(from, 1, mode, &harmony),
+        detail::scaleUp(from, 2, mode, &harmony), detail::scaleDown(from, 2, mode, &harmony), from};
     for (int accept = 0; accept < cand_rank; ++accept) {
       for (const int alt : alternatives) {
         if (alt == cand || alt <= kBassBandHi || alt > kV1EmbellishCeiling)
@@ -869,6 +880,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   for (int bar = 0; bar < bars; ++bar) {
     const int tone = skeleton[static_cast<std::size_t>(bar)].pitch;
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
+    const detail::ChordSpec bar_spelling = spellingOf(chord);
     const Tick base = barTick(bar);
     // Arc density for the cycle this bar belongs to, biased by the character's
     // ornament density. A denser bar fills the off-beats with passing eighths.
@@ -931,7 +943,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       // The stepwise off-beats already break repetition; the run-break guard on
       // the two chord-tone beats keeps a long static figure from chaining.
       const int b2 = breakRun(guardV1Parallel(beat2, base + kHalf, chord), chord, base + kHalf);
-      const int off2 = guardV1Passing(stepToward(b2, beat3), base + kHalf + kEighth, b2);
+      const int off2 = guardV1Passing(stepToward(b2, beat3, chord), base + kHalf + kEighth, b2);
       out.material.cf_embellished.push_back(materialNote(base + kHalf, kEighth, b2));
       out.material.cf_embellished.push_back(materialNote(base + kHalf + kEighth, kEighth, off2));
       // The passing eighth advances the run tracker so the next beat sees it.
@@ -946,9 +958,9 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int next_tone =
           (bar + 1 < bars) ? static_cast<int>(skeleton[static_cast<std::size_t>(bar + 1)].pitch)
                            : tone;
-      int off3 = stepToward(b3, next_tone);
+      int off3 = stepToward(b3, next_tone, chord);
       if (off3 == b3)
-        off3 = detail::scaleUp(b3, 1, mode);
+        off3 = detail::scaleUp(b3, 1, mode, &bar_spelling);
       off3 = guardV1Passing(off3, base + kHalf + 3 * kEighth, b3);
       out.material.cf_embellished.push_back(materialNote(base + kHalf + 2 * kEighth, kEighth, b3));
       out.material.cf_embellished.push_back(
@@ -1165,6 +1177,10 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const Tick suspension_tick = barTick(bars - bar_offset);
       const Tick preparation_tick = suspension_tick - kTicksPerBeat;
       const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+      const BarChord& resolution_chord = bar_chords[static_cast<std::size_t>(bars - bar_offset)];
+      const detail::ChordSpec resolution_spec = spellingOf(resolution_chord);
+      const detail::ChordSpec preparation_spec =
+          spellingOf(bar_chords[static_cast<std::size_t>(bars - bar_offset - 1)]);
       const int original_bass_prep = soundingMaterialPitch(bass, preparation_tick);
       const int held_bass = soundingMaterialPitch(bass, suspension_tick);
       const int cantus_prep = soundingMaterialPitch(cantus, preparation_tick);
@@ -1195,7 +1211,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
           if (distance == 0 && direction < 0)
             continue;
           const int bass_prep = original_bass_prep + direction * distance;
-          if (bass_prep < 30 || bass_prep >= cantus_prep || !detail::inScale(bass_prep, mode) ||
+          if (bass_prep < 30 || bass_prep >= cantus_prep ||
+              !detail::inScale(bass_prep, mode, &preparation_spec) ||
               !isConsonantPair(cantus_prep, bass_prep))
             continue;
           for (SuspensionType type :
@@ -1209,7 +1226,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                     static_cast<std::uint8_t>(cantus_res),
                     /*band_lo=*/
                     std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
-                    band_hi, mode, &suspension))
+                    band_hi, mode, &suspension, &resolution_spec))
               continue;
             // Displacing the bass and installing the carrier are one choice: the
             // carrier overwrites the top line across the whole figure, so what

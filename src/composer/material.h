@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "composer/figuration.h"
 #include "composer/harmonic_plan.h"
 #include "core/basic_types.h"
 
@@ -37,7 +38,8 @@ enum class MaterialFragment : std::uint8_t {
 //
 // Minor is the natural minor here, matching the collection the figuration
 // helpers walk. A raised leading tone is a property of the dominant harmony,
-// not of the key, and is supplied where that harmony is known.
+// not of the key, and is supplied where that harmony is known (bendIntoKey's
+// chord argument, detail::spellScale).
 struct KeyContext {
   std::uint8_t tonic_pc = 0;
   bool is_minor = false;
@@ -45,6 +47,9 @@ struct KeyContext {
 
 /**
  * @brief The key in effect at `tick`, read from the plan's modulation list.
+ *
+ * Delegates to rule_helpers::keyAt, the single implementation.
+ *
  * @param plan Harmonic plan whose modulations bound the key areas.
  * @param tick Tick to resolve.
  * @return The most recent modulation's destination, or the plan's home key
@@ -95,13 +100,16 @@ int transposeIntoKey(int pitch, const KeyContext& from, const KeyContext& to);
  * carrying it -- an episode figure or an accompaniment line that has to stop
  * contradicting the local key while a foreign entry sounds. A pitch already in
  * the key is returned unchanged; a chromatic one moves to the nearest member,
- * upward when both sides are equally near.
+ * upward when both sides are equally near. With a chord the key is spelled
+ * under it (detail::spellScale), so a minor key's dominant bends onto its
+ * leading tone.
  *
  * @param pitch MIDI pitch to bend.
  * @param key Collection to bend into.
+ * @param chord_pcs Tones of the harmony at the pitch (0 = none known).
  * @return The nearest pitch belonging to `key`.
  */
-int bendIntoKey(int pitch, const KeyContext& key);
+int bendIntoKey(int pitch, const KeyContext& key, detail::PcMask chord_pcs = 0);
 
 struct LeadingToneMarker {
   MaterialFragment fragment = MaterialFragment::Subject;

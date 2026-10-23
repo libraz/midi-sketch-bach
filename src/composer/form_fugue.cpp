@@ -12,6 +12,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
@@ -931,7 +932,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                                         Tick start, Tick end) {
     appendScoredCountersubject(source, static_cast<VoiceId>(voice), start, end, kBandLo[voice],
                                kBandHi[voice], mode, out.material.countersubject,
-                               asm_ctx.theme_tones);
+                               asm_ctx.theme_tones, &out.harmony);
   };
   // The piece's ONE canonical countersubject, snapshotted from the exposition
   // (re-based to tick 0) once the answer counterline is derived. Every later
@@ -951,7 +952,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // canonical line yet or the carried line is wider than the band (a voice-band
   // violation the strict register order forbids).
   auto build_restatement = [&](int degree_offset, const KeyContext& to, int voice,
-                               Tick anchor_start, std::vector<MaterialNote>* dst) -> bool {
+                               Tick anchor_start, const std::vector<MaterialNote>& entry,
+                               std::vector<MaterialNote>* dst) -> bool {
     dst->clear();
     if (canonical_cs.empty()) {
       return false;
@@ -965,7 +967,16 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const int base = static_cast<int>(note.pitch);
       const int shifted_base = (degree_offset >= 0) ? scaleUp(base, degree_offset, mode)
                                                     : scaleDown(base, -degree_offset, mode);
-      const int pitch = transposeIntoKey(shifted_base, home_key, to);
+      // Degrees 6 and 7 take the spelling of the harmony and the entry tone
+      // sounding where the note is restated, not the one it was derived over.
+      const Tick restated_tick = anchor_start + note.start_tick;
+      const KeyContext local = localKeyAt(out.harmony, restated_tick);
+      const Mode local_mode = local.is_minor ? Mode::Minor : Mode::Major;
+      const detail::PcMask context = detail::withSoundingTone(
+          rule_helpers::chordPcsAt(out.harmony, restated_tick),
+          soundingMaterialPitch(entry, restated_tick), local.tonic_pc, local_mode);
+      const int pitch = detail::respellInScale(transposeIntoKey(shifted_base, home_key, to),
+                                               local.tonic_pc, local_mode, context);
       shifted.push_back(pitch);
       lo = std::min(lo, pitch);
       hi = std::max(hi, pitch);
@@ -1088,7 +1099,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const Tick win_start = barTick(win_start_bar);
     const Tick win_end = barTick(win_start_bar + kSubjectBars);
     std::vector<MaterialNote> restated;
-    if (build_restatement(degree_offset, to, acc_voice, win_start, &restated) &&
+    if (build_restatement(degree_offset, to, acc_voice, win_start, entry_line, &restated) &&
         restatement_compatible(restated, entry_line, win_start)) {
       for (const auto& note : restated) {
         addNote(out.material.countersubject, note.start_tick, note.duration,
@@ -1192,7 +1203,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // The answer is the only voice sounding under this line: the third voice has
   // not entered yet, and in an exposition it stays silent until it does.
   appendScoredCountersubject(answer_source, 0, cs_start, cs_end, kBandLo[0], kBandHi[0], mode,
-                             plain_cs, plain_tones, /*avoid_battuta=*/false,
+                             plain_cs, plain_tones, &out.harmony, /*avoid_battuta=*/false,
                              /*source_is_lowest=*/true);
   // Battutas the realized line forms against the entry it accompanies, read at
   // the line's own onsets against whatever the entry sounds under them. The
@@ -1231,7 +1242,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     appendScoredCountersubject(answer_source, 0, cs_start, cs_end,
                                std::max(kBandLo[0], plain_lo - slack),
                                std::min(kBandHi[0], plain_hi + slack), mode, trial_cs, trial_tones,
-                               /*avoid_battuta=*/true, /*source_is_lowest=*/true);
+                               &out.harmony, /*avoid_battuta=*/true, /*source_is_lowest=*/true);
     if (!trial_cs.empty() && battuta_count(trial_cs) < battuta_count(plain_cs)) {
       const Tick origin = trial_cs.front().start_tick;
       canonical_cs.clear();
@@ -1244,8 +1255,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       }
       const Tick third_start = barTick(first_bar + 8);
       std::vector<MaterialNote> restated;
-      if (build_restatement(3, home_key, 1, third_start, &restated) &&
-          restatement_compatible(restated, third_entry_seed_at(first_bar + 8), third_start)) {
+      const std::vector<MaterialNote> third_entry = third_entry_seed_at(first_bar + 8);
+      if (build_restatement(3, home_key, 1, third_start, third_entry, &restated) &&
+          restatement_compatible(restated, third_entry, third_start)) {
         out.material.countersubject.insert(out.material.countersubject.end(), trial_cs.begin(),
                                            trial_cs.end());
         asm_ctx.theme_tones = trial_tones;
@@ -1395,6 +1407,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       if (leader_carry_voice == 1 && candidate.extra_semis != 0) {
         continue;  // no in-set fifth-up canon against the modal vi leader.
       }
+      if (mode == Mode::Minor && candidate.extra_semis != 0) {
+        // A minor leader is degree-shifted inside the home collection; a real
+        // fifth-up follower would spell the dominant key against it.
+        continue;
+      }
       const int candidate_semis = follower_key_semis + candidate.extra_semis;
       const int candidate_off =
           octaveOffsetForBand(subj_pat, candidate_semis, follower_voice, kBandLo, kBandHi);
@@ -1537,6 +1554,21 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         me_real[static_cast<std::size_t>(note)] =
             static_cast<std::uint8_t>(std::clamp(realized, 0, 127));
       }
+      // A spelled minor station keeps the subject's leading-tone resolution a
+      // semitone: its 7th rising by step to the tonic is the raised 7th. A cycle
+      // that may state a stretto keeps the home collection instead, so the
+      // canon against a home-key follower stays in one key.
+      const bool stretto_cycle = cycle == climax_cycle || cycle == second_stretto_cycle;
+      if (mode == Mode::Major && entry_key.is_minor && !stretto_cycle) {
+        for (int note = 0; note + 1 < kSubjectNotes; ++note) {
+          const int current = static_cast<int>(me_real[static_cast<std::size_t>(note)]);
+          const int next = static_cast<int>(me_real[static_cast<std::size_t>(note + 1)]);
+          if (next - current == 2 && degreeInKey(current, entry_key) == 6 &&
+              degreeInKey(next, entry_key) == 0) {
+            me_real[static_cast<std::size_t>(note)] = static_cast<std::uint8_t>(current + 1);
+          }
+        }
+      }
       const int me_off = octaveOffsetForBand(me_real, 0, carry_voice, kBandLo, kBandHi);
       MiddleEntryDecl& decl = middle_decls[static_cast<std::size_t>(carry_voice)];
       decl.voice = static_cast<VoiceId>(carry_voice);
@@ -1618,7 +1650,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
             int extra_semis;
           };
           constexpr std::array<SecondConfig, 4> kSecondConfigs = {{{2, 0}, {2, 7}, {3, 0}, {3, 7}}};
-          const int second_key_semis = (carry_voice == 1) ? 0 : key_semis;
+          // Minor stays in the home collection, as the first follower does.
+          const int second_key_semis = (carry_voice == 1 || mode == Mode::Minor) ? 0 : key_semis;
           // Pile up a THIRD statement only when the committed two-voice canon
           // is itself clean: when the leader/first-follower overlap already
           // runs the seconds family on more than a quarter of its shared slots,
@@ -1651,21 +1684,21 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
           // transient wash is what makes a pile-up read as mud instead of
           // tension. Failing every config keeps the two-voice stretto.
           //
-          // Among the configurations that clear those, the one whose head steps
-          // into the fewest perfect intervals with either line already sounding
-          // is committed; the preference order breaks ties. The head is a third
-          // verbatim statement of the same material, so it meets both other
-          // lines on the same terms the pair below already answers for.
+          // Among the configurations that clear those, one whose head steps into
+          // a true parallel with either line already sounding is refused, as it
+          // is for the first follower; the preference order picks among the
+          // rest. The head is a third verbatim statement of the same material,
+          // so it meets both other lines on the same terms the pair below
+          // already answers for.
           int best_second = -1;
-          int best_second_parallels = 0;
           int best_second_total = 0;
           for (std::size_t idx = 0; first_canon_clean && idx < kSecondConfigs.size(); ++idx) {
             const SecondConfig& candidate = kSecondConfigs[idx];
             if (candidate.delay_bars <= first_delay) {
               continue;  // the pile-up requires a later entrance than the first.
             }
-            if (carry_voice == 1 && candidate.extra_semis != 0) {
-              continue;  // no in-set fifth-up canon against the modal vi leader.
+            if ((carry_voice == 1 || mode == Mode::Minor) && candidate.extra_semis != 0) {
+              continue;  // no in-set fifth-up canon against the vi or a minor leader.
             }
             const int candidate_semis = second_key_semis + candidate.extra_semis;
             const int candidate_off =
@@ -1685,10 +1718,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                 4 * vs_first.broad_sharp_slots > vs_first.overlap_slots) {
               continue;
             }
-            const int parallels = vs_leader.parallel_perfects + vs_first.parallel_perfects;
-            if (best_second < 0 || parallels < best_second_parallels) {
+            if (vs_leader.parallel_perfects + vs_first.parallel_perfects > 0) {
+              continue;
+            }
+            if (best_second < 0) {
               best_second = static_cast<int>(idx);
-              best_second_parallels = parallels;
               best_second_total = candidate_total;
             }
           }
@@ -2359,16 +2393,7 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
     return true;
   };
 
-  const auto chord_at = [&](Tick tick) -> const ChordEvent* {
-    const ChordEvent* active = nullptr;
-    for (const ChordEvent& chord : plan.chords) {
-      if (chord.start_tick <= tick &&
-          (active == nullptr || chord.start_tick >= active->start_tick)) {
-        active = &chord;
-      }
-    }
-    return active;
-  };
+  const auto chord_at = [&](Tick tick) { return rule_helpers::chordAt(plan, tick); };
   const auto harmony_holds = [&](const ChordEvent* chord, int pitch, int bent,
                                  const KeyContext& key) {
     if (chord == nullptr) {
@@ -2479,10 +2504,14 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
         return;
       }
       const int pitch = static_cast<int>(note.pitch);
-      if (inKey(pitch, area.key)) {
+      // The area's key as spelled under the chord at the note, so a passing
+      // tone over the local dominant takes its leading tone.
+      const detail::PcMask harmony_pcs = rule_helpers::chordPcsAt(plan, note.start_tick);
+      if (detail::inSpelledScale(pitch, area.key.tonic_pc,
+                                 area.key.is_minor ? Mode::Minor : Mode::Major, harmony_pcs)) {
         return;
       }
-      const int bent = bendIntoKey(pitch, area.key);
+      const int bent = bendIntoKey(pitch, area.key, harmony_pcs);
       if (bent == pitch || bent < 0 || bent > 127) {
         return;
       }
@@ -2615,13 +2644,8 @@ void relieveFigurationSeams(FugueAssembly& asm_ctx, std::vector<PlacedTone> repl
   // in the bar the line is free to any scale tone. The chord tone set is the
   // shared one, so a seam over a dominant seventh may still be relieved onto the
   // seventh the anchor selector was allowed to place there.
-  const std::vector<ChordEvent>& chords = asm_ctx.out->harmony.chords;
   auto anchors_bar_harmony = [&](Tick tick, int pitch) {
-    const ChordEvent* active = nullptr;
-    for (const ChordEvent& chord : chords) {
-      if (chord.start_tick <= tick && (active == nullptr || chord.start_tick >= active->start_tick))
-        active = &chord;
-    }
+    const ChordEvent* active = rule_helpers::chordAt(asm_ctx.out->harmony, tick);
     if (active == nullptr) {
       return false;
     }

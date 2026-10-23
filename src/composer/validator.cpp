@@ -2235,11 +2235,15 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       return offset == 0 || offset == 2 || offset == 3 || offset == 5 || offset == 7 ||
              offset == 8 || offset == 10 || offset == 11;
     };
+    // A major piece's vi entry is spelled in its own minor key, which also
+    // admits the raised 7th its leading-tone resolution takes.
     bool notes_ok = true;
     for (const auto& n : entry.notes) {
       const std::uint8_t note_pc = static_cast<std::uint8_t>(n.pitch % 12);
-      if (harmonic_plan.is_minor ? !isInMinorContext(note_pc, scale_tonic_pc)
-                                 : !rule_helpers::isDiatonicPc(note_pc, scale_tonic_pc, false)) {
+      const bool in_context = harmonic_plan.is_minor ? isInMinorContext(note_pc, scale_tonic_pc)
+                              : is_vi                ? isInMinorContext(note_pc, key_pc)
+                                      : rule_helpers::isDiatonicPc(note_pc, scale_tonic_pc, false);
+      if (!in_context) {
         notes_ok = false;
         break;
       }

@@ -934,7 +934,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     //
     // Nothing on this row pays for it. Every fault column holds exactly and only
     // the floor moves, rising by fourteen hundred.
-    {FormType::Fugue, 0, 0, 35, 36, 2, 0, 2, 2, 1, 55960, 146},
+    // Minor 6th/7th spelled under the plan's chord (spellScale) puts the leading
+    // tone in the countersubject and figuration: hidden 35 -> 15, but battuta
+    // 36 -> 40 and fourths over a held bass 146 -> 164.
+    {FormType::Fugue, 0, 0, 15, 40, 2, 0, 2, 2, 1, 56200, 164},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1025,7 +1028,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // twenty bars against the fugue's forty-four, so its episodes carry a
     // larger share of the piece and the figure's wider reach is felt across
     // more of it.
-    {FormType::PreludeAndFugue, 0, 0, 12, 35, 3, 0, 2, 2, 1, 31903, 66},
+    // Leading-tone spelling over the minor dominant: hidden 12 -> 8, fourths
+    // 66 -> 59; battuta 35 -> 45 (worst cell 2 -> 3), floor 31903 -> 31834.
+    {FormType::PreludeAndFugue, 0, 0, 8, 45, 3, 0, 2, 3, 1, 31834, 59},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1114,7 +1119,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The floor falls by a few dozen successions because the eighth that used to
     // be written wherever it fit is now refused wherever it costs more than the
     // quarter, so there are marginally fewer onsets to examine.
-    {FormType::TrioSonata, 0, 0, 119, 31, 2, 0, 4, 2, 1, 34800, 9},
+    // Leading tone kept over V in both directions: battuta 31 -> 27, fourths
+    // 9 -> 5; hidden 119 -> 126 (worst cell 4 -> 5), anti 2 -> 4, floor -31.
+    {FormType::TrioSonata, 0, 0, 126, 27, 4, 0, 5, 2, 1, 34769, 5},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -1181,7 +1188,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // overwrites the stretch it covers, so installing one lowers the onset
     // count -- ninety-four configurations carry a suspension where ninety-three
     // did, and the sampled pairs fall with the onsets. No voice fell silent.
-    {FormType::ChoralePrelude, 0, 0, 28, 21, 0, 0, 2, 3, 0, 16983, 26},
+    // Walkers keep the leading tone over V: battuta 21 -> 19; hidden 28 -> 33,
+    // fourths over a held bass 26 -> 28.
+    {FormType::ChoralePrelude, 0, 0, 33, 19, 0, 0, 2, 3, 0, 17172, 28},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1312,7 +1321,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The fugue tail's countersubject now knows its source is the only bass, so
     // it stops parking a fourth over it: the fourths fall by a third, at the cost
     // of two hidden approaches and eight successions. Every worst cell holds.
-    {FormType::ToccataAndFugue, 84, 84, 16, 12, 6, 7, 2, 1, 1, 28023, 148},
+    // Bends and the countersubject spelled under the local dominant: fourths
+    // 148 -> 140; hidden 16 -> 18, battuta 12 -> 14, anti 6 -> 12.
+    {FormType::ToccataAndFugue, 84, 84, 18, 14, 12, 7, 2, 1, 1, 28110, 140},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1439,7 +1450,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // stay empty. The floor falls by twelve because the displaced anchors
     // occasionally land on a pitch the line already sounds, and a repeat is one
     // onset where there were two.
-    {FormType::Passacaglia, 0, 0, 24, 8, 4, 0, 1, 1, 1, 27374, 150},
+    // Variation and counter-line keep the leading tone over V: battuta 8 -> 9,
+    // anti 4 -> 5, fourths 150 -> 154, floor 27374 -> 27294.
+    {FormType::Passacaglia, 0, 0, 24, 9, 5, 0, 1, 1, 1, 27294, 154},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1512,7 +1525,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The fugue tail's lowest-voice countersubject reaches here as on the
     // toccata's row: the fourths fall by 87, hidden rises by two and the floor
     // falls by 27 successions. Every worst cell holds.
-    {FormType::FantasiaAndFugue, 0, 0, 11, 0, 14, 0, 1, 0, 1, 28623, 206},
+    // Countersubject and bends spelled under the local dominant: hidden 11 -> 16
+    // (worst 1 -> 2), battuta 0 -> 2 (worst 0 -> 1), anti 14 -> 16, fourths
+    // 206 -> 213, floor -8.
+    {FormType::FantasiaAndFugue, 0, 0, 16, 2, 16, 0, 2, 1, 1, 28615, 213},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1604,7 +1620,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // restated one, so there are more pairs to examine. Its shake falls from
     // eighty-one notes in a hundred to forty-six, and from forty-six to
     // twenty-seven across the sweep.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18978, 40},
+    // Leading tone over V in variation and counter-line: every perfect column
+    // stays 0; fourths over the ground 40 -> 50, floor 18978 -> 18628.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18628, 50},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1657,7 +1675,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // that root. Battuta triples and its worst cell doubles -- a held tone
     // approached from above arrives contrary by definition, and this line is
     // held tones almost throughout. Hidden moves by one.
-    {FormType::GoldbergVariations, 0, 0, 9, 25, 8, 0, 1, 2, 1, 29028, 0},
+    {FormType::GoldbergVariations, 0, 0, 9, 25, 8, 0, 1, 2, 1, 29129, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -1949,7 +1967,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     //
     // A snap-aligned natural length makes the medium fugue 88 bars, not 84: the
     // longer piece adds eight hidden approaches and removes ten battuta arrivals.
-    {FormType::Fugue, 0, 0, 183, 219, 14, 0, 3, 4, 1, 489584, 1667},
+    // Minor 6th/7th spelled under the plan's chord: hidden 183 -> 145; battuta
+    // 219 -> 247 (worst 4 -> 5), anti 14 -> 20, worst hidden 3 -> 4, fourths
+    // 1667 -> 1834.
+    {FormType::Fugue, 0, 0, 145, 247, 20, 0, 4, 5, 1, 493269, 1834},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2036,7 +2057,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // grows mostly because there is more counterpoint to count. The trade is
     // stated rather than assumed: what buys it is a bass that runs at all, which
     // all but two of the reference organ fugues let theirs do.
-    {FormType::PreludeAndFugue, 0, 0, 113, 199, 6, 0, 3, 3, 1, 423808, 1087},
+    // Same spelling: hidden 113 -> 89; battuta 199 -> 217, anti 6 -> 13,
+    // fourths 1087 -> 1193.
+    {FormType::PreludeAndFugue, 0, 0, 89, 217, 13, 0, 3, 3, 1, 427684, 1193},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

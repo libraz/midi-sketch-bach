@@ -266,6 +266,41 @@ TEST(RuleHelpersTest, KeyAtSwitchesOnTheModulationBoundary) {
   EXPECT_EQ(keyAt(plan, 8 * kTicksPerBar).tonic_pc, 9);
 }
 
+// A dominant-key area's own dominant is labelled V there and carries that
+// key's leading tone, read against the key in force at the chord.
+TEST(RuleHelpersTest, LocalDominantCarriesTheLocalLeadingTone) {
+  HarmonicPlan plan = cMajor();
+  ChordEvent tonic;
+  tonic.start_tick = 0;
+  tonic.root_pc = 0;
+  ChordEvent local_dominant;
+  local_dominant.start_tick = 4 * kTicksPerBar;
+  local_dominant.root_pc = 2;  // D major: V of G.
+  plan.chords = {tonic, local_dominant};
+  plan.modulations.push_back({4 * kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  annotateDiatonicChordMetadata(&plan);
+
+  EXPECT_EQ(plan.chords[1].degree, RomanNumeral::V);
+  EXPECT_EQ(plan.chords[1].function, HarmonicFunction::D);
+  const TonalContext context = tonalContextAt(plan, 4 * kTicksPerBar);
+  EXPECT_TRUE(context.has_active_leading_tone);
+  EXPECT_EQ(context.leading_tone_pc, 6);  // F sharp
+  EXPECT_TRUE(isContextualLeadingTone(66, plan, 4 * kTicksPerBar));
+}
+
+// The subtonic triad of a minor key is not a leading-tone chord.
+TEST(RuleHelpersTest, MinorSubtonicTriadHasNoActiveLeadingTone) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent subtonic;
+  subtonic.root_pc = 10;  // B-flat major.
+  plan.chords = {subtonic};
+  annotateDiatonicChordMetadata(&plan);
+  EXPECT_FALSE(tonalContextAt(plan, 0).has_active_leading_tone);
+  EXPECT_TRUE(isContextualScalePitch(70, plan, 0, -1));  // its own root
+}
+
 TEST(RuleHelpersTest, KeyAtAgreesWithLocalKeyAtOnSortedAndUnsortedLists) {
   HarmonicPlan sorted = cMajor();
   sorted.modulations.push_back({kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});

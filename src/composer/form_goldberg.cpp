@@ -215,8 +215,9 @@ int transposeUp(int pitch, int degrees, Mode mode) {
 // restatement.
 void appendAriaBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mode mode,
                    int register_base, int offset) {
-  const int start =
-      snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
+  const detail::ChordSpec harmony{chord.root_pc, chord.minor};
+  const int start = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
+                                      chord.root_pc, chord.minor);
   const Tick base = barTick(bar);
   var.notes.push_back(materialNote(base, kHalf, start));
   var.notes.push_back(
@@ -231,8 +232,9 @@ void appendAriaBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mo
 // lift compresses against the instrument ceiling, exactly as the real
 // keyboard writing does.
 int goldbergFigurationStart(int register_base, int offset, const BarChord& chord, Mode mode) {
-  int snapped =
-      snapUpToChordTone(detail::scaleUp(register_base, offset, mode), chord.root_pc, chord.minor);
+  const detail::ChordSpec harmony{chord.root_pc, chord.minor};
+  int snapped = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
+                                  chord.root_pc, chord.minor);
   constexpr int kFigStartCeiling = 77;
   if (snapped > kFigStartCeiling) {
     const int third = chord.minor ? 3 : 4;
@@ -1157,7 +1159,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           final_tone -= 12;
       }
       int prefinal = final_tone;  // anticipation fallback.
-      const int step_above = detail::scaleUp(final_tone, 1, mode);
+      const detail::ChordSpec penult_spec{penult_chord.root_pc, penult_chord.minor};
+      const int step_above = detail::scaleUp(final_tone, 1, mode, &penult_spec);
       if (consonant_with(step_above, penult_chord)) {
         prefinal = step_above;
       } else if (consonant_with(final_tone - 1, penult_chord)) {
