@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "composer/arc.h"
+#include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
@@ -1497,7 +1498,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
   const detail::Mode mode = req.mode;
   const bool minor = mode == detail::Mode::Minor;
-  const bool picardy = minor && detail::usePicardy(req.seed);
+  const bool picardy = electsPicardy(mode, req.seed);
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
 
@@ -1534,7 +1535,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     chord.start_tick = bar_tick(bar);
     if (bar == total_bars - 1) {
       chord.root_pc = 0;
-      chord.quality = (picardy || !minor) ? ChordQuality::Major : ChordQuality::Minor;
+      chord.quality = minor ? ChordQuality::Minor : ChordQuality::Major;
     } else {
       chord.root_pc = plan.root_pc;
       if (plan.seventh) {
@@ -1545,6 +1546,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     }
     out.harmony.chords.push_back(chord);
   }
+  stampPicardyClose(out.harmony, mode, req.seed);
   if (total_bars >= 2) {
     // The immutable passacaglia ground approaches the final tonic on D, the
     // fifth of the dominant.  Spell that real sonority as V4/3 (second
@@ -2040,7 +2042,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
   const detail::Mode mode = req.mode;
   const bool minor = mode == detail::Mode::Minor;
-  const bool picardy = minor && detail::usePicardy(req.seed);
+  const bool picardy = electsPicardy(mode, req.seed);
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
 
@@ -2103,9 +2105,9 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     ChordEvent chord;
     chord.start_tick = bar_tick(bar);
     if (bar == total_bars - 1) {
-      // Closing cadence on the tonic; Picardy raises the third to major.
+      // Closing cadence on the tonic; stampPicardyClose raises an elected third.
       chord.root_pc = 0;
-      chord.quality = (picardy || !minor) ? ChordQuality::Major : ChordQuality::Minor;
+      chord.quality = minor ? ChordQuality::Minor : ChordQuality::Major;
     } else {
       chord.root_pc = plan.root_pc;
       if (plan.seventh) {
@@ -2116,6 +2118,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     }
     out.harmony.chords.push_back(chord);
   }
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   // --- V0 variation blocks: one per cycle, arc-driven density / register /
   // figure orientation. The first cycle is a plain Ground-role statement

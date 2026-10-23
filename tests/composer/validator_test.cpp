@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "composer/counterpoint_budget.h"
@@ -1217,7 +1218,7 @@ TEST(ValidatorTest, CadenceVoiceLeadingAcceptsAllCadenceTypes) {
   const std::vector<Case> cases = {
       {CadenceType::Perfect, 71, 72, 55, 48},   {CadenceType::ImperfectAuthentic, 62, 64, 55, 48},
       {CadenceType::Plagal, 65, 64, 53, 48},    {CadenceType::Half, 64, 62, 48, 55},
-      {CadenceType::Deceptive, 71, 72, 55, 57}, {CadenceType::Phrygian, 61, 62, 56, 55},
+      {CadenceType::Deceptive, 71, 72, 55, 57}, {CadenceType::Phrygian, 65, 67, 56, 55},
   };
 
   for (const auto& c : cases) {
@@ -1269,6 +1270,182 @@ TEST(ValidatorTest, MinorDeceptiveCadenceResolvesBassToFlatSix) {
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   const ValidationReport report = Validator{}.validate(notes, prov, plan);
   EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+}
+
+namespace {
+
+// C minor, V on beat one and the closing tonic on beat two, declared as a
+// PicardyThird cadence; `flagged` sets is_picardy on the tonic.
+HarmonicPlan cMinorPicardyClose(bool flagged) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent dominant;
+  dominant.start_tick = 0;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Major;
+  plan.chords.push_back(dominant);
+  ChordEvent tonic;
+  tonic.start_tick = kTicksPerBeat;
+  tonic.root_pc = 0;
+  tonic.quality = flagged ? ChordQuality::Major : ChordQuality::Minor;
+  tonic.is_picardy = flagged;
+  plan.chords.push_back(tonic);
+  plan.cadences.push_back({kTicksPerBeat, CadenceType::PicardyThird});
+  return plan;
+}
+
+// C minor iv6 -> V declared as a Phrygian cadence on beat two.
+HarmonicPlan cMinorPhrygianClose() {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent subdominant;
+  subdominant.start_tick = 0;
+  subdominant.root_pc = 5;
+  subdominant.quality = ChordQuality::Minor;
+  subdominant.inversion = ChordInversion::First;
+  plan.chords.push_back(subdominant);
+  ChordEvent dominant;
+  dominant.start_tick = kTicksPerBeat;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Major;
+  plan.chords.push_back(dominant);
+  plan.cadences.push_back({kTicksPerBeat, CadenceType::Phrygian});
+  return plan;
+}
+
+ValidationReport validateMaterial(const std::vector<NoteEvent>& notes, const HarmonicPlan& plan) {
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  return Validator{}.validate(notes, prov, plan);
+}
+
+}  // namespace
+
+// Textbook Picardy close: soprano B -> C, inner D -> E, bass G -> C.
+TEST(ValidatorTest, PicardyCadenceAcceptsTextbookPolyphonicClose) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(0, kTicksPerBeat, 62, 1),
+      makeNote(0, kTicksPerBeat, 55, 2),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 48, 2),
+  };
+  const ValidationReport report = validateMaterial(notes, cMinorPicardyClose(true));
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+  EXPECT_FALSE(hasRule(report, "picardy_third"));
+}
+
+// A single line resolves the leading tone and then states the raised third.
+TEST(ValidatorTest, PicardyCadenceAcceptsTextbookMonophonicClose) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat / 2, 72, 0),
+      makeNote(kTicksPerBeat + kTicksPerBeat / 2, kTicksPerBeat / 2, 76, 0),
+  };
+  const ValidationReport report = validateMaterial(notes, cMinorPicardyClose(true));
+  EXPECT_FALSE(hasRule(report, "cadence_voice_leading"));
+  EXPECT_FALSE(hasRule(report, "picardy_third"));
+}
+
+TEST(ValidatorTest, PicardyChordWithMinorOrAbsentThirdFails) {
+  for (const std::uint8_t inner : {std::uint8_t{63}, std::uint8_t{67}}) {
+    const std::vector<NoteEvent> notes = {
+        makeNote(0, kTicksPerBeat, 71, 0),
+        makeNote(0, kTicksPerBeat, 62, 1),
+        makeNote(0, kTicksPerBeat, 55, 2),
+        makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+        makeNote(kTicksPerBeat, kTicksPerBeat, inner, 1),
+        makeNote(kTicksPerBeat, kTicksPerBeat, 48, 2),
+    };
+    EXPECT_TRUE(hasRule(validateMaterial(notes, cMinorPicardyClose(true)), "picardy_third"))
+        << static_cast<int>(inner);
+  }
+  // A monophonic close that never states the raised third.
+  const std::vector<NoteEvent> line = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+  };
+  EXPECT_TRUE(hasRule(validateMaterial(line, cMinorPicardyClose(true)), "picardy_third"));
+}
+
+TEST(ValidatorTest, PicardyCadenceRequiresTheFlaggedChord) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(0, kTicksPerBeat, 62, 1),
+      makeNote(0, kTicksPerBeat, 55, 2),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 64, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 48, 2),
+  };
+  EXPECT_TRUE(hasRule(validateMaterial(notes, cMinorPicardyClose(false)), "cadence_voice_leading"));
+}
+
+// Textbook Phrygian half cadence: bass Ab -> G under soprano F -> G.
+TEST(ValidatorTest, PhrygianCadenceAcceptsTextbookVoicing) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 65, 0),
+      makeNote(0, kTicksPerBeat, 60, 1),
+      makeNote(0, kTicksPerBeat, 56, 2),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 67, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 59, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 55, 2),
+  };
+  EXPECT_FALSE(hasRule(validateMaterial(notes, cMinorPhrygianClose()), "cadence_voice_leading"));
+  // The upper voice moving b2 -> 2 is not the Phrygian formula.
+  std::vector<NoteEvent> wrong = notes;
+  wrong[0].pitch = 61;
+  wrong[3].pitch = 62;
+  EXPECT_TRUE(hasRule(validateMaterial(wrong, cMinorPhrygianClose()), "cadence_voice_leading"));
+  // A single line may state either outer voice.
+  for (const auto& pair : {std::pair<std::uint8_t, std::uint8_t>{65, 67},
+                           std::pair<std::uint8_t, std::uint8_t>{68, 67}}) {
+    const std::vector<NoteEvent> line = {
+        makeNote(0, kTicksPerBeat, pair.first, 0),
+        makeNote(kTicksPerBeat, kTicksPerBeat, pair.second, 0),
+    };
+    EXPECT_FALSE(hasRule(validateMaterial(line, cMinorPhrygianClose()), "cadence_voice_leading"))
+        << static_cast<int>(pair.first);
+  }
+}
+
+// The cadence cells, realized literally, satisfy the validator branch for
+// their own type in both the polyphonic and the monophonic path.
+TEST(ValidatorTest, PicardyAndPhrygianCellsSatisfyTheirCadenceBranch) {
+  for (const bool picardy : {true, false}) {
+    const HarmonicPlan plan = picardy ? cMinorPicardyClose(true) : cMinorPhrygianClose();
+    Material material;
+    annotateCadenceCells(material, plan);
+    ASSERT_EQ(material.cadence_cells.size(), 1u);
+    const CadenceCell& cell = material.cadence_cells.front();
+    const auto nearest = [](int pc, int target) {
+      int pitch = target - 6;
+      while (pitch % 12 != pc)
+        ++pitch;
+      return static_cast<std::uint8_t>(pitch);
+    };
+    const std::uint8_t sop_prev = nearest(cell.soprano_approach_pc, 72);
+    const std::uint8_t sop_now = nearest(cell.soprano_cadence_pc, sop_prev);
+    const std::uint8_t bass_prev = nearest(cell.bass_approach_pc, 52);
+    const std::uint8_t bass_now = nearest(cell.bass_cadence_pc, bass_prev);
+    const std::vector<NoteEvent> duet = {
+        makeNote(0, kTicksPerBeat, sop_prev, 0),
+        makeNote(0, kTicksPerBeat, bass_prev, 1),
+        makeNote(kTicksPerBeat, kTicksPerBeat, sop_now, 0),
+        makeNote(kTicksPerBeat, kTicksPerBeat, bass_now, 1),
+    };
+    const ValidationReport duet_report = validateMaterial(duet, plan);
+    EXPECT_FALSE(hasRule(duet_report, "cadence_voice_leading")) << picardy;
+    EXPECT_FALSE(hasRule(duet_report, "picardy_third")) << picardy;
+    const std::vector<NoteEvent> line = {
+        makeNote(0, kTicksPerBeat, sop_prev, 0),
+        makeNote(kTicksPerBeat, kTicksPerBeat, sop_now, 0),
+    };
+    const ValidationReport line_report = validateMaterial(line, plan);
+    EXPECT_FALSE(hasRule(line_report, "cadence_voice_leading")) << picardy;
+    EXPECT_FALSE(hasRule(line_report, "picardy_third")) << picardy;
+  }
 }
 
 TEST(ValidatorTest, MinorImperfectAuthenticAcceptsDeclaredPicardyThird) {

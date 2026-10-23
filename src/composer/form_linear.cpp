@@ -55,8 +55,11 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   constexpr int kGroup = 4;             // four sixteenths per implicit cell.
   constexpr int kNotesPerBar = 16;      // sixteen sixteenths per bar.
 
-  const std::vector<ChordSpec> chords = buildCadencedProgression(bars, req.seed, mode,
-                                                                 /*cello_implicit_safe=*/true);
+  std::vector<ChordSpec> chords = buildCadencedProgression(bars, req.seed, mode,
+                                                           /*cello_implicit_safe=*/true);
+  // The line closes on a single held tonic, which has no third to raise, so
+  // the cello never elects a Picardy close.
+  chords.back() = {0, mode == Mode::Minor};
   writeBarChords(out, chords, mode);
 
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);

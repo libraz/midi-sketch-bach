@@ -9,6 +9,7 @@
 #include "composer/arc.h"
 #include "composer/arrival_relief.h"
 #include "composer/bar_material.h"
+#include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
@@ -567,7 +568,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
   out.harmony.is_minor = (mode == Mode::Minor);
   std::vector<BarChord> bar_chords;
   bar_chords.reserve(static_cast<std::size_t>(bars));
-  const bool picardy = mode == Mode::Minor && detail::usePicardy(req.seed);
+  const bool picardy = electsPicardy(mode, req.seed);
   for (int bar = 0; bar < bars; ++bar) {
     BarChord chord = chordForCfTone(skeleton[static_cast<std::size_t>(bar)].pitch, mode);
     if (bar == bars - 1) {
@@ -581,9 +582,9 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     ce.start_tick = barTick(bar);
     ce.root_pc = chord.root_pc;
     ce.quality = chord.minor ? ChordQuality::Minor : ChordQuality::Major;
-    ce.is_picardy = bar == bars - 1 && picardy;
     out.harmony.chords.push_back(ce);
   }
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   // Immutable skeleton material (one whole note per bar). cantus_firmus_immutable
   // reads this vector for the per-bar downbeat lookup.

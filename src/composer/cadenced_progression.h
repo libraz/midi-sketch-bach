@@ -51,6 +51,25 @@ std::vector<detail::ChordSpec> buildCadencedProgression(int bars, std::uint32_t 
                                                         detail::Mode mode,
                                                         bool cello_implicit_safe = false);
 
+/// @brief Whether a piece closes on a Picardy (major) tonic.
+///
+/// The one election every form reads, both to spell its closing material and
+/// to stamp the plan through stampPicardyClose.
+/// @param mode Piece mode; only a minor piece can elect a Picardy third.
+/// @param seed Piece seed (the deterministic per-seed choice).
+/// @return True when the final tonic takes a major third.
+bool electsPicardy(detail::Mode mode, std::uint32_t seed);
+
+/// @brief Raise the plan's final tonic to a flagged Picardy chord when elected.
+///
+/// The only writer of ChordEvent::is_picardy. The caller has already built the
+/// final chord on the tonic; when electsPicardy holds it becomes a major triad
+/// with the flag set, otherwise it is left as built.
+/// @param plan Plan whose last chord is the closing tonic.
+/// @param mode Piece mode.
+/// @param seed Piece seed.
+void stampPicardyClose(HarmonicPlan& plan, detail::Mode mode, std::uint32_t seed);
+
 /// @brief Emit one ChordEvent per bar into a HarmonicPlan from a progression.
 /// @param out Fixture whose harmony plan receives the chords.
 /// @param chords Per-bar progression.

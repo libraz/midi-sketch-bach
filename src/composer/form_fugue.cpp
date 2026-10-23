@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/chord_voicing.h"
 #include "composer/figuration.h"
@@ -970,7 +971,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     plan[static_cast<std::size_t>(window.entry_start - 1)] =
         ChordSpec{key_pc, isRelatedKeyMinor(key_pc, mode)};
   }
-  const bool picardy = mode == Mode::Minor && detail::usePicardy(req.seed);
+  const bool picardy = electsPicardy(mode, req.seed);
   plan[static_cast<std::size_t>(bars - 2)] = ChordSpec{7, false};  // V (G major).
   plan[static_cast<std::size_t>(bars - 1)] =
       ChordSpec{0, mode == Mode::Minor && !picardy};  // I / Picardy I.
@@ -1001,11 +1002,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   }
   markDominantSevenths(plan, triad_only_bars, mode, /*cyclic=*/false);
   emitHarmony(out, plan, mode, first_bar);
-  for (ChordEvent& chord : out.harmony.chords) {
-    if (chord.start_tick == barTick(first_bar + bars - 1)) {
-      chord.is_picardy = picardy;
-    }
-  }
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
@@ -2426,7 +2423,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     while (inner_dominant % 12 != 7) {
       ++inner_dominant;
     }
-    const bool picardy_third = mode != Mode::Minor || detail::usePicardy(req.seed);
+    const bool picardy_third = mode != Mode::Minor || electsPicardy(mode, req.seed);
     int inner_third = kBandLo[1];
     while (inner_third % 12 != (picardy_third ? 4 : 3)) {
       ++inner_third;
@@ -2474,7 +2471,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                      });
     CadenceEvent cadence;
     cadence.tick = barTick(coda_start + coda_bars - 1);
-    cadence.type = CadenceType::Perfect;
+    cadence.type = electsPicardy(mode, req.seed) ? CadenceType::PicardyThird : CadenceType::Perfect;
     out.harmony.cadences.push_back(cadence);
     out.harmony.cadential_six_fours.push_back(
         {six_four_tick, six_four_tick + kTicksPerBeat, SixFourType::Cadential});

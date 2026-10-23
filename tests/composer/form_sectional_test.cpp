@@ -621,11 +621,13 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
         EXPECT_EQ(last_chord->quality,
                   (minor && !picardy) ? ChordQuality::Minor : ChordQuality::Major);
 
-        // A perfect cadence is annotated at the last bar downbeat.
+        // A perfect cadence, or its Picardy form, is annotated at the last bar
+        // downbeat.
+        const CadenceType final_type = picardy ? CadenceType::PicardyThird : CadenceType::Perfect;
         bool has_final_cadence = false;
         const Tick last_bar_tick = static_cast<Tick>(bars - 1) * kBar;
         for (const auto& cadence : fx.harmony.cadences) {
-          if (cadence.tick == last_bar_tick && cadence.type == CadenceType::Perfect) {
+          if (cadence.tick == last_bar_tick && cadence.type == final_type) {
             has_final_cadence = true;
           }
         }

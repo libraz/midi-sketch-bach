@@ -136,7 +136,8 @@ struct ChordEvent {
   //                  keys and other parallel-mode loans.
   // is_picardy:      this chord is the final tonic of a minor-key
   //                  piece with the third raised to major (the
-  //                  Picardy third). The Validator uses this to
+  //                  Picardy third). Forms set it only through
+  //                  stampPicardyClose; the Validator uses it to
   //                  verify the third is indeed major.
   RomanNumeral secondary_of = RomanNumeral::I;
   bool has_secondary_of = false;

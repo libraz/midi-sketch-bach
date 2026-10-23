@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
@@ -1554,10 +1555,8 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // (V0) to resolve the leading tone B -> tonic C and the bass (the lowest
   // sounding voice, V2) to step the dominant root G -> tonic C across the
   // approach -> cadence beats. Material confined to the per-voice bands keeps
-  // V0 >= V1 >= V2. Minor + usePicardy(seed) colours the close with a major
-  // third E in V0 (documentary Picardy colour; the cadence type stays Perfect
-  // because PicardyThird's leading-tone-AND-major-third upper requirement is
-  // self-contradictory under the rule).
+  // V0 >= V1 >= V2. When the piece elects a Picardy close, V1 holds the major
+  // third E and the cadence is declared PicardyThird.
   int tonic0 = kBandLo[0];
   while (tonic0 % 12 != 0) {
     ++tonic0;  // tonic C inside the V0 band.
@@ -1670,7 +1669,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
         }
       }
     }
-    const bool picardy_third = mode != Mode::Minor || detail::usePicardy(req.seed);
+    const bool picardy_third = mode != Mode::Minor || electsPicardy(mode, req.seed);
     int inner_third = kBandLo[1];
     while (inner_third % 12 != (picardy_third ? 4 : 3)) {
       ++inner_third;
@@ -1690,7 +1689,6 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
 
   // Force the final two bars' harmony to V -> I so the annotated perfect cadence
   // is supported by the harmonic plan and the final ChordEvent is the tonic.
-  const bool picardy = mode == Mode::Minor && detail::usePicardy(req.seed);
   for (auto& chord : out.harmony.chords) {
     const int bar = static_cast<int>(chord.start_tick / kTicksPerBar);
     if (bar == cadence_start) {
@@ -1698,16 +1696,16 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
       chord.quality = ChordQuality::Major;
     } else if (bar == cadence_start + 1) {
       chord.root_pc = 0;  // I.
-      chord.quality = (mode == Mode::Minor && !picardy) ? ChordQuality::Minor : ChordQuality::Major;
-      chord.is_picardy = picardy;
+      chord.quality = mode == Mode::Minor ? ChordQuality::Minor : ChordQuality::Major;
     }
   }
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   // Final perfect cadence annotation at the last bar downbeat.
   {
     CadenceEvent cadence;
     cadence.tick = barTick(first_bar + bars - 1);
-    cadence.type = CadenceType::Perfect;
+    cadence.type = electsPicardy(mode, req.seed) ? CadenceType::PicardyThird : CadenceType::Perfect;
     out.harmony.cadences.push_back(cadence);
   }
 }

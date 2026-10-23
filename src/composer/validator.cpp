@@ -857,11 +857,30 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     bool ok = upper_now != 0 && bass_now != 0;
     if (cadence.type != CadenceType::Half)
       ok = ok && upper_prev != 0 && bass_prev != 0;
+    // A Picardy close lands on a chord the plan flags is_picardy; the upper line
+    // either resolves the leading tone or steps onto the raised third itself.
+    // Whether that third sounds is the picardy_third rule's business.
+    const bool picardy_landing =
+        activeChord(harmonic_plan, cadence.tick).is_picardy &&
+        (resolvesLeadingTone(upper_prev, upper_now, harmonic_plan) ||
+         (pitchClass(upper_now) == static_cast<std::uint8_t>((tonic + 4) % 12) &&
+          upper_now != upper_prev &&
+          std::abs(static_cast<int>(upper_now) - static_cast<int>(upper_prev)) <= 2));
+    // Phrygian iv6 -> V: the bass falls a half step b6 -> 5 while the soprano
+    // rises 4 -> 5, the outer voices opening from a sixth onto the octave.
+    const bool phrygian_bass = pitchClass(bass_prev) == minor_submediant &&
+                               pitchClass(bass_now) == dominant &&
+                               static_cast<int>(bass_prev) - static_cast<int>(bass_now) == 1;
+    const bool phrygian_soprano = pitchClass(upper_prev) == subdominant &&
+                                  pitchClass(upper_now) == dominant && upper_now > upper_prev &&
+                                  static_cast<int>(upper_now) - static_cast<int>(upper_prev) <= 2;
     if (ok && monophonic) {
       switch (cadence.type) {
         case CadenceType::Perfect:
-        case CadenceType::PicardyThird:
           ok = resolvesLeadingTone(upper_prev, upper_now, harmonic_plan);
+          break;
+        case CadenceType::PicardyThird:
+          ok = picardy_landing;
           break;
         case CadenceType::ImperfectAuthentic:
           ok = isTonicTriadPc(pitchClass(upper_now), harmonic_plan, cadence.tick);
@@ -877,9 +896,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                (pitchClass(upper_now) == submediant || pitchClass(upper_now) == minor_submediant);
           break;
         case CadenceType::Phrygian:
-          ok = pitchClass(upper_prev) == minor_submediant && pitchClass(upper_now) == dominant &&
-               upper_now < upper_prev &&
-               std::abs(static_cast<int>(upper_now) - static_cast<int>(upper_prev)) <= 2;
+          // A single line states either outer voice of the formula.
+          ok = phrygian_bass || phrygian_soprano;
           break;
       }
     } else if (ok) {
@@ -893,9 +911,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                isTonicTriadPc(pitchClass(upper_now), harmonic_plan, cadence.tick);
           break;
         case CadenceType::PicardyThird:
-          ok = resolvesLeadingTone(upper_prev, upper_now, harmonic_plan) &&
-               pitchClass(bass_prev) == authentic_bass_pc && pitchClass(bass_now) == tonic &&
-               pitchClass(upper_now) == static_cast<std::uint8_t>((tonic + 4) % 12);
+          ok = picardy_landing && pitchClass(bass_prev) == authentic_bass_pc &&
+               pitchClass(bass_now) == tonic;
           break;
         case CadenceType::Plagal:
           ok = pitchClass(bass_prev) == subdominant && pitchClass(bass_now) == tonic &&
@@ -909,9 +926,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                pitchClass(bass_now) == (harmonic_plan.is_minor ? minor_submediant : submediant);
           break;
         case CadenceType::Phrygian:
-          ok = pitchClass(bass_prev) == minor_submediant && pitchClass(bass_now) == dominant &&
-               bass_now < bass_prev &&
-               std::abs(static_cast<int>(bass_now) - static_cast<int>(bass_prev)) <= 2;
+          ok = phrygian_bass && phrygian_soprano;
           break;
       }
     }
@@ -927,6 +942,45 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       // harmony-rule violation (MusicalFail); only the malformed-layout
       // paths above are StructuralFail. Set explicitly for consistency
       // with every other musical rule instead of relying on the default.
+      failure.kind = FailKind::MusicalFail;
+      report.failures.push_back(failure);
+    }
+  }
+
+  // In a minor-key piece a chord flagged is_picardy must sound its major third
+  // and never the minor one anywhere in its span; the flag is the only Picardy
+  // declaration read. In a major key the raised third is simply diatonic.
+  for (std::size_t ci = 0; harmonic_plan.is_minor && ci < harmonic_plan.chords.size(); ++ci) {
+    const ChordEvent& chord = harmonic_plan.chords[ci];
+    if (!chord.is_picardy)
+      continue;
+    Tick span_end = std::numeric_limits<Tick>::max();
+    for (std::size_t next = ci + 1; next < harmonic_plan.chords.size(); ++next) {
+      if (harmonic_plan.chords[next].start_tick > chord.start_tick) {
+        span_end = harmonic_plan.chords[next].start_tick;
+        break;
+      }
+    }
+    const std::uint8_t major_third = static_cast<std::uint8_t>((chord.root_pc + 4) % 12);
+    const std::uint8_t minor_third = static_cast<std::uint8_t>((chord.root_pc + 3) % 12);
+    bool major_sounds = false;
+    bool minor_sounds = false;
+    SpanId fail_span = kInvalidSpanId;
+    for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+      const NoteEvent& note = notes[idx];
+      if (note.start_tick >= span_end || note.start_tick + note.duration <= chord.start_tick)
+        continue;
+      major_sounds = major_sounds || pitchClass(note.pitch) == major_third;
+      if (pitchClass(note.pitch) == minor_third && !minor_sounds) {
+        minor_sounds = true;
+        if (idx < provenance.size())
+          fail_span = provenance[idx].span_id;
+      }
+    }
+    if (!major_sounds || minor_sounds) {
+      ValidationFailure failure;
+      failure.span_id = fail_span;
+      failure.rule_id = "picardy_third";
       failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
     }

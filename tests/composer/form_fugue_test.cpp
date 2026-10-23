@@ -1238,11 +1238,14 @@ TEST(FormFugueTest, CodaCadencesOnTonic) {
       // The final coda note is the tonic (pitch class 0).
       EXPECT_EQ(coda.notes.back().pitch % 12, 0)
           << "seed " << seed << (minor ? " minor" : " major") << " coda does not end on tonic";
-      // A perfect cadence is annotated at the final bar downbeat.
+      // A perfect cadence, or its Picardy form, is annotated at the final bar
+      // downbeat.
+      const bool picardy = minor && detail::usePicardy(seed);
+      const CadenceType final_type = picardy ? CadenceType::PicardyThird : CadenceType::Perfect;
       bool has_final_cadence = false;
       const Tick last_bar_tick = static_cast<Tick>(bars - 1) * kBar;
       for (const auto& cadence : fx.harmony.cadences) {
-        if (cadence.tick == last_bar_tick && cadence.type == CadenceType::Perfect) {
+        if (cadence.tick == last_bar_tick && cadence.type == final_type) {
           has_final_cadence = true;
         }
       }
@@ -1252,7 +1255,6 @@ TEST(FormFugueTest, CodaCadencesOnTonic) {
           std::find_if(fx.harmony.chords.begin(), fx.harmony.chords.end(),
                        [&](const ChordEvent& chord) { return chord.start_tick == last_bar_tick; });
       ASSERT_NE(final_chord, fx.harmony.chords.end());
-      const bool picardy = minor && detail::usePicardy(seed);
       EXPECT_EQ(final_chord->is_picardy, picardy);
       EXPECT_EQ(final_chord->quality,
                 (minor && !picardy) ? ChordQuality::Minor : ChordQuality::Major);

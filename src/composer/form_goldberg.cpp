@@ -8,6 +8,7 @@
 #include "composer/arc.h"
 #include "composer/arrival_relief.h"
 #include "composer/bar_material.h"
+#include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
@@ -1006,7 +1007,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // The final bar is an explicit tonic arrival rather than one more aria-bass
   // repetition: the latter may end on V or vi depending on the selected ground
   // variant. Minor-mode cadences retain the deterministic Picardy policy.
-  const BarChord final_cadence_chord = {0, mode == Mode::Minor && !detail::usePicardy(req.seed)};
+  const BarChord final_cadence_chord = {0, mode == Mode::Minor && !electsPicardy(mode, req.seed)};
   out.harmony.tonic_pc = 0;
   out.harmony.is_minor = (mode == Mode::Minor);
   for (int bar = 0; bar < bars; ++bar) {
@@ -1020,6 +1021,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     ce.quality = chord.minor ? ChordQuality::Minor : ChordQuality::Major;
     out.harmony.chords.push_back(ce);
   }
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   // The climax block is the arc climax cycle (~80% of the span), NOT necessarily
   // the last block. The aria (block 0) and any da-capo block are never the

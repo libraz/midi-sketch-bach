@@ -852,7 +852,9 @@
             "rule_bits": [
               "PicardyThird"
             ],
-            "validator_rules": [],
+            "validator_rules": [
+              "picardy_third"
+            ],
             "voice_intents": []
           }
         },

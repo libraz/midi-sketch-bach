@@ -167,8 +167,8 @@ int minorScaleUp(int midi, int steps, bool harmonic_context);
  *
  * A Picardy third raises the final tonic chord's third to major. The choice is
  * seed-deterministic (even seed => Picardy) so a given seed always yields the
- * same final-cadence colour. Final-cadence material consumers call this to
- * decide whether to raise the closing third; it has no other side effects.
+ * same final-cadence colour. Forms read it through electsPicardy
+ * (cadenced_progression.h), which adds the minor-mode condition.
  *
  * @param seed The piece seed.
  * @return True when the final tonic chord should use a Picardy (major) third.

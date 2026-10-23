@@ -72,7 +72,7 @@ CadenceType cadenceTypeAt(const HarmonicPlan& plan, Tick tick) {
     return CadenceType::Half;
   if (previous != nullptr && previous->root_pc % 12 == dominant) {
     if (current->root_pc % 12 == tonic)
-      return CadenceType::Perfect;
+      return current->is_picardy ? CadenceType::PicardyThird : CadenceType::Perfect;
     if (current->root_pc % 12 == submediant)
       return CadenceType::Deceptive;
   }

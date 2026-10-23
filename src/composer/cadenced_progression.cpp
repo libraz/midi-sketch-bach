@@ -49,10 +49,22 @@ std::vector<ChordSpec> buildCadencedProgression(int bars, std::uint32_t seed, Mo
   }
   // Design-valued final cadence: V (dominant, always major) then tonic. In
   // minor the tonic stays minor unless the seed elects a Picardy third.
-  const bool tonic_minor = (mode == Mode::Minor) && !detail::usePicardy(seed);
+  const bool tonic_minor = (mode == Mode::Minor) && !electsPicardy(mode, seed);
   chords[static_cast<std::size_t>(bars - 2)] = {7, false};
   chords[static_cast<std::size_t>(bars - 1)] = {0, tonic_minor};
   return chords;
+}
+
+bool electsPicardy(Mode mode, std::uint32_t seed) {
+  return mode == Mode::Minor && detail::usePicardy(seed);
+}
+
+void stampPicardyClose(HarmonicPlan& plan, Mode mode, std::uint32_t seed) {
+  if (plan.chords.empty() || !electsPicardy(mode, seed))
+    return;
+  ChordEvent& final_chord = plan.chords.back();
+  final_chord.quality = ChordQuality::Major;
+  final_chord.is_picardy = true;
 }
 
 void writeBarChords(HarnessFixture& out, const std::vector<ChordSpec>& chords, Mode mode) {

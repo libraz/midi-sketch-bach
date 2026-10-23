@@ -151,7 +151,9 @@ void annotateCadenceCells(Material& material, const HarmonicPlan& harmonic_plan)
         cell.bass_cadence_pc = tonic;
         break;
       case CadenceType::PicardyThird:
-        cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 11) % 12);
+        // The soprano steps onto the raised third, so the cell sounds the
+        // Picardy third itself whatever the texture's voice count.
+        cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 2) % 12);
         cell.soprano_cadence_pc = major_third;
         cell.bass_approach_pc = static_cast<std::uint8_t>((tonic + 7) % 12);
         cell.bass_cadence_pc = tonic;
@@ -176,8 +178,9 @@ void annotateCadenceCells(Material& material, const HarmonicPlan& harmonic_plan)
             static_cast<std::uint8_t>((tonic + (harmonic_plan.is_minor ? 8 : 9)) % 12);
         break;
       case CadenceType::Phrygian:
-        cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 1) % 12);
-        cell.soprano_cadence_pc = static_cast<std::uint8_t>((tonic + 2) % 12);
+        // iv6 -> V: soprano 4 -> 5 over the half-step bass b6 -> 5.
+        cell.soprano_approach_pc = static_cast<std::uint8_t>((tonic + 5) % 12);
+        cell.soprano_cadence_pc = static_cast<std::uint8_t>((tonic + 7) % 12);
         cell.bass_approach_pc = static_cast<std::uint8_t>((tonic + 8) % 12);
         cell.bass_cadence_pc = static_cast<std::uint8_t>((tonic + 7) % 12);
         break;

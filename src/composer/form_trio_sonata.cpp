@@ -57,6 +57,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // bar by bar -- so the spelling has no line it can contradict.
   markDominantSevenths(chords, /*triad_only_bars=*/{}, mode, /*cyclic=*/false);
   writeBarChords(out, chords, mode);
+  stampPicardyClose(out.harmony, mode, req.seed);
 
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);
 
@@ -658,7 +659,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // minor without the Picardy lift), filling the triad between the V0 tonic
   // and the pedal root.
   {
-    const bool picardy = (mode == Mode::Minor) && detail::usePicardy(req.seed);
+    const bool picardy = electsPicardy(mode, req.seed);
     const int third = (mode == Mode::Minor && !picardy) ? 63 : 64;  // Eb4 / E4.
     v1.notes.erase(
         std::remove_if(v1.notes.begin(), v1.notes.end(),

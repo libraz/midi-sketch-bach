@@ -19,6 +19,7 @@
 #include <cstdint>
 
 #include "composer/arc.h"
+#include "composer/cadenced_progression.h"
 #include "composer/composer.h"
 #include "composer/rule_helpers.h"
 #include "composer/validator.h"
@@ -78,6 +79,48 @@ TEST(FormDirectorHarmony, ShippedFormsDeclareDiatonicChordMetadata) {
     ASSERT_FALSE(fixture.harmony.chords.empty()) << static_cast<int>(form);
     for (const ChordEvent& chord : fixture.harmony.chords) {
       EXPECT_TRUE(chord.has_degree) << static_cast<int>(form) << " tick=" << chord.start_tick;
+    }
+  }
+}
+
+// Every minor-key form stamps the elected Picardy close on its final tonic, the
+// composed close sounds the raised third under the PicardyThird bit, and the
+// validator holds the result to the flag. The cello closes on a bare held
+// tonic, so it never elects one.
+TEST(FormDirectorHarmony, ElectedPicardyCloseIsStampedSoundedAndValidated) {
+  for (FormType form : kAllForms) {
+    for (std::uint32_t seed = 1; seed <= 6; ++seed) {
+      ComposeRequest request;
+      request.form = form;
+      request.is_minor = true;
+      request.seed = seed;
+      request.target_bars = resolveBars(form, DurationScale::Short, 0);
+      HarnessFixture fixture;
+      ASSERT_EQ(buildFormFixture(request, &fixture), FormDirectorStatus::Ok);
+      const ChordEvent& final_chord = fixture.harmony.chords.back();
+      const bool elected =
+          form != FormType::CelloPrelude && electsPicardy(detail::Mode::Minor, seed);
+      EXPECT_EQ(final_chord.root_pc % 12, fixture.harmony.tonic_pc % 12);
+      EXPECT_EQ(final_chord.is_picardy, elected) << static_cast<int>(form) << " seed " << seed;
+
+      const ComposeResult result =
+          Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+      for (const ValidationFailure& failure : result.validation.failures) {
+        EXPECT_NE(failure.rule_id, "picardy_third") << static_cast<int>(form) << " seed " << seed;
+        EXPECT_NE(failure.rule_id, "cadence_voice_leading")
+            << static_cast<int>(form) << " seed " << seed;
+      }
+      if (!elected)
+        continue;
+      bool third_with_bit = false;
+      for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+        const NoteEvent& note = result.notes[idx];
+        if (note.start_tick + note.duration > final_chord.start_tick &&
+            note.pitch % 12 == (final_chord.root_pc + 4) % 12 &&
+            (result.provenance[idx].satisfied_rules & ruleBitMask(RuleBit::PicardyThird)))
+          third_with_bit = true;
+      }
+      EXPECT_TRUE(third_with_bit) << static_cast<int>(form) << " seed " << seed;
     }
   }
 }
