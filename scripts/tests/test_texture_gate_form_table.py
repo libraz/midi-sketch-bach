@@ -217,8 +217,10 @@ class DocumentedClaimsTest(unittest.TestCase):
 
     def test_fugue_device_claims_are_conditional_in_both_readmes(self) -> None:
         self.assertNotIn("Every fugue builds an exposition, real/tonal answer", README_EN)
-        self.assertIn("only when the development has room", README_EN)
-        self.assertIn("展開部に余地が", README_JA)
+        self.assertIn("episodes where the\ndevelopment has room", README_EN)
+        self.assertIn("below 32 bars they have no\nstretto", README_EN)
+        self.assertIn("嬉遊部は展開部に余地がある場合", README_JA)
+        self.assertIn("32小節未満ではストレッタを持たず", README_JA)
 
 
 class DemoCharacterTest(unittest.TestCase):

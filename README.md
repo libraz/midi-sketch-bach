@@ -52,11 +52,13 @@ two-tune Quodlibet slot), and an aria restatement with an explicit terminal
 coda.
 
 Every fugue builds an exposition, a real or tonal answer and a countersubject.
-Later devices depend on the form and length: `fugue` adds episodes and middle
-entries, and a stretto only when the development has room for one (not every
-seed at the default length); the `prelude_and_fugue` default length has a
-single episode and no stretto; the `toccata_and_fugue` and
-`fantasia_and_fugue` fugue tails are exposition, stretto and cadence. The
+Later devices depend on the form and length: `fugue` and `prelude_and_fugue`
+add middle entries and a stretto at every length, episodes where the
+development has room for them, and a dominant pedal once it holds two or more
+entries; the `toccata_and_fugue` and
+`fantasia_and_fugue` fugue tails are exposition, stretto and cadence with
+figuration rather than episodes between them, and below 32 bars they have no
+stretto and below 24 bars a two-entry exposition with no bass entry. The
 final-score validator audits parallel fifths/octaves and voice
 crossing on the emitted notes and reports any authored-material findings.
 
