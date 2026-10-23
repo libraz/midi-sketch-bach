@@ -131,7 +131,10 @@ export interface DiagnosticData {
  *
  * Counted before the validator decides how to route a finding, so a rule that
  * never produced a failure is still visible. `total - gated - exempted` is the
- * number of findings recorded as informational.
+ * number of findings recorded as informational. The counts describe
+ * per-finding routing only: the counterpoint budget fails a piece through a
+ * separate rule-level entry in `validation.failures` (no span) and leaves these
+ * counts unchanged.
  */
 export interface CounterpointObservation {
   /** Stable rule token, e.g. "parallel_fifth". */
@@ -144,7 +147,7 @@ export interface CounterpointObservation {
   geometry: 'linear' | 'vertical' | 'unclassified';
   /** Times the rule matched, before any routing decision. */
   total: number;
-  /** Findings routed to validation failures. */
+  /** Individual findings routed to validation failures. */
   gated: number;
   /** Findings suppressed because every operand is an immutable input. */
   exempted: number;

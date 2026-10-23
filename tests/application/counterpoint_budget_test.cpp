@@ -288,6 +288,27 @@ TEST(CounterpointBudgetTest, ClosedRuleWithAMatchFailsThePiece) {
   EXPECT_EQ(report.status, composer::ValidationStatus::Ok);
 }
 
+TEST(CounterpointBudgetTest, RuleLevelFailureLeavesThePerFindingTallyUnchanged) {
+  // The budget failure is a separate channel: it carries no span, and the
+  // tally keeps `total - gated - exempted` equal to the informational count.
+  composer::RuleObservation tally;
+  tally.rule_id = "doubling_no_seventh";
+  tally.total = 5;
+  tally.gated = 2;
+  tally.exempted = 1;
+  composer::ValidationReport report;
+  report.observations.push_back(tally);
+
+  composer::applyCounterpointBudget(FormType::Fugue, &report);
+
+  ASSERT_EQ(report.failures.size(), 1u);
+  EXPECT_EQ(report.failures[0].span_id, composer::kInvalidSpanId);
+  ASSERT_EQ(report.observations.size(), 1u);
+  EXPECT_EQ(report.observations[0].total, 5);
+  EXPECT_EQ(report.observations[0].gated, 2);
+  EXPECT_EQ(report.observations[0].exempted, 1);
+}
+
 TEST(CounterpointBudgetTest, ClosedRuleWithoutAMatchAppendsNothing) {
   composer::ValidationReport report;
   report.observations.push_back(observation("doubling_no_seventh", 0));
