@@ -639,8 +639,10 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     if (profile.prefer_dotted)
       notes_per_beat = 4;  // Noble: a busier, dotted-feel running figuration.
     // Register base stays at C4 (60) plus the arc register lift, comfortably
-    // above the C3-region cantus firmus.
-    const int register_base = 60 + static_cast<int>(point.register_shift);
+    // above the C3-region cantus firmus. A bar whose figure would climb past
+    // the manual compass is rebuilt with its lift lowered by the overshoot.
+    int register_base = 60 + static_cast<int>(point.register_shift);
+    const std::size_t bar_begin = fig.notes.size();
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
     const detail::ChordSpec harmony = spellingOf(chord);
     // Pattern rotation per 4-bar cycle: the anchored scalar wave alternates
@@ -655,28 +657,41 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const bool mid_cycle = mid_boundary_bar >= 0 && (bar / 4) == (mid_boundary_bar / 4);
     const bool corta = !point.is_climax &&
                        ((((req.seed + static_cast<std::uint32_t>(bar / 4)) % 2) == 1) || mid_cycle);
-    if (corta) {
-      const int corta_figure =
-          static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
-      appendFiguraCortaBar(fig.notes, bar,
-                           snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
-                                             chord.root_pc, chord.minor),
-                           detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure,
-                           profile.prefer_dotted);
-    } else {
-      // Anchor-contour rotation, phased by the seed so the same section plan
-      // lays the contours over different bars across seeds. The phase folds in
-      // seed/4 as well: every other seed input here is mod-4 (register offset,
-      // corta parity), so without it seeds congruent mod 4 produced identical
-      // chorale preludes.
-      const int figure =
-          static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
-      // Sixteenth-tier bars open with the leap-and-fill cell (ascending-sixth
-      // leap, stepwise descent): the contour windows' stepwise fills alone
-      // leave the ascending-sixth interval bins -- a fixture of the chorale
-      // figuration idiom -- almost empty.
-      appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset, figure,
-                          /*leap_fill=*/notes_per_beat == 4);
+    // The figure's floor is the embellishment ceiling of the cantus below it,
+    // so the drop stops at the unlifted base.
+    for (;;) {
+      if (corta) {
+        const int corta_figure =
+            static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
+        appendFiguraCortaBar(
+            fig.notes, bar,
+            snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony), chord.root_pc,
+                              chord.minor),
+            detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure,
+            profile.prefer_dotted);
+      } else {
+        // Anchor-contour rotation, phased by the seed so the same section plan
+        // lays the contours over different bars across seeds. The phase folds in
+        // seed/4 as well: every other seed input here is mod-4 (register offset,
+        // corta parity), so without it seeds congruent mod 4 produced identical
+        // chorale preludes.
+        const int figure =
+            static_cast<int>((req.seed + req.seed / 4u + static_cast<std::uint32_t>(bar)) % 4u);
+        // Sixteenth-tier bars open with the leap-and-fill cell (ascending-sixth
+        // leap, stepwise descent): the contour windows' stepwise fills alone
+        // leave the ascending-sixth interval bins -- a fixture of the chorale
+        // figuration idiom -- almost empty.
+        appendFigurationBar(fig, bar, chord, mode, notes_per_beat, register_base, offset, figure,
+                            /*leap_fill=*/notes_per_beat == 4);
+      }
+      int bar_top = 0;
+      for (std::size_t idx = bar_begin; idx < fig.notes.size(); ++idx)
+        bar_top = std::max(bar_top, static_cast<int>(fig.notes[idx].pitch));
+      const int overshoot = bar_top - static_cast<int>(organ_range::kManualHigh);
+      if (overshoot <= 0 || register_base <= kV1EmbellishCeiling)
+        break;
+      register_base = std::max(register_base - overshoot, kV1EmbellishCeiling);
+      fig.notes.resize(bar_begin);
     }
   }
 
@@ -713,7 +728,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     appendCadentialLanding(fig.notes, barTick(bars - 2), kTicksPerBar, prefinal, closing_third,
                            mode,
                            /*band_lo=*/62, &penult_spec, /*prefer_descending=*/false,
-                           /*lift_to_context=*/true);
+                           /*lift_ceiling=*/organ_range::kManualHigh);
   }
 
   // V0 figuration registry for the embellishment loop's run-break consonance
@@ -1189,7 +1204,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int top_prep = soundingMaterialPitch(top, preparation_tick);
       const int top_sus = soundingMaterialPitch(top, suspension_tick);
       const int top_res = soundingMaterialPitch(top, resolution_tick);
-      const int band_hi = std::min(86, std::max({top_prep, top_sus, top_res}) + 5);
+      const int band_hi = std::min(static_cast<int>(organ_range::kManualHigh),
+                                   std::max({top_prep, top_sus, top_res}) + 5);
       // The tone the three lines were last read against, one sixteenth before
       // each arrival -- the grain a union-onset reading pairs the voices at.
       const int bass_before = soundingMaterialPitch(bass, preparation_tick - kSixteenth);

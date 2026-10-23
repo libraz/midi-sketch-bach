@@ -318,13 +318,15 @@ struct SpellingCeiling {
 constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
     {FormType::Fugue, 114, 12, 0, 5, 22},
     {FormType::PreludeAndFugue, 15, 0, 0, 1, 0},
-    {FormType::TrioSonata, 8, 0, 13, 10, 0},
+    {FormType::TrioSonata, 8, 0, 5, 10, 0},
     {FormType::ChoralePrelude, 9, 6, 0, 0, 0},
     {FormType::ToccataAndFugue, 16, 0, 7, 0, 0},
-    {FormType::Passacaglia, 5, 0, 3, 0, 0},
+    // The compass-bound counter-line concedes an augmented second only where
+    // every other tone keeps a perfect-motion fault: 3 -> 5.
+    {FormType::Passacaglia, 5, 0, 5, 0, 0},
     {FormType::FantasiaAndFugue, 17, 0, 5, 0, 0},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0},
-    {FormType::Chaconne, 2, 0, 11, 2, 0},
+    {FormType::Chaconne, 2, 0, 6, 2, 0},
     {FormType::GoldbergVariations, 32, 8, 42, 64, 4},
 }};
 

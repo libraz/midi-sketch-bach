@@ -166,7 +166,7 @@ TEST(TextureHelpersTest, CadentialLandingInTripleMeterUsesOnlyFirstBeatForApproa
   appendCadentialLanding(line, /*penult_bar_start=*/0, kThreeFourBar, /*prefinal=*/71,
                          /*final_pitch=*/72, detail::Mode::Major, /*band_lo=*/60,
                          /*downbeat_chord=*/nullptr, /*prefer_descending=*/false,
-                         /*lift_to_context=*/false, /*ts_numerator=*/3);
+                         /*lift_ceiling=*/0, /*ts_numerator=*/3);
 
   ASSERT_EQ(line.size(), 4u);
   EXPECT_EQ(line[0].start_tick, 0);

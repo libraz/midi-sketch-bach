@@ -889,6 +889,38 @@ TEST(CompositionServiceTest, ChaconneInGMinorAtFullLengthShipsOnEverySeed) {
   EXPECT_TRUE(needed_nearest_placement);
 }
 
+// The organ has no key outside its compass, so every organ form sounds inside it
+// in every key: a whole octave places most scores, the output placement moves
+// what one cannot, and the key never costs the piece its validity.
+TEST(CompositionServiceTest, OrganFormsSoundInsideTheCompassInEveryKey) {
+  constexpr FormType forms[] = {
+      FormType::Fugue,
+      FormType::PreludeAndFugue,
+      FormType::TrioSonata,
+      FormType::ChoralePrelude,
+      FormType::ToccataAndFugue,
+      FormType::Passacaglia,
+      FormType::FantasiaAndFugue,
+  };
+  for (FormType form : forms) {
+    for (int tonic = 0; tonic < 12; ++tonic) {
+      for (bool minor : {false, true}) {
+        SCOPED_TRACE(formTypeToString(form));
+        SCOPED_TRACE(tonic);
+        SCOPED_TRACE(minor ? "minor" : "major");
+        CompositionRequest request;
+        request.form = form;
+        request.key = {static_cast<Key>(tonic), minor};
+        request.seed = 1;
+        request.bpm = 100;
+        CompositionProduct product;
+        ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+        EXPECT_EQ(compassExcess(product), 0);
+      }
+    }
+  }
+}
+
 // The figuration wave's veto counters are a process-wide accumulator that only
 // the form builders drive. compose() resets it per piece and snapshots it onto
 // the report, so the exported document describes this piece alone: a fugue

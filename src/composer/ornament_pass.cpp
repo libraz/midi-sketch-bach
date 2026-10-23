@@ -12,6 +12,7 @@
 #include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "composer/validator.h"
+#include "core/instrument_program.h"
 
 namespace bach::composer {
 
@@ -452,7 +453,10 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   const std::uint8_t beats_per_bar = params.ts_numerator == 0 ? 4 : params.ts_numerator;
   const Tick beat_ticks = tpb / beats_per_bar;
   const std::uint8_t density = effectiveOrnamentDensity(params.character, params.instrument);
-  const int ornament_pitch_ceiling = (params.instrument == InstrumentType::Organ) ? 84 : kMidiMax;
+  // An instrument with no keys above its compass cannot sound a figure there. The
+  // limit is read in the composed frame; output placement owns the transposed one.
+  const InstrumentPitchRange compass = pitchRangeFor(params.instrument);
+  const int ornament_pitch_ceiling = compass.hard_limit ? compass.high : kMidiMax;
   const int total_bars = static_cast<int>((longestEnd(result.notes) + tpb - 1) / tpb);
 
   // The cadence window is the last two bars; the penultimate strong beat
@@ -850,7 +854,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
       const int lower = lowerNeighbour(note.pitch, params.mode, in_cadence_window,
                                        params.harmonic_plan, note.start_tick);
 
-      const bool neighbours_ok = upper >= 0 && upper <= ornament_pitch_ceiling && lower >= 0;
+      const bool neighbours_ok = upper >= 0 && lower >= 0;
 
       // Ceiling guard: the upper neighbour must not cross above the next-higher
       // voice's concurrent pitch.
@@ -1088,9 +1092,15 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
 
     // The entry gate checks the immediate lower neighbour. Slides additionally
     // introduce a second lower step, so verify every emitted sub-note at its
-    // actual onset before committing the expansion.
+    // actual onset before committing the expansion. The compass is judged on
+    // the tones the figure sounds, so a figure without the upper auxiliary is
+    // never refused for it.
     if (!exp.notes.empty()) {
       for (const NoteEvent& ornament : exp.notes) {
+        if (static_cast<int>(ornament.pitch) > ornament_pitch_ceiling) {
+          exp.notes.clear();
+          break;
+        }
         const int ornament_floor =
             nextLowerVoiceFloor(result.notes, note.voice, ornament.start_tick);
         if (static_cast<int>(ornament.pitch) <= ornament_floor) {

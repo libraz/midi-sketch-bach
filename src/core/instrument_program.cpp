@@ -32,7 +32,7 @@ std::uint8_t gmProgramFor(InstrumentType instrument) {
 InstrumentPitchRange pitchRangeFor(InstrumentType instrument) {
   switch (instrument) {
     case InstrumentType::Organ:
-      return {organ_range::kPedalLow, organ_range::kManual1High};
+      return {organ_range::kPedalLow, organ_range::kManualHigh, /*hard_limit=*/true};
     case InstrumentType::Harpsichord:
       return {36, 96};
     case InstrumentType::Piano:
@@ -47,7 +47,7 @@ InstrumentPitchRange pitchRangeFor(InstrumentType instrument) {
       // Likewise, the public Cello Prelude may use a broad multi-octave
       // arpeggio. This is an output compass for the complete product, not a
       // claim that every line is a literal unaccompanied solo part.
-      return {organ_range::kPedalLow, organ_range::kManual1High};
+      return {24, 96};
     case InstrumentType::Guitar:
       return {string_range::kGuitarLow, string_range::kGuitarHigh};
   }

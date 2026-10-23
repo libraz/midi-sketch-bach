@@ -78,9 +78,14 @@ constexpr int kSubjectBars = 4;
 // The real answer descends a fourth before its octave placement.  Its catalog
 // minimum is therefore E3 (53), so V1 begins there; V2 ends at E-flat3 (52).
 // Those adjacent, non-overlapping bands keep the actual answer out of the bass
-// register while still fitting every qualified subject's full range.
+// register while still fitting every qualified subject's full range. V0 tops out
+// at the manual compass.
 constexpr std::array<int, 3> kBandLo = {70, 53, 33};
-constexpr std::array<int, 3> kBandHi = {88, 71, 52};
+constexpr std::array<int, 3> kBandHi = {organ_range::kManualHigh, 71, 52};
+
+// Floor of the toccata's solo opening gesture. Nothing sounds under it, so its
+// run and its octave cascade may reach an octave below the V0 band.
+constexpr int kGestureFloor = kBandLo[0] - interval::kOctave;
 
 /// @brief Append a single clamped note to a material vector.
 void addNote(std::vector<MaterialNote>& dst, Tick tick, Tick dur, int pitch) {
@@ -1951,7 +1956,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         const int chord_bar = dramaticus_cascade ? win.first_bar : bar;
         const int octave_drop = (dramaticus_cascade && bar == 1) ? 1 : 0;
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(chord_bar)], mode,
-                         kBandLo[0], kBandHi[0], octave_drop);
+                         kGestureFloor, kBandHi[0], octave_drop);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         prev_pitch = -1;
         continue;
@@ -1963,7 +1968,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         // line they are rather than as two parts moving in octaves; the doubled
         // V1 statement is emitted as a verbatim voice-1 ToccataSection there.
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(win.first_bar)], mode,
-                         kBandLo[0], kBandHi[0], /*octave_drop=*/2);
+                         kGestureFloor, kBandHi[0], /*octave_drop=*/2);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         for (std::size_t note_idx = before; note_idx < section.notes.size(); ++note_idx) {
           MaterialNote doubled = section.notes[note_idx];
@@ -2222,11 +2227,17 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   // One uniform register lift for the whole fantasia, taken from the climax
   // cycle's arc point, so adjacent-section register deltas stay at the proven
   // 12-semitone spacing (preserving section_contrast_required margins).
+  // The lift is compressed so the highest style's wave stays on the manual.
+  constexpr int kWaveSpan = 14;  // a style's wave ceiling above its base.
+  int highest_base = 0;
+  for (const StyleSpec& style : kStyles)
+    highest_base = std::max(highest_base, style.base_midi);
   int free_register_lift = 0;
   for (std::size_t cyc = 0; cyc < req.cycle_count; ++cyc) {
     const ArcPoint pt = req.arc(cyc);
     if (pt.is_climax) {
-      free_register_lift = std::max<int>(0, pt.register_shift);
+      free_register_lift = std::clamp<int>(pt.register_shift, 0,
+                                           organ_range::kManualHigh - kWaveSpan - highest_base);
       break;
     }
   }
@@ -2262,7 +2273,7 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
     // per-section shift could compress the Chordal -> Free wrap below the
     // 5-semitone contrast margin. The proven density deltas (4/8/16/4) already
     // satisfy section_contrast_required for the non-wrap adjacencies.
-    const int base = std::clamp(sp.base_midi + free_register_lift, 40, 84);
+    const int base = sp.base_midi + free_register_lift;
     // The wave chains conjunctly within the section (reset at the section head so
     // each style keeps its own register identity, preserving the per-section
     // register contrast section_contrast_required measures).
@@ -2280,7 +2291,7 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
         // other bar -- the odd bars answer with the running wave so the chordal
         // rhetoric arrives without flooding the section with half notes.
         appendChordBlockBarAlternating(section.notes, bar, plan[static_cast<std::size_t>(bar)],
-                                       mode, base + 14, chordal_prev_top);
+                                       mode, base + kWaveSpan, chordal_prev_top);
         lp.homophonic = true;  // V1 + V2 strike together (half-note chordal).
         prev_pitch = -1;
         continue;
@@ -2289,13 +2300,13 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
         // A Free section opens with a rhetorical gesture (mordent onset +
         // descending run, the bar tail silent) before the quarter-note wave.
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, base,
-                         base + 14);
+                         base + kWaveSpan);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
         prev_pitch = -1;
         continue;
       }
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
-                          sp.notes_per_beat, base, base + 14, fig_offset, prev_pitch);
+                          sp.notes_per_beat, base, base + kWaveSpan, fig_offset, prev_pitch);
       bendIntoLocalKeys(section.notes, before, out.harmony, plan);
       if (sp.style == FantasiaStyle::Fugal || sp.style == FantasiaStyle::Toccata) {
         lp.punctuate = true;  // V1 head punctuation on top of the pedal.

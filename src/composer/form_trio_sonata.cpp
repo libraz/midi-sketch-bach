@@ -13,6 +13,7 @@
 #include "composer/minor_material.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -200,6 +201,17 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                        : detail::scaleUp(midi, steps, mode, &bc);
     };
 
+    // The voice's sounding envelope: the band plus a two-degree neighbour above
+    // it, never past the manual compass. A neighbour figure that would climb
+    // out of it takes its mirror below the anchor instead.
+    const int sounding_hi = std::min(walk(band_hi, 2), static_cast<int>(organ_range::kManualHigh));
+    auto neighbour = [&](int anchor, int steps, Tick tick) {
+      const int above = walk(anchor, steps);
+      const int below = walk(anchor, -steps);
+      return above > sounding_hi ? improved_by(below, above, tick)
+                                 : improved_by(above, below, tick);
+    };
+
     // Find the chord tone (of any triad pitch class) NEAREST `near`, realized in
     // the voice's register band [band_lo, band_hi]. Used to voice-lead each beat
     // anchor to the closest chord tone, so consecutive anchors move by at most a
@@ -323,7 +335,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         // whole figure, the descending neighbour still carries the same
         // stepwise vocabulary and may escape where the ascending one cannot.
         const Tick short_tick = base + dq;
-        const int short_pitch = improved_by(walk(long_pitch, 1), walk(long_pitch, -1), short_tick);
+        const int short_pitch = neighbour(long_pitch, 1, short_tick);
         MaterialNote shortn;
         shortn.start_tick = short_tick;
         shortn.duration = kEighth;
@@ -351,8 +363,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
         prev_emitted = anchor;
         for (int sub = 0; sub < 2; ++sub) {
           const Tick tick = base + kEighth + static_cast<Tick>(sub) * kSixteenth;
-          const int pitch =
-              improved_by(walk(anchor, sub == 0 ? 1 : 2), walk(anchor, sub == 0 ? -1 : -2), tick);
+          const int pitch = neighbour(anchor, sub == 0 ? 1 : 2, tick);
           MaterialNote shortn;
           shortn.start_tick = tick;
           shortn.duration = kSixteenth;
@@ -392,8 +403,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // broken-third cells point away from whichever band edge would let
       // their widest tone escape the envelope (when neither direction fits,
       // the rising arc substitutes) -- so the strict V2 < V1 < V0 register
-      // order the voice-crossing rule samples at every onset is preserved.
-      const int sounding_hi = walk(band_hi, 2);
+      // order the voice-crossing rule samples at every onset is preserved. A
+      // rising arc whose peak would leave the envelope falls instead.
       bool broken_fits = false;
       int broken_dir = 1;
       bool thirds_fits = false;
@@ -419,6 +430,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       } else {
         falling = (shape == 1) && (anchor - 4 >= band_lo);
       }
+      if (!falling && !leap_fits && !thirds_fits && !broken_fits &&
+          walk(anchor, notes_per_beat / 2) > sounding_hi && anchor - 4 >= band_lo)
+        falling = true;
       // Broken-third climb degrees per subdivision: anchor, third up, step
       // back, third up again -- net a fourth, recovered by the next beat's
       // chord-tone anchor.
@@ -454,7 +468,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           bool escaped = false;
           for (int accept = kGuardClean; accept < cell_rank && !escaped; ++accept) {
             for (const int alt : {walk(anchor, -degrees), anchor}) {
-              if (alt == pitch || alt < band_lo || alt > walk(band_hi, 2))
+              if (alt == pitch || alt < band_lo || alt > sounding_hi)
                 continue;
               if (guard_rank(prev_emitted, alt, mn.start_tick) <= accept) {
                 pitch = alt;
@@ -484,7 +498,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // AllowTrioUpperMomentary policy (set below) still rejects a held inversion;
   // the pedal remains below both manuals.
   constexpr int kV0BandLo = 60;  // C4.
-  constexpr int kV0BandHi = 84;  // C6.
+  constexpr int kV0BandHi = organ_range::kManualHigh;
   constexpr int kV1BandLo = 55;  // G3; remains above the pedal ceiling.
   constexpr int kV1BandHi = 64;  // E4.
   int v0_anchor = 72;            // ~C5.

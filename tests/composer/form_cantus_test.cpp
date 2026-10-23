@@ -1032,7 +1032,7 @@ TEST(FormCantusRegister, ChoraleCycleBoundaryKeepsFigurationConnected) {
   ASSERT_EQ(target_result.validation.status, ValidationStatus::Ok);
   EXPECT_LE(maxVoiceConsecutiveLeap(target_result.notes, /*target_voice=*/0), 14);
   const Tick climax_resolve_tick = 12 * kTicksPerBar;
-  EXPECT_EQ(voice_pitch_at(target_result, climax_resolve_tick), 79);
+  EXPECT_EQ(voice_pitch_at(target_result, climax_resolve_tick), 67);
   EXPECT_EQ(voice_pitch_at(target_result, climax_resolve_tick + kTicksPerBeat), 76);
 
   const auto transition_chord =
@@ -1058,7 +1058,7 @@ TEST(FormCantusRegister, ChoraleCycleBoundaryKeepsFigurationConnected) {
   EXPECT_GT(climax_peak, resolve_peak);
 
   for (const auto& [seed, expected_leap] :
-       std::array<std::pair<std::uint32_t, int>, 3>{{{42, 12}, {44, 12}, {45, 13}}}) {
+       std::array<std::pair<std::uint32_t, int>, 3>{{{42, 12}, {44, 12}, {45, 12}}}) {
     const HarnessFixture control =
         build(FormType::ChoralePrelude, false, SubjectCharacter::Severe, 16, seed);
     const ComposeResult control_result =

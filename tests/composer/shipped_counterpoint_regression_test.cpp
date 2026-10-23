@@ -30,11 +30,12 @@
 //   structural : Composer::run's own output. The strict column only. This is
 //                the counterpoint the form builders actually wrote, and no
 //                amount of decoration may be what brings it to zero.
-//   shipped    : after the ornament pass. All four columns. Everything past the
-//                pass -- velocity curve, renderer, MIDI writer -- leaves pitch
-//                and onset alone, so this is the final contrapuntal surface,
-//                and it is the surface the product's own gate reads
-//                (applyCounterpointBudget over FinalScore validation).
+//   shipped    : after the ornament pass and output placement, in C. All four
+//                columns. Everything past placement -- velocity curve,
+//                renderer, MIDI writer -- leaves pitch and onset alone, so this
+//                is the final contrapuntal surface, and it is the surface the
+//                product's own gate reads (applyCounterpointBudget over
+//                FinalScore validation).
 //
 // The ornament configuration is not rebuilt here. resolveFixtureOrnamentContext
 // is the product's own derivation, called with the product's own instrument
@@ -56,10 +57,13 @@
 // compile-time constant, not a link dependency -- bach_composer_tests still
 // links bach_composer_lib only.
 #include "application/composition_service.h"
+#include "composer/compass_placement.h"
 #include "composer/composer.h"
+#include "composer/counterpoint_budget.h"
 #include "composer/form_director.h"
 #include "composer/harness_fixture.h"
 #include "composer/ornament_pass.h"
+#include "composer/validator.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 
@@ -575,6 +579,16 @@ bool composeSurfaces(const ComposeRequest& request, std::vector<NoteEvent>* stru
   ornament.bpm = application::kDefaultBpm;
   resolveFixtureOrnamentContext(fixture, request.form, totalTicks(result.notes), &ornament);
   applyOrnamentPass(result, ornament);
+  const auto placement =
+      placeInOutputCompass(&result, fixture.material, fixture.harmony, Key::C, ornament.instrument,
+                           fixture.harmony.ticksPerBar(), [&](const ComposeResult& placed) {
+                             ValidationReport report = Validator{}.validate(
+                                 placed.notes, placed.provenance, fixture.harmony, fixture.material,
+                                 ValidationScope::FinalScore);
+                             applyCounterpointBudget(request.form, &report);
+                             return report.failures.empty();
+                           });
+  EXPECT_TRUE(placement.has_value());
   *shipped = std::move(result.notes);
   return true;
 }
@@ -1121,7 +1135,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // quarter, so there are marginally fewer onsets to examine.
     // Leading tone kept over V in both directions: battuta 31 -> 27, fourths
     // 9 -> 5; hidden 119 -> 126 (worst cell 4 -> 5), anti 2 -> 4, floor -31.
-    {FormType::TrioSonata, 0, 0, 126, 27, 4, 0, 5, 2, 1, 34769, 5},
+    // V0 kept inside the manual compass: hidden 126 -> 116, battuta 27 -> 18,
+    // paid with fourths 5 -> 7 where a neighbour figure turns down from the top.
+    {FormType::TrioSonata, 0, 0, 116, 18, 4, 0, 5, 2, 1, 34784, 7},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -1190,7 +1206,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // did, and the sampled pairs fall with the onsets. No voice fell silent.
     // Walkers keep the leading tone over V: battuta 21 -> 19; hidden 28 -> 33,
     // fourths over a held bass 26 -> 28.
-    {FormType::ChoralePrelude, 0, 0, 33, 19, 0, 0, 2, 3, 0, 17172, 28},
+    // V0 lift compressed under the manual compass: battuta 19 -> 17 (worst 3 -> 2),
+    // paid with fourths 28 -> 29 and a floor 9 lower.
+    {FormType::ChoralePrelude, 0, 0, 33, 17, 0, 0, 2, 2, 0, 17163, 29},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1323,7 +1341,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // of two hidden approaches and eight successions. Every worst cell holds.
     // Bends and the countersubject spelled under the local dominant: fourths
     // 148 -> 140; hidden 16 -> 18, battuta 12 -> 14, anti 6 -> 12.
-    {FormType::ToccataAndFugue, 84, 84, 18, 14, 12, 7, 2, 1, 1, 28110, 140},
+    // V0 band topped at the manual compass: hidden 18 -> 12, battuta 14 -> 3,
+    // anti 12 -> 0, paid with fourths 140 -> 146.
+    {FormType::ToccataAndFugue, 84, 84, 12, 3, 0, 7, 2, 1, 0, 28273, 146},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1452,7 +1472,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // onset where there were two.
     // Variation and counter-line keep the leading tone over V: battuta 8 -> 9,
     // anti 4 -> 5, fourths 150 -> 154, floor 27374 -> 27294.
-    {FormType::Passacaglia, 0, 0, 24, 9, 5, 0, 1, 1, 1, 27294, 154},
+    // Variations kept inside the manual compass: hidden 24 -> 20, battuta 9 -> 0,
+    // paid with fourths 154 -> 155.
+    {FormType::Passacaglia, 0, 0, 20, 0, 5, 0, 1, 0, 1, 27362, 155},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1528,7 +1550,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Countersubject and bends spelled under the local dominant: hidden 11 -> 16
     // (worst 1 -> 2), battuta 0 -> 2 (worst 0 -> 1), anti 14 -> 16, fourths
     // 206 -> 213, floor -8.
-    {FormType::FantasiaAndFugue, 0, 0, 16, 2, 16, 0, 2, 1, 1, 28615, 213},
+    // Fugue-tail V0 band topped at the manual compass: fourths 213 -> 208, paid
+    // with one battuta (2 -> 3) where the figuration turns down from the top.
+    {FormType::FantasiaAndFugue, 0, 0, 16, 3, 16, 0, 2, 1, 1, 29024, 208},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1622,7 +1646,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // twenty-seven across the sweep.
     // Leading tone over V in variation and counter-line: every perfect column
     // stays 0; fourths over the ground 40 -> 50, floor 18978 -> 18628.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18628, 50},
+    // The middle voice refuses augmented seconds first: minor aug2 11 -> 6, at a
+    // floor 148 lower where it now withdraws or holds.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18480, 49},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

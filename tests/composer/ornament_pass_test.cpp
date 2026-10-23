@@ -30,6 +30,7 @@
 #include "composer/renderer.h"
 #include "composer/validator.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -809,8 +810,43 @@ TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
   applyOrnamentPass(r, p);
 
   for (const auto& note : r.notes) {
-    EXPECT_LE(note.pitch, 84) << "organ ornament exceeded manual compass";
+    EXPECT_LE(note.pitch, organ_range::kManualHigh) << "organ ornament exceeded manual compass";
   }
+}
+
+// The compass is judged on the tones a figure sounds. A mordent on the top key
+// of the manual sounds only the main note and the step below it, so the upper
+// neighbour lying past the compass must not refuse it.
+TEST(OrnamentPassTest, OrganMordentOnTheTopKeyIsNotRefusedForItsUpperNeighbour) {
+  int mordents = 0;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    ComposeResult r;
+    for (int bar = 0; bar < 8; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, 48, 1));
+      r.provenance.push_back(composeProv(1));
+      for (int beat = 0; beat < 4; ++beat) {
+        const std::uint8_t pitch = beat == 0 ? organ_range::kManualHigh : 79;
+        r.notes.push_back(makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat, pitch, 0));
+        r.provenance.push_back(composeProv(0));
+      }
+    }
+    r.tracks = Renderer{}.render(r.notes);
+    OrnamentParams p = baseParams();
+    p.character = SubjectCharacter::Restless;  // downbeat mordents on even bars.
+    p.seed = seed;
+    applyOrnamentPass(r, p);
+    for (std::size_t idx = 0; idx + 2 < r.notes.size(); ++idx) {
+      const NoteEvent& first = r.notes[idx];
+      if (first.voice != 0 || first.source != BachNoteSource::Ornament ||
+          first.pitch != organ_range::kManualHigh || first.start_tick % kTicksPerBar != 0)
+        continue;
+      if (r.notes[idx + 1].pitch == organ_range::kManualHigh - 1)
+        ++mordents;
+    }
+    for (const auto& note : r.notes)
+      EXPECT_LE(note.pitch, organ_range::kManualHigh);
+  }
+  EXPECT_GT(mordents, 0);
 }
 
 // --- Mid-piece distribution -------------------------------------------------

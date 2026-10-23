@@ -54,6 +54,9 @@ namespace {
 
 using detail::Mode;
 
+// d''' (MIDI 86): the top of the harpsichord compass this music was written for.
+constexpr int kKeyboardTop = 86;
+
 // The Goldberg ground tables live in kGoldbergGroundsMajor /
 // kGoldbergGroundsMinor (seed-selected design variants, period 4 bars, all
 // tones C2-region chord roots so the variation downbeat anchoring stays
@@ -226,16 +229,16 @@ void appendAriaBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mo
 
 // Snapped goldberg figuration start with the keyboard ceiling applied. The
 // figure built on the start (the contour ladder, the figura corta cell) rises
-// up to a ninth above it, so a start above MIDI 77 would carry the line past
-// d''' (MIDI 86), the top of the Bach keyboard compass. Walk such starts down
-// to the highest chord tone at or under the cap -- the arc's climax register
-// lift compresses against the instrument ceiling, exactly as the real
+// up to a ninth above it, so a start more than a ninth under kKeyboardTop would
+// carry the line past the top of the harpsichord's compass. Walk such starts
+// down to the highest chord tone at or under the cap -- the arc's climax
+// register lift compresses against the instrument ceiling, exactly as the real
 // keyboard writing does.
 int goldbergFigurationStart(int register_base, int offset, const BarChord& chord, Mode mode) {
   const detail::ChordSpec harmony{chord.root_pc, chord.minor};
   int snapped = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
                                   chord.root_pc, chord.minor);
-  constexpr int kFigStartCeiling = 77;
+  constexpr int kFigStartCeiling = kKeyboardTop - 9;
   if (snapped > kFigStartCeiling) {
     const int third = chord.minor ? 3 : 4;
     const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
@@ -1168,7 +1171,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       }
       appendCadentialLanding(var.notes, barTick(bars - 2), kTicksPerBar, prefinal, final_tone, mode,
                              /*band_lo=*/62, /*downbeat_chord=*/nullptr,
-                             /*prefer_descending=*/false, /*lift_to_context=*/true);
+                             /*prefer_descending=*/false, /*lift_ceiling=*/kKeyboardTop);
     }
 
     if (fill_middle_voice) {

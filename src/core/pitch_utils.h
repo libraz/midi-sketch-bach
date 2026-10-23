@@ -66,17 +66,10 @@ constexpr bool kDiatonicPitchClass[12] = {true,  false, true,  false, true,  tru
 
 namespace organ_range {
 
-// Manual I (Great): C2-C6
-constexpr uint8_t kManual1Low = 36;
-constexpr uint8_t kManual1High = 96;
-
-// Manual II (Swell): C2-C6
-constexpr uint8_t kManual2Low = 36;
-constexpr uint8_t kManual2High = 96;
-
-// Manual III (Positiv): C3-C6
-constexpr uint8_t kManual3Low = 48;
-constexpr uint8_t kManual3High = 96;
+// Manuals: C2-C6, the keyboard compass of the organs this repertoire was
+// written for. No manual key exists above C6.
+constexpr uint8_t kManualLow = 36;
+constexpr uint8_t kManualHigh = 84;
 
 // Pedal: C1-D3 (soft penalty, not hard reject)
 constexpr uint8_t kPedalLow = 24;

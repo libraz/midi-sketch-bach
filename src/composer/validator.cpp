@@ -347,10 +347,10 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
     if (std::find(voices.begin(), voices.end(), note.voice) == voices.end()) {
       voices.push_back(note.voice);
     }
-    // Broad organ compass for fugue-family diagnostics: pedal C1 through
-    // manual C6. This catches D7-style escapes without classifying playable
-    // bass-register material as a violation.
-    if (note.pitch < 24 || note.pitch > 84) {
+    // Broad organ compass, pedal C1 through manual C6, read in the composed
+    // frame: the design contract every builder writes inside. The transposed
+    // output is held inside it by output placement.
+    if (note.pitch < organ_range::kPedalLow || note.pitch > organ_range::kManualHigh) {
       ++metrics.compass_violation_count;
     }
   }

@@ -30,6 +30,7 @@ set(BACH_COMPOSER_SOURCES
   renderer.cpp
   json_export.cpp
   ornament_pass.cpp
+  compass_placement.cpp
   figuration.cpp
   figuration_palette.cpp
   harness_fixture.cpp
@@ -85,4 +86,7 @@ target_sources(bach_composer_lib PRIVATE
   # way to name an instrument here is to copy the mapping, which is how a
   # measurement drifts away from the music it claims to describe.
   ${CMAKE_SOURCE_DIR}/src/core/basic_types.cpp
+  # instrument_program.cpp owns each instrument's compass. Output placement and
+  # the ornament pass read it, so the compass has one definition.
+  ${CMAKE_SOURCE_DIR}/src/core/instrument_program.cpp
 )

@@ -70,6 +70,8 @@ struct TextureMetrics {
   // [first onset, last offset]); meter-independent (tick-weighted only).
   // 0.0 for empty input.
   double mono_ratio = 0.0;
+  // Notes outside the organ compass (organ_range::kPedalLow..kManualHigh) in the
+  // composed C frame, before key transposition and output octave placement.
   int compass_violation_count = 0;
   double register_overlap_ratio = 0.0;
   std::vector<VoiceTextureMetrics> voices;

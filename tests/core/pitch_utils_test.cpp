@@ -471,17 +471,9 @@ TEST(PitchUtilsTest, DirectedInterval) {
 // ---------------------------------------------------------------------------
 
 TEST(PitchRangesTest, OrganRanges) {
-  // Manual I (Great): C2-C6
-  EXPECT_EQ(organ_range::kManual1Low, 36);
-  EXPECT_EQ(organ_range::kManual1High, 96);
-
-  // Manual II (Swell): C2-C6
-  EXPECT_EQ(organ_range::kManual2Low, 36);
-  EXPECT_EQ(organ_range::kManual2High, 96);
-
-  // Manual III (Positiv): C3-C6
-  EXPECT_EQ(organ_range::kManual3Low, 48);
-  EXPECT_EQ(organ_range::kManual3High, 96);
+  // Manuals: C2-C6 (C6 is MIDI 84 with C4 = 60).
+  EXPECT_EQ(organ_range::kManualLow, 36);
+  EXPECT_EQ(organ_range::kManualHigh, 84);
 
   // Pedal: C1-D3
   EXPECT_EQ(organ_range::kPedalLow, 24);

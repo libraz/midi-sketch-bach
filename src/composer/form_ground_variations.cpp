@@ -16,6 +16,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -513,12 +514,11 @@ void markCycleDominantSevenths(std::vector<CycleBar>& plan, detail::Mode mode,
     plan[bar].seventh = spelling[bar].seventh;
 }
 
-// Compass the ground-parallel repair may relocate a V0 onset into: the C4
-// region, where the variation sits above every lower voice, up to the top of
-// the register the ornament pass can decorate. A cycle whose figuration is
-// lifted by the arc raises the floor with it (see the repair's band_lo).
+// Lowest pitch the ground-parallel repair may relocate a V0 onset into: the C4
+// region, where the variation sits above every lower voice. A cycle whose
+// figuration is lifted by the arc raises the floor with it (see the repair's
+// band_lo); the ceiling is the top of the instrument's compass.
 constexpr int kV0RepairFloor = 60;
-constexpr int kV0RepairCeiling = 91;
 
 // The chaconne coda's dominant bass (G2): the tone the bass steps to on the
 // penultimate bar's closing beat before stating the tonic under the final bar.
@@ -546,6 +546,8 @@ constexpr detail::ChordSpec kCodaDominantChord{7, false};
 ///        register freely, so this floor is what keeps the variation above the
 ///        voices under it: a cycle the arc lifts must raise it by the same
 ///        shift, or a repaired onset drops into the middle voice's band.
+/// @param band_hi Highest pitch a relocation may take: the top of the
+///        instrument's compass.
 /// @param every_voice_placed Whether the two contrary-motion faults may also be
 ///        repaired here. Every candidate is judged against the ground and
 ///        nothing else, so in a texture that still has a voice to come the
@@ -566,8 +568,8 @@ constexpr detail::ChordSpec kCodaDominantChord{7, false};
 void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                           const std::vector<std::uint8_t>& ground_pitch,
                           const std::vector<CycleBar>& cycle_bar_plan, const HarmonicPlan& harmony,
-                          int preceding_v0_bar_head = -1, int preceding_ground_pitch = -1,
-                          int preceding_v0_last = -1, int band_lo = kV0RepairFloor,
+                          int preceding_v0_bar_head, int preceding_ground_pitch,
+                          int preceding_v0_last, int band_lo, int band_hi,
                           bool every_voice_placed = true) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   // Realized V0 pitch per beat: the previous bar's (the chain reference, seeded
@@ -710,7 +712,7 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
     // for a tone a step away: the line keeps its conjunct surface, and if no
     // neighbour works the parallel stands. A repair that trades a contrapuntal
     // blemish for a hole in the melody is not a repair.
-    const int max_displacement = (beat == 0) ? kV0RepairCeiling - band_lo : 2;
+    const int max_displacement = (beat == 0) ? band_hi - band_lo : 2;
     // The local key as spelled under the chord at the onset (detail::spellScale).
     const auto inSpelledScaleAt = [&](int cand, Tick at) {
       const rule_helpers::KeyContext key = rule_helpers::keyAt(harmony, at);
@@ -752,7 +754,7 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
             // stop agreeing the moment a ground states a bar on anything but its
             // root, which is a change to a table rather than to this code.
             const bool is_declared_seventh = plan.seventh && ((cand % 12) + 12) % 12 == chord_pc[3];
-            if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+            if (cand < band_lo || cand > band_hi || cand == prev_pitch ||
                 (!is_declared_seventh &&
                  !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
                                                      static_cast<std::uint8_t>(ground_now)))) {
@@ -779,7 +781,7 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
         // rather than leave the perfect motion in place.
         for (int dist = 1; dist <= max_displacement && !placed; ++dist) {
           for (int cand : {pitch + dist, pitch - dist}) {
-            if (cand < band_lo || cand > kV0RepairCeiling || cand == prev_pitch ||
+            if (cand < band_lo || cand > band_hi || cand == prev_pitch ||
                 !rule_helpers::isConsonantInterval(cand - ground_now) ||
                 !inSpelledScaleAt(cand, tick) ||
                 (melodic_prev >= 0 && createsAugmentedSecond(melodic_prev, cand)) ||
@@ -1036,6 +1038,26 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             break;
         }
       }
+      // An anchor the line would reach by an augmented second takes the nearest
+      // other chord tone consonant with every concurrent voice instead.
+      const auto augmentedFrom = [mode](int from, int to) {
+        return from >= 0 && detail::isAugmentedSecondClass(from, to, 0, mode);
+      };
+      if (augmentedFrom(prev_emitted, anchor)) {
+        bool placed = false;
+        for (int dist = 1; dist <= 12 && !placed; ++dist) {
+          for (int cand : {anchor - dist, anchor + dist}) {
+            if (cand < band_lo || cand > band_hi || !is_chord_tone(cand) ||
+                augmentedFrom(prev_emitted, cand) || !clean_over_bass(cand) ||
+                std::any_of(theme_pitches.begin(), theme_pitches.end(),
+                            [cand](int upper) { return !isConsonantIc(cand - upper); }))
+              continue;
+            anchor = cand;
+            placed = true;
+            break;
+          }
+        }
+      }
       // Audible-grain parallel re-check. consonantChordTone judged the anchor's
       // parallel motion at QUARTER grain (previous beat -> this beat), but the
       // union-onset sampling the gate (and the ear) uses pairs this anchor with
@@ -1086,9 +1108,10 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         };
         const int design_rank = anchor_fault_rank(anchor);
         if (design_rank != kAnchorClean) {
-          auto admissible = [&](int cand) {
+          auto admissible = [&](int cand, bool allow_augmented) {
             if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-                !detail::inScale(cand, mode, &chord)) {
+                !detail::inScale(cand, mode, &chord) ||
+                (!allow_augmented && augmentedFrom(prev_emitted, cand))) {
               return false;
             }
             for (int upper : theme_pitches) {
@@ -1115,26 +1138,31 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             return clean_over_bass(prev_emitted);
           };
           bool displaced = false;
-          for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
-            // The band sweep reaches the whole band, not a fixed fifth-and-a-bit.
-            // Two of the tests in `admissible` are pitch-class shaped (scale
-            // membership, consonance against the concurrent tones), so the
-            // admissible set is sparse and its nearest member is regularly
-            // further than a fifth away; a short radius left the anchor sitting
-            // on a true parallel while a free tone waited an octave down.
-            for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
-              for (int dir : {1, -1}) {
-                const int cand = anchor + dir * dist;
-                if (!admissible(cand) || anchor_fault_rank(cand) > accept)
-                  continue;
-                anchor = cand;
-                displaced = true;
-                break;
+          // An augmented second is refused first and conceded only where every
+          // other tone keeps the approach fault.
+          for (int allow_augmented = 0; allow_augmented < 2 && !displaced; ++allow_augmented) {
+            for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
+              // The band sweep reaches the whole band, not a fixed
+              // fifth-and-a-bit. Two of the tests in `admissible` are
+              // pitch-class shaped (scale membership, consonance against the
+              // concurrent tones), so the admissible set is sparse and its
+              // nearest member is regularly further than a fifth away; a short
+              // radius left the anchor sitting on a true parallel while a free
+              // tone waited an octave down.
+              for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
+                for (int dir : {1, -1}) {
+                  const int cand = anchor + dir * dist;
+                  if (!admissible(cand, allow_augmented == 1) || anchor_fault_rank(cand) > accept)
+                    continue;
+                  anchor = cand;
+                  displaced = true;
+                  break;
+                }
               }
-            }
-            if (!displaced && accept == kAnchorClean && hold_admissible()) {
-              anchor = prev_emitted;
-              displaced = true;
+              if (!displaced && accept == kAnchorClean && hold_admissible()) {
+                anchor = prev_emitted;
+                displaced = true;
+              }
             }
           }
         }
@@ -1154,6 +1182,14 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
         int pitch = (sub == 0) ? anchor : walk_step(prev_emitted, walk_dir);
+        if (sub > 0 && augmentedFrom(prev_emitted, pitch)) {
+          int reversed = -walk_dir;
+          const int other = walk_step(prev_emitted, reversed);
+          if (!augmentedFrom(prev_emitted, other)) {
+            pitch = other;
+            walk_dir = reversed;
+          }
+        }
         // Every off-beat tone moves concurrently with the V0 sixteenths, so all
         // of them need the same audible-grain parallel re-check as the beat
         // anchor: when the tone lands a parallel against a concurrently moving
@@ -1689,6 +1725,9 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   // motion test there passes on an undefined pair.
   MaterialNote carry_v0{};
   bool carry_v0_valid = false;
+  // The counter-figuration band's centre per cycle, for the counter spans.
+  std::vector<int> counter_centre(static_cast<std::size_t>(cycles),
+                                  (kPassV1BandLo + kPassV1BandHi) / 2);
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
@@ -1709,6 +1748,32 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     // V0 principal variation (when present this cycle). Cycle 0 (when it carries
     // V0) is a plain quarter-note establishing statement; later cycles ride the
     // arc density tier.
+    //
+    // The arc lifts both upper voices, but the variation climbs no higher than
+    // the manual compass. A variation the lift would carry past it is taken an
+    // octave lower as a whole; a figure centred above its band that still
+    // overshoots is lowered by the overshoot. Neither goes below the lift the
+    // counter-figuration needs to clear every ground tone of the cycle, and the
+    // counter-figuration and the repair floor ride the same lift, so the three
+    // voices keep their order.
+    int ground_top = 0;
+    for (const MaterialNote& note : ground) {
+      if (note.start_tick < block_end && note.start_tick + note.duration > block_start)
+        ground_top = std::max(ground_top, static_cast<int>(note.pitch));
+    }
+    const int ground_clearance = std::max(0, ground_top - kPassV1BandLo);
+    int lift = point.register_shift;
+    const auto highest = [](const std::vector<MaterialNote>& line) {
+      int top = 0;
+      for (const MaterialNote& note : line)
+        top = std::max(top, static_cast<int>(note.pitch));
+      return top;
+    };
+    const auto dipsUnderBand = [ground_clearance](const std::vector<MaterialNote>& line) {
+      return std::any_of(line.begin(), line.end(), [ground_clearance](const MaterialNote& note) {
+        return static_cast<int>(note.pitch) < kPassV0BandLo + ground_clearance;
+      });
+    };
     std::vector<MaterialNote> v0_notes;
     if (v0_present[static_cast<std::size_t>(cycle)]) {
       const int tier = cycle_tier;
@@ -1717,39 +1782,57 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       // Pattern selection: the establishing cycle and the climax are design
       // values (quarters / densest scalar wave); other cycles rotate the
       // passacaglia palette so consecutive variations alternate idioms.
-      const PatternKind pattern =
+      PatternKind pattern =
           (establishing || is_climax)
               ? PatternKind::kScalarWave
               : kPassacagliaPalette[(req.seed + static_cast<std::uint32_t>(cycle)) % 4];
       auto build_variant = [&](int rotation, std::vector<MaterialNote>& dst) {
         switch (pattern) {
           case PatternKind::kSawtooth:
-            appendSawtoothCycle(dst, block_start, cycle_bar_plan,
-                                point.register_shift + kPassV0CenterLift, rotation, notes_per_beat,
-                                mode);
+            appendSawtoothCycle(dst, block_start, cycle_bar_plan, lift + kPassV0CenterLift,
+                                rotation, notes_per_beat, mode);
             break;
           case PatternKind::kArpeggio:
-            appendArpeggioCycle(
-                dst, block_start, cycle_bar_plan, kPassV0BandLo + point.register_shift,
-                kPassV0BandHi + point.register_shift, rotation, notes_per_beat, mode);
+            appendArpeggioCycle(dst, block_start, cycle_bar_plan, kPassV0BandLo + lift,
+                                kPassV0BandHi + lift, rotation, notes_per_beat, mode);
             break;
           case PatternKind::kFiguraCorta:
-            appendFiguraCortaCycle(dst, block_start, cycle_bar_plan,
-                                   point.register_shift + kPassV0CenterLift, rotation, mode);
+            appendFiguraCortaCycle(dst, block_start, cycle_bar_plan, lift + kPassV0CenterLift,
+                                   rotation, mode);
             break;
           case PatternKind::kScalarWave:
           default:
-            appendScalarWaveCycle(dst, block_start, cycle_bar_plan,
-                                  kPassV0BandLo + point.register_shift,
-                                  kPassV0BandHi + point.register_shift, rotation, descending_start,
-                                  notes_per_beat, mode);
+            appendScalarWaveCycle(dst, block_start, cycle_bar_plan, kPassV0BandLo + lift,
+                                  kPassV0BandHi + lift, rotation, descending_start, notes_per_beat,
+                                  mode);
             break;
         }
       };
-      const int rotation_domain = (pattern == PatternKind::kScalarWave) ? 5 : 4;
-      const int seed_rotation =
-          static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % rotation_domain);
+      const int seed_rotation = static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) %
+                                                 ((pattern == PatternKind::kScalarWave) ? 5 : 4));
       build_variant(seed_rotation, v0_notes);
+      if (highest(v0_notes) > organ_range::kManualHigh && lift > 0) {
+        lift = std::max({lift - interval::kOctave, 0, ground_clearance});
+        v0_notes.clear();
+        build_variant(seed_rotation, v0_notes);
+      }
+      while (highest(v0_notes) > organ_range::kManualHigh) {
+        const int unlowered = lift;
+        lift -= highest(v0_notes) - organ_range::kManualHigh;
+        std::vector<MaterialNote> lowered;
+        build_variant(seed_rotation, lowered);
+        if (dipsUnderBand(lowered)) {
+          // Too wide to fit between the band floor and the compass: the cycle
+          // takes the band-confined wave instead.
+          lift = std::max(unlowered, ground_clearance);
+          pattern = PatternKind::kScalarWave;
+          v0_notes.clear();
+          build_variant(seed_rotation, v0_notes);
+          break;
+        }
+        v0_notes = std::move(lowered);
+      }
+      const int rotation_domain = (pattern == PatternKind::kScalarWave) ? 5 : 4;
       // Voice-lead the variation seam: when the rotation arithmetic opens the
       // new cycle with a leap beyond a fifth from the previous variation's
       // closing pitch, re-pick the rotation that lands nearest that pitch --
@@ -1777,7 +1860,8 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
             if (trial.empty())
               continue;
             const int seam = std::abs(static_cast<int>(trial.front().pitch) - prev_v0_last);
-            if (seam < best_seam && internal_leaps(trial) <= default_leaps) {
+            if (seam < best_seam && internal_leaps(trial) <= default_leaps &&
+                highest(trial) <= organ_range::kManualHigh && !dipsUnderBand(trial)) {
               best_seam = seam;
               v0_notes = std::move(trial);
             }
@@ -1791,11 +1875,11 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           ground_beats.begin() + static_cast<std::ptrdiff_t>(beat_base),
           ground_beats.begin() +
               static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
-      scrubGroundParallels(v0_notes, block_start, cycle_beats, cycle_bar_plan, out.harmony,
-                           prev_v0_bar_head,
-                           cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
-                           prev_v0_last, kPassV0BandLo + point.register_shift,
-                           /*every_voice_placed=*/true);
+      scrubGroundParallels(
+          v0_notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, prev_v0_bar_head,
+          cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1, prev_v0_last,
+          kPassV0BandLo + std::max(lift, ground_clearance), organ_range::kManualHigh,
+          /*every_voice_placed=*/true);
       if (!v0_notes.empty()) {
         prev_v0_last = static_cast<int>(v0_notes.back().pitch);
         prev_v0_bar_head = pitchAtBarHead(
@@ -1838,9 +1922,13 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       }
       const int v1_tier = (cycle_tier > 0) ? cycle_tier - 1 : 0;
       const int notes_per_beat = notesPerBeatForTier(v1_tier);
+      const int v1_lift =
+          std::max(std::min(lift, static_cast<int>(point.register_shift)), ground_clearance);
+      counter_centre[static_cast<std::size_t>(cycle)] =
+          (kPassV1BandLo + kPassV1BandHi) / 2 + v1_lift;
       appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
-                              kPassV1BandLo + point.register_shift,
-                              kPassV1BandHi + point.register_shift, notes_per_beat, mode);
+                              kPassV1BandLo + v1_lift, kPassV1BandHi + v1_lift, notes_per_beat,
+                              mode);
     }
 
     carry_v0_valid = !v0_notes.empty();
@@ -1882,7 +1970,10 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int degree_pc = tritone_seam ? 2 : 11;
       const int up = near + ((degree_pc - (near % 12)) % 12 + 12) % 12;
       int prefinal = (up - near <= near - (up - 12)) ? up : up - 12;
-      while (prefinal > 83)
+      // The trill's upper neighbour, a semitone over B or a tone over D, stays
+      // on the manual.
+      const int trill_reach = tritone_seam ? 2 : 1;
+      while (prefinal + trill_reach > organ_range::kManualHigh)
         prefinal -= 12;
       while (prefinal < 67)
         prefinal += 12;
@@ -2023,6 +2114,10 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     counter_span.voice = 1;
     counter_span.intent = VoiceIntent::TrioVoiceCarrier;
     counter_span.subdivision = Subdivision::Quarter;
+    // Read only by the scored search that may replace the counter-figuration:
+    // it centres on the band the cycle gave the line.
+    counter_span.voice_center =
+        static_cast<std::uint8_t>(counter_centre[static_cast<std::size_t>(cycle)]);
     out.voice_plan.spans.push_back(counter_span);
   }
 
@@ -2207,10 +2302,11 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         ground_beats.begin() + static_cast<std::ptrdiff_t>(beat_base),
         ground_beats.begin() +
             static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
-    scrubGroundParallels(notes, block_start, cycle_beats, cycle_bar_plan, out.harmony,
-                         previous_v0_bar_head,
-                         cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
-                         previous_v0_last, kV0RepairFloor, /*every_voice_placed=*/!passacaglia);
+    scrubGroundParallels(
+        notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, previous_v0_bar_head,
+        cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1, previous_v0_last,
+        kV0RepairFloor, passacaglia ? organ_range::kManualHigh : string_range::kViolinHigh,
+        /*every_voice_placed=*/!passacaglia);
 
     // Compact cadential landing on the piece's final bar. The chaconne coda
     // replaces the repeating dominant bass with a tonic, so its upper voice
@@ -2879,15 +2975,30 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     // parallel would be paying a cardinal fault for an ornament the cycle can
     // simply go without. Those bars take the figure only when it is clean.
     const bool closing_cadence = sus_bar == static_cast<int>(req.bars) - 2;
-    const int strict_passes = closing_cadence ? 2 : 1;
-    for (int strict_pass = 0; strict_pass < strict_passes && !installed; ++strict_pass) {
+    // Leading passes also refuse the anti-parallel, the firmer of the two
+    // contrary-motion faults: first with the battuta, then -- at the close --
+    // trading it for the battuta. The passes after them are the ones above.
+    struct Pass {
+      bool refuse_anti;
+      bool refuse_battuta;
+      int strict_pass;
+    };
+    static constexpr Pass kInteriorPasses[] = {{true, true, 0}, {false, true, 0}};
+    static constexpr Pass kClosingPasses[] = {
+        {true, true, 0}, {true, false, 0}, {false, true, 0}, {false, false, 1}};
+    const Pass* passes = closing_cadence ? kClosingPasses : kInteriorPasses;
+    const int pass_count = closing_cadence ? 4 : 2;
+    for (int pass = 0; pass < pass_count && !installed; ++pass) {
+      const bool refuse_anti = passes[pass].refuse_anti;
+      const bool refuse_battuta = passes[pass].refuse_battuta;
+      const int strict_pass = passes[pass].strict_pass;
       for (int distance = 0; distance <= 12 && !installed; ++distance) {
         for (int direction : {1, -1}) {
           if (distance == 0 && direction < 0)
             continue;
           const int upper_sus = original_upper_sus + direction * distance;
           const int pc = ((upper_sus % 12) + 12) % 12;
-          if (upper_sus < 60 || upper_sus > 86 ||
+          if (upper_sus < 60 || upper_sus > organ_range::kManualHigh ||
               (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
             continue;
           if (previous_upper_head >= 0 && previous_ground >= 0 &&
@@ -2912,13 +3023,17 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
           // is: it is the cheapest class the reference corpus prices, and a
           // closing cadence with no accented dissonance is worth less than one
           // that arrives carrying a battuta.
-          if (strict_pass == 0 &&
-              ((previous_upper_head >= 0 && previous_ground >= 0 &&
-                formsBattuta(previous_upper_head, upper_sus, previous_ground, bass_sus)) ||
-               (prior_upper >= 0 && prior_upper_ground >= 0 &&
-                formsBattuta(prior_upper, upper_sus, prior_upper_ground, bass_sus)) ||
-               (next_upper_head >= 0 && next_ground >= 0 &&
-                formsBattuta(upper_sus, next_upper_head, bass_sus, next_ground))))
+          const auto contraryFault = [refuse_anti, refuse_battuta](int upper_from, int upper_to,
+                                                                   int bass_from, int bass_to) {
+            return upper_from >= 0 && bass_from >= 0 &&
+                   ((refuse_battuta && formsBattuta(upper_from, upper_to, bass_from, bass_to)) ||
+                    (refuse_anti &&
+                     formsAntiParallelPerfect(upper_from, upper_to, bass_from, bass_to)));
+          };
+          if (contraryFault(previous_upper_head, upper_sus, previous_ground, bass_sus) ||
+              contraryFault(prior_upper, upper_sus, prior_upper_ground, bass_sus) ||
+              (next_upper_head >= 0 && next_ground >= 0 &&
+               contraryFault(upper_sus, next_upper_head, bass_sus, next_ground)))
             continue;
           bool creates_augmented_second = false;
           if (req.mode == detail::Mode::Minor) {

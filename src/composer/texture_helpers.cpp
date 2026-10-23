@@ -975,8 +975,7 @@ StrettoOverlapProfile strettoOverlapProfile(const std::array<std::uint8_t, 16>& 
 void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                             Tick ticks_per_bar, int prefinal, int final_pitch, detail::Mode mode,
                             int band_lo, const detail::ChordSpec* downbeat_chord,
-                            bool prefer_descending, bool lift_to_context,
-                            std::uint8_t ts_numerator) {
+                            bool prefer_descending, int lift_ceiling, std::uint8_t ts_numerator) {
   const Tick eighth = duration::kEighthNote;
   // The approach sounds over the closing dominant, so it walks that chord's
   // spelling: the minor run reaches the leading tone through the raised 6th.
@@ -985,7 +984,7 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
       ts_numerator == 3 ? ticks_per_bar / static_cast<Tick>(3) : ticks_per_bar / 2;
   const int run_len = static_cast<int>(prefinal_tick / eighth);  // 4 in 4/4, 2 in 3/4.
 
-  if (lift_to_context) {
+  if (lift_ceiling > 0) {
     // The formula's register is the caller's design value, but the line it
     // interrupts may be running an octave higher (a climax block compressing
     // against the keyboard ceiling). When the last figuration pitch before
@@ -993,8 +992,8 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
     // tone, re-octave the whole formula upward: pitch classes are preserved,
     // so consonance against the other voices is unchanged, and the close
     // connects from the line instead of falling off a registral cliff. The
-    // lift never carries the trill site past d''' (MIDI 86, the keyboard
-    // ceiling; +2 covers the trill's upper neighbour).
+    // lift never carries the trill's upper neighbour (+2 over the trill site)
+    // or the final tone past the keyboard ceiling.
     int last_pitch = -1;
     Tick last_tick = 0;
     for (const MaterialNote& note : line) {
@@ -1007,7 +1006,8 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
       const int run_entry = detail::scaleDown(prefinal, run_len, mode, &kDominant);
       const int gap_plain = std::abs(last_pitch - run_entry);
       const int gap_lifted = std::abs(last_pitch - (run_entry + 12));
-      if (gap_plain > 9 && gap_lifted < gap_plain && prefinal + 14 <= 86) {
+      if (gap_plain > 9 && gap_lifted < gap_plain && prefinal + 14 <= lift_ceiling &&
+          final_pitch + 12 <= lift_ceiling) {
         prefinal += 12;
         final_pitch += 12;
       }

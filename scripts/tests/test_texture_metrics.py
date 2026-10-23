@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +12,34 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from bachlib import texture_metrics  # noqa: E402
+
+PITCH_UTILS = (SCRIPTS_DIR.parent / "src/core/pitch_utils.h").read_text(encoding="utf-8")
+
+
+def cpp_organ_range(name: str) -> int:
+    """Value of one organ_range constant in src/core/pitch_utils.h."""
+    block = PITCH_UTILS[PITCH_UTILS.index("namespace organ_range {") :]
+    match = re.search(rf"constexpr uint8_t {name} = (\d+);", block)
+    assert match is not None, name
+    return int(match.group(1))
+
+
+class CompassDriftTest(unittest.TestCase):
+    def test_compass_equals_the_core_organ_range(self) -> None:
+        self.assertEqual(texture_metrics.ORGAN_COMPASS_LOW, cpp_organ_range("kPedalLow"))
+        self.assertEqual(texture_metrics.ORGAN_COMPASS_HIGH, cpp_organ_range("kManualHigh"))
+
+    def test_compass_bounds_are_inclusive(self) -> None:
+        notes = [
+            {"start_tick": 0, "duration": 480, "pitch": pitch, "voice": 0}
+            for pitch in (
+                texture_metrics.ORGAN_COMPASS_LOW - 1,
+                texture_metrics.ORGAN_COMPASS_LOW,
+                texture_metrics.ORGAN_COMPASS_HIGH,
+                texture_metrics.ORGAN_COMPASS_HIGH + 1,
+            )
+        ]
+        self.assertEqual(texture_metrics.compute_texture_metrics(notes).compass_violation_count, 2)
 
 
 class TextureMetricsTest(unittest.TestCase):

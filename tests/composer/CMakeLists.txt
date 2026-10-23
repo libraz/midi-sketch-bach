@@ -51,6 +51,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   meter_test.cpp
   expression_events_test.cpp
   ornament_pass_test.cpp
+  compass_placement_test.cpp
   minor_spelling_test.cpp
   shipped_counterpoint_regression_test.cpp
   counterpoint_observation_test.cpp

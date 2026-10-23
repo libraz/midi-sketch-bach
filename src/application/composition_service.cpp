@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <utility>
 
+#include "composer/compass_placement.h"
 #include "composer/counterpoint_budget.h"
 #include "composer/expression_events.h"
 #include "composer/figuration_palette.h"
@@ -242,16 +244,37 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   ornament.bpm = effective.bpm;
   composer::resolveFixtureOrnamentContext(fixture, effective.form, out->total_ticks, &ornament);
   composer::applyOrnamentPass(out->composition, ornament);
-
-  out->final_validation = composer::Validator{}.validate(
-      out->composition.notes, out->composition.provenance, fixture.harmony, fixture.material,
-      composer::ValidationScope::FinalScore);
   // Vertical counterpoint findings are exempted from `failures` at the recorder
   // whenever every operand is an immutable carrier, which is every note the
   // shipped forms emit. Gating the per-rule totals is what lets those findings
   // stop a piece again: a rule this form no longer breaks anywhere fails on the
   // first match, while one it still breaks stays measured until it is repaired.
-  composer::applyCounterpointBudget(effective.form, &out->final_validation);
+  const auto validateFinal = [&](const composer::ComposeResult& composition) {
+    composer::ValidationReport report =
+        composer::Validator{}.validate(composition.notes, composition.provenance, fixture.harmony,
+                                       fixture.material, composer::ValidationScope::FinalScore);
+    composer::applyCounterpointBudget(effective.form, &report);
+    return report;
+  };
+  // Placed before FinalScore validation: an octave it moves changes intervals
+  // the validator reads, and the report must describe the notes that sound.
+  std::optional<composer::ValidationReport> placed_validation;
+  const auto placement = composer::placeInOutputCompass(
+      &out->composition, fixture.material, fixture.harmony, effective.key.tonic, out->instrument,
+      ticks_per_bar, [&](const composer::ComposeResult& placed) {
+        composer::ValidationReport report = validateFinal(placed);
+        if (!report.failures.empty())
+          return false;
+        placed_validation = std::move(report);
+        return true;
+      });
+  if (!placement) {
+    out->status = CompositionStatus::MidiFailed;
+    return out->status;
+  }
+  out->output_octave_shift = placement->octave_shift;
+  out->final_validation = placement->displaced_notes > 0 ? std::move(*placed_validation)
+                                                         : validateFinal(out->composition);
   if (!out->final_validation.failures.empty()) {
     out->final_validation.status = composer::ValidationStatus::FailedSpan;
   }
@@ -346,14 +369,6 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   out->tempo_events.insert(out->tempo_events.end(), ritard.begin(), ritard.end());
   sortTempoEvents(&out->tempo_events);
   out->time_signature_events.push_back({0, {spec.ts_numerator, spec.ts_denominator}});
-
-  const auto output_octave_shift =
-      selectOutputOctaveShift(out->composition.notes, effective.key.tonic, out->instrument);
-  if (!output_octave_shift) {
-    out->status = CompositionStatus::MidiFailed;
-    return out->status;
-  }
-  out->output_octave_shift = *output_octave_shift;
 
   MidiWriter writer;
   if (writer.build(out->composition.tracks, out->tempo_events, out->time_signature_events,

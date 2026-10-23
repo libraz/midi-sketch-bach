@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any
 
+# Organ compass in the composed C frame: pedal C1 through manual C6. Mirrors
+# organ_range::kPedalLow / organ_range::kManualHigh in src/core/pitch_utils.h;
+# scripts/tests/test_texture_metrics.py fails when the two drift apart.
+ORGAN_COMPASS_LOW = 24
+ORGAN_COMPASS_HIGH = 84
+
 
 @dataclass
 class VoiceTextureMetrics:
@@ -151,7 +157,9 @@ def compute_texture_metrics(notes: list[dict[str, int]]) -> TextureMetrics:
         avg_active_voices=active_voice_ticks / total_ticks if total_ticks > 0 else 0.0,
         mono_ratio=mono_ticks / total_ticks if total_ticks > 0 else 0.0,
         compass_violation_count=sum(
-            1 for note in notes if int(note["pitch"]) < 24 or int(note["pitch"]) > 84
+            1
+            for note in notes
+            if not ORGAN_COMPASS_LOW <= int(note["pitch"]) <= ORGAN_COMPASS_HIGH
         ),
         register_overlap_ratio=overlap_sum / pair_count if pair_count > 0 else 0.0,
         voices=voice_metrics,

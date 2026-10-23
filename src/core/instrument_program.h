@@ -27,6 +27,9 @@ std::uint8_t gmProgramFor(InstrumentType instrument);
 struct InstrumentPitchRange {
   std::uint8_t low = 0;
   std::uint8_t high = 127;
+  /// True when the instrument has no key outside the range, so no note may
+  /// sound there; false when the range is only the preferred placement.
+  bool hard_limit = false;
 };
 
 /// @brief Return the playable sounding range used for MIDI export.
@@ -42,7 +45,9 @@ InstrumentPitchRange pitchRangeFor(InstrumentType instrument);
 /// comes within a few semitones of the compass fits in some keys and not in
 /// others; refusing those keys would withhold the piece entirely rather than
 /// place it a little outside the ideal range. When no displacement fits, the
-/// one that leaves the fewest semitones outside the compass is returned.
+/// one that leaves the fewest semitones outside the compass is returned. For an
+/// instrument whose range is a hard limit, the composer's output placement
+/// (composer/compass_placement.h) moves what this displacement leaves outside.
 ///
 /// `nullopt` means no displacement keeps the score inside MIDI's own 0-127
 /// range, which requires an ambitus wider than MIDI itself.
