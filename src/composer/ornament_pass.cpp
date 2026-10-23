@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "composer/character_profile.h"
+#include "composer/expression_events.h"
+#include "composer/form_director.h"
 #include "composer/renderer.h"
 #include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
@@ -169,6 +171,10 @@ Expansion buildTrill(const NoteEvent& base, int upper, int lower, Tick sub, Tril
   // Need at least upper + main + Nachschlag-lower + main to be a trill.
   if (figure.size() - prefix < 4)
     return exp;  // caller keeps the original note.
+  // The Nachschlag turns from the main tone: drop a slot when the alternation
+  // would reach it from the upper one; the final tone absorbs the time.
+  if (figure[figure.size() - 3].pitch != base.pitch)
+    figure.pop_back();
 
   // Nachschlag: penultimate slot becomes the lower neighbour, last slot the
   // resolved main tone.
@@ -411,11 +417,20 @@ void resolveFixtureOrnamentContext(const HarnessFixture& fixture, FormType form,
       voicesForIntent(fixture.voice_plan, {VoiceIntent::CantusFirmusCarrier});
   params->aria_end_tick = form == FormType::GoldbergVariations ? 4 * ticks_per_bar : 0;
   params->section_cadence_ticks = fixture.section_cadence_ticks;
-  if (fixture.climax_end_tick > fixture.climax_start_tick) {
-    params->climax_start_tick = fixture.climax_start_tick;
-    params->climax_end_tick = fixture.climax_end_tick;
+  // The window sits on the tick the registration peaks at, so the decoration and
+  // the dynamic summit coincide.
+  const bool declared = fixture.climax_end_tick > fixture.climax_start_tick;
+  const std::uint16_t bars =
+      ticks_per_bar > 0
+          ? static_cast<std::uint16_t>((total_ticks + ticks_per_bar - 1) / ticks_per_bar)
+          : 0;
+  const Tick climax_tick =
+      macroArcClimaxTick(macroArcCycleCount(bars, formSpec(form).snap_bars), ticks_per_bar,
+                         total_ticks, declared ? fixture.climax_start_tick : 0);
+  if (declared) {
+    params->climax_start_tick = climax_tick;
+    params->climax_end_tick = climax_tick + (fixture.climax_end_tick - fixture.climax_start_tick);
   } else {
-    const Tick climax_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
     params->climax_start_tick = climax_tick > ticks_per_bar ? climax_tick - ticks_per_bar : 0;
     params->climax_end_tick = climax_tick + ticks_per_bar;
   }
@@ -448,6 +463,14 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     return;
   if (result.notes.size() != result.provenance.size())
     return;  // index-parallel invariant broken upstream; refuse to corrupt it.
+  // Ornament sub-notes mean this pass already ran. Every site is chosen against
+  // the plain texture, so a second run returns the result unchanged instead of
+  // judging candidates against its own figures.
+  for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+    if (result.notes[idx].source == BachNoteSource::Ornament ||
+        result.provenance[idx].source == NoteSource::Ornament)
+      return;
+  }
 
   const Tick tpb = params.ticks_per_bar > 0 ? params.ticks_per_bar : kTicksPerBar;
   const std::uint8_t beats_per_bar = params.ts_numerator == 0 ? 4 : params.ts_numerator;
@@ -459,14 +482,14 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
   const int ornament_pitch_ceiling = compass.hard_limit ? compass.high : kMidiMax;
   const int total_bars = static_cast<int>((longestEnd(result.notes) + tpb - 1) / tpb);
 
-  // The cadence window is the last two bars; the penultimate strong beat
-  // before the final cadence is where the priority cadence trill lands.
+  // The cadence window is the last two bars; the penultimate bar's cadential
+  // landing (see cadence_landing below) takes the priority cadence trill.
   const int cadence_window_start_bar = total_bars >= 2 ? total_bars - 2 : 0;
 
   // Interior section-cadence bars: each entry of section_cadence_ticks names
   // the bar that closes an inner section (a fugue exposition, a toccata's
   // free section). These bars behave like the final cadence -- a mandatory
-  // top-line-only strong-beat trill site -- at lower intensity (short trill).
+  // top-line-only trill on the bar's landing -- at lower intensity (short trill).
   // Bars at or past the final cadence window are dropped: the final window's
   // long cadential trill wins.
   std::vector<int> section_cadence_bars;
@@ -535,21 +558,71 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     for (const std::size_t k : order) {
       const VoiceId v = result.notes[k].voice;
       if (last_in_voice[v] >= 0) {
-        const std::size_t prev_idx = static_cast<std::size_t>(last_in_voice[v]);
-        const NoteEvent& prev = result.notes[prev_idx];
-        // An ornament sub-note is not a structural approach tone: leaving the
-        // context unset closes the approach sites behind expanded notes, which
-        // keeps a second application of the pass a strict no-op.
-        const bool prev_is_ornament = prev.source == BachNoteSource::Ornament ||
-                                      result.provenance[prev_idx].source == NoteSource::Ornament;
-        if (!prev_is_ornament) {
-          prev_pitch_in_voice[k] = static_cast<int>(prev.pitch);
-          prev_dur_in_voice[k] = prev.duration;
-        }
+        const NoteEvent& prev = result.notes[static_cast<std::size_t>(last_in_voice[v])];
+        prev_pitch_in_voice[k] = static_cast<int>(prev.pitch);
+        prev_dur_in_voice[k] = prev.duration;
       }
       last_in_voice[v] = static_cast<int>(k);
     }
   }
+
+  // Note-level eligibility, independent of the site grammar.
+  const auto decorable = [&](std::size_t idx) {
+    const NoteEvent& note = result.notes[idx];
+    const NoteProvenance& prov = result.provenance[idx];
+    // Severe keeps the whole cantus firmus plain (the Orgelbuechlein subtype).
+    const bool skeleton_plain = isExempt(params.skeleton_exempt_voices, note.voice) &&
+                                params.character == SubjectCharacter::Severe;
+    const bool cadence_resolution = std::binary_search(
+        declared_cadence_ticks.begin(), declared_cadence_ticks.end(), note.start_tick);
+    // A subject statement is the one line the ear is asked to match against
+    // itself, and the grammar would decorate each entry differently. The intent
+    // is read per span because the subject travels through every voice. Middle
+    // entries stay decorable: they are where a fugue varies its material.
+    const bool subject_statement = prov.voice_intent == VoiceIntent::SubjectCarrier ||
+                                   prov.voice_intent == VoiceIntent::AnswerCarrier ||
+                                   prov.voice_intent == VoiceIntent::StrettoCarrier ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierAugmented ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierDiminished ||
+                                   prov.voice_intent == VoiceIntent::SubjectCarrierInverted;
+    // Eighth notes are admitted as mordent candidates at the phrase-boundary
+    // sites only; sixteenths and shorter are never ornamented.
+    return prov.voice_intent != VoiceIntent::SuspensionCarrier && !cadence_resolution &&
+           !subject_statement && note.duration >= kEighth &&
+           !isExempt(params.exempt_voices, note.voice) && !skeleton_plain &&
+           note.start_tick != last_onset[note.voice];
+  };
+
+  // The cadential landing of a cadence bar: its longest top-line tone of a
+  // quarter or longer, on whichever beat it starts (ties go to the later
+  // onset). Never the bass, never a cantus-firmus tone.
+  const auto cadence_landing = [&](int bar) {
+    std::size_t best = result.notes.size();
+    for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+      const NoteEvent& note = result.notes[idx];
+      if (static_cast<int>(note.start_tick / tpb) != bar || note.duration < kQuarter ||
+          isExempt(params.skeleton_exempt_voices, note.voice) || !decorable(idx))
+        continue;
+      if (multi_voice && note.pitch <= lowestSoundingPitch(result.notes, note.start_tick))
+        continue;
+      if (highestOtherSoundingPitch(result.notes, note.voice, note.start_tick) > note.pitch)
+        continue;
+      if (best == result.notes.size() || note.duration > result.notes[best].duration ||
+          (note.duration == result.notes[best].duration &&
+           note.start_tick > result.notes[best].start_tick))
+        best = idx;
+    }
+    return best;
+  };
+  const std::size_t final_landing =
+      total_bars >= 2 ? cadence_landing(total_bars - 2) : result.notes.size();
+  std::vector<std::size_t> section_landings;
+  for (const int bar : section_cadence_bars) {
+    const std::size_t landing = cadence_landing(bar);
+    if (landing < result.notes.size())
+      section_landings.push_back(landing);
+  }
+  std::sort(section_landings.begin(), section_landings.end());
 
   // Build replacement views WITHOUT mutating the live note list until the full
   // plan is assembled (build-then-swap).
@@ -775,44 +848,15 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     const NoteProvenance& prov = result.provenance[idx];
 
     Expansion exp;
-    const bool already_ornament =
-        note.source == BachNoteSource::Ornament || prov.source == NoteSource::Ornament;
+    // A mandatory cadence trill whose opening a guard refuses tries the other
+    // long opening before the landing is left plain.
+    Expansion cadence_fallback;
 
-    // Voice-level exemptions. Hard-exempt voices (ground carriers) never take
-    // an ornament. Skeleton-exempt voices (cantus firmus) keep their bar-head
-    // onsets immutable but may decorate within-bar tones -- EXCEPT under
-    // Severe, whose plain-CF subtype keeps the whole line bare.
+    // Skeleton-exempt voices (cantus firmus) keep their bar-head onsets
+    // immutable but may decorate within-bar tones.
     const bool skeleton_voice = isExempt(params.skeleton_exempt_voices, note.voice);
-    const bool skeleton_plain = skeleton_voice && params.character == SubjectCharacter::Severe;
-    const bool suspension_carrier = prov.voice_intent == VoiceIntent::SuspensionCarrier;
-    const bool cadence_resolution = std::binary_search(
-        declared_cadence_ticks.begin(), declared_cadence_ticks.end(), note.start_tick);
 
-    // A subject statement is the one line the ear is asked to match against
-    // itself. An ornament here is not decoration but a different set of notes,
-    // and because the grammar below fires on whatever local shape a given entry
-    // happens to present, the third entry stops answering the first. Bach's own
-    // subjects do carry mordents -- written into the subject, so every entry
-    // states the same ones. This exemption reads the span's intent rather than
-    // its voice: the subject travels through every voice in turn, so the
-    // voice-level exempt list above cannot express it at all. The transformed
-    // statements are included because the ear is still matching them, and an
-    // augmentation's long notes are otherwise the pass's prime targets. Middle
-    // entries are left decorable -- already transposed and developmental, they
-    // are where a fugue varies its material rather than restates it.
-    const bool subject_statement = prov.voice_intent == VoiceIntent::SubjectCarrier ||
-                                   prov.voice_intent == VoiceIntent::AnswerCarrier ||
-                                   prov.voice_intent == VoiceIntent::StrettoCarrier ||
-                                   prov.voice_intent == VoiceIntent::SubjectCarrierAugmented ||
-                                   prov.voice_intent == VoiceIntent::SubjectCarrierDiminished ||
-                                   prov.voice_intent == VoiceIntent::SubjectCarrierInverted;
-
-    // Eighth notes are admitted as mordent candidates at the phrase-boundary
-    // sites only (the per-rule conditions below re-narrow longer figures to
-    // quarter+); sixteenths and shorter are never ornamented.
-    if (!already_ornament && !suspension_carrier && !cadence_resolution && !subject_statement &&
-        note.duration >= kEighth && !isExempt(params.exempt_voices, note.voice) &&
-        !skeleton_plain && note.start_tick != last_onset[note.voice]) {
+    if (decorable(idx)) {
       const int bar = static_cast<int>(note.start_tick / tpb);
       const Tick pos_in_bar = note.start_tick % tpb;
       const bool is_downbeat = pos_in_bar == 0;
@@ -828,8 +872,9 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           on_beat && (beat_index == 0 || (beats_per_bar == 4 && beat_index == 2) ||
                       (beats_per_bar == 3 &&
                        params.meter_profile == MeterProfile::SarabandeTriple && beat_index == 1));
-      const bool final_cadence_site = bar == total_bars - 2 && is_downbeat;
-      const bool section_cadence_site = in_section_cadence && is_downbeat;
+      const bool final_cadence_site = idx == final_landing;
+      const bool section_cadence_site =
+          std::binary_search(section_landings.begin(), section_landings.end(), idx);
 
       // Clean-bass guard: never ornament the lowest-sounding voice. A
       // single-voice piece has no bass to protect, so the guard is multi-voice
@@ -882,6 +927,12 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         // the closing bars. These are candidates only -- the deterministic
         // gate below still applies (never mandatory).
         const bool is_phrase_boundary = (bar % 4 == 3) && !in_cadence_window;
+        // The density-0 boundary sites and their figure: the percussive
+        // characters strike a mordent, the suspension-leaning ones lean.
+        const bool sparse_site =
+            (bar % 8 == 7 || bar == mid_boundary_bar) && !in_cadence_window && is_downbeat;
+        const bool sparse_mordent = params.character == SubjectCharacter::Restless ||
+                                    params.character == SubjectCharacter::Playful;
 
         // Melodic approach context (same-voice previous attack).
         const int prev_pitch = prev_pitch_in_voice[idx];
@@ -897,8 +948,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         // the figure each character places at each site class is a design
         // value, not a search). The cadence rows are shared and mandatory --
         // every character closes with the long cadential trill, and every
-        // character marks an interior section-cadence bar with a short
-        // strong-beat trill.
+        // character marks an interior section-cadence landing with a short
+        // trill.
         //   Severe   : boundary -> appoggiatura (the linear stile antico
         //              suspends rather than strikes); interior -> nothing
         //              beyond the section-cadence trill.
@@ -908,7 +959,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
         //              mordent (shorter); interior -> downbeat mordent (the
         //              percussive idiom).
         //   Playful  : boundary -> slide under a leap approach / turn (long
-        //              tones) / mordent (quarters); interior -> inner trill
+        //              tones) / mordent (quarters, eighths); interior -> inner trill
         //              on strong-beat quarter-or-longer tones every other
         //              bar, slide under leap arrivals, downbeat mordent on
         //              quarters.
@@ -964,14 +1015,10 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
           // Sparse uplift: a density-0 character marks every other phrase
           // boundary (and the designed mid-piece boundary) with its boundary
           // figure, so the piece is not bare until the final cadence. These
-          // are design values (one site per 8 bars), not gated sites. The
-          // suspension-leaning characters take the appoggiatura; Restless
-          // keeps its percussive mordent.
-          if ((bar % 8 == 7 || bar == mid_boundary_bar) && !in_cadence_window && is_downbeat) {
-            if (params.character == SubjectCharacter::Restless)
-              want_mordent = true;
-            else
-              want_appoggiatura = true;
+          // are design values (one site per 8 bars), not gated sites.
+          if (sparse_site) {
+            want_mordent = sparse_mordent;
+            want_appoggiatura = !sparse_mordent;
           }
         } else if (!in_cadence_window) {
           switch (params.character) {
@@ -1016,8 +1063,10 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
               }
               break;
             case SubjectCharacter::Playful:
-              if (is_phrase_boundary && is_strong_beat && note.duration >= kQuarter) {
-                if (rising_leap && ((roll >> 5) & 1ull) == 0ull) {
+              if (is_phrase_boundary && is_strong_beat) {
+                // Boundary eighths take the mordent too, as they do for the
+                // sparser Restless.
+                if (note.duration >= kQuarter && rising_leap && ((roll >> 5) & 1ull) == 0ull) {
                   want_slide = true;
                   self_gated = true;
                 } else if (note.duration >= kHalf) {
@@ -1041,18 +1090,27 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
               }
               break;
           }
+          // A denser character keeps every density-0 site: where its own
+          // grammar chose nothing, the site takes the character's boundary
+          // figure (Noble's turn, the percussive mordent, Severe's lean).
+          if (sparse_site && !want_trill && !want_mordent && !want_appoggiatura && !want_turn &&
+              !want_slide) {
+            want_turn = params.character == SubjectCharacter::Noble;
+            want_mordent = !want_turn && sparse_mordent;
+            want_appoggiatura = !want_turn && !sparse_mordent;
+          }
         }
 
         // A small deterministic gate so not literally every eligible note in a
         // dense passage is ornamented (keeps the texture musical). Cadence
         // trills (final and interior section cadences alike), the designed
-        // mid-piece boundary, the density-0 boundary figures (already
-        // one-per-8-bars sparse), and the approach-matched figures (each
+        // mid-piece boundary, the density-0 boundary sites (already
+        // one-per-8-bars sparse, at every density), and the approach-matched figures (each
         // carries its own quantile gate above) bypass the gate. Inside the
         // climax window a second hash bit joins the gate, so it opens for
         // ~3 in 4 sites instead of 1 in 2.
         const bool mandatory = final_cadence_site || section_cadence_site;
-        const bool gate_open = mandatory || bar == mid_boundary_bar ||
+        const bool gate_open = mandatory || bar == mid_boundary_bar || sparse_site ||
                                (local_density == 0 && (want_mordent || want_appoggiatura)) ||
                                self_gated || (roll & 1ull) == 0ull ||
                                (in_climax && ((roll >> 6) & 1ull) == 0ull);
@@ -1085,6 +1143,11 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
                                  ? std::max(trill_sub, duration::kSixteenthNote)
                                  : trill_sub;
             exp = buildTrill(note, upper, lower, sub, onset);
+            if (mandatory && onset != TrillOnset::UpperStart) {
+              cadence_fallback =
+                  buildTrill(note, upper, lower, sub,
+                             onset == TrillOnset::Appuy ? TrillOnset::VonUnten : TrillOnset::Appuy);
+            }
           }
         }
       }
@@ -1094,26 +1157,27 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
     // introduce a second lower step, so verify every emitted sub-note at its
     // actual onset before committing the expansion. The compass is judged on
     // the tones the figure sounds, so a figure without the upper auxiliary is
-    // never refused for it.
-    if (!exp.notes.empty()) {
-      for (const NoteEvent& ornament : exp.notes) {
-        if (static_cast<int>(ornament.pitch) > ornament_pitch_ceiling) {
-          exp.notes.clear();
-          break;
-        }
+    // never refused for it. A figure that would clash with or cross another
+    // voice stays plain.
+    const auto refused = [&](const Expansion& cand_exp) {
+      for (const NoteEvent& ornament : cand_exp.notes) {
+        if (static_cast<int>(ornament.pitch) > ornament_pitch_ceiling)
+          return true;
         const int ornament_floor =
             nextLowerVoiceFloor(result.notes, note.voice, ornament.start_tick);
-        if (static_cast<int>(ornament.pitch) <= ornament_floor) {
-          exp.notes.clear();
-          break;
-        }
+        if (static_cast<int>(ornament.pitch) <= ornament_floor)
+          return true;
       }
+      return clashes_committed_ornament(note) ||
+             expansion_forms_perfect_arrival(cand_exp, note, idx) ||
+             expansion_sustains_dissonance(cand_exp, note, idx) ||
+             expansion_crosses_voice(cand_exp, note, idx);
+    };
+    if (!exp.notes.empty() && refused(exp)) {
+      exp.notes.clear();
+      if (!cadence_fallback.notes.empty() && !refused(cadence_fallback))
+        exp = std::move(cadence_fallback);
     }
-
-    if (!exp.notes.empty() &&
-        (clashes_committed_ornament(note) || expansion_forms_perfect_arrival(exp, note, idx) ||
-         expansion_sustains_dissonance(exp, note, idx) || expansion_crosses_voice(exp, note, idx)))
-      exp.notes.clear();  // would clash with or cross another voice: stay plain.
 
     if (exp.notes.empty()) {
       out_notes.push_back(note);

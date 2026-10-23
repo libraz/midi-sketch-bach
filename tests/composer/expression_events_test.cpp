@@ -151,6 +151,21 @@ TEST(ExpressionEventsTest, RegistrationPeakLandsAtClimaxTick) {
   EXPECT_TRUE(found) << "no climax peak point emitted";
 }
 
+TEST(ExpressionEventsTest, RegistrationClimaxEarlierThanDevelopStandsABarAfterIt) {
+  const Tick total = 44 * kTicksPerBar;
+  const Tick develop = total / 2;
+  const auto events = buildRegistrationPlan(44, 11, kTicksPerBar, total, 10 * kTicksPerBar);
+  bool found = false;
+  for (const auto& evt : events) {
+    if (evt.controller == 7 && evt.value == 95) {
+      EXPECT_EQ(evt.tick, develop + kTicksPerBar);
+      EXPECT_EQ(evt.tick, macroArcClimaxTick(11, kTicksPerBar, total, 10 * kTicksPerBar));
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found) << "no climax peak point emitted";
+}
+
 TEST(ExpressionEventsTest, RegistrationClimaxClampedBeforePieceEnd) {
   const Tick total = 16 * kTicksPerBar;
   // A climax past the end clamps to at most one bar before the end so the settle

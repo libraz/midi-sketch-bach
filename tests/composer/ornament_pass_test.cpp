@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -127,12 +128,61 @@ TEST(OrnamentPassTest, DeterministicForSameInputs) {
   }
 }
 
+// Every note field, provenance source and track must survive a second pass.
+void expectSameResult(const ComposeResult& lhs, const ComposeResult& rhs) {
+  ASSERT_EQ(lhs.notes.size(), rhs.notes.size());
+  ASSERT_EQ(lhs.provenance.size(), rhs.provenance.size());
+  for (std::size_t idx = 0; idx < lhs.notes.size(); ++idx) {
+    EXPECT_EQ(lhs.notes[idx].start_tick, rhs.notes[idx].start_tick) << "note " << idx;
+    EXPECT_EQ(lhs.notes[idx].duration, rhs.notes[idx].duration) << "note " << idx;
+    EXPECT_EQ(lhs.notes[idx].pitch, rhs.notes[idx].pitch) << "note " << idx;
+    EXPECT_EQ(lhs.notes[idx].voice, rhs.notes[idx].voice) << "note " << idx;
+    EXPECT_EQ(lhs.notes[idx].source, rhs.notes[idx].source) << "note " << idx;
+    EXPECT_EQ(lhs.provenance[idx].source, rhs.provenance[idx].source) << "note " << idx;
+    EXPECT_EQ(lhs.provenance[idx].voice_intent, rhs.provenance[idx].voice_intent) << "note " << idx;
+  }
+  ASSERT_EQ(lhs.tracks.size(), rhs.tracks.size());
+  for (std::size_t trk = 0; trk < lhs.tracks.size(); ++trk) {
+    ASSERT_EQ(lhs.tracks[trk].notes.size(), rhs.tracks[trk].notes.size()) << "track " << trk;
+    for (std::size_t idx = 0; idx < lhs.tracks[trk].notes.size(); ++idx) {
+      EXPECT_EQ(lhs.tracks[trk].notes[idx].start_tick, rhs.tracks[trk].notes[idx].start_tick);
+      EXPECT_EQ(lhs.tracks[trk].notes[idx].pitch, rhs.tracks[trk].notes[idx].pitch);
+    }
+  }
+}
+
 TEST(OrnamentPassTest, IdempotentSecondApplicationIsNoOp) {
   ComposeResult r = twoVoiceFixture(8);
   applyOrnamentPass(r, baseParams());
-  const std::size_t after_first = r.notes.size();
+  ASSERT_GT(ornamentNoteCount(r), 0u);
+  const ComposeResult once = r;
   applyOrnamentPass(r, baseParams());
-  EXPECT_EQ(r.notes.size(), after_first);
+  expectSameResult(once, r);
+}
+
+TEST(OrnamentPassTest, IdempotentOnShippedForms) {
+  for (const FormType form : {FormType::Fugue, FormType::TrioSonata, FormType::Passacaglia}) {
+    ComposeRequest req;
+    req.form = form;
+    req.character = SubjectCharacter::Playful;
+    req.seed = 1;
+    HarnessFixture fx;
+    ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+    ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    OrnamentParams params;
+    params.character = req.character;
+    params.instrument = defaultInstrumentForForm(form);
+    params.seed = req.seed;
+    Tick end = 0;
+    for (const NoteEvent& note : r.notes)
+      end = std::max(end, note.start_tick + note.duration);
+    resolveFixtureOrnamentContext(fx, form, end, &params);
+    applyOrnamentPass(r, params);
+    ASSERT_GT(ornamentNoteCount(r), 0u) << formTypeToString(form);
+    const ComposeResult once = r;
+    applyOrnamentPass(r, params);
+    expectSameResult(once, r);
+  }
 }
 
 // --- Exempt voices ---------------------------------------------------------
@@ -1623,6 +1673,195 @@ TEST(OrnamentPassTest, RestlessQuarterBoundaryTrillFires) {
     }
   }
   EXPECT_TRUE(found_trill) << "no Restless quarter-note boundary trill fired across the seeds";
+}
+
+// --- Shipped forms: cadence landing, density order, Nachschlag ---------------
+
+namespace {
+
+constexpr std::array<FormType, 10> kAllForms = {{
+    FormType::Fugue,
+    FormType::PreludeAndFugue,
+    FormType::TrioSonata,
+    FormType::ChoralePrelude,
+    FormType::ToccataAndFugue,
+    FormType::Passacaglia,
+    FormType::FantasiaAndFugue,
+    FormType::CelloPrelude,
+    FormType::Chaconne,
+    FormType::GoldbergVariations,
+}};
+
+constexpr std::array<SubjectCharacter, 4> kAllCharacters = {{
+    SubjectCharacter::Severe,
+    SubjectCharacter::Noble,
+    SubjectCharacter::Restless,
+    SubjectCharacter::Playful,
+}};
+
+// One ornamented figure: the sub-notes that replaced one authored note.
+struct OrnamentFigure {
+  VoiceId voice = 0;
+  Tick authored_start = 0;
+  int authored_pitch = 0;
+  std::vector<NoteEvent> notes;
+};
+
+// The form decorated as the product decorates it (default instrument, fixture
+// context). Returns false when the form director refuses the character.
+bool decorateShippedForm(FormType form, SubjectCharacter character, std::uint32_t seed,
+                         ComposeResult* plain, ComposeResult* decorated, Tick* ticks_per_bar) {
+  ComposeRequest req;
+  req.form = form;
+  req.character = character;
+  req.seed = seed;
+  HarnessFixture fx;
+  if (buildFormFixture(req, &fx) != FormDirectorStatus::Ok)
+    return false;
+  *plain = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  *decorated = *plain;
+  OrnamentParams params;
+  params.character = character;
+  params.instrument = defaultInstrumentForForm(form);
+  params.seed = seed;
+  Tick end = 0;
+  for (const NoteEvent& note : plain->notes)
+    end = std::max(end, note.start_tick + note.duration);
+  resolveFixtureOrnamentContext(fx, form, end, &params);
+  applyOrnamentPass(*decorated, params);
+  *ticks_per_bar = fx.harmony.ticksPerBar();
+  return true;
+}
+
+std::vector<OrnamentFigure> ornamentFigures(const ComposeResult& result) {
+  std::vector<OrnamentFigure> figures;
+  for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+    const NoteProvenance& prov = result.provenance[idx];
+    if (prov.source != NoteSource::Ornament)
+      continue;
+    const NoteEvent& note = result.notes[idx];
+    auto found = std::find_if(figures.begin(), figures.end(), [&](const OrnamentFigure& fig) {
+      return fig.voice == note.voice && fig.authored_start == prov.authored_start_tick;
+    });
+    if (found == figures.end()) {
+      figures.push_back({note.voice, prov.authored_start_tick, prov.authored_pitch, {}});
+      found = figures.end() - 1;
+    }
+    found->notes.push_back(note);
+  }
+  for (OrnamentFigure& fig : figures) {
+    std::sort(fig.notes.begin(), fig.notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+      return lhs.start_tick < rhs.start_tick;
+    });
+  }
+  return figures;
+}
+
+}  // namespace
+
+// The cadential trill sits on the penultimate bar's landing tone, on whichever
+// beat it starts: the longest top-line tone of a quarter or longer there.
+TEST(OrnamentPassTest, FinalCadenceTrillLandsOnTheCadentialToneInEveryForm) {
+  std::size_t checked = 0;
+  for (const FormType form : kAllForms) {
+    for (const SubjectCharacter character : kAllCharacters) {
+      for (std::uint32_t seed = 1; seed <= 3; ++seed) {
+        ComposeResult plain;
+        ComposeResult decorated;
+        Tick tpb = 0;
+        if (!decorateShippedForm(form, character, seed, &plain, &decorated, &tpb))
+          continue;
+        Tick end = 0;
+        for (const NoteEvent& note : plain.notes)
+          end = std::max(end, note.start_tick + note.duration);
+        const Tick cadence_bar = (end + tpb - 1) / tpb - 2;
+        const bool multi_voice =
+            std::any_of(plain.notes.begin(), plain.notes.end(),
+                        [&](const NoteEvent& note) { return note.voice != plain.notes[0].voice; });
+        const NoteEvent* landing = nullptr;
+        for (const NoteEvent& note : plain.notes) {
+          if (note.start_tick / tpb != cadence_bar || note.duration < kTicksPerBeat)
+            continue;
+          bool top = true;
+          bool above_bass = !multi_voice;
+          for (const NoteEvent& other : plain.notes) {
+            if (other.voice == note.voice || other.start_tick > note.start_tick ||
+                other.start_tick + other.duration <= note.start_tick)
+              continue;
+            top = top && other.pitch <= note.pitch;
+            above_bass = above_bass || other.pitch < note.pitch;
+          }
+          if (!top || !above_bass)
+            continue;
+          if (landing == nullptr || note.duration > landing->duration ||
+              (note.duration == landing->duration && note.start_tick > landing->start_tick))
+            landing = &note;
+        }
+        if (landing == nullptr)
+          continue;  // no top-line tone of a quarter or longer to trill.
+        ++checked;
+        bool trilled = false;
+        for (const OrnamentFigure& fig : ornamentFigures(decorated)) {
+          trilled = trilled || (fig.voice == landing->voice &&
+                                fig.authored_start == landing->start_tick && fig.notes.size() >= 4);
+        }
+        EXPECT_TRUE(trilled) << formTypeToString(form) << " " << subjectCharacterToString(character)
+                             << " seed " << seed << ": no trill on the landing at tick "
+                             << landing->start_tick;
+      }
+    }
+  }
+  EXPECT_GT(checked, 90u);
+}
+
+// Playful is the ornament-rich character, Severe the bare one; Noble and
+// Restless sit between at one density tier.
+TEST(OrnamentPassTest, TrioSonataOrnamentCountsFollowCharacterDensity) {
+  for (std::uint32_t seed = 1; seed <= 3; ++seed) {
+    std::array<std::size_t, 4> sites{};
+    for (std::size_t chr = 0; chr < kAllCharacters.size(); ++chr) {
+      ComposeResult plain;
+      ComposeResult decorated;
+      Tick tpb = 0;
+      ASSERT_TRUE(decorateShippedForm(FormType::TrioSonata, kAllCharacters[chr], seed, &plain,
+                                      &decorated, &tpb));
+      sites[chr] = ornamentFigures(decorated).size();
+    }
+    // kAllCharacters order: Severe, Noble, Restless, Playful.
+    EXPECT_LE(sites[0], sites[1]) << "seed " << seed;
+    EXPECT_LE(sites[0], sites[2]) << "seed " << seed;
+    EXPECT_LE(sites[1], sites[3]) << "seed " << seed;
+    EXPECT_LE(sites[2], sites[3]) << "seed " << seed;
+    EXPECT_GT(sites[3], 0u) << "seed " << seed;
+  }
+}
+
+// A trill's Nachschlag turns from the main tone, whatever the number of
+// alternation slots: ... main, lower, main.
+TEST(OrnamentPassTest, NachschlagTurnsFromTheMainToneInShippedForms) {
+  std::size_t trills = 0;
+  for (const FormType form : kAllForms) {
+    for (const SubjectCharacter character : kAllCharacters) {
+      for (std::uint32_t seed = 1; seed <= 3; ++seed) {
+        ComposeResult plain;
+        ComposeResult decorated;
+        Tick tpb = 0;
+        if (!decorateShippedForm(form, character, seed, &plain, &decorated, &tpb))
+          continue;
+        for (const OrnamentFigure& fig : ornamentFigures(decorated)) {
+          const std::size_t size = fig.notes.size();
+          if (size < 4 || fig.notes[size - 2].pitch >= fig.notes[size - 1].pitch)
+            continue;  // not a figure that closes on a lower-neighbour turn.
+          ++trills;
+          EXPECT_EQ(fig.notes[size - 1].pitch, fig.authored_pitch);
+          EXPECT_EQ(fig.notes[size - 3].pitch, fig.authored_pitch)
+              << formTypeToString(form) << " seed " << seed << " voice " << int{fig.voice}
+              << " tick " << fig.authored_start << ": the Nachschlag skips the main tone";
+        }
+      }
+    }
+  }
+  EXPECT_GT(trills, 0u);
 }
 
 // --- Untouched core pipeline (opt-in guarantee) ----------------------------

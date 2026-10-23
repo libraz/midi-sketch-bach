@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "composer/form_director.h"
+#include "composer/harness_fixture.h"
+#include "composer/ornament_pass.h"
 #include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 #include "midi/midi_reader.h"
@@ -594,6 +596,46 @@ TEST(CompositionServiceTest, CharacterChangesTheRegistration) {
   }
 }
 
+// The registration peak stands at least a bar after the develop step, and the
+// ornament pass's climax window opens on that same tick.
+TEST(CompositionServiceTest, RegistrationPeakFollowsDevelopAndMatchesOrnamentClimax) {
+  for (const FormType form : {FormType::Fugue, FormType::Passacaglia}) {
+    for (const std::uint32_t seed : {1u, 2u}) {
+      CompositionRequest request = fugueRequest(seed);
+      request.form = form;
+      CompositionProduct product;
+      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+      ASSERT_FALSE(product.composition.tracks.empty());
+
+      Tick peak_tick = 0;
+      std::uint8_t peak_value = 0;
+      for (const auto& event : product.composition.tracks.front().cc_events) {
+        if (event.controller == 7 && event.value > peak_value) {
+          peak_value = event.value;
+          peak_tick = event.tick;
+        }
+      }
+      const Tick ticks_per_bar = kTicksPerBeat * composer::formSpec(form).ts_numerator;
+      const Tick develop_tick = product.total_ticks / 2;
+      EXPECT_GE(peak_tick, develop_tick + ticks_per_bar)
+          << formTypeToString(form) << " seed " << seed;
+
+      composer::ComposeRequest compose_request;
+      compose_request.form = form;
+      compose_request.is_minor = request.key.is_minor;
+      compose_request.character = request.character;
+      compose_request.target_bars = product.resolved_bars;
+      compose_request.seed = product.seed;
+      composer::HarnessFixture fixture;
+      ASSERT_EQ(composer::buildFormFixture(compose_request, &fixture),
+                composer::FormDirectorStatus::Ok);
+      composer::OrnamentParams params;
+      composer::resolveFixtureOrnamentContext(fixture, form, product.total_ticks, &params);
+      EXPECT_EQ(params.climax_start_tick, peak_tick) << formTypeToString(form) << " seed " << seed;
+    }
+  }
+}
+
 TEST(CompositionServiceTest, ExplicitIncompatibleInstrumentFailsBeforeGeneration) {
   CompositionRequest request = fugueRequest(42);
   request.instrument = InstrumentType::Cello;
@@ -945,7 +987,12 @@ TEST(CompositionServiceTest, GoldbergEndsOnTheDeclaredResolvedTonicTriad) {
         EXPECT_TRUE(last.count(third)) << "the final sonority has no tonic third";
         for (int pcl : last)
           EXPECT_TRUE(tonic_triad.count(pcl)) << "pc " << pcl << " held over the final tonic";
-        EXPECT_TRUE(sonorityAt(notes, approach).count(11)) << "no leading tone on the approach";
+        // Read across the beat: a cadential trill on the leading tone opens on
+        // its upper auxiliary.
+        EXPECT_TRUE(std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
+          return note.pitch % 12 == 11 && note.start_tick < final_bar &&
+                 note.start_tick + note.duration > approach;
+        })) << "no leading tone on the approach";
 
         for (const NoteEvent& note : notes) {
           if (note.voice != 1 || note.start_tick + note.duration <= approach)
@@ -1055,10 +1102,10 @@ bool sameNotatedTones(const std::vector<NoteEvent>& lhs, const std::vector<NoteE
 // status. Read on the composed product, not on the composer's own result: the
 // ornament pass is part of the piece and carries some of the differentiation.
 //
-// The three forms in kPinnedIdenticalPairs are the open exceptions, each for the
-// same reason: they derive their figuration from a palette walked by a seed
-// rotation, and the levers that would let a character walk that palette
-// differently move their counterpoint ceilings the wrong way. The identical
+// The chaconne pairs in kPinnedIdenticalPairs are the open exception: its
+// figuration comes from a palette walked by a seed rotation, and the levers that
+// would let a character walk that palette differently move its counterpoint
+// ceilings the wrong way. The identical
 // (form, mode, seed, character pair) set is pinned exactly -- a wider collapse
 // and a closed gap both fail, so the exception cannot outlive its cause.
 TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
@@ -1078,14 +1125,9 @@ TEST(CompositionServiceTest, EveryAcceptedCharacterComposesADifferentPiece) {
       {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
        SubjectCharacter::Restless}};
   // Entries are "<form ordinal>:<minor>:<seed>:<lhs character>=<rhs character>".
-  // The minor goldberg pair at seed 42 differed only by one trill whose
-  // auxiliary was a chromatic alteration of its main note; spelled
-  // diatonically, that trill is no longer placed.
   const std::set<std::string> kPinnedIdenticalPairs = {
-      "5:0:1:severe=noble",   "5:0:7:severe=noble",   "5:1:1:severe=noble",  "5:1:7:severe=noble",
-      "8:0:1:severe=noble",   "8:0:2:severe=noble",   "8:0:42:severe=noble", "8:0:7:severe=noble",
-      "8:1:1:severe=noble",   "8:1:2:severe=noble",   "8:1:42:severe=noble", "8:1:7:severe=noble",
-      "9:0:42:playful=noble", "9:1:42:playful=noble",
+      "8:0:1:severe=noble", "8:0:2:severe=noble", "8:0:42:severe=noble", "8:0:7:severe=noble",
+      "8:1:1:severe=noble", "8:1:2:severe=noble", "8:1:42:severe=noble", "8:1:7:severe=noble",
   };
   std::set<std::string> observed;
   for (FormType form : kAllForms) {

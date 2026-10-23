@@ -320,10 +320,7 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
 
   const composer::FormSpec& spec = composer::formSpec(effective.form);
   const std::uint16_t snap = spec.snap_bars == 0 ? 1 : spec.snap_bars;
-  std::size_t cycle_count = out->resolved_bars / snap;
-  if (cycle_count == 0) {
-    cycle_count = 1;
-  }
+  const std::size_t cycle_count = composer::macroArcCycleCount(out->resolved_bars, snap);
   // Which stops the piece is drawn on. The registration is the organ's only
   // dynamic, so without this the four characters would be played on identical
   // stops and differ in nothing an ear can hear as loudness.

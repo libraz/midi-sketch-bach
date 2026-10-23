@@ -67,28 +67,6 @@ void addRegistrationPoint(std::vector<CcEvent>& events, Tick tick, std::uint8_t 
 /// @param tick Query position.
 /// @param total_ticks Piece length (> 0).
 /// @return Interpolated controller value in [kOpeningValue, kClimaxValue].
-Tick normalizedClimaxTick(std::size_t cycle_count, Tick ticks_per_bar, std::uint32_t total_ticks,
-                          Tick climax_tick) {
-  const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
-  Tick peak_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
-  if (climax_tick == 0) {
-    return peak_tick;
-  }
-  const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 2);
-  const Tick establish_end = (cycle_count >= 3)
-                                 ? develop_tick
-                                 : static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 4);
-  const Tick ceiling = (ticks_per_bar > 0 && total_ticks > ticks_per_bar)
-                           ? total_ticks - ticks_per_bar
-                           : settle_tick;
-  Tick lo = establish_end + 1;
-  Tick hi = ceiling;
-  if (hi < lo) {
-    hi = lo;
-  }
-  return std::clamp<Tick>(climax_tick, lo, hi);
-}
-
 std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick tick,
                              std::uint32_t total_ticks, Tick climax_tick, int level_offset) {
   struct Point {
@@ -103,7 +81,7 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick t
     points[count++] = {total / 2, shiftLevel(kDevelopValue, level_offset)};
   }
   if (cycle_count >= 2) {
-    points[count++] = {normalizedClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick),
+    points[count++] = {macroArcClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick),
                        shiftLevel(kClimaxValue, level_offset)};
   }
   points[count++] = {total > 0 ? total - 1 : 0, shiftLevel(kSettleValue, level_offset)};
@@ -132,6 +110,33 @@ std::uint8_t macroArcValueAt(std::size_t cycle_count, Tick ticks_per_bar, Tick t
 
 }  // namespace
 
+std::size_t macroArcCycleCount(std::uint16_t bars, std::uint16_t snap_bars) {
+  const std::size_t cycles = snap_bars == 0 ? bars : bars / snap_bars;
+  return cycles == 0 ? 1 : cycles;
+}
+
+Tick macroArcClimaxTick(std::size_t cycle_count, Tick ticks_per_bar, std::uint32_t total_ticks,
+                        Tick climax_tick) {
+  const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
+  if (climax_tick == 0) {
+    return static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 3 / 4);
+  }
+  const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 2);
+  const Tick establish_end = (cycle_count >= 3)
+                                 ? develop_tick
+                                 : static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) / 4);
+  const Tick ceiling = (ticks_per_bar > 0 && total_ticks > ticks_per_bar)
+                           ? total_ticks - ticks_per_bar
+                           : settle_tick;
+  Tick lo = establish_end + 1;
+  // A peak one tick after the develop step collapses the rise; keep a bar between them.
+  if (cycle_count >= 3 && develop_tick + ticks_per_bar <= ceiling) {
+    lo = develop_tick + ticks_per_bar;
+  }
+  const Tick hi = std::max(ceiling, lo);
+  return std::clamp<Tick>(climax_tick, lo, hi);
+}
+
 std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle_count,
                                            Tick ticks_per_bar, std::uint32_t total_ticks,
                                            Tick climax_tick, int level_offset) {
@@ -147,7 +152,7 @@ std::vector<CcEvent> buildRegistrationPlan(std::uint16_t bars, std::size_t cycle
   // and the settle near the very end.
   const Tick develop_tick = static_cast<Tick>(static_cast<std::uint64_t>(total_ticks) * 1 / 2);
   const Tick settle_tick = total_ticks > 0 ? total_ticks - 1 : 0;
-  const Tick peak_tick = normalizedClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick);
+  const Tick peak_tick = macroArcClimaxTick(cycle_count, ticks_per_bar, total_ticks, climax_tick);
 
   events.reserve(4);
 

@@ -32,16 +32,20 @@ namespace bach::composer {
 //   * Inside the cadence window (the last two bars) only the TOP sounding
 //     line is ornamented: simultaneous trills in two voices clash at the
 //     alternation level.
+//   * The cadential trill lands on the penultimate bar's cadential landing:
+//     its longest top-line tone of a quarter or longer, on whichever beat it
+//     starts (ties go to the later onset), for EVERY character (bypassing the
+//     placement gate). A long one whose opening a guard refuses tries the
+//     other opening.
 //   * Interior section cadences (section_cadence_ticks) close an inner section
 //     -- a fugue exposition, a toccata's free section -- and behave like the
-//     final cadence: the bar's top sounding line takes a short strong-beat
-//     trill for EVERY character (bypassing the placement gate) while the lower
-//     voices stay plain. Bars at or past the final cadence window are dropped
-//     (the final window wins).
+//     final cadence: the bar's landing, chosen the same way, takes a short
+//     trill while the lower voices stay plain. Bars at or past the final
+//     cadence window are dropped (the final window wins).
 //   * A trill starts on the upper auxiliary (Baroque standard; at a cadence
 //     the upper tone is the 4-3 suspension over the dominant), alternates
-//     upper/main, and ends in a lower-neighbour Nachschlag pair before the
-//     final main tone.
+//     upper/main, and ends main -> lower neighbour -> main (the Nachschlag
+//     always turns from the main tone).
 //   * Long trills (>= half note) open with a held upper-neighbour
 //     appoggiatura (appuy, max(span/4, eighth) capped at a half note) before
 //     the alternation; long CADENCE trills deterministically alternate
@@ -65,7 +69,7 @@ namespace bach::composer {
 //       Restless : boundary -> short trill (quarter-or-longer tones) /
 //                  mordent (shorter); interior -> downbeat mordent.
 //       Playful  : boundary -> slide under a rising-leap approach / turn
-//                  (long tones) / mordent (quarters); interior -> inner trill
+//                  (long tones) / mordent (quarters and eighths); interior -> inner trill
 //                  on strong-beat quarter-or-longer tones every other bar,
 //                  slide under leap arrivals, downbeat quarter mordent.
 //     Approach-matched figures carry their own placement-hash quantile gate;
@@ -80,8 +84,10 @@ namespace bach::composer {
 // Density (number of ornaments placed) is driven by the character's
 // ornament_density (CharacterProfile) scaled by instrument:
 //   density 0 -> the mandatory cadence trill plus one boundary figure per
-//                8 bars (appoggiatura; mordent for Restless).
-//   density 1+ -> + the character's boundary and interior vocabulary above.
+//                8 bars (appoggiatura; mordent for Restless and Playful).
+//   density 1+ -> + the character's boundary and interior vocabulary above;
+//                every density-0 site stays a site, so density never removes
+//                one.
 // Instrument scaling: Harpsichord +1 (cap 2); Violin/Cello/Guitar -1 (min 0);
 // Organ/Piano unchanged.
 // Per-form exceptions (wired by the product callers):
@@ -100,8 +106,9 @@ namespace bach::composer {
 //   * Climax uplift -- inside [climax_start_tick, climax_end_tick) the
 //     ornament density rises one tier (cap 2) and the generic placement gate
 //     opens more often, so decoration intensifies exactly where the macro
-//     energy arc peaks (the callers centre the window on the ~75% climax
-//     point). climax_end_tick == 0 disables the window.
+//     energy arc peaks: resolveFixtureOrnamentContext opens the window on
+//     macroArcClimaxTick, the tick the registration peak uses.
+//     climax_end_tick == 0 disables the window.
 struct OrnamentParams {
   SubjectCharacter character = SubjectCharacter::Severe;  // density via CharacterProfile.
   InstrumentType instrument = InstrumentType::Organ;      // density scaling.
@@ -168,8 +175,8 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
  * NoteSource::Ornament. `result.validation` is left untouched (re-run the
  * Validator separately to confirm the ornamented line still passes).
  *
- * Idempotent guards: notes already carrying NoteSource::Ornament are never
- * re-ornamented, so applying the pass twice is a no-op on the second call.
+ * Idempotent: a result that already carries NoteSource::Ornament notes is
+ * returned unchanged, so applying the pass twice equals applying it once.
  *
  * @param result The composed result to ornament in place.
  * @param params Ornament configuration (character, instrument, mode, seed,

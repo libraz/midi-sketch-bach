@@ -954,7 +954,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Pedal and climax stretto at the natural length, answer-interval restatement,
     // minor v under the v station: hidden 15 -> 19, battuta 40 -> 61, anti 2 -> 6,
     // fourths 164 -> 352 (the 6/4 over the pedal), floor 56200 -> 52539.
-    {FormType::Fugue, 0, 0, 19, 61, 6, 0, 2, 3, 1, 52539, 352},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 352 -> 502, anti 6 -> 4. The climax window
+    // moved onto the registration peak: battuta 61 -> 62 (one cell).
+    {FormType::Fugue, 0, 0, 19, 62, 4, 0, 2, 3, 1, 52539, 502},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1049,7 +1052,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 66 -> 59; battuta 35 -> 45 (worst cell 2 -> 3), floor 31903 -> 31834.
     // A 20-bar fugue half now states a middle entry and its stretto: hidden
     // 8 -> 11, floor 31834 -> 28670; battuta 45 -> 25, anti 3 -> 0, fourths 59 -> 54.
-    {FormType::PreludeAndFugue, 0, 0, 11, 25, 0, 0, 1, 2, 0, 28670, 54},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 54 -> 219.
+    {FormType::PreludeAndFugue, 0, 0, 11, 25, 0, 0, 1, 2, 0, 28670, 219},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1213,7 +1218,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourths over a held bass 26 -> 28.
     // V0 lift compressed under the manual compass: battuta 19 -> 17 (worst 3 -> 2),
     // paid with fourths 28 -> 29 and a floor 9 lower.
-    {FormType::ChoralePrelude, 0, 0, 33, 17, 0, 0, 2, 2, 0, 17163, 29},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 29 -> 31.
+    {FormType::ChoralePrelude, 0, 0, 33, 17, 0, 0, 2, 2, 0, 17163, 31},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1348,7 +1355,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 148 -> 140; hidden 16 -> 18, battuta 12 -> 14, anti 6 -> 12.
     // V0 band topped at the manual compass: hidden 18 -> 12, battuta 14 -> 3,
     // anti 12 -> 0, paid with fourths 140 -> 146.
-    {FormType::ToccataAndFugue, 84, 84, 12, 3, 0, 7, 2, 1, 0, 28273, 146},
+    // Cadential trill on the real landing tone: hidden 12 -> 11.
+    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 28273, 146},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1479,7 +1487,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // anti 4 -> 5, fourths 150 -> 154, floor 27374 -> 27294.
     // Variations kept inside the manual compass: hidden 24 -> 20, battuta 9 -> 0,
     // paid with fourths 154 -> 155.
-    {FormType::Passacaglia, 0, 0, 20, 0, 5, 0, 1, 0, 1, 27362, 155},
+    // Cadential trill moved off the downbeat onto the landing tone: it no longer masks
+    // the composed anti-fifth into that downbeat, anti 5 -> 10; hidden 20 -> 14, fourths
+    // 155 -> 180 (the trill's upper auxiliary over the held dominant).
+    {FormType::Passacaglia, 0, 0, 14, 0, 10, 0, 1, 0, 1, 27362, 180},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1557,7 +1568,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 206 -> 213, floor -8.
     // Fugue-tail V0 band topped at the manual compass: fourths 213 -> 208, paid
     // with one battuta (2 -> 3) where the figuration turns down from the top.
-    {FormType::FantasiaAndFugue, 0, 0, 16, 3, 16, 0, 2, 1, 1, 29024, 208},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 208 -> 209; hidden 16 -> 14.
+    {FormType::FantasiaAndFugue, 0, 0, 14, 3, 16, 0, 2, 1, 1, 29024, 209},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1653,7 +1666,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // stays 0; fourths over the ground 40 -> 50, floor 18978 -> 18628.
     // The middle voice refuses augmented seconds first: minor aug2 11 -> 6, at a
     // floor 148 lower where it now withdraws or holds.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18480, 49},
+    // Ornament sites follow the cadence landing and the density floor: fourths 49 -> 46.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18480, 46},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1708,7 +1722,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // held tones almost throughout. Hidden moves by one.
     // The closing cadence holds its tonic triad instead of re-striking the inner
     // line through the final bar: successions 29129 -> 28937, three per cell.
-    {FormType::GoldbergVariations, 0, 0, 8, 15, 8, 0, 1, 1, 1, 28937, 0},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 0 -> 16.
+    {FormType::GoldbergVariations, 0, 0, 8, 15, 8, 0, 1, 1, 1, 28937, 16},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale
@@ -2006,7 +2022,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Pedal and stretto at every length, answer-interval restatement, minor v
     // under the v station: hidden 145 -> 200 (worst 4 -> 5), battuta 247 -> 287,
     // anti 20 -> 36 (worst 1 -> 2), fourths 1834 -> 1949, floor 493269 -> 486007.
-    {FormType::Fugue, 0, 0, 200, 287, 36, 0, 5, 4, 2, 486007, 1949},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 1949 -> 2615;
+    // battuta 287 -> 286, anti 36 -> 32.
+    {FormType::Fugue, 0, 0, 200, 286, 32, 0, 5, 4, 2, 486007, 2615},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2097,7 +2116,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // fourths 1087 -> 1193.
     // Same changes: hidden 89 -> 106, fourths 1193 -> 1262, floor 427684 -> 422035;
     // battuta 217 -> 214, anti 13 -> 10.
-    {FormType::PreludeAndFugue, 0, 0, 106, 214, 10, 0, 3, 3, 1, 422035, 1262},
+    // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
+    // held dominant on the beat grid, fourths 1262 -> 1883;
+    // hidden 106 -> 105, anti 10 -> 9.
+    {FormType::PreludeAndFugue, 0, 0, 105, 214, 9, 0, 3, 3, 1, 422035, 1883},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

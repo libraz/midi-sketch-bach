@@ -67,6 +67,37 @@ void applyArticulation(const std::vector<ArticulationDecl>& plan, std::vector<No
                        std::vector<NoteProvenance>* provenance);
 
 /**
+ * @brief Number of macro energy-arc cycles a piece spans.
+ *
+ * One cycle per form length unit (snap_bars), never fewer than one. Selects the
+ * registration-plan tier and the climax normalization tier.
+ *
+ * @param bars Piece length in bars.
+ * @param snap_bars The form's length granularity; 0 counts bars directly.
+ * @return Cycle count, >= 1.
+ */
+std::size_t macroArcCycleCount(std::uint16_t bars, std::uint16_t snap_bars);
+
+/**
+ * @brief The tick the macro energy arc peaks at.
+ *
+ * The single source of the climax position: the CC#7 registration peak, the
+ * CC#11 phrase arc and the ornament pass's climax window all read it. A zero
+ * climax_tick yields the ~75% design point. A form-declared climax is clamped
+ * to land after the establish phase -- at least one bar after the develop step
+ * in the four-point tier when the piece is long enough -- and at least one bar
+ * before the piece end.
+ *
+ * @param cycle_count Arc cycle count (see macroArcCycleCount).
+ * @param ticks_per_bar Ticks per bar for the piece's meter.
+ * @param total_ticks Total length of the piece in ticks.
+ * @param climax_tick The form's declared energy-peak tick, or 0 for none.
+ * @return Normalized climax tick.
+ */
+Tick macroArcClimaxTick(std::size_t cycle_count, Tick ticks_per_bar, std::uint32_t total_ticks,
+                        Tick climax_tick);
+
+/**
  * @brief Build an arc-driven organ registration plan as a stream of CC events.
  *
  * Produces a small, seed-independent sequence of CC#7 stop-registration
