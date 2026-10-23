@@ -232,17 +232,26 @@ TEST(GetCloselyRelatedKeysTest, CMajorIncludes) {
   EXPECT_TRUE(has_key(Key::A, true));   // Relative minor
 }
 
-TEST(GetCloselyRelatedKeysTest, IncludesParallel) {
-  KeySignature c_major = {Key::C, false};
-  auto keys = getCloselyRelatedKeys(c_major);
-
-  auto has_key = [&](Key tonic, bool minor) {
-    return std::any_of(keys.begin(), keys.end(), [&](const KeySignature& ks) {
-      return ks.tonic == tonic && ks.is_minor == minor;
-    });
-  };
-
-  EXPECT_TRUE(has_key(Key::C, true));  // Parallel minor
+TEST(GetCloselyRelatedKeysTest, MatchesIsCloselyRelatedForEveryKey) {
+  for (int pc = 0; pc < 12; ++pc) {
+    for (bool minor : {false, true}) {
+      const KeySignature source = {static_cast<Key>(pc), minor};
+      const auto keys = getCloselyRelatedKeys(source);
+      int accepted = 0;
+      for (int other_pc = 0; other_pc < 12; ++other_pc) {
+        for (bool other_minor : {false, true}) {
+          const KeySignature other = {static_cast<Key>(other_pc), other_minor};
+          const bool listed = std::any_of(keys.begin(), keys.end(),
+                                          [&](const KeySignature& ks) { return ks == other; });
+          EXPECT_EQ(listed, isCloselyRelated(source, other))
+              << "source pc " << pc << (minor ? " minor" : " major") << ", other pc " << other_pc
+              << (other_minor ? " minor" : " major");
+          accepted += isCloselyRelated(source, other) ? 1 : 0;
+        }
+      }
+      EXPECT_EQ(static_cast<int>(keys.size()), accepted);
+    }
+  }
 }
 
 TEST(GetCloselyRelatedKeysTest, MinorKeyIncludes) {
@@ -264,9 +273,8 @@ TEST(GetCloselyRelatedKeysTest, MinorKeyIncludes) {
 TEST(GetCloselyRelatedKeysTest, ResultSize) {
   KeySignature c_major = {Key::C, false};
   auto keys = getCloselyRelatedKeys(c_major);
-  // Self + dominant + subdominant + relative + parallel + dom_of_relative (if unique).
-  EXPECT_GE(keys.size(), 4u);
-  EXPECT_LE(keys.size(), 6u);
+  // Self, dominant, subdominant, and the relative with its dominant and subdominant.
+  EXPECT_EQ(keys.size(), 6u);
 }
 
 // ---------------------------------------------------------------------------

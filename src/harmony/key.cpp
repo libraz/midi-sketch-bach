@@ -97,52 +97,11 @@ bool isCloselyRelated(const KeySignature& lhs, const KeySignature& rhs) {
 }
 
 std::vector<KeySignature> getCloselyRelatedKeys(const KeySignature& key_sig) {
-  std::vector<KeySignature> result;
-  result.reserve(6);
-
-  // Self.
-  result.push_back(key_sig);
-
-  // Dominant (same mode).
-  KeySignature dominant = getDominant(key_sig);
-  result.push_back(dominant);
-
-  // Subdominant (same mode).
-  KeySignature subdominant = getSubdominant(key_sig);
-  result.push_back(subdominant);
-
-  // Relative (opposite mode).
-  KeySignature relative = getRelative(key_sig);
-  result.push_back(relative);
-
-  // Parallel (same tonic, opposite mode).
-  KeySignature parallel = getParallel(key_sig);
-  // Only add if not already present (e.g. parallel might equal relative in some cases).
-  bool parallel_already_present = false;
-  for (const auto& existing : result) {
-    if (existing == parallel) {
-      parallel_already_present = true;
-      break;
-    }
-  }
-  if (!parallel_already_present) {
-    result.push_back(parallel);
-  }
-
-  // Dominant of relative (common closely-related key in Bach).
-  KeySignature dom_of_relative = getDominant(relative);
-  bool dom_rel_already_present = false;
-  for (const auto& existing : result) {
-    if (existing == dom_of_relative) {
-      dom_rel_already_present = true;
-      break;
-    }
-  }
-  if (!dom_rel_already_present) {
-    result.push_back(dom_of_relative);
-  }
-
-  return result;
+  // Exactly the keys isCloselyRelated accepts: the source and its dominant and
+  // subdominant in each mode, the other mode reached through the relative.
+  const KeySignature relative = getRelative(key_sig);
+  return {key_sig,  getDominant(key_sig),  getSubdominant(key_sig),
+          relative, getDominant(relative), getSubdominant(relative)};
 }
 
 // ---------------------------------------------------------------------------

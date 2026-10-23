@@ -82,6 +82,21 @@ const char* chordQualityToString(ChordQuality quality);
 /// @return Null-terminated string such as "I", "ii", "V".
 const char* chordDegreeToString(ChordDegree degree);
 
+/// @brief Semitones from the root to the chord's second member.
+///
+/// An augmented sixth is rooted on b6, so its second member is 1 (+4).
+/// @param quality The chord quality.
+/// @return 3 or 4.
+int chordThirdInterval(ChordQuality quality);
+
+/// @brief Semitones from the root to the chord's third member.
+///
+/// For the augmented sixths (root b6) this is the member after 1: #4 (+10) for
+/// It+6, 2 (+6) for Fr+6 and b3 (+7) for Ger+6.
+/// @param quality The chord quality.
+/// @return Interval in semitones.
+int chordFifthInterval(ChordQuality quality);
+
 struct HarmonicEvent;
 
 /// @brief Check if a MIDI pitch is a chord tone of the given harmonic event.

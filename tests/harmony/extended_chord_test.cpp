@@ -210,5 +210,25 @@ TEST(ExtendedDegreeMinorSemitonesTest, V_of_iii_Is10) {
   EXPECT_EQ(degreeMinorSemitones(ChordDegree::V_of_iii), 10);
 }
 
+// ---------------------------------------------------------------------------
+// chordThirdInterval / chordFifthInterval -- the inversion members
+// ---------------------------------------------------------------------------
+
+TEST(AugSixthMemberIntervalTest, MembersAreTheStandardTonesAboveFlatSix) {
+  // Rooted on b6: the second member is 1 (+4), the third is #4, 2 or b3.
+  EXPECT_EQ(chordThirdInterval(ChordQuality::AugSixthItalian), 4);
+  EXPECT_EQ(chordThirdInterval(ChordQuality::AugSixthFrench), 4);
+  EXPECT_EQ(chordThirdInterval(ChordQuality::AugSixthGerman), 4);
+  EXPECT_EQ(chordFifthInterval(ChordQuality::AugSixthItalian), 10);
+  EXPECT_EQ(chordFifthInterval(ChordQuality::AugSixthFrench), 6);
+  EXPECT_EQ(chordFifthInterval(ChordQuality::AugSixthGerman), 7);
+}
+
+TEST(AugSixthMemberIntervalTest, SeventhChordsKeepTheirDiminishedFifth) {
+  EXPECT_EQ(chordFifthInterval(ChordQuality::Diminished7), 6);
+  EXPECT_EQ(chordFifthInterval(ChordQuality::HalfDiminished7), 6);
+  EXPECT_EQ(chordFifthInterval(ChordQuality::Dominant7), 7);
+}
+
 }  // namespace
 }  // namespace bach

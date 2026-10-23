@@ -62,9 +62,9 @@ size_t HarmonicTimeline::size() const {
 // ---------------------------------------------------------------------------
 
 int HarmonicTimeline::findEventIndex(Tick tick) const {
-  // Linear scan backward from the end. For typical timeline sizes (tens to
-  // low hundreds of events), this is efficient and avoids binary search
-  // complexity for edge cases (overlapping end_tick boundaries).
+  // Linear forward scan, O(n): events are chronological, so the last event
+  // starting at or before the tick wins. Timelines hold tens to low hundreds
+  // of events.
   int last_valid = -1;
   for (int idx = 0; idx < static_cast<int>(events_.size()); ++idx) {
     if (events_[idx].tick <= tick) {
@@ -146,39 +146,6 @@ static Chord buildChordWithQuality(const KeySignature& key_sig, ChordDegree degr
   return chord;
 }
 
-/// @brief Get the third interval in semitones for a chord quality.
-static int thirdInterval(ChordQuality quality) {
-  switch (quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Dominant7:
-    case ChordQuality::MajorMajor7:
-    case ChordQuality::Augmented:
-    case ChordQuality::AugmentedSixth:
-    case ChordQuality::AugSixthItalian:
-    case ChordQuality::AugSixthFrench:
-    case ChordQuality::AugSixthGerman:
-      return 4;
-    default:
-      return 3;
-  }
-}
-
-/// @brief Get the fifth interval in semitones for a chord quality.
-static int fifthInterval(ChordQuality quality) {
-  switch (quality) {
-    case ChordQuality::Diminished:
-    case ChordQuality::AugSixthItalian:
-    case ChordQuality::AugSixthFrench:
-      return 6;
-    case ChordQuality::Augmented:
-    case ChordQuality::AugmentedSixth:
-    case ChordQuality::AugSixthGerman:
-      return 8;
-    default:
-      return 7;
-  }
-}
-
 /// @brief Calculate bass pitch for a chord, respecting inversions.
 /// @param chord The chord (inversion field determines bass note).
 /// @param bass_octave Octave for the bass note (typically 2 or 3).
@@ -188,9 +155,9 @@ static uint8_t computeBassPitch(const Chord& chord, int bass_octave) {
   int bass_pc = root_pc;
 
   if (chord.inversion == 1) {
-    bass_pc = (root_pc + thirdInterval(chord.quality)) % 12;
+    bass_pc = (root_pc + chordThirdInterval(chord.quality)) % 12;
   } else if (chord.inversion == 2) {
-    bass_pc = (root_pc + fifthInterval(chord.quality)) % 12;
+    bass_pc = (root_pc + chordFifthInterval(chord.quality)) % 12;
   }
 
   int bass_midi = (bass_octave + 1) * 12 + bass_pc;

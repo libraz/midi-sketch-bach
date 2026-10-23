@@ -53,7 +53,7 @@ KeySignature getParallel(const KeySignature& key_sig);
 /// @param lhs First key signature.
 /// @param rhs Second key signature.
 /// @return True if the keys are within 1 step on the circle of fifths,
-///         accounting for relative/parallel relationships.
+///         measuring a change of mode through the relative key.
 bool isCloselyRelated(const KeySignature& lhs, const KeySignature& rhs);
 
 /// @brief Get circle-of-fifths distance between two key signatures.
@@ -65,8 +65,9 @@ int circleOfFifthsDistance(const KeySignature& lhs, const KeySignature& rhs);
 
 /// @brief Get all closely related keys (distance 0-1 on circle of fifths).
 /// @param key_sig The source key signature.
-/// @return Vector of closely related key signatures (includes the source key itself,
-///         dominant, subdominant, relative, and parallel).
+/// @return Exactly the keys isCloselyRelated accepts: the source key, its
+///         dominant and subdominant, its relative, and the relative's dominant
+///         and subdominant. The parallel key (distance 3) is not included.
 std::vector<KeySignature> getCloselyRelatedKeys(const KeySignature& key_sig);
 
 /// @brief Get MIDI pitch of the tonic in a given octave.

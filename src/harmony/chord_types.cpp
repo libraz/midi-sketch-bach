@@ -234,6 +234,55 @@ const char* chordDegreeToString(ChordDegree degree) {
   return "?";
 }
 
+int chordThirdInterval(ChordQuality quality) {
+  switch (quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Dominant7:
+    case ChordQuality::MajorMajor7:
+    case ChordQuality::Augmented:
+    case ChordQuality::AugmentedSixth:
+    case ChordQuality::AugSixthItalian:
+    case ChordQuality::AugSixthFrench:
+    case ChordQuality::AugSixthGerman:
+      return 4;
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+    case ChordQuality::Diminished:
+    case ChordQuality::Diminished7:
+    case ChordQuality::HalfDiminished7:
+      return 3;
+  }
+  return 4;
+}
+
+int chordFifthInterval(ChordQuality quality) {
+  switch (quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Dominant7:
+    case ChordQuality::MajorMajor7:
+    case ChordQuality::Minor:
+    case ChordQuality::Minor7:
+      return 7;
+    case ChordQuality::Diminished:
+    case ChordQuality::Diminished7:
+    case ChordQuality::HalfDiminished7:
+      return 6;
+    case ChordQuality::Augmented:
+    case ChordQuality::AugmentedSixth:
+      return 8;
+    case ChordQuality::AugSixthItalian:
+      // It+6: b6, 1, #4 -> 0, 4, 10 from the root.
+      return 10;
+    case ChordQuality::AugSixthFrench:
+      // Fr+6: b6, 1, 2, #4 -> 0, 4, 6, 10 from the root.
+      return 6;
+    case ChordQuality::AugSixthGerman:
+      // Ger+6: b6, 1, b3, #4 -> 0, 4, 7, 10 from the root.
+      return 7;
+  }
+  return 7;
+}
+
 bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
   int pitch_class = getPitchClass(pitch);
   int root_pc = getPitchClass(event.chord.root_pitch);
@@ -241,57 +290,8 @@ bool isChordTone(uint8_t pitch, const HarmonicEvent& event) {
   if (pitch_class == root_pc)
     return true;
 
-  int third_interval = 0;
-  int fifth_interval = 0;
-
-  switch (event.chord.quality) {
-    case ChordQuality::Major:
-    case ChordQuality::Dominant7:
-    case ChordQuality::MajorMajor7:
-      third_interval = 4;
-      fifth_interval = 7;
-      break;
-    case ChordQuality::Minor:
-    case ChordQuality::Minor7:
-      third_interval = 3;
-      fifth_interval = 7;
-      break;
-    case ChordQuality::Diminished:
-      third_interval = 3;
-      fifth_interval = 6;
-      break;
-    case ChordQuality::Augmented:
-      third_interval = 4;
-      fifth_interval = 8;
-      break;
-    case ChordQuality::Diminished7:
-      third_interval = 3;
-      fifth_interval = 6;
-      break;
-    case ChordQuality::HalfDiminished7:
-      third_interval = 3;
-      fifth_interval = 6;
-      break;
-    case ChordQuality::AugmentedSixth:
-      third_interval = 4;
-      fifth_interval = 8;
-      break;
-    case ChordQuality::AugSixthItalian:
-      // It+6: root(b6), +4(1), +10(#4) -> semitones 0, 4, 10 from root
-      third_interval = 4;
-      fifth_interval = 10;
-      break;
-    case ChordQuality::AugSixthFrench:
-      // Fr+6: root(b6), +4(1), +6(2), +10(#4) -> semitones 0, 4, 6, 10 from root
-      third_interval = 4;
-      fifth_interval = 6;
-      break;
-    case ChordQuality::AugSixthGerman:
-      // Ger+6: root(b6), +4(1), +7(b3), +10(#4) -> semitones 0, 4, 7, 10 from root
-      third_interval = 4;
-      fifth_interval = 7;
-      break;
-  }
+  const int third_interval = chordThirdInterval(event.chord.quality);
+  const int fifth_interval = chordFifthInterval(event.chord.quality);
 
   int third_pc = (root_pc + third_interval) % 12;
   int fifth_pc = (root_pc + fifth_interval) % 12;
