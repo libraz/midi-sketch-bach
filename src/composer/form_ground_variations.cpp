@@ -23,22 +23,21 @@
 namespace bach::composer {
 
 // ---------------------------------------------------------------------------
-// Ground-bass variation forms: chaconne (4-bar ground, 3/4) and passacaglia
-// (8-bar ground, 3/4).
+// Ground-bass variation forms: chaconne (4-bar ground, 3/4, three voices) and
+// passacaglia (8-bar ground, 3/4, built by buildPassacagliaForm via
+// buildPassacagliaThreeVoice), generalised over length / mode / character / arc.
 //
-// Both forms share one architecture (modelled on the proven Chaconne chaconne
-// and Passacaglia passacaglia fixtures, reworked from 4/4 to 3/4 and generalised
-// over length / mode / character / arc):
-//
-//   - V1 = the immutable ground bass, one dotted-half note per bar, period-
-//     tiled across every cycle by the GroundCarrier / PassacagliaGround replay
-//     branch (ground_bass_immutable / passacaglia_ground_immutable stay clean).
-//   - V0 = one variation block per cycle, a stepwise scalar wave riding well
-//     ABOVE the ground (C4-C5 region vs the C2-C3 ground), so V0 >= V1 holds at
-//     every shared tick (no voice crossing). Block density, register, and
-//     figure orientation are arc-driven and seed-deterministic; the single
-//     climax cycle (arc.is_climax) is the densest block and carries the climax
-//     flag so ClimaxPlaced fires.
+// Chaconne layout:
+//   - V2 = the immutable ground bass, decorated within the bar but with the
+//     structural tone on every bar head, replayed by the GroundCarrier branch
+//     (ground_bass_immutable stays clean); the final bar is a coda extension.
+//   - V1 = a middle line realising the chords the ground implies, written after
+//     both outer lines (TrioVoiceCarrier).
+//   - V0 = one variation block per cycle riding well ABOVE the ground, so
+//     V0 >= V1 >= V2 holds at every shared tick (no voice crossing). Block
+//     density, register, and figure orientation are arc-driven and seed-
+//     deterministic; the single climax cycle (arc.is_climax) is the densest
+//     block and carries the climax flag so ClimaxPlaced fires.
 //
 // 3/4 bar math: ticks_per_bar = 1440 (3 quarter beats). The scalar wave is
 // built per bar with m = 3 * notes_per_beat notes. Every tick the builders
@@ -2045,26 +2044,19 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
 }
 
 /**
- * @brief Build the (Material, HarmonicPlan, VoicePlan) triple for a ground-
- *        variation form (chaconne or passacaglia).
- *
- * Shared between buildChaconneForm and buildPassacagliaForm; the two differ
- * only in cycle length (4 vs 8 bars) and the per-bar ground / harmony tables.
+ * @brief Build the (Material, HarmonicPlan, VoicePlan) triple for the chaconne
+ *        (3 voices: V0 variation, V1 middle line, V2 ground).
  *
  * @param req The resolved request (bars, seed, mode, character, arc).
- * @param cycle_bars Bars per ground cycle (4 chaconne, 8 passacaglia).
+ * @param cycle_bars Bars per ground cycle (4).
  * @param ground_pitch The cycle-relative ground bass pitches, one per bar.
  * @param cycle_bar_plan The per-bar harmony + variation start tone for one
  *        ground cycle (cycle_bars entries).
- * @param passacaglia When true, route through the PassacagliaGround /
- *        PassacagliaVariation carriers (8-bar form); when false, the chaconne
- *        GroundCarrier / VariationCarrier carriers (4-bar form).
  * @return The assembled fixture (meter is stamped later by the form-director).
  */
 HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_bars,
                                         const std::vector<std::uint8_t>& ground_pitch,
-                                        const std::vector<CycleBar>& cycle_bar_plan,
-                                        bool passacaglia) {
+                                        const std::vector<CycleBar>& cycle_bar_plan) {
   HarnessFixture out;
 
   const int total_bars = static_cast<int>(req.bars);
@@ -2104,19 +2096,13 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // --- V1 ground bass: the structural tone on every bar head, statement by
   // statement under the growth articulations. The declared period is the whole
   // line, so the replay branch lays it down once instead of tiling one cycle. ---
-  std::vector<MaterialNote>& ground =
-      passacaglia ? out.material.passacaglia_ground : out.material.ground_bass;
+  std::vector<MaterialNote>& ground = out.material.ground_bass;
   appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, cycles, cycles,
-                         passacaglia ? total_bars : total_bars - 2, mode);
+                         total_bars - 2, mode);
   const Tick ground_line_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
   const Tick ground_cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
-  if (passacaglia) {
-    out.material.passacaglia_ground_period = ground_line_ticks;
-    out.material.passacaglia_ground_cycle = ground_cycle_ticks;
-  } else {
-    out.material.ground_bass_period = ground_line_ticks;
-    out.material.ground_bass_cycle = ground_cycle_ticks;
-  }
+  out.material.ground_bass_period = ground_line_ticks;
+  out.material.ground_bass_cycle = ground_cycle_ticks;
   // The realized ground, read at beat grain: what the variation blocks are
   // vetted against once a statement is decorated inside the bar.
   const std::vector<std::uint8_t> ground_beats = groundBeatTones(ground, 0, total_bars);
@@ -2226,17 +2212,15 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     scrubGroundParallels(
         notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, previous_v0_bar_head,
         cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1, previous_v0_last,
-        kV0RepairFloor, passacaglia ? organ_range::kManualHigh : string_range::kViolinHigh,
-        /*every_voice_placed=*/!passacaglia);
+        kV0RepairFloor, string_range::kViolinHigh, /*every_voice_placed=*/true);
 
     // Compact cadential landing on the piece's final bar. The chaconne coda
     // replaces the repeating dominant bass with a tonic, so its upper voice
-    // holds the consonant fifth G before resolving to C. The passacaglia keeps
-    // its existing supertonic-to-tonic close over its tonic-ending ground.
+    // holds the consonant fifth G before resolving to C.
     if (cycle == cycles - 1 && !notes.empty()) {
       const int near = static_cast<int>(notes.back().pitch);
-      const int prefinal_pc = passacaglia ? 2 : 7;
-      const int up = near + ((prefinal_pc - (near % 12)) % 12 + 12) % 12;
+      constexpr int kPrefinalPc = 7;
+      const int up = near + ((kPrefinalPc - (near % 12)) % 12 + 12) % 12;
       int prefinal = (up - near <= near - (up - 12)) ? up : up - 12;
       // Settle the close in the variation's home octave, above the lower
       // voices and below the upper ornament compass.
@@ -2244,256 +2228,251 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         prefinal -= 12;
       while (prefinal < 67)
         prefinal += 12;
-      if (!passacaglia) {
-        const Tick approach_tick =
-            static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat;
-        // The bass pair this tone is heard against: the coda's held support tone
-        // moving to its dominant. Both are design values written further below,
-        // so they are recomputed here rather than read back.
-        const int bass_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(
-            (total_bars - 2) % static_cast<int>(ground_pitch.size()))]);
-        MaterialNote* approach_note = nullptr;
-        MaterialNote* before_approach = nullptr;
-        for (MaterialNote& note : notes) {
-          if (note.start_tick == approach_tick) {
-            approach_note = &note;
-            break;
-          }
-          before_approach = &note;
+      const Tick approach_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat;
+      // The bass pair this tone is heard against: the coda's held support tone
+      // moving to its dominant. Both are design values written further below,
+      // so they are recomputed here rather than read back.
+      const int bass_prev = static_cast<int>(ground_pitch[static_cast<std::size_t>(
+          (total_bars - 2) % static_cast<int>(ground_pitch.size()))]);
+      MaterialNote* approach_note = nullptr;
+      MaterialNote* before_approach = nullptr;
+      for (MaterialNote& note : notes) {
+        if (note.start_tick == approach_tick) {
+          approach_note = &note;
+          break;
         }
-        const int approach_prev =
-            before_approach == nullptr ? -1 : static_cast<int>(before_approach->pitch);
-        // The tone the landing is actually reached from: the last one the
-        // variation still sounds before the final bar, which is the approach
-        // tone only when nothing follows it. Both ends of that arrival are
-        // design values -- the landing spells the dominant, the coda bass states
-        // the tonic, and a dominant over a tonic is a fifth however either is
-        // spelt -- so a fault formed there can be answered only on the way in.
-        // Everything from the approach beat onward meets a bass holding its
-        // dominant, so the way in is free of any fault of its own.
-        const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
-        const int coda_tonic = static_cast<int>(ground_pitch.front());
-        MaterialNote* tail_note = nullptr;
-        for (MaterialNote& note : notes) {
-          if (note.start_tick >= final_bar_tick)
-            break;
-          tail_note = &note;
-        }
-        if (approach_note != nullptr) {
-          // Landing on the dominant is the design value; which dominant tone, and
-          // in which octave, is not. Root and fifth are the mode-neutral members
-          // of the dominant triad -- the third alone changes with the mode -- so
-          // either spells the same approach in major and minor. Rank the
-          // candidates by how they meet the bass and take the best. A fixed root
-          // two octaves above it leapt down into an octave under every ground
-          // whose penultimate tone rises, and no later pass can catch that: this
-          // write lands after the line's only guard.
-          //
-          // The penalties are ranked, not summed as equals: a true parallel
-          // outranks a battuta, which outranks a contrary arrival on the perfect
-          // interval already sounding, which outranks a hidden perfect, which
-          // outranks spelling the dominant as its fifth, which outranks distance.
-          // Merging them would let the tone dodge the mildest fault by committing
-          // the worst. The hidden rung sits below the battuta because a leap to
-          // the dominant over a rising bass is ordinary cadential writing where a
-          // converging octave is not, but it sits above colour and distance
-          // because the compass holds more than one spelling of the dominant and
-          // a third of the similar-motion arrivals have a tone that avoids one,
-          // for a handful of wider melodic intervals.
-          //
-          // Both perfect-motion rungs read BOTH ends of the cadence, not just
-          // this one. Ranking the approach alone does remove the arrivals it is
-          // aimed at, but the tone it then prefers reaches the final tonic by
-          // contrary motion off the same interval -- the fault moves to the far
-          // end rather than leaving, and the far end is measured too. Reading
-          // both ends removes it at both.
-          // How a tone on this beat meets the bass it actually sounds over. The
-          // penultimate ground tone is still held here -- the coda states its
-          // dominant from the final bar -- so the motion this chooser ranks says
-          // nothing about the interval standing at the onset, and it carried no
-          // term for that at all. It went unnoticed while the motion penalties
-          // were doing the steering; with those answered the colour preference
-          // decides, and it prefers the dominant's own spelling whatever that
-          // spelling clashes with. Read against the bass, so the fourth counts as
-          // the dissonance it is under the lowest line.
-          //
-          // Weighed rather than filtered, and the same weight at both ends of the
-          // re-aim below, so the two trade against each other instead of one
-          // being answered at the other's expense.
-          const auto clashAt = [&](int pitch) {
-            return rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(pitch),
-                                                      static_cast<std::uint8_t>(bass_prev))
-                       ? 0
-                       : (1 << 9);
-          };
-          const auto rankDominantApproach = [&](int prev, int* chosen) {
-            int best = -1;
-            int best_key = 1 << 20;
-            for (const int approach_pc : {7, 2}) {
-              for (int cand = 67; cand <= 81; ++cand) {
-                if (cand % 12 != approach_pc)
-                  continue;
-                const int parallel_penalty =
-                    formsStrictPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 16)
-                                                                                         : 0;
-                const int battuta_penalty =
-                    formsBattuta(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 12) : 0;
-                // When this tone is also the one the landing is reached from, the
-                // arrival it makes there is ranked too -- below the fault it would
-                // make here and above a battuta. Ranking the two ends as equals
-                // lets a candidate that faults at this end tie with one that
-                // faults at the far end, and the tie is then settled by colour and
-                // distance, which is how a fault gets moved rather than removed.
-                // This end is the dearer one: the bass leaves its dominant two
-                // octaves below, so a parallel here is an octave, while the
-                // landing states the tonic under a dominant, where it is a fifth.
-                const int landing_penalty =
-                    (tail_note == approach_note &&
-                     formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
-                        ? (1 << 14)
-                        : 0;
-                const int anti_penalty =
-                    (formsAntiParallelPerfect(prev, cand, bass_prev, kCodaBassDominant) ||
-                     (tail_note == approach_note &&
-                      formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic)))
-                        ? (1 << 11)
-                        : 0;
-                // Read at both ends, like the anti-parallel above it and for the
-                // same reason: a class ranked at one end only is not removed by
-                // the ranking, it is moved to the other end, where the sweep that
-                // measures the composed surface cannot see it.
-                const int hidden_penalty =
-                    (formsPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ||
-                     (tail_note == approach_note &&
-                      formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic)))
-                        ? (1 << 10)
-                        : 0;
-                const int clash_penalty = clashAt(cand);
-                const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
-                const int step = (prev >= 0) ? std::abs(cand - prev) : 0;
-                const int key = parallel_penalty + landing_penalty + battuta_penalty +
-                                anti_penalty + hidden_penalty + clash_penalty + colour_penalty +
-                                step;
-                if (key < best_key) {
-                  best_key = key;
-                  best = cand;
-                }
-              }
-            }
-            if (chosen != nullptr)
-              *chosen = best;
-            return best_key;
-          };
-          int chosen = -1;
-          int chosen_key = rankDominantApproach(approach_prev, &chosen);
-          // Re-aim the tone this approach is reached FROM, wherever that lowers
-          // the fault. It is the only free tone in reach, and it is genuinely
-          // free: the coda's support tone is held from the start of this bar to
-          // the approach beat, so any onset strictly inside that span meets an
-          // oblique bass and can fault against nothing.
-          //
-          // Offered for any fault, not only a parallel. Every tone this compass
-          // holds over the coda's dominant is a perfect interval with it -- the
-          // two spellings of the dominant an octave apart, and its fifth -- so
-          // which fault the approach forms is settled entirely by the interval it
-          // is reached BY, and this is the end that settles it. Gated at the
-          // parallel, the hidden perfect had a repair it could always reach and
-          // was never once offered it.
-          //
-          // The whole window is read and the lowest key kept, rather than the
-          // first tone under a threshold: a nearer tone that only downgrades the
-          // fault would otherwise be taken while a clean one stood one step
-          // further out. Ties fall to the nearest, and the tone already chosen is
-          // the floor, so a re-aim can only lower the key.
-          //
-          // Held inside the line's own compass rather than the arrival's, and
-          // reaching an octave rather than a fourth. The tone being re-aimed
-          // belongs to the variation, which need not run in the register the
-          // cadence lands in: measured against the arrival's octave instead,
-          // every candidate was refused outright wherever the variation sat
-          // below it, and where the variation sat an octave below, no reach short
-          // of one could put the approach within a step of where it is going.
-          int line_lo = 127;
-          int line_hi = 0;
-          for (const MaterialNote& note : notes) {
-            line_lo = std::min(line_lo, static_cast<int>(note.pitch));
-            line_hi = std::max(line_hi, static_cast<int>(note.pitch));
-          }
-          const Tick support_start = final_bar_tick - kTicksPerBar34;
-          if (before_approach != nullptr && before_approach->start_tick > support_start) {
-            const int prev_original = static_cast<int>(before_approach->pitch);
-            int best_prev = -1;
-            int best_note = chosen;
-            int best_key = chosen_key + clashAt(prev_original);
-            if (best_key > 0) {
-              for (int dist = 1; dist <= 12; ++dist) {
-                for (const int sgn : {-1, 1}) {
-                  const int prev_cand = prev_original + sgn * dist;
-                  if (prev_cand < line_lo || prev_cand > line_hi ||
-                      !detail::inScale(prev_cand, mode, &kCodaDominantChord)) {
-                    continue;
-                  }
-                  int trial = -1;
-                  const int trial_key =
-                      rankDominantApproach(prev_cand, &trial) + clashAt(prev_cand);
-                  if (trial_key < best_key) {
-                    best_key = trial_key;
-                    best_note = trial;
-                    best_prev = prev_cand;
-                  }
-                }
-              }
-            }
-            if (best_prev >= 0) {
-              before_approach->pitch = static_cast<std::uint8_t>(best_prev);
-              chosen = best_note;
-            }
-          }
-          approach_note->pitch = static_cast<std::uint8_t>(chosen >= 0 ? chosen : 67);
-        }
-        // A figuration tone standing between the approach beat and the landing
-        // carries no such ranking of its own: the block's only guard reads the
-        // ground at bar heads, and this onset is neither. It is re-aimed to the
-        // nearest scale tone of the same compass that leaves the arrival clean.
+        before_approach = &note;
+      }
+      const int approach_prev =
+          before_approach == nullptr ? -1 : static_cast<int>(before_approach->pitch);
+      // The tone the landing is actually reached from: the last one the
+      // variation still sounds before the final bar, which is the approach
+      // tone only when nothing follows it. Both ends of that arrival are
+      // design values -- the landing spells the dominant, the coda bass states
+      // the tonic, and a dominant over a tonic is a fifth however either is
+      // spelt -- so a fault formed there can be answered only on the way in.
+      // Everything from the approach beat onward meets a bass holding its
+      // dominant, so the way in is free of any fault of its own.
+      const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+      const int coda_tonic = static_cast<int>(ground_pitch.front());
+      MaterialNote* tail_note = nullptr;
+      for (MaterialNote& note : notes) {
+        if (note.start_tick >= final_bar_tick)
+          break;
+        tail_note = &note;
+      }
+      if (approach_note != nullptr) {
+        // Landing on the dominant is the design value; which dominant tone, and
+        // in which octave, is not. Root and fifth are the mode-neutral members
+        // of the dominant triad -- the third alone changes with the mode -- so
+        // either spells the same approach in major and minor. Rank the
+        // candidates by how they meet the bass and take the best. A fixed root
+        // two octaves above it leapt down into an octave under every ground
+        // whose penultimate tone rises, and no later pass can catch that: this
+        // write lands after the line's only guard.
         //
-        // Ranked rather than filtered, and for the same reason the approach beat
-        // is. Demanding a fully free arrival outright would reject the whole
-        // compass on the bars where none exists and leave the tone exactly as it
-        // was -- including where a merely hidden one was in reach and the tone in
-        // place is the true parallel. Each accept level re-offers the whole
-        // compass, so a clean tone is always preferred to one that only
-        // downgrades the fault.
-        if (tail_note != nullptr && tail_note != approach_note) {
-          const auto tailFaultRank = [&](int cand) {
-            if (formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
-              return 2;
-            if (formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic) ||
-                formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic))
-              return 1;
-            return 0;
-          };
-          const int original = static_cast<int>(tail_note->pitch);
-          const int design_rank = tailFaultRank(original);
-          for (int accept = 0; accept < design_rank; ++accept) {
-            bool placed = false;
-            for (int dist = 1; dist <= 12 && !placed; ++dist) {
-              for (const int sgn : {-1, 1}) {
-                const int cand = original + sgn * dist;
-                if (cand < 67 || cand > 81 || !detail::inScale(cand, mode, &kCodaDominantChord) ||
-                    tailFaultRank(cand) > accept)
-                  continue;
-                tail_note->pitch = static_cast<std::uint8_t>(cand);
-                placed = true;
-                break;
+        // The penalties are ranked, not summed as equals: a true parallel
+        // outranks a battuta, which outranks a contrary arrival on the perfect
+        // interval already sounding, which outranks a hidden perfect, which
+        // outranks spelling the dominant as its fifth, which outranks distance.
+        // Merging them would let the tone dodge the mildest fault by committing
+        // the worst. The hidden rung sits below the battuta because a leap to
+        // the dominant over a rising bass is ordinary cadential writing where a
+        // converging octave is not, but it sits above colour and distance
+        // because the compass holds more than one spelling of the dominant and
+        // a third of the similar-motion arrivals have a tone that avoids one,
+        // for a handful of wider melodic intervals.
+        //
+        // Both perfect-motion rungs read BOTH ends of the cadence, not just
+        // this one. Ranking the approach alone does remove the arrivals it is
+        // aimed at, but the tone it then prefers reaches the final tonic by
+        // contrary motion off the same interval -- the fault moves to the far
+        // end rather than leaving, and the far end is measured too. Reading
+        // both ends removes it at both.
+        // How a tone on this beat meets the bass it actually sounds over. The
+        // penultimate ground tone is still held here -- the coda states its
+        // dominant from the final bar -- so the motion this chooser ranks says
+        // nothing about the interval standing at the onset, and it carried no
+        // term for that at all. It went unnoticed while the motion penalties
+        // were doing the steering; with those answered the colour preference
+        // decides, and it prefers the dominant's own spelling whatever that
+        // spelling clashes with. Read against the bass, so the fourth counts as
+        // the dissonance it is under the lowest line.
+        //
+        // Weighed rather than filtered, and the same weight at both ends of the
+        // re-aim below, so the two trade against each other instead of one
+        // being answered at the other's expense.
+        const auto clashAt = [&](int pitch) {
+          return rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(pitch),
+                                                    static_cast<std::uint8_t>(bass_prev))
+                     ? 0
+                     : (1 << 9);
+        };
+        const auto rankDominantApproach = [&](int prev, int* chosen) {
+          int best = -1;
+          int best_key = 1 << 20;
+          for (const int approach_pc : {7, 2}) {
+            for (int cand = 67; cand <= 81; ++cand) {
+              if (cand % 12 != approach_pc)
+                continue;
+              const int parallel_penalty =
+                  formsStrictPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 16)
+                                                                                       : 0;
+              const int battuta_penalty =
+                  formsBattuta(prev, cand, bass_prev, kCodaBassDominant) ? (1 << 12) : 0;
+              // When this tone is also the one the landing is reached from, the
+              // arrival it makes there is ranked too -- below the fault it would
+              // make here and above a battuta. Ranking the two ends as equals
+              // lets a candidate that faults at this end tie with one that
+              // faults at the far end, and the tie is then settled by colour and
+              // distance, which is how a fault gets moved rather than removed.
+              // This end is the dearer one: the bass leaves its dominant two
+              // octaves below, so a parallel here is an octave, while the
+              // landing states the tonic under a dominant, where it is a fifth.
+              const int landing_penalty =
+                  (tail_note == approach_note &&
+                   formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
+                      ? (1 << 14)
+                      : 0;
+              const int anti_penalty =
+                  (formsAntiParallelPerfect(prev, cand, bass_prev, kCodaBassDominant) ||
+                   (tail_note == approach_note &&
+                    formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic)))
+                      ? (1 << 11)
+                      : 0;
+              // Read at both ends, like the anti-parallel above it and for the
+              // same reason: a class ranked at one end only is not removed by
+              // the ranking, it is moved to the other end, where the sweep that
+              // measures the composed surface cannot see it.
+              const int hidden_penalty =
+                  (formsPerfectParallel(prev, cand, bass_prev, kCodaBassDominant) ||
+                   (tail_note == approach_note &&
+                    formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic)))
+                      ? (1 << 10)
+                      : 0;
+              const int clash_penalty = clashAt(cand);
+              const int colour_penalty = (approach_pc == 7) ? 0 : (1 << 8);
+              const int step = (prev >= 0) ? std::abs(cand - prev) : 0;
+              const int key = parallel_penalty + landing_penalty + battuta_penalty + anti_penalty +
+                              hidden_penalty + clash_penalty + colour_penalty + step;
+              if (key < best_key) {
+                best_key = key;
+                best = cand;
               }
             }
-            if (placed)
-              break;
           }
+          if (chosen != nullptr)
+            *chosen = best;
+          return best_key;
+        };
+        int chosen = -1;
+        int chosen_key = rankDominantApproach(approach_prev, &chosen);
+        // Re-aim the tone this approach is reached FROM, wherever that lowers
+        // the fault. It is the only free tone in reach, and it is genuinely
+        // free: the coda's support tone is held from the start of this bar to
+        // the approach beat, so any onset strictly inside that span meets an
+        // oblique bass and can fault against nothing.
+        //
+        // Offered for any fault, not only a parallel. Every tone this compass
+        // holds over the coda's dominant is a perfect interval with it -- the
+        // two spellings of the dominant an octave apart, and its fifth -- so
+        // which fault the approach forms is settled entirely by the interval it
+        // is reached BY, and this is the end that settles it. Gated at the
+        // parallel, the hidden perfect had a repair it could always reach and
+        // was never once offered it.
+        //
+        // The whole window is read and the lowest key kept, rather than the
+        // first tone under a threshold: a nearer tone that only downgrades the
+        // fault would otherwise be taken while a clean one stood one step
+        // further out. Ties fall to the nearest, and the tone already chosen is
+        // the floor, so a re-aim can only lower the key.
+        //
+        // Held inside the line's own compass rather than the arrival's, and
+        // reaching an octave rather than a fourth. The tone being re-aimed
+        // belongs to the variation, which need not run in the register the
+        // cadence lands in: measured against the arrival's octave instead,
+        // every candidate was refused outright wherever the variation sat
+        // below it, and where the variation sat an octave below, no reach short
+        // of one could put the approach within a step of where it is going.
+        int line_lo = 127;
+        int line_hi = 0;
+        for (const MaterialNote& note : notes) {
+          line_lo = std::min(line_lo, static_cast<int>(note.pitch));
+          line_hi = std::max(line_hi, static_cast<int>(note.pitch));
+        }
+        const Tick support_start = final_bar_tick - kTicksPerBar34;
+        if (before_approach != nullptr && before_approach->start_tick > support_start) {
+          const int prev_original = static_cast<int>(before_approach->pitch);
+          int best_prev = -1;
+          int best_note = chosen;
+          int best_key = chosen_key + clashAt(prev_original);
+          if (best_key > 0) {
+            for (int dist = 1; dist <= 12; ++dist) {
+              for (const int sgn : {-1, 1}) {
+                const int prev_cand = prev_original + sgn * dist;
+                if (prev_cand < line_lo || prev_cand > line_hi ||
+                    !detail::inScale(prev_cand, mode, &kCodaDominantChord)) {
+                  continue;
+                }
+                int trial = -1;
+                const int trial_key = rankDominantApproach(prev_cand, &trial) + clashAt(prev_cand);
+                if (trial_key < best_key) {
+                  best_key = trial_key;
+                  best_note = trial;
+                  best_prev = prev_cand;
+                }
+              }
+            }
+          }
+          if (best_prev >= 0) {
+            before_approach->pitch = static_cast<std::uint8_t>(best_prev);
+            chosen = best_note;
+          }
+        }
+        approach_note->pitch = static_cast<std::uint8_t>(chosen >= 0 ? chosen : 67);
+      }
+      // A figuration tone standing between the approach beat and the landing
+      // carries no such ranking of its own: the block's only guard reads the
+      // ground at bar heads, and this onset is neither. It is re-aimed to the
+      // nearest scale tone of the same compass that leaves the arrival clean.
+      //
+      // Ranked rather than filtered, and for the same reason the approach beat
+      // is. Demanding a fully free arrival outright would reject the whole
+      // compass on the bars where none exists and leave the tone exactly as it
+      // was -- including where a merely hidden one was in reach and the tone in
+      // place is the true parallel. Each accept level re-offers the whole
+      // compass, so a clean tone is always preferred to one that only
+      // downgrades the fault.
+      if (tail_note != nullptr && tail_note != approach_note) {
+        const auto tailFaultRank = [&](int cand) {
+          if (formsStrictPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic))
+            return 2;
+          if (formsPerfectParallel(cand, prefinal, kCodaBassDominant, coda_tonic) ||
+              formsAntiParallelPerfect(cand, prefinal, kCodaBassDominant, coda_tonic))
+            return 1;
+          return 0;
+        };
+        const int original = static_cast<int>(tail_note->pitch);
+        const int design_rank = tailFaultRank(original);
+        for (int accept = 0; accept < design_rank; ++accept) {
+          bool placed = false;
+          for (int dist = 1; dist <= 12 && !placed; ++dist) {
+            for (const int sgn : {-1, 1}) {
+              const int cand = original + sgn * dist;
+              if (cand < 67 || cand > 81 || !detail::inScale(cand, mode, &kCodaDominantChord) ||
+                  tailFaultRank(cand) > accept)
+                continue;
+              tail_note->pitch = static_cast<std::uint8_t>(cand);
+              placed = true;
+              break;
+            }
+          }
+          if (placed)
+            break;
         }
       }
       appendCompactCadentialLanding(notes, static_cast<Tick>(total_bars - 1) * kTicksPerBar34,
-                                    kTicksPerBar34, prefinal, prefinal - (passacaglia ? 2 : 7), 3);
+                                    kTicksPerBar34, prefinal, prefinal - kPrefinalPc, 3);
     }
 
     if (!notes.empty()) {
@@ -2502,64 +2481,51 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
       previous_v0_last = static_cast<int>(notes.back().pitch);
     }
 
-    if (passacaglia) {
-      PassacagliaVariation var;
-      var.voice = 0;
-      var.start_tick = block_start;
-      var.end_tick = block_end;
-      var.density_level = tier;
-      var.is_climax = point.is_climax;
-      var.notes = std::move(notes);
-      out.material.passacaglia_variations.push_back(std::move(var));
-    } else {
-      VariationDecl var;
-      // Role assignment. Cycle 0 is the plain Ground-role statement (quarters
-      // only, so variation_role_ornament_constraint stays satisfied -- no
-      // sub-quarter note may carry the Ground role). Every later (subdivided)
-      // cycle rotates through Respond -> Propel -> Assert, never re-using
-      // Ground, since those blocks contain eighths / sixteenths. The climax
-      // cycle is always Assert (the peak role).
-      static constexpr VariationRole kActiveRoles[3] = {
-          VariationRole::Respond, VariationRole::Propel, VariationRole::Assert};
-      VariationRole role =
-          ground_role ? VariationRole::Ground
-                      : (point.is_climax ? VariationRole::Assert : kActiveRoles[(cycle - 1) % 3]);
-      var.role = role;
-      var.voice = 0;
-      var.start_tick = block_start;
-      var.end_tick = block_end;
-      var.density_level = tier;
-      var.notes = std::move(notes);
-      out.material.variations.push_back(std::move(var));
-    }
+    VariationDecl var;
+    // Role assignment. Cycle 0 is the plain Ground-role statement (quarters
+    // only, so variation_role_ornament_constraint stays satisfied -- no
+    // sub-quarter note may carry the Ground role). Every later (subdivided)
+    // cycle rotates through Respond -> Propel -> Assert, never re-using
+    // Ground, since those blocks contain eighths / sixteenths. The climax
+    // cycle is always Assert (the peak role).
+    static constexpr VariationRole kActiveRoles[3] = {VariationRole::Respond, VariationRole::Propel,
+                                                      VariationRole::Assert};
+    VariationRole role =
+        ground_role ? VariationRole::Ground
+                    : (point.is_climax ? VariationRole::Assert : kActiveRoles[(cycle - 1) % 3]);
+    var.role = role;
+    var.voice = 0;
+    var.start_tick = block_start;
+    var.end_tick = block_end;
+    var.density_level = tier;
+    var.notes = std::move(notes);
+    out.material.variations.push_back(std::move(var));
   }
 
   // --- V1 middle voice: the line that realises the chords the ground implies,
   // written after both outer lines so every tone is chosen against them. ---
   std::vector<bool> middle_present(static_cast<std::size_t>(cycles), false);
-  if (!passacaglia) {
-    std::vector<MaterialNote> middle_notes;
-    appendChaconneMiddleVoice(middle_notes, out.material.variations, ground, cycle_bar_plan,
-                              variation_notes_per_beat, mode, middle_present);
-    if (!out.material.variations.empty()) {
-      // The coda holds the support tone through the penultimate bar, steps to
-      // its dominant on that bar's closing beat and states the tonic under the
-      // final bar.
-      const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
-      closeMiddleVoiceOnCadence(middle_notes, out.material.variations.back().notes, final_bar_tick,
-                                final_bar_tick - kTicksPerBeat, kTicksPerBar34,
-                                static_cast<int>(ground_pitch[static_cast<std::size_t>(
-                                    (total_bars - 2) % static_cast<int>(ground_pitch.size()))]),
-                                kCodaBassDominant, static_cast<int>(ground_pitch.front()),
-                                picardy || !minor);
-    }
-    if (!middle_notes.empty()) {
-      TrioVoiceLine middle_line;
-      middle_line.voice = 1;
-      middle_line.manual = 1;  // documentary (Swell): V1 = the middle line.
-      middle_line.notes = std::move(middle_notes);
-      out.material.trio_voices.push_back(std::move(middle_line));
-    }
+  std::vector<MaterialNote> middle_notes;
+  appendChaconneMiddleVoice(middle_notes, out.material.variations, ground, cycle_bar_plan,
+                            variation_notes_per_beat, mode, middle_present);
+  if (!out.material.variations.empty()) {
+    // The coda holds the support tone through the penultimate bar, steps to
+    // its dominant on that bar's closing beat and states the tonic under the
+    // final bar.
+    const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
+    closeMiddleVoiceOnCadence(middle_notes, out.material.variations.back().notes, final_bar_tick,
+                              final_bar_tick - kTicksPerBeat, kTicksPerBar34,
+                              static_cast<int>(ground_pitch[static_cast<std::size_t>(
+                                  (total_bars - 2) % static_cast<int>(ground_pitch.size()))]),
+                              kCodaBassDominant, static_cast<int>(ground_pitch.front()),
+                              picardy || !minor);
+  }
+  if (!middle_notes.empty()) {
+    TrioVoiceLine middle_line;
+    middle_line.voice = 1;
+    middle_line.manual = 1;  // documentary (Swell): V1 = the middle line.
+    middle_line.notes = std::move(middle_notes);
+    out.material.trio_voices.push_back(std::move(middle_line));
   }
 
   {
@@ -2575,61 +2541,58 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // variation carrier per statement. The chaconne replaces the final ground bar
   // with an explicitly declared coda; the register order V0 > V1 > V2 holds at
   // every shared tick, so no voice crossing occurs. ---
-  out.voice_plan.num_voices = passacaglia ? 2 : 3;
-  const VoiceId ground_voice = passacaglia ? 1 : 2;
+  out.voice_plan.num_voices = 3;
+  const VoiceId ground_voice = 2;
 
   Span ground_span;
   ground_span.id = 0;
   ground_span.start_tick = 0;
   const Tick final_bar_tick = static_cast<Tick>(total_bars - 1) * kTicksPerBar34;
   const Tick final_approach_tick = final_bar_tick - kTicksPerBeat;
-  ground_span.end_tick = passacaglia ? static_cast<Tick>(total_bars) * kTicksPerBar34
-                                     : final_bar_tick - kTicksPerBar34;
+  ground_span.end_tick = final_bar_tick - kTicksPerBar34;
   ground_span.voice = ground_voice;
-  ground_span.intent = passacaglia ? VoiceIntent::PassacagliaGround : VoiceIntent::GroundCarrier;
+  ground_span.intent = VoiceIntent::GroundCarrier;
   ground_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
   out.voice_plan.spans.push_back(ground_span);
 
-  if (!passacaglia) {
-    CodaDecl coda;
-    coda.voice = ground_voice;
-    MaterialNote support;
-    support.start_tick = final_bar_tick - kTicksPerBar34;
-    support.duration = kTicksPerBar34 - kTicksPerBeat;
-    support.pitch = ground_pitch[static_cast<std::size_t>((total_bars - 2) %
-                                                          static_cast<int>(ground_pitch.size()))];
-    coda.notes.push_back(support);
-    MaterialNote dominant;
-    dominant.start_tick = final_approach_tick;
-    dominant.duration = kTicksPerBeat;
-    dominant.pitch = 43;  // G2.
-    coda.notes.push_back(dominant);
-    MaterialNote tonic;
-    tonic.start_tick = final_bar_tick;
-    tonic.duration = kTicksPerBar34;
-    tonic.pitch = ground_pitch.front();
-    coda.notes.push_back(tonic);
-    out.material.coda_extensions.push_back(std::move(coda));
+  CodaDecl coda;
+  coda.voice = ground_voice;
+  MaterialNote support;
+  support.start_tick = final_bar_tick - kTicksPerBar34;
+  support.duration = kTicksPerBar34 - kTicksPerBeat;
+  support.pitch = ground_pitch[static_cast<std::size_t>((total_bars - 2) %
+                                                        static_cast<int>(ground_pitch.size()))];
+  coda.notes.push_back(support);
+  MaterialNote dominant;
+  dominant.start_tick = final_approach_tick;
+  dominant.duration = kTicksPerBeat;
+  dominant.pitch = 43;  // G2.
+  coda.notes.push_back(dominant);
+  MaterialNote tonic;
+  tonic.start_tick = final_bar_tick;
+  tonic.duration = kTicksPerBar34;
+  tonic.pitch = ground_pitch.front();
+  coda.notes.push_back(tonic);
+  out.material.coda_extensions.push_back(std::move(coda));
 
-    Span coda_span;
-    coda_span.id = static_cast<SpanId>(1 + cycles);
-    coda_span.start_tick = support.start_tick;
-    coda_span.end_tick = tonic.start_tick + tonic.duration;
-    coda_span.voice = ground_voice;
-    coda_span.intent = VoiceIntent::CodaCarrier;
-    coda_span.subdivision = Subdivision::Quarter;
-    out.voice_plan.spans.push_back(coda_span);
+  Span coda_span;
+  coda_span.id = static_cast<SpanId>(1 + cycles);
+  coda_span.start_tick = support.start_tick;
+  coda_span.end_tick = tonic.start_tick + tonic.duration;
+  coda_span.voice = ground_voice;
+  coda_span.intent = VoiceIntent::CodaCarrier;
+  coda_span.subdivision = Subdivision::Quarter;
+  out.voice_plan.spans.push_back(coda_span);
 
-    ChordEvent approach;
-    approach.start_tick = final_approach_tick;
-    approach.root_pc = 7;
-    approach.quality = ChordQuality::Dominant7;
-    approach.degree = RomanNumeral::V;
-    approach.function = HarmonicFunction::D;
-    approach.has_degree = true;
-    out.harmony.chords.insert(out.harmony.chords.end() - 1, approach);
-    out.harmony.cadences.push_back({final_bar_tick, CadenceType::ImperfectAuthentic});
-  }
+  ChordEvent approach;
+  approach.start_tick = final_approach_tick;
+  approach.root_pc = 7;
+  approach.quality = ChordQuality::Dominant7;
+  approach.degree = RomanNumeral::V;
+  approach.function = HarmonicFunction::D;
+  approach.has_degree = true;
+  out.harmony.chords.insert(out.harmony.chords.end() - 1, approach);
+  out.harmony.cadences.push_back({final_bar_tick, CadenceType::ImperfectAuthentic});
 
   for (int cycle = 0; cycle < cycles; ++cycle) {
     Span var_span;
@@ -2637,8 +2600,7 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     var_span.start_tick = static_cast<Tick>(cycle * cycle_bars) * kTicksPerBar34;
     var_span.end_tick = var_span.start_tick + period;
     var_span.voice = 0;
-    var_span.intent =
-        passacaglia ? VoiceIntent::PassacagliaVariation : VoiceIntent::VariationCarrier;
+    var_span.intent = VoiceIntent::VariationCarrier;
     var_span.subdivision = Subdivision::Quarter;  // unused by verbatim replay.
     out.voice_plan.spans.push_back(var_span);
   }
@@ -2716,8 +2678,7 @@ HarnessFixture buildChaconneForm(const ResolvedRequest& req) {
   }
   markCycleDominantSevenths(plan, req.mode, /*triad_only_bars=*/{});
 
-  return buildGroundVariationForm(req, kChaconneCycleBars, ground_pitch, plan,
-                                  /*passacaglia=*/false);
+  return buildGroundVariationForm(req, kChaconneCycleBars, ground_pitch, plan);
 }
 
 // ---------------------------------------------------------------------------
