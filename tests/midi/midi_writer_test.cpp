@@ -677,5 +677,58 @@ TEST(MidiWriterTest, AcceptsSupportedPowerOfTwoDenominators) {
   }
 }
 
+TEST(MidiWriterTest, RejectsControlChangeTicksBeyondVariableLengthLimit) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0, 480);
+  track.cc_events.push_back({0x10000000u, 11, 64});
+  EXPECT_EQ(writer.build({track}, {{0, 120}}), MidiWriterStatus::InvalidVariableLength);
+  EXPECT_TRUE(writer.toBytes().empty());
+}
+
+TEST(MidiWriterTest, ControlChangeDataBytesNeverWrap) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0, 480);
+  track.cc_events.push_back({0, 11, 200});
+  ASSERT_EQ(writer.build({track}, {{0, 120}}), MidiWriterStatus::Ok);
+  const std::vector<std::uint8_t> bytes = writer.toBytes();
+  bool found_clamped = false;
+  for (std::size_t idx = 0; idx + 2 < bytes.size(); ++idx) {
+    if (bytes[idx] == 0xB0 && bytes[idx + 1] == 11) {
+      found_clamped = bytes[idx + 2] == 127;
+    }
+  }
+  EXPECT_TRUE(found_clamped);
+}
+
+TEST(MidiWriterTest, NoteOnVelocityIsAlwaysAudibleAndInRange) {
+  MidiWriter writer;
+  Track track = makeSimpleTrack(0, 0, "test", 60, 0, 480);
+  NoteEvent silent = track.notes.front();
+  silent.pitch = 62;
+  silent.start_tick = 480;
+  silent.velocity = 0;
+  NoteEvent loud = track.notes.front();
+  loud.pitch = 64;
+  loud.start_tick = 960;
+  loud.velocity = 200;
+  track.notes.push_back(silent);
+  track.notes.push_back(loud);
+  ASSERT_EQ(writer.build({track}, {{0, 120}}), MidiWriterStatus::Ok);
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(writer.toBytes())) << reader.getError();
+  std::vector<NoteEvent> parsed;
+  for (const auto& parsed_track : reader.getParsedMidi().tracks)
+    parsed.insert(parsed.end(), parsed_track.notes.begin(), parsed_track.notes.end());
+  // The velocity-0 note is skipped (no silent note-on, no orphan note-off).
+  ASSERT_EQ(parsed.size(), 2u);
+  for (const auto& note : parsed) {
+    EXPECT_GE(note.velocity, 1);
+    EXPECT_LE(note.velocity, 127);
+    EXPECT_NE(note.pitch, 62);
+  }
+  EXPECT_EQ(parsed.back().velocity, 127);
+}
+
 }  // namespace
 }  // namespace bach

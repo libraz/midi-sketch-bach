@@ -26,6 +26,12 @@ struct WriteEvent {
 
 constexpr std::uint32_t kMaxMidiTempoUsec = 0x00FFFFFF;
 constexpr std::uint32_t kMaxVlq = 0x0FFFFFFF;
+constexpr std::uint8_t kMaxDataByte = 127;
+
+/// Clamps a MIDI data byte (velocity, controller, value) to 0-127 instead of wrapping it.
+std::uint8_t clampDataByte(std::uint8_t value) {
+  return value > kMaxDataByte ? kMaxDataByte : value;
+}
 
 bool isValidTempo(std::uint16_t bpm) {
   return bpm > 0 && kMicrosecondsPerMinute / bpm <= kMaxMidiTempoUsec;
@@ -34,6 +40,46 @@ bool isValidTempo(std::uint16_t bpm) {
 bool isValidTimeSignature(const TimeSignature& time_signature) {
   const std::uint8_t denominator = time_signature.denominator;
   return time_signature.numerator > 0 && denominator > 0 && (denominator & (denominator - 1)) == 0;
+}
+
+/// Checks every field of the build input that cannot be encoded exactly.
+MidiWriterStatus validateBuildInput(const std::vector<Track>& tracks,
+                                    const std::vector<TempoEvent>& tempo_events,
+                                    const std::vector<TimeSignatureEvent>& time_sig_events) {
+  for (const auto& tempo : tempo_events) {
+    if (!isValidTempo(tempo.bpm)) {
+      return MidiWriterStatus::InvalidTempo;
+    }
+  }
+  for (const auto& time_signature : time_sig_events) {
+    if (!isValidTimeSignature(time_signature.time_sig)) {
+      return MidiWriterStatus::InvalidTimeSignature;
+    }
+  }
+  for (const auto& tempo : tempo_events) {
+    if (tempo.tick > kMaxVlq)
+      return MidiWriterStatus::InvalidVariableLength;
+  }
+  for (const auto& time_signature : time_sig_events) {
+    if (time_signature.tick > kMaxVlq)
+      return MidiWriterStatus::InvalidVariableLength;
+  }
+  for (const auto& track : tracks) {
+    for (const auto& note : track.notes) {
+      const std::uint64_t end = static_cast<std::uint64_t>(note.start_tick) + note.duration;
+      if (note.start_tick > kMaxVlq || end > kMaxVlq)
+        return MidiWriterStatus::InvalidVariableLength;
+    }
+    for (const auto& event : track.events) {
+      if (event.tick > kMaxVlq)
+        return MidiWriterStatus::InvalidVariableLength;
+    }
+    for (const auto& cc : track.cc_events) {
+      if (cc.tick > kMaxVlq)
+        return MidiWriterStatus::InvalidVariableLength;
+    }
+  }
+  return MidiWriterStatus::Ok;
 }
 
 }  // namespace
@@ -66,34 +112,9 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
                                    int output_octave_shift) {
   data_.clear();
 
-  for (const auto& tempo : tempo_events) {
-    if (!isValidTempo(tempo.bpm)) {
-      return MidiWriterStatus::InvalidTempo;
-    }
-  }
-  for (const auto& time_signature : time_sig_events) {
-    if (!isValidTimeSignature(time_signature.time_sig)) {
-      return MidiWriterStatus::InvalidTimeSignature;
-    }
-  }
-  for (const auto& tempo : tempo_events) {
-    if (tempo.tick > kMaxVlq)
-      return MidiWriterStatus::InvalidVariableLength;
-  }
-  for (const auto& time_signature : time_sig_events) {
-    if (time_signature.tick > kMaxVlq)
-      return MidiWriterStatus::InvalidVariableLength;
-  }
-  for (const auto& track : tracks) {
-    for (const auto& note : track.notes) {
-      const std::uint64_t end = static_cast<std::uint64_t>(note.start_tick) + note.duration;
-      if (note.start_tick > kMaxVlq || end > kMaxVlq)
-        return MidiWriterStatus::InvalidVariableLength;
-    }
-    for (const auto& event : track.events) {
-      if (event.tick > kMaxVlq)
-        return MidiWriterStatus::InvalidVariableLength;
-    }
+  const MidiWriterStatus input_status = validateBuildInput(tracks, tempo_events, time_sig_events);
+  if (input_status != MidiWriterStatus::Ok) {
+    return input_status;
   }
 
   // Count non-empty tracks, plus one for the metadata track.
@@ -187,8 +208,9 @@ void MidiWriter::writeTrack(const Track& track, Key key, int output_octave_shift
     // A same-tick note-off is sorted before its note-on. Emitting a zero-length
     // note would therefore leave the note on indefinitely on a MIDI device.
     // Renderer normally removes these, but MidiWriter is public and must be
-    // safe when used directly.
-    if (note.duration == 0)
+    // safe when used directly. A velocity-0 note-on reads as a note-off on devices,
+    // so it is skipped the same way.
+    if (note.duration == 0 || note.velocity == 0)
       continue;
     const uint8_t out_pitch =
         transposePitchBySemitones(note.pitch, keyTranspositionSemitones(key) + output_octave_shift);
@@ -197,7 +219,7 @@ void MidiWriter::writeTrack(const Track& track, Key key, int output_octave_shift
     on_event.tick = note.start_tick;
     on_event.status = static_cast<uint8_t>(0x90 | (track.channel & 0x0F));
     on_event.data1 = out_pitch;
-    on_event.data2 = note.velocity;
+    on_event.data2 = clampDataByte(note.velocity);
     on_event.priority = 1;  // Note-on after note-off at same tick
     events.push_back(on_event);
 
@@ -234,8 +256,8 @@ void MidiWriter::writeTrack(const Track& track, Key key, int output_octave_shift
     WriteEvent cc_event;
     cc_event.tick = cc.tick;
     cc_event.status = static_cast<uint8_t>(0xB0 | (track.channel & 0x0F));
-    cc_event.data1 = cc.controller;
-    cc_event.data2 = cc.value;
+    cc_event.data1 = clampDataByte(cc.controller);
+    cc_event.data2 = clampDataByte(cc.value);
     cc_event.priority = -1;  // Control change before note-off/on at same tick
     events.push_back(cc_event);
   }

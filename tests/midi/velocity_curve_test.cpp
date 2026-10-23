@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "core/basic_types.h"
 
 namespace bach {
@@ -54,7 +56,7 @@ TEST(VelocityCurveTest, StandardTripleLeavesBothNonDownbeatsWeak) {
             73);
 }
 
-TEST(VelocityCurveTest, FourFourValuesAndBarBoundaryStayUnchanged) {
+TEST(VelocityCurveTest, FourFourAccentsOnlyTheFirstBarOfAPhrase) {
   std::vector<NoteEvent> notes;
   for (Tick tick : {0u, 480u, 960u, 1440u, 1919u, 1920u}) {
     NoteEvent note;
@@ -66,14 +68,14 @@ TEST(VelocityCurveTest, FourFourValuesAndBarBoundaryStayUnchanged) {
 
   applyVelocityCurve(notes, InstrumentType::Violin, {});
 
-  const std::vector<std::uint8_t> expected = {88, 73, 83, 73, 73, 88};
+  const std::vector<std::uint8_t> expected = {88, 73, 83, 73, 73, 80};
   ASSERT_EQ(notes.size(), expected.size());
   for (std::size_t idx = 0; idx < expected.size(); ++idx) {
     EXPECT_EQ(notes[idx].velocity, expected[idx]) << "tick=" << notes[idx].start_tick;
   }
 }
 
-TEST(VelocityCurveTest, ThreeFourPhraseBoundaryUsesNotatedBars) {
+TEST(VelocityCurveTest, ThreeFourPhraseStartsAtCadenceAndSpansNotatedBar) {
   std::vector<NoteEvent> notes;
   for (Tick tick : {1439u, 1440u, 1920u, 2400u, 2880u}) {
     NoteEvent note;
@@ -83,9 +85,9 @@ TEST(VelocityCurveTest, ThreeFourPhraseBoundaryUsesNotatedBars) {
     notes.push_back(note);
   }
 
-  applyVelocityCurve(notes, InstrumentType::Violin, {}, {3, 4}, MeterProfile::SarabandeTriple);
+  applyVelocityCurve(notes, InstrumentType::Violin, {1440u}, {3, 4}, MeterProfile::SarabandeTriple);
 
-  const std::vector<std::uint8_t> expected = {73, 88, 83, 73, 88};
+  const std::vector<std::uint8_t> expected = {70, 88, 83, 73, 80};
   ASSERT_EQ(notes.size(), expected.size());
   for (std::size_t idx = 0; idx < expected.size(); ++idx) {
     EXPECT_EQ(notes[idx].velocity, expected[idx]) << "tick=" << notes[idx].start_tick;
@@ -170,6 +172,29 @@ TEST(VelocityCurveTest, PreCadenceDiminuendo) {
   // Both are on beat 0, so beat emphasis is the same.
   // pre_cadence = 70 + 10 - 3 = 77, normal = 70 + 10 + 8 (phrase start) = 88.
   EXPECT_LT(pre_cadence_vel, normal_vel);
+}
+
+TEST(VelocityCurveTest, PhraseStartAccentOnlyOnFirstBarAfterBoundary) {
+  const std::vector<Tick> cadences = {kTicksPerBar * 4};
+  std::vector<NoteEvent> notes;
+  for (const Tick bar : {Tick{0}, Tick{1}, Tick{3}, Tick{4}, Tick{5}, Tick{7}}) {
+    NoteEvent note;
+    note.start_tick = bar * kTicksPerBar;
+    note.duration = kTicksPerBeat;
+    note.pitch = 60;
+    note.velocity = 80;
+    notes.push_back(note);
+  }
+
+  applyVelocityCurve(notes, InstrumentType::Violin, cadences);
+
+  // Downbeat = 70 + 10; the first bar of a phrase adds 8.
+  EXPECT_EQ(notes[0].velocity, 88);  // bar 0: piece start
+  EXPECT_EQ(notes[1].velocity, 80);  // bar 1: later bar of the same phrase
+  EXPECT_EQ(notes[2].velocity, 80);  // bar 3
+  EXPECT_EQ(notes[3].velocity, 88);  // bar 4: first bar after the cadence tick
+  EXPECT_EQ(notes[4].velocity, 80);  // bar 5
+  EXPECT_EQ(notes[5].velocity, 80);  // bar 7
 }
 
 }  // namespace

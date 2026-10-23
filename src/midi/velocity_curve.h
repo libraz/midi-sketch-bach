@@ -40,6 +40,8 @@ uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
 /// @brief Apply velocity curves to all notes in a track.
 ///
 /// Only modifies notes for non-organ instruments. Organ notes are left at 80.
+/// A phrase starts at tick 0 and at each cadence tick; only the first bar of a phrase
+/// receives the phrase-start accent.
 ///
 /// @param notes Notes to adjust (modified in place).
 /// @param instrument The instrument type.

@@ -63,11 +63,12 @@ void applyVelocityCurve(std::vector<NoteEvent>& notes, InstrumentType instrument
     return;
   }
 
-  // Estimate phrase boundaries: each notated bar is a rough phrase unit.
+  // A phrase starts at the piece start and at every cadence tick.
   const TimeSignature meter = normalizedTimeSignature(time_signature);
-  const Tick ticks_per_bar = meter.ticksPerBar();
   for (auto& note : notes) {
-    Tick phrase_start = (note.start_tick / ticks_per_bar) * ticks_per_bar;
+    const auto next_cadence =
+        std::upper_bound(cadence_ticks.begin(), cadence_ticks.end(), note.start_tick);
+    const Tick phrase_start = next_cadence == cadence_ticks.begin() ? 0 : *(next_cadence - 1);
     note.velocity =
         computeVelocity(note.start_tick, cadence_ticks, phrase_start, meter, meter_profile);
   }
