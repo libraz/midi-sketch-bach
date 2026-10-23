@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from bachlib.ornament_report import ticks_per_bar_for_form
 from bachlib.common import (
     DEFAULT_CLI,
     DEFAULT_INDEX_JS,
@@ -45,8 +46,6 @@ from bachlib.common import (
     run as run_process,
     score_generated,
 )
-
-TICKS_PER_BAR = 1920
 
 FORMS = (
     "fugue",
@@ -137,7 +136,7 @@ def out_of_key_ratio(notes: list[dict[str, Any]], scale: frozenset[int]) -> floa
     return outside / len(notes)
 
 
-def _bar_signature(voice_notes: list[dict[str, Any]], bar: int) -> tuple:
+def _bar_signature(voice_notes: list[dict[str, Any]], bar: int, ticks_per_bar: int) -> tuple:
     """Pitch / offset / duration content of one bar of one voice.
 
     A bar is identified by what sounds in it, so two bars match only when every
@@ -145,8 +144,8 @@ def _bar_signature(voice_notes: list[dict[str, Any]], bar: int) -> tuple:
     their onset bar; a note sustained across the barline belongs to the bar it
     starts in.
     """
-    start = bar * TICKS_PER_BAR
-    end = start + TICKS_PER_BAR
+    start = bar * ticks_per_bar
+    end = start + ticks_per_bar
     return tuple(
         (int(note["pitch"]), int(note["start_tick"]) - start, int(note["duration"]))
         for note in voice_notes
@@ -154,14 +153,16 @@ def _bar_signature(voice_notes: list[dict[str, Any]], bar: int) -> tuple:
     )
 
 
-def duplicate_bar_ratios(notes: list[dict[str, Any]], duration_ticks: int) -> tuple[float, float]:
+def duplicate_bar_ratios(
+    notes: list[dict[str, Any]], duration_ticks: int, ticks_per_bar: int
+) -> tuple[float, float]:
     """Share of bars that are byte-identical to another bar.
 
     @return ``(all_voices, worst_voice)``. The first treats the full texture of
         a bar as the unit; the second is the largest per-voice share, which is
         where a returning ground or a copied countersubject shows up.
     """
-    bar_count = max(1, -(-duration_ticks // TICKS_PER_BAR))
+    bar_count = max(1, -(-duration_ticks // ticks_per_bar))
     voices = _voices(notes)
 
     combined: list[tuple] = []
@@ -169,13 +170,13 @@ def duplicate_bar_ratios(notes: list[dict[str, Any]], duration_ticks: int) -> tu
         # Silent voices are dropped rather than recorded as empty, so a bar in
         # which nothing sounds collapses to the empty signature that
         # _repeat_share excludes.
-        sounding = [_bar_signature(voices[voice], bar) for voice in sorted(voices)]
+        sounding = [_bar_signature(voices[voice], bar, ticks_per_bar) for voice in sorted(voices)]
         combined.append(tuple(sorted(signature for signature in sounding if signature)))
     all_voices = _repeat_share(combined)
 
     worst = 0.0
     for voice in sorted(voices):
-        bars = [_bar_signature(voices[voice], bar) for bar in range(bar_count)]
+        bars = [_bar_signature(voices[voice], bar, ticks_per_bar) for bar in range(bar_count)]
         worst = max(worst, _repeat_share(bars))
     return all_voices, worst
 
@@ -249,13 +250,13 @@ def note_gap_ratio(voices: dict[int, list[dict[str, Any]]]) -> float:
     return gaps / pairs if pairs else 0.0
 
 
-def structural_metrics(generated: dict[str, Any], key: str) -> dict[str, float]:
-    """Compute the structure axes of one generated.v1 payload."""
+def structural_metrics(generated: dict[str, Any], key: str, form: str) -> dict[str, float]:
+    """Compute the structure axes of one generated.v1 payload of ``form``."""
     notes = generated.get("notes", [])
     scale = MINOR_SCALE if key.endswith("minor") else MAJOR_SCALE
     voices = _voices(notes)
     all_voices, worst_voice = duplicate_bar_ratios(
-        notes, int(generated.get("duration_ticks", 0))
+        notes, int(generated.get("duration_ticks", 0)), ticks_per_bar_for_form(form)
     )
     velocities = {int(note.get("velocity", 0)) for note in notes}
     return {
@@ -331,7 +332,7 @@ def run_case(
         result.reason = f"unreadable generated JSON: {exc}"
         return result
 
-    result.metrics.update(structural_metrics(generated, key))
+    result.metrics.update(structural_metrics(generated, key, form))
     try:
         result.metrics.update(corpus_metrics(score_generated(index_js, generated_json)))
     except RuntimeError as exc:

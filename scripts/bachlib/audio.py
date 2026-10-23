@@ -24,7 +24,7 @@ import sys
 import wave
 from array import array
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from bachlib.common import (
     DEFAULT_CLI,
@@ -38,6 +38,9 @@ from bachlib.common import (
 from bachlib.phases import PHASE_TAGS, fixture_for_seed, normalize_phase
 
 TICKS_PER_BEAT = 480
+
+# Tempo used when a document carries no tempos list; matches the composer default.
+DEFAULT_BPM = 100.0
 DEFAULT_SAMPLE_RATE = 44100
 
 
@@ -101,6 +104,33 @@ def track_gain(track: dict) -> float:
     return 0.074
 
 
+def tempo_map(tempos: list[dict] | None, ticks_per_beat: int) -> Callable[[int], float]:
+    """Build a tick-to-seconds function from a generated.v1 ``tempos`` list.
+
+    @param tempos Entries with ``tick`` and ``bpm``; None or empty uses DEFAULT_BPM.
+    @param ticks_per_beat Ticks per quarter note of the document.
+    @return Function mapping an absolute tick to seconds, honouring tempo changes.
+    """
+    changes = sorted(
+        ((int(entry["tick"]), float(entry["bpm"])) for entry in tempos or []),
+        key=lambda change: change[0],
+    )
+    if not changes or changes[0][0] > 0:
+        changes.insert(0, (0, changes[0][1] if changes else DEFAULT_BPM))
+
+    def to_seconds(tick: int) -> float:
+        seconds = 0.0
+        for idx, (start, bpm) in enumerate(changes):
+            end = changes[idx + 1][0] if idx + 1 < len(changes) else tick
+            span = min(tick, end) - start
+            if span <= 0:
+                break
+            seconds += span * 60.0 / bpm / ticks_per_beat
+        return seconds
+
+    return to_seconds
+
+
 def render(json_path: Path, wav_path: Path, sample_rate: int = DEFAULT_SAMPLE_RATE) -> None:
     """Render a generated JSON note file to a stereo WAV.
 
@@ -109,8 +139,8 @@ def render(json_path: Path, wav_path: Path, sample_rate: int = DEFAULT_SAMPLE_RA
     @param sample_rate Output sample rate in Hz.
     """
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    bpm = float(data.get("bpm", 72))
-    seconds_per_tick = 60.0 / bpm / TICKS_PER_BEAT
+    ticks_per_beat = int(data.get("ticks_per_beat", TICKS_PER_BEAT))
+    tick_to_sec = tempo_map(data.get("tempos"), ticks_per_beat)
     total_ticks = int(data.get("total_ticks", data.get("duration_ticks", 0)))
 
     notes: list[tuple[dict, dict]] = []
@@ -133,7 +163,7 @@ def render(json_path: Path, wav_path: Path, sample_rate: int = DEFAULT_SAMPLE_RA
             )
 
     tail_sec = 1.8
-    total_sec = total_ticks * seconds_per_tick + tail_sec
+    total_sec = tick_to_sec(total_ticks) + tail_sec
     pcm = array("f", [0.0]) * (int(total_sec * sample_rate) + 1)
 
     for track, note in notes:
@@ -143,8 +173,8 @@ def render(json_path: Path, wav_path: Path, sample_rate: int = DEFAULT_SAMPLE_RA
             pcm,
             pitch=int(note.get("pitch", 60)),
             velocity=int(note.get("velocity", 80)),
-            start_sec=start_tick * seconds_per_tick,
-            dur_sec=duration * seconds_per_tick,
+            start_sec=tick_to_sec(start_tick),
+            dur_sec=tick_to_sec(start_tick + duration) - tick_to_sec(start_tick),
             gain=track_gain(track),
             sample_rate=sample_rate,
         )
@@ -204,7 +234,7 @@ def _add_render_arguments(parser) -> None:
 
 def _add_listening_arguments(parser) -> None:
     """Register the ``listening`` command arguments on ``parser``."""
-    parser.add_argument("--phase", default="FugueExposition3v", help="FugueSubject2v/FugueSubject2vShort/FugueAnswer2v/FugueSubject3v/FugueExposition3v")
+    parser.add_argument("--phase", default="FugueExposition3v", help="phase name, one of: " + ", ".join(PHASE_TAGS))
     parser.add_argument("--top", type=int, default=5, help="number of seeds to render to WAV")
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "build" / "listening_packet")
     parser.add_argument("--cli", type=Path, default=DEFAULT_CLI)

@@ -50,9 +50,8 @@ def model_probability(score: dict[str, Any]) -> float:
 def model_probability_v2(score: dict[str, Any]) -> float:
     """KL-divergence model probability (bach-mcp model_score_v2).
 
-    Informational for now: gates and closure thresholds stay anchored to the
-    v1 probability scale until they are re-anchored deliberately. Returns -1.0
-    when the scorer did not emit a v2 block (older bach-mcp build).
+    Gated per form by texture-gate through its FORM_THRESHOLDS floor. Returns
+    -1.0 when the scorer did not emit a v2 block (older bach-mcp build).
     """
     model = score.get("model_score_v2")
     if isinstance(model, dict):
@@ -68,9 +67,9 @@ def model_probability_v2_length_invariant(score: dict[str, Any]) -> float:
     The v2 probability is not comparable across piece lengths: the scorer's
     pseudo-count shrinkage suppresses the KL of short pieces toward zero. This
     axis re-bases each component on what real Bach material scores at the same
-    event count, so 16-bar and 128-bar runs share one scale. Informational
-    only; no gate floor is anchored to it. Returns -1.0 when the scorer did
-    not emit the field (older bach-mcp build or pre-calibration model).
+    event count, so 16-bar and 128-bar runs share one scale. Gated per form by
+    texture-gate through its FORM_THRESHOLDS floor. Returns -1.0 when the
+    scorer did not emit the field (older bach-mcp build or pre-calibration model).
     """
     model = score.get("model_score_v2")
     if isinstance(model, dict):

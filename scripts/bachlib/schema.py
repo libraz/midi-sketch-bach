@@ -8,6 +8,9 @@ actually used by ``bach-mcp/schema/generated.v1.json``:
     - array : type, items
     - integer: type, minimum, maximum
     - string : type, const, enum
+    - any    : list-valued type (e.g. ["integer", "null"])
+
+Any other keyword is a usage error (exit 2) rather than a silent pass.
 
 External ``jsonschema`` package is intentionally NOT required so this
 script stays usable from CI without extra pip installs.
@@ -31,6 +34,41 @@ from bachlib.common import REPO_ROOT
 DEFAULT_SCHEMA = REPO_ROOT / "schema" / "generated.v1.json"
 
 
+class UnsupportedSchemaError(Exception):
+    """Raised when the schema uses a keyword or type this subset cannot evaluate."""
+
+
+# Keywords the validator evaluates, plus pure annotations that carry no constraint.
+SUPPORTED_KEYWORDS = frozenset(
+    {
+        "type",
+        "required",
+        "additionalProperties",
+        "properties",
+        "items",
+        "minimum",
+        "maximum",
+        "const",
+        "enum",
+    }
+)
+ANNOTATION_KEYWORDS = frozenset({"$schema", "$id", "title", "description"})
+SUPPORTED_TYPES = frozenset({"object", "array", "integer", "string", "null"})
+
+
+def _matches_type(node: Any, type_name: str) -> bool:
+    """Whether ``node`` is an instance of the JSON Schema type ``type_name``."""
+    if type_name == "object":
+        return isinstance(node, dict)
+    if type_name == "array":
+        return isinstance(node, list)
+    if type_name == "integer":
+        return isinstance(node, int) and not isinstance(node, bool)
+    if type_name == "string":
+        return isinstance(node, str)
+    return node is None
+
+
 def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
     """Recursively validate ``node`` against the schema subset.
 
@@ -38,12 +76,30 @@ def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) ->
     @param schema The schema fragment that ``node`` must satisfy.
     @param path Dotted/indexed JSON path used for error messages.
     @param errors Accumulator that receives one message per violation.
+    @throws UnsupportedSchemaError When the schema uses a keyword or type outside the subset.
     """
-    expected_type = schema.get("type")
-    if expected_type == "object":
-        if not isinstance(node, dict):
-            errors.append(f"{path}: expected object, got {type(node).__name__}")
+    for keyword in schema:
+        if keyword not in SUPPORTED_KEYWORDS and keyword not in ANNOTATION_KEYWORDS:
+            raise UnsupportedSchemaError(f"{path}: unsupported schema keyword '{keyword}'")
+
+    declared = schema.get("type")
+    allowed = [declared] if isinstance(declared, str) else list(declared or [])
+    for type_name in allowed:
+        if type_name not in SUPPORTED_TYPES:
+            raise UnsupportedSchemaError(f"{path}: unsupported schema type '{type_name}'")
+
+    if allowed:
+        matched = [name for name in allowed if _matches_type(node, name)]
+        if not matched:
+            errors.append(
+                f"{path}: expected {' or '.join(allowed)}, got {type(node).__name__}"
+            )
             return
+        active = matched[0]
+    else:
+        active = None
+
+    if active == "object":
         for required in schema.get("required", []):
             if required not in node:
                 errors.append(f"{path}: missing required key '{required}'")
@@ -55,32 +111,16 @@ def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) ->
         for key, sub_schema in props.items():
             if key in node:
                 validate(node[key], sub_schema, f"{path}.{key}", errors)
-        return
-
-    if expected_type == "array":
-        if not isinstance(node, list):
-            errors.append(f"{path}: expected array, got {type(node).__name__}")
-            return
+    elif active == "array":
         item_schema = schema.get("items")
         if item_schema is not None:
             for i, item in enumerate(node):
                 validate(item, item_schema, f"{path}[{i}]", errors)
-        return
-
-    if expected_type == "integer":
-        if isinstance(node, bool) or not isinstance(node, int):
-            errors.append(f"{path}: expected integer, got {type(node).__name__}")
-            return
+    elif active == "integer":
         if "minimum" in schema and node < schema["minimum"]:
             errors.append(f"{path}: {node} < minimum {schema['minimum']}")
         if "maximum" in schema and node > schema["maximum"]:
             errors.append(f"{path}: {node} > maximum {schema['maximum']}")
-        return
-
-    if expected_type == "string":
-        if not isinstance(node, str):
-            errors.append(f"{path}: expected string, got {type(node).__name__}")
-            return
 
     if "const" in schema:
         if node != schema["const"]:
@@ -140,7 +180,11 @@ def run(args) -> int:
         return 2
 
     errors: list[str] = []
-    validate(payload, schema, "$", errors)
+    try:
+        validate(payload, schema, "$", errors)
+    except UnsupportedSchemaError as exc:
+        print(f"unsupported schema: {exc}", file=sys.stderr)
+        return 2
 
     if errors:
         print(f"schema validation FAILED for {output_path}", file=sys.stderr)

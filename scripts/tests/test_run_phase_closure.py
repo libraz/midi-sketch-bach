@@ -18,6 +18,7 @@ import bachlib as rpc  # noqa: E402
 from bachlib.closure import (  # noqa: E402
     _check_required_bits,
     prepare_work_dir,
+    resolve_min_pass,
 )
 from bachlib.phases import fixture_for_seed  # noqa: E402
 
@@ -247,6 +248,49 @@ class ExpectedArpeggioSequenceTest(unittest.TestCase):
             first_cell = [p for _, p in arp[:4]]
             self.assertEqual(min(first_cell), 48)  # bar 0 bass.
             self.assertEqual(max(first_cell), 64)  # bar 0 top.
+
+
+class PhaseHelpTest(unittest.TestCase):
+    def test_phase_help_lists_every_phase(self) -> None:
+        import argparse
+
+        from bachlib import closure
+        from bachlib.phases import PHASE_DEFAULTS
+
+        parser = argparse.ArgumentParser()
+        closure._add_arguments(parser)
+        phase_action = next(act for act in parser._actions if "--phase" in act.option_strings)
+        for phase in PHASE_DEFAULTS:
+            self.assertIn(phase, phase_action.help)
+
+    def test_gated_score_axes_are_not_called_informational(self) -> None:
+        from bachlib import common
+
+        for func in (common.model_probability_v2, common.model_probability_v2_length_invariant):
+            self.assertNotIn("nformational", func.__doc__)
+
+
+class ResolveMinPassTest(unittest.TestCase):
+    def test_default_never_exceeds_seed_count(self) -> None:
+        # A run where every seed passes must be able to pass at any --seeds >= 1.
+        for seeds in (1, 2, 5, 14, 20, 40):
+            min_pass = resolve_min_pass(None, 14, seeds)
+            self.assertTrue(
+                rpc.compute_passed(
+                    seed_count=seeds,
+                    composer_ok_count=seeds,
+                    model_pass_count=seeds,
+                    min_pass=min_pass,
+                    structural_ok_count=seeds,
+                    rule_pass={},
+                    all_bits_pass=True,
+                    evaluator_error_count=0,
+                ),
+                seeds,
+            )
+
+    def test_explicit_value_is_kept(self) -> None:
+        self.assertEqual(resolve_min_pass(3, 14, 20), 3)
 
 
 class ComputePassedTest(unittest.TestCase):

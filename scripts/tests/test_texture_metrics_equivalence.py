@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
@@ -64,12 +65,19 @@ class TextureMetricsEquivalenceTest(unittest.TestCase):
             text=True,
         )
         if result.returncode != 0:
-            self.skipTest(f"bach_cli failed for {form}: {result.stderr.strip()}")
+            self.fail(f"bach_cli failed for {form}: {result.stderr.strip()}")
         json_path = tmp / f"{form}.generated.json"
         if not json_path.exists():
-            self.skipTest(f"generated JSON not produced at {json_path}")
+            self.fail(f"generated JSON not produced at {json_path}")
         with json_path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def test_generation_failure_fails_instead_of_skipping(self) -> None:
+        failed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="boom")
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(subprocess, "run", return_value=failed):
+                with self.assertRaises(self.failureException):
+                    self._generate("fugue", Path(tmp))
 
     def test_python_matches_embedded_validator_metrics(self) -> None:
         for form in _FORMS:

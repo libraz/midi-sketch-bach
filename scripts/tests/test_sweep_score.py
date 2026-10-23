@@ -47,14 +47,14 @@ class OutOfKeyTest(unittest.TestCase):
         # generated.v1 is the internal C-based representation, so a piece
         # requested in G minor still spells its tonic as C.
         generated = {"duration_ticks": 1920, "notes": [note(0, 60, 0), note(480, 67, 0)]}
-        metrics = sweep_score.structural_metrics(generated, "g_minor")
+        metrics = sweep_score.structural_metrics(generated, "g_minor", "fugue")
         self.assertAlmostEqual(metrics["out_of_key"], 0.0)
 
 
 class DuplicateBarTest(unittest.TestCase):
     def test_identical_bars_count_on_both_sides(self) -> None:
         notes = [note(0, 60, 0), note(1920, 60, 0), note(3840, 64, 0)]
-        combined, worst = sweep_score.duplicate_bar_ratios(notes, 5760)
+        combined, worst = sweep_score.duplicate_bar_ratios(notes, 5760, 1920)
         # Bars 1 and 2 are identical, bar 3 is not: two of three sounding bars.
         self.assertAlmostEqual(worst, 2 / 3)
         self.assertAlmostEqual(combined, 2 / 3)
@@ -63,15 +63,27 @@ class DuplicateBarTest(unittest.TestCase):
         # A voice that sounds in one bar and rests through three must not read
         # as 75% literal repetition.
         notes = [note(0, 60, 0)]
-        combined, worst = sweep_score.duplicate_bar_ratios(notes, 7680)
+        combined, worst = sweep_score.duplicate_bar_ratios(notes, 7680, 1920)
         self.assertAlmostEqual(worst, 0.0)
         self.assertAlmostEqual(combined, 0.0)
 
     def test_a_shifted_copy_is_not_a_duplicate(self) -> None:
         # Same pitches, different position inside the bar.
         notes = [note(0, 60, 0), note(1920 + 240, 60, 0)]
-        _, worst = sweep_score.duplicate_bar_ratios(notes, 3840)
+        _, worst = sweep_score.duplicate_bar_ratios(notes, 3840, 1920)
         self.assertAlmostEqual(worst, 0.0)
+
+    def test_three_four_forms_slice_on_the_real_bar_length(self) -> None:
+        # Three identical 1440-tick bars; sliced at 1920 they would not align.
+        notes = [note(bar * 1440, 60, 0, duration=1440) for bar in range(3)]
+        generated = {"duration_ticks": 4320, "notes": notes}
+        passacaglia = sweep_score.structural_metrics(generated, "c_minor", "passacaglia")
+        fugue = sweep_score.structural_metrics(generated, "c_minor", "fugue")
+        self.assertAlmostEqual(passacaglia["duplicate_bars"], 1.0)
+        self.assertLess(fugue["duplicate_bars"], 1.0)
+
+    def test_no_private_bar_length_constant(self) -> None:
+        self.assertFalse(hasattr(sweep_score, "TICKS_PER_BAR"))
 
 
 class BassAndArticulationTest(unittest.TestCase):

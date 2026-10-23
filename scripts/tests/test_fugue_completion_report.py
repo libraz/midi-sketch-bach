@@ -63,6 +63,52 @@ class FugueCompletionReportTest(unittest.TestCase):
         self.assertEqual(result["p7_gate_visibility"]["fortspinnung_span_count"], 1)
         self.assertEqual(result["p7_gate_visibility"]["stretto_span_count"], 1)
 
+    def _evaluate(self, notes: list[dict], intents: list[str]) -> dict:
+        with tempfile.TemporaryDirectory() as tmp:
+            generated = Path(tmp) / "case.generated.json"
+            provenance = Path(tmp) / "case.provenance.json"
+            generated.write_text(json.dumps({"notes": notes}), encoding="utf-8")
+            provenance.write_text(
+                json.dumps({"notes": [{"voice_intent": intent} for intent in intents]}),
+                encoding="utf-8",
+            )
+            return report.evaluate(generated, provenance)
+
+    def test_gate_visibility_follows_measured_span_counts(self) -> None:
+        notes = [{"voice": 0, "pitch": 72, "start_tick": 0, "duration": 480}]
+        result = self._evaluate(notes, ["SubjectCarrier"])
+        self.assertFalse(result["p7_gate_visibility"]["passes"])
+
+    def test_subject_window_starts_at_the_first_subject_onset(self) -> None:
+        # Prelude figuration fills the first 24 bars; the subject then states
+        # two different durations inside its own first four bars.
+        prelude = 24 * 1920
+        notes = [
+            {"voice": 0, "pitch": 72, "start_tick": 0, "duration": 480},
+            {"voice": 0, "pitch": 72, "start_tick": prelude, "duration": 480},
+            {"voice": 0, "pitch": 74, "start_tick": prelude + 480, "duration": 240},
+        ]
+        result = self._evaluate(
+            notes, ["HarmonicSupport", "SubjectCarrier", "SubjectCarrier"]
+        )
+        self.assertEqual(result["p5_subject_rhythm"]["unique_subject_durations"], [240, 480])
+        self.assertTrue(result["p5_subject_rhythm"]["passes"])
+
+    def test_bass_silence_is_measured_from_the_bass_entry(self) -> None:
+        # Voice 2 plays only prelude figuration with a long gap, then enters
+        # the theme and sounds continuously; the gap precedes its entry.
+        entry = 24 * 1920
+        notes = [
+            {"voice": 2, "pitch": 48, "start_tick": 0, "duration": 480},
+            {"voice": 2, "pitch": 48, "start_tick": entry, "duration": 1920},
+            {"voice": 2, "pitch": 50, "start_tick": entry + 1920, "duration": 1920},
+        ]
+        result = self._evaluate(
+            notes, ["HarmonicSupport", "SubjectCarrier", "SubjectCarrier"]
+        )
+        self.assertEqual(result["p2_bass_continuity"]["v2_silence_ratio"], 0.0)
+        self.assertTrue(result["p2_bass_continuity"]["passes"])
+
     def test_render_markdown_includes_status(self) -> None:
         text = report.render_markdown({"p1": {"passes": False, "value": 3}})
         self.assertIn("`p1`: FAIL", text)

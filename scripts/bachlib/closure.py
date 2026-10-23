@@ -122,6 +122,18 @@ def compute_passed(
     )
 
 
+def resolve_min_pass(requested: int | None, phase_default: int, seeds: int) -> int:
+    """Seeds that must reach the model threshold.
+
+    An explicit request is honoured as given. The phase default is capped at the
+    seed count so a short run is judged on the seeds it has, like the sibling
+    gates that default to ``--seeds``.
+    """
+    if requested is not None:
+        return requested
+    return min(phase_default, seeds)
+
+
 def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -> int | None:
     """Enforce the per-phase required-rule-bit guards.
 
@@ -272,7 +284,7 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
 
 def _add_arguments(parser: argparse.ArgumentParser) -> None:
     """Attach the closure-harness CLI arguments to `parser`."""
-    parser.add_argument("--phase", default="FugueExposition3v", help="FugueSubject2v/FugueSubject2vShort/FugueAnswer2v/FugueSubject3v/FugueExposition3v")
+    parser.add_argument("--phase", default="FugueExposition3v", help="phase name, one of: " + ", ".join(PHASE_DEFAULTS))
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--threshold", type=float)
     parser.add_argument("--min-pass", type=int)
@@ -330,7 +342,7 @@ def run(args: argparse.Namespace) -> int:
     defaults = PHASE_DEFAULTS[phase]
     tag = defaults["tag"]
     threshold = args.threshold if args.threshold is not None else defaults["threshold"]
-    min_pass = args.min_pass if args.min_pass is not None else defaults["min_pass"]
+    min_pass = resolve_min_pass(args.min_pass, defaults["min_pass"], args.seeds)
     required_rule_min = (
         args.required_rule_min if args.required_rule_min is not None else args.seeds
     )

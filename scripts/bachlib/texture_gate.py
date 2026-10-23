@@ -197,6 +197,10 @@ class FormThresholds:
         MIN_PIECE_VOICE_OCCUPANCY (calibrated on continuous fugue textures);
         a form whose inner voice is episodic by design (goldberg's canon
         follower) pins its own design value instead.
+    @field max_compass_violations Ceiling on notes outside the organ compass
+        (texture_metrics.compass_violation_count). None disables the compass
+        axis; it is set for the organ forms only, since the compass is the
+        organ's.
     @field enforced When True, failures flip the exit code; otherwise the form
         is informational only.
     """
@@ -209,7 +213,14 @@ class FormThresholds:
     model_score_v2_threshold: float | None = None
     model_score_v2_length_invariant_threshold: float | None = None
     min_piece_voice_occupancy: float | None = None
+    max_compass_violations: int | None = None
     enforced: bool = True
+
+
+# Fantasia-and-fugue layout the mono ceiling is derived from: the subject
+# statement that opens the fugue tail, and the default-scale piece length.
+FANTASIA_DUX_BARS = 4
+FANTASIA_DEFAULT_BARS = 32
 
 
 # Texture targets per form. Fugue forms use the historical enforced gate
@@ -222,18 +233,21 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # voice-count floor is not applied to them so their enforcement is
     # byte-identical to the original gate.
     "fugue": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
         model_score_v2_threshold=0.78,
         model_score_v2_length_invariant_threshold=0.79,
         enforced=True,
     ),
     "prelude_and_fugue": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=MIN_AVG_ACTIVE_VOICES,
         model_score_v2_threshold=0.85,
         model_score_v2_length_invariant_threshold=0.77,
         enforced=True,
     ),
     "toccata_and_fugue": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=2.1,
         max_mono_ratio=0.25,
         require_v1_v2_occupancy=True,
@@ -242,14 +256,18 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         enforced=True,
     ),
     "fantasia_and_fugue": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=2.3,
-        max_mono_ratio=0.10,
+        # The fugue tail opens with the dux alone for its whole four-bar
+        # statement; pin that authored proportion of the default length.
+        max_mono_ratio=FANTASIA_DUX_BARS / FANTASIA_DEFAULT_BARS,
         model_score_threshold=0.78,
         model_score_v2_threshold=0.82,
         model_score_v2_length_invariant_threshold=0.76,
         enforced=True,
     ),
     "passacaglia": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=2.2,
         # The opening third is the deliberately unaccompanied immutable
         # ground-bass statement.  Pin that authored proportion exactly so a
@@ -261,6 +279,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
         enforced=True,
     ),
     "chorale_prelude": FormThresholds(
+        max_compass_violations=0,
         min_avg_active=2.5,
         max_mono_ratio=0.05,
         # Recalibrated after the cadence/ornament remediation against the
@@ -274,6 +293,7 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     # fugue-style) entry; they are listed explicitly to carry their KL-model
     # floors. All other fields keep the default-entry semantics.
     "trio_sonata": FormThresholds(
+        max_compass_violations=0,
         model_score_v2_threshold=0.84,
         model_score_v2_length_invariant_threshold=0.81,
         enforced=True,
@@ -312,9 +332,11 @@ FORM_THRESHOLDS: dict[str, FormThresholds] = {
     ),
 }
 
-# Planned voice counts from the ten shipped FormSpecs. These are deliberately
-# independent of the emitted notes: deriving the target from the voices that
-# happened to appear makes a completely missing voice invisible to the gate.
+# Planned voice counts, one per shipped form. These are deliberately independent
+# of the emitted notes: deriving the target from the voices that happened to
+# appear makes a completely missing voice invisible to the gate. The demo's
+# per-form table and the C++ FormSpec table are checked against this one by
+# scripts/tests/test_texture_gate_form_table.py.
 FORM_EXPECTED_VOICES: dict[str, int] = {
     "fugue": 3,
     "prelude_and_fugue": 3,
@@ -324,7 +346,7 @@ FORM_EXPECTED_VOICES: dict[str, int] = {
     "passacaglia": 3,
     "fantasia_and_fugue": 3,
     "cello_prelude": 1,
-    "chaconne": 2,
+    "chaconne": 3,
     "goldberg_variations": 3,
 }
 SHIPPED_FORMS = tuple(FORM_EXPECTED_VOICES)
@@ -552,6 +574,14 @@ class GateCase:
                 self.passes_model_score_v2_length_invariant
             ),
         }
+        if thresholds.max_compass_violations is not None:
+            results["compass"] = (
+                self.compass_violation_count <= thresholds.max_compass_violations
+            )
+        # Nonperiodicity is only defined once at least three middle entries
+        # give two spacings to compare.
+        if len(self.entry_intervals or []) >= 2:
+            results["entry_plan_nonperiodic"] = self.entry_plan_nonperiodic
         if self.target_bars is not None:
             return results
         results["avg_active_voices"] = self.avg_active_voices >= self.min_avg_active
@@ -1029,8 +1059,8 @@ def model_score_for(
     @param generated_json The generated.v1 JSON to score.
     @return (v1 probability, v2 KL-model probability, length-invariant v2
         probability); -1.0 when unavailable. v1 gates against the historical
-        gate-3 floor and v2 against the form's KL-model floor; the
-        length-invariant value is informational only.
+        gate-3 floor; v2 and the length-invariant value gate per form through
+        FORM_THRESHOLDS.
     """
     if index_js is None or not index_js.exists():
         return -1.0, -1.0, -1.0

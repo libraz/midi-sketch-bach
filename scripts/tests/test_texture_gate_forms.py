@@ -71,7 +71,9 @@ class FormThresholdsTableTest(unittest.TestCase):
         self.assertTrue(toccata.require_v1_v2_occupancy)
         fantasia = texture_gate.thresholds_for("fantasia_and_fugue")
         self.assertEqual(fantasia.min_avg_active, 2.3)
-        self.assertEqual(fantasia.max_mono_ratio, 0.10)
+        # The fugue tail opens with a four-bar solo subject statement in a
+        # 32-bar default piece.
+        self.assertEqual(fantasia.max_mono_ratio, 4 / 32)
         passacaglia = texture_gate.thresholds_for("passacaglia")
         self.assertEqual(passacaglia.min_avg_active, 2.2)
         self.assertEqual(passacaglia.max_mono_ratio, 1.0 / 3.0)
@@ -242,6 +244,63 @@ class PerAxisRoutingTest(unittest.TestCase):
         self.assertIn("mono_ratio", axes)
         self.assertNotIn("v2_silence_ratio", axes)
 
+    def test_chaconne_is_a_three_voice_form(self) -> None:
+        trio = self._case("chaconne", v2_silence_ratio=0.0)
+        self.assertEqual(trio.voice_count_target, 3)
+        self.assertTrue(trio.axis_results()["max_active_voices"])
+        duo = self._case("chaconne", num_voices=2, max_active_voices=2)
+        self.assertFalse(duo.axis_results()["max_active_voices"])
+
+    def test_fantasia_mono_ceiling_is_the_authored_solo_subject(self) -> None:
+        at_ceiling = self._case("fantasia_and_fugue", mono_ratio=4 / 32)
+        over = self._case("fantasia_and_fugue", mono_ratio=4.5 / 32)
+        self.assertTrue(at_ceiling.axis_results()["mono_ratio"])
+        self.assertFalse(over.axis_results()["mono_ratio"])
+
+    def test_compass_axis_gates_every_organ_form(self) -> None:
+        organ_forms = (
+            "fugue",
+            "prelude_and_fugue",
+            "trio_sonata",
+            "chorale_prelude",
+            "toccata_and_fugue",
+            "passacaglia",
+            "fantasia_and_fugue",
+        )
+        for form in organ_forms:
+            clean = self._case(form, compass_violation_count=0)
+            stray = self._case(form, compass_violation_count=1)
+            self.assertTrue(clean.axis_results()["compass"], form)
+            self.assertFalse(stray.axis_results()["compass"], form)
+            self.assertFalse(stray.passes_all_axes, form)
+
+    def test_compass_axis_is_organ_only(self) -> None:
+        for form in ("cello_prelude", "chaconne", "goldberg_variations"):
+            case = self._case(form, compass_violation_count=50)
+            self.assertNotIn("compass", case.axis_results(), form)
+
+    def test_compass_axis_survives_explicit_target_bars(self) -> None:
+        case = self._case("fugue", compass_violation_count=3, target_bars=64)
+        self.assertFalse(case.axis_results()["compass"])
+
+    def test_entry_plan_axis_requires_a_periodicity_free_plan(self) -> None:
+        periodic = self._case(
+            "fugue", middle_entry_bars=[12, 20, 28], entry_intervals=[8, 8],
+            entry_plan_nonperiodic=False,
+        )
+        varied = self._case(
+            "fugue", middle_entry_bars=[12, 20, 25], entry_intervals=[8, 5],
+            entry_plan_nonperiodic=True,
+        )
+        self.assertFalse(periodic.axis_results()["entry_plan_nonperiodic"])
+        self.assertFalse(periodic.passes_all_axes)
+        self.assertTrue(varied.axis_results()["entry_plan_nonperiodic"])
+
+    def test_entry_plan_axis_omitted_without_two_spacings(self) -> None:
+        for intervals in ([], [8]):
+            case = self._case("prelude_and_fugue", entry_intervals=intervals)
+            self.assertNotIn("entry_plan_nonperiodic", case.axis_results())
+
     def test_v2_silence_axis_present_for_fugue_forms(self) -> None:
         axes = self._case("fugue", mono_ratio=0.0, v2_silence_ratio=0.0).axis_results()
         self.assertIn("v2_silence_ratio", axes)
@@ -253,7 +312,8 @@ class PerAxisRoutingTest(unittest.TestCase):
         # rather than on anything the form actually played.
         solo = self._case("cello_prelude", num_voices=1, max_active_voices=1,
                           piece_voice_occupancy={0: 1.0}, v2_silence_ratio=1.0)
-        duo = self._case("chaconne", num_voices=2, max_active_voices=2,
+        duo = self._case("two_voice_form", num_voices=2, expected_voices=2,
+                         max_active_voices=2,
                          piece_voice_occupancy={0: 1.0, 1: 1.0}, v2_silence_ratio=1.0)
         self.assertNotIn("v2_silence_ratio", solo.axis_results())
         self.assertNotIn("v2_silence_ratio", duo.axis_results())
@@ -512,6 +572,7 @@ class LengthInvariantFloorTest(unittest.TestCase):
                 "max_repeated_run",
                 "alternation_share",
                 "parallel_perfect",
+                "compass",
                 "model_score_v2_length_invariant",
             },
         )

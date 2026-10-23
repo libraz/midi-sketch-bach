@@ -43,5 +43,46 @@ class RenderJsonToWavTest(unittest.TestCase):
                 self.assertGreater(wav.getnframes(), 0)
 
 
+class TempoMapTest(unittest.TestCase):
+    def test_constant_tempo_from_tempos_list(self) -> None:
+        to_sec = render_json_to_wav.tempo_map([{"tick": 0, "bpm": 120}], 480)
+        self.assertAlmostEqual(to_sec(960), 1.0)
+
+    def test_tempo_change_applies_from_its_tick(self) -> None:
+        to_sec = render_json_to_wav.tempo_map(
+            [{"tick": 0, "bpm": 120}, {"tick": 960, "bpm": 60}], 480
+        )
+        # 960 ticks at 120 bpm = 1 s, then 480 ticks at 60 bpm = 1 s.
+        self.assertAlmostEqual(to_sec(1440), 2.0)
+
+    def test_absent_tempos_use_the_default(self) -> None:
+        to_sec = render_json_to_wav.tempo_map(None, 480)
+        self.assertAlmostEqual(to_sec(480), 60.0 / render_json_to_wav.DEFAULT_BPM)
+
+    def test_render_length_follows_tempos(self) -> None:
+        lengths = []
+        for bpm in (60, 120):
+            with tempfile.TemporaryDirectory() as tmp:
+                json_path = Path(tmp) / "g.json"
+                wav_path = Path(tmp) / "o.wav"
+                json_path.write_text(
+                    json.dumps(
+                        {
+                            "ticks_per_beat": 480,
+                            "duration_ticks": 4800,
+                            "tempos": [{"tick": 0, "bpm": bpm}],
+                            "notes": [
+                                {"voice": 0, "pitch": 60, "start_tick": 0, "duration": 4800, "velocity": 80}
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                render_json_to_wav.render(json_path, wav_path, sample_rate=2000)
+                with wave.open(str(wav_path), "rb") as wav:
+                    lengths.append(wav.getnframes())
+        self.assertGreater(lengths[0], lengths[1])
+
+
 if __name__ == "__main__":
     unittest.main()

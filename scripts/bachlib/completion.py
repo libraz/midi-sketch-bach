@@ -14,6 +14,7 @@ from bachlib.texture_gate import (
     MIN_AVG_ACTIVE_VOICES,
     MIN_PIECE_VOICE_OCCUPANCY,
     compute_entry_plan_metrics,
+    compute_entry_relative_silence,
     compute_piece_voice_occupancy,
     count_intent_spans,
 )
@@ -62,16 +63,30 @@ def evaluate(generated_json: Path, provenance_json: Path) -> dict[str, Any]:
     prov_notes = provenance.get("notes", [])
     metrics = compute_texture_metrics(notes)
     entry_bars, entry_intervals, entry_nonperiodic = compute_entry_plan_metrics(notes, prov_notes)
+    subject_starts = [
+        int(note["start_tick"])
+        for note, prov in zip(notes, prov_notes)
+        if prov.get("voice_intent") == "SubjectCarrier"
+    ]
+    # The subject window opens at the first statement, not at tick 0, so a
+    # fugue that follows a prelude is measured on its own opening bars.
+    subject_begin = min(subject_starts, default=0)
     subject_durations = [
         int(note["duration"])
         for note, prov in zip(notes, prov_notes)
-        if prov.get("voice_intent") == "SubjectCarrier" and int(note["start_tick"]) < 4 * 1920
+        if prov.get("voice_intent") == "SubjectCarrier"
+        and int(note["start_tick"]) < subject_begin + 4 * 1920
     ]
 
     voice_silence = {voice.voice: voice.silence_ratio for voice in metrics.voices}
+    bass_silence = compute_entry_relative_silence(
+        notes, prov_notes, 2, voice_silence.get(2, 1.0)
+    )
     max_run = max((voice.max_repeated_run for voice in metrics.voices), default=0)
     occupancy = compute_piece_voice_occupancy(notes)
     min_occupancy = min(occupancy.values(), default=0.0)
+    fortspinnung_spans = count_intent_spans(prov_notes, "FortspinnungSpan")
+    stretto_spans = count_intent_spans(prov_notes, "StrettoCarrier")
     return {
         "p1_three_voice_texture": {
             "max_active_voices": metrics.max_active_voices,
@@ -86,8 +101,8 @@ def evaluate(generated_json: Path, provenance_json: Path) -> dict[str, Any]:
             ),
         },
         "p2_bass_continuity": {
-            "v2_silence_ratio": voice_silence.get(2, 1.0),
-            "passes": voice_silence.get(2, 1.0) <= 0.25,
+            "v2_silence_ratio": bass_silence,
+            "passes": bass_silence <= 0.25,
         },
         "p3_repeated_run": {
             "max_repeated_run": max_run,
@@ -109,9 +124,9 @@ def evaluate(generated_json: Path, provenance_json: Path) -> dict[str, Any]:
             "passes": entry_nonperiodic,
         },
         "p7_gate_visibility": {
-            "fortspinnung_span_count": count_intent_spans(prov_notes, "FortspinnungSpan"),
-            "stretto_span_count": count_intent_spans(prov_notes, "StrettoCarrier"),
-            "passes": True,
+            "fortspinnung_span_count": fortspinnung_spans,
+            "stretto_span_count": stretto_spans,
+            "passes": fortspinnung_spans > 0 and stretto_spans > 0,
         },
     }
 
