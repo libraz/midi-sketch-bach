@@ -951,7 +951,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Minor 6th/7th spelled under the plan's chord (spellScale) puts the leading
     // tone in the countersubject and figuration: hidden 35 -> 15, but battuta
     // 36 -> 40 and fourths over a held bass 146 -> 164.
-    {FormType::Fugue, 0, 0, 15, 40, 2, 0, 2, 2, 1, 56200, 164},
+    // Pedal and climax stretto at the natural length, answer-interval restatement,
+    // minor v under the v station: hidden 15 -> 19, battuta 40 -> 61, anti 2 -> 6,
+    // fourths 164 -> 352 (the 6/4 over the pedal), floor 56200 -> 52539.
+    {FormType::Fugue, 0, 0, 19, 61, 6, 0, 2, 3, 1, 52539, 352},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1044,7 +1047,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // more of it.
     // Leading-tone spelling over the minor dominant: hidden 12 -> 8, fourths
     // 66 -> 59; battuta 35 -> 45 (worst cell 2 -> 3), floor 31903 -> 31834.
-    {FormType::PreludeAndFugue, 0, 0, 8, 45, 3, 0, 2, 3, 1, 31834, 59},
+    // A 20-bar fugue half now states a middle entry and its stretto: hidden
+    // 8 -> 11, floor 31834 -> 28670; battuta 45 -> 25, anti 3 -> 0, fourths 59 -> 54.
+    {FormType::PreludeAndFugue, 0, 0, 11, 25, 0, 0, 1, 2, 0, 28670, 54},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1998,7 +2003,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Minor 6th/7th spelled under the plan's chord: hidden 183 -> 145; battuta
     // 219 -> 247 (worst 4 -> 5), anti 14 -> 20, worst hidden 3 -> 4, fourths
     // 1667 -> 1834.
-    {FormType::Fugue, 0, 0, 145, 247, 20, 0, 4, 5, 1, 493269, 1834},
+    // Pedal and stretto at every length, answer-interval restatement, minor v
+    // under the v station: hidden 145 -> 200 (worst 4 -> 5), battuta 247 -> 287,
+    // anti 20 -> 36 (worst 1 -> 2), fourths 1834 -> 1949, floor 493269 -> 486007.
+    {FormType::Fugue, 0, 0, 200, 287, 36, 0, 5, 4, 2, 486007, 1949},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2087,7 +2095,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // all but two of the reference organ fugues let theirs do.
     // Same spelling: hidden 113 -> 89; battuta 199 -> 217, anti 6 -> 13,
     // fourths 1087 -> 1193.
-    {FormType::PreludeAndFugue, 0, 0, 89, 217, 13, 0, 3, 3, 1, 427684, 1193},
+    // Same changes: hidden 89 -> 106, fourths 1193 -> 1262, floor 427684 -> 422035;
+    // battuta 217 -> 214, anti 13 -> 10.
+    {FormType::PreludeAndFugue, 0, 0, 106, 214, 10, 0, 3, 3, 1, 422035, 1262},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionStaysUnderCeilingAtEveryLength) {

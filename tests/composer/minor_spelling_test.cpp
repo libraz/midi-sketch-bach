@@ -316,8 +316,11 @@ struct SpellingCeiling {
 };
 
 constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
-    {FormType::Fugue, 114, 12, 0, 5, 22},
-    {FormType::PreludeAndFugue, 15, 0, 0, 1, 0},
+    // Minor v under the v-station entry and the pedal: lowered sevenths 114 -> 75;
+    // the reactive counterline over the inverted entry the natural length now
+    // reaches steps B-Ab-B over V: augmented seconds 0 -> 12.
+    {FormType::Fugue, 75, 0, 12, 5, 0},
+    {FormType::PreludeAndFugue, 0, 0, 0, 0, 0},
     {FormType::TrioSonata, 8, 0, 5, 10, 0},
     {FormType::ChoralePrelude, 9, 6, 0, 0, 0},
     {FormType::ToccataAndFugue, 16, 0, 7, 0, 0},

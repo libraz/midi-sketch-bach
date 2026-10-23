@@ -1766,6 +1766,288 @@ TEST(FormFugueTest, RecurringCountersubjectFallbackStaysValid) {
   }
 }
 
+namespace {
+
+// Letter (diatonic step) of a pitch in the key declared where it sounds, so a
+// restatement and the line it came from are each read in their own key.
+int letterInLocalKey(const HarnessFixture& fx, int pitch, Tick tick) {
+  const KeyContext key = localKeyAt(fx.harmony, tick);
+  return detail::diatonicLetter(pitch, key.tonic_pc,
+                                key.is_minor ? detail::Mode::Minor : detail::Mode::Major);
+}
+
+int soundingAt(const std::vector<MaterialNote>& notes, Tick tick) {
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick <= tick && tick < note.start_tick + note.duration) {
+      return note.pitch;
+    }
+  }
+  return -1;
+}
+
+// The thematic line a countersubject window sounds against: the third entry or
+// a middle entry, whichever states in [start, end).
+std::vector<MaterialNote> entryNotesIn(const HarnessFixture& fx, Tick start, Tick end) {
+  std::vector<MaterialNote> notes;
+  const auto take = [&](const std::vector<MaterialNote>& line) {
+    for (const MaterialNote& note : line) {
+      if (note.start_tick >= start && note.start_tick < end) {
+        notes.push_back(note);
+      }
+    }
+  };
+  take(fx.material.subject);
+  for (const MiddleEntryDecl& decl : fx.material.middle_entries) {
+    take(decl.notes);
+  }
+  std::sort(notes.begin(), notes.end(), [](const MaterialNote& left, const MaterialNote& right) {
+    return left.start_tick < right.start_tick;
+  });
+  return notes;
+}
+
+bool insideTransform(const HarnessFixture& fx, Tick tick, motif_ops::EpisodeMotifTransform kind) {
+  for (const MiddleEntryDecl& decl : fx.material.middle_entries) {
+    for (const MiddleEntryTransformRegion& region : decl.transform_regions) {
+      if (region.transform == static_cast<std::uint8_t>(kind) && tick >= region.start_tick &&
+          tick < region.end_tick) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+// The canonical countersubject is derived against the answer, so wherever it is
+// restated it must keep, letter for letter, the interval it had to the answer
+// note under it -- at the third entry, at a station spelled as its own key and
+// at a minor station degree-shifted inside the home collection. A mirrored
+// entry is not the line it was derived against and never takes the restatement.
+// Notes where a tonal answer departs from the real one are skipped: the line was
+// derived against the tonal head there.
+TEST(FormFugueTest, RestatedCountersubjectKeepsItsIntervalsToTheAnswer) {
+  int restated_third = 0;
+  int restated_major_station = 0;
+  int restated_minor_station = 0;
+  for (bool minor : {false, true}) {
+    for (std::uint16_t bars : {std::uint16_t{44}, std::uint16_t{64}, std::uint16_t{128}}) {
+      for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+        const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, bars);
+        const std::vector<MaterialNote> canonical = countersubjectNotesIn(fx, 4 * kBar, 8 * kBar);
+        ASSERT_FALSE(canonical.empty());
+        const std::vector<MaterialNote>& answer =
+            fx.material.use_tonal_answer ? fx.material.tonal_answer : fx.material.answer;
+        std::vector<int> canonical_rel;
+        for (const MaterialNote& note : canonical) {
+          const int under = soundingAt(answer, note.start_tick);
+          const bool tonal_head = fx.material.use_tonal_answer &&
+                                  under != soundingAt(fx.material.answer, note.start_tick);
+          canonical_rel.push_back(under < 0 || tonal_head
+                                      ? -1
+                                      : ((letterInLocalKey(fx, note.pitch, note.start_tick) -
+                                          letterInLocalKey(fx, under, note.start_tick)) %
+                                             7 +
+                                         7) %
+                                            7);
+        }
+        for (const Span& span : fx.voice_plan.spans) {
+          if (span.intent != VoiceIntent::CountersubjectCarrier || span.start_tick < 8 * kBar) {
+            continue;
+          }
+          const std::vector<MaterialNote> window =
+              countersubjectNotesIn(fx, span.start_tick, span.end_tick);
+          const std::vector<MaterialNote> entry = entryNotesIn(fx, span.start_tick, span.end_tick);
+          if (window.size() != canonical.size() || entry.empty()) {
+            continue;
+          }
+          // A restatement is the canonical line note for note in rhythm, moved
+          // by one constant number of letters.
+          bool restated = true;
+          const int shift = letterInLocalKey(fx, window[0].pitch, window[0].start_tick) -
+                            letterInLocalKey(fx, canonical[0].pitch, canonical[0].start_tick);
+          for (std::size_t idx = 0; restated && idx < window.size(); ++idx) {
+            restated =
+                window[idx].duration == canonical[idx].duration &&
+                window[idx].start_tick - span.start_tick ==
+                    canonical[idx].start_tick - canonical[0].start_tick &&
+                letterInLocalKey(fx, window[idx].pitch, window[idx].start_tick) -
+                        letterInLocalKey(fx, canonical[idx].pitch, canonical[idx].start_tick) ==
+                    shift;
+          }
+          if (insideTransform(fx, span.start_tick, motif_ops::EpisodeMotifTransform::Invert)) {
+            EXPECT_FALSE(restated) << "seed " << seed << " bars " << bars
+                                   << ": the countersubject was restated against an inverted entry";
+            continue;
+          }
+          if (!restated) {
+            continue;
+          }
+          for (std::size_t idx = 0; idx < window.size(); ++idx) {
+            const int under = soundingAt(entry, window[idx].start_tick);
+            if (canonical_rel[idx] < 0 || under < 0) {
+              continue;
+            }
+            const int rel = ((letterInLocalKey(fx, window[idx].pitch, window[idx].start_tick) -
+                              letterInLocalKey(fx, under, window[idx].start_tick)) %
+                                 7 +
+                             7) %
+                            7;
+            EXPECT_EQ(rel, canonical_rel[idx])
+                << (minor ? "minor" : "major") << " seed " << seed << " bars " << bars
+                << " window bar " << span.start_tick / kBar << " note " << idx;
+          }
+          if (span.start_tick < 12 * kBar) {
+            ++restated_third;
+          } else if (minor) {
+            ++restated_minor_station;
+          } else {
+            ++restated_major_station;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_GT(restated_third, 0);
+  EXPECT_GT(restated_major_station, 0);
+  EXPECT_GT(restated_minor_station, 0);
+}
+
+// Every key area the fugue declares contains the statement it brackets. A
+// minor-mode station is degree-shifted inside the home collection, so it
+// declares no key area at all; declaring the station's own key would name
+// pitches -- the major dominant's leading tone, the minor iv's lowered sixth --
+// that the entry contradicts.
+TEST(FormFugueTest, DeclaredKeyAreasContainTheirStatements) {
+  for (bool minor : {false, true}) {
+    for (std::uint16_t bars : {std::uint16_t{44}, std::uint16_t{64}, std::uint16_t{128}}) {
+      for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+        const HarnessFixture fx = buildFixture(FormType::Fugue, seed, minor, bars);
+        const KeyContext home{static_cast<std::uint8_t>(fx.harmony.tonic_pc % 12),
+                              fx.harmony.is_minor};
+        const auto& modulations = fx.harmony.modulations;
+        for (std::size_t idx = 0; idx < modulations.size(); ++idx) {
+          const KeyContext key{static_cast<std::uint8_t>(modulations[idx].to_tonic_pc % 12),
+                               modulations[idx].to_is_minor};
+          if (key.tonic_pc == home.tonic_pc && key.is_minor == home.is_minor) {
+            continue;
+          }
+          const Tick start = modulations[idx].tick;
+          const Tick end = idx + 1 < modulations.size() ? modulations[idx + 1].tick : bars * kBar;
+          const auto check = [&](const std::vector<MaterialNote>& line, const char* what) {
+            for (const MaterialNote& note : line) {
+              if (note.start_tick < start || note.start_tick >= end) {
+                continue;
+              }
+              const int pitch_class = note.pitch % 12;
+              const bool raised_leading_tone =
+                  key.is_minor && pitch_class == (key.tonic_pc + 11) % 12;
+              EXPECT_TRUE(inKey(note.pitch, key) || raised_leading_tone)
+                  << (minor ? "minor" : "major") << " seed " << seed << " bars " << bars << ": "
+                  << what << " pitch " << static_cast<int>(note.pitch) << " at bar "
+                  << note.start_tick / kBar << " lies outside the declared key "
+                  << static_cast<int>(key.tonic_pc) << (key.is_minor ? "m" : "M");
+            }
+          };
+          for (const MiddleEntryDecl& decl : fx.material.middle_entries) {
+            check(decl.notes, "middle entry");
+          }
+          check(fx.material.use_tonal_answer ? fx.material.tonal_answer : fx.material.answer,
+                "answer");
+        }
+      }
+    }
+  }
+}
+
+// Every supported fugue length states a stretto, and a development with two or
+// more entry cycles prolongs the dominant over a pedal. Both devices sit in a
+// window that carries an entry, and so does the climax window the ornament pass
+// reads.
+TEST(FormFugueTest, EveryFugueLengthStatesAStrettoAndItsPedal) {
+  constexpr std::array<SubjectCharacter, 4> kCharacters = {
+      SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+      SubjectCharacter::Restless};
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint16_t bars :
+         {std::uint16_t{0}, std::uint16_t{20}, std::uint16_t{30}, std::uint16_t{84}}) {
+      for (SubjectCharacter character : kCharacters) {
+        for (bool minor : {false, true}) {
+          for (std::uint32_t seed = 1; seed <= 5; ++seed) {
+            ComposeRequest req;
+            req.form = form;
+            req.seed = seed;
+            req.is_minor = minor;
+            req.character = character;
+            req.target_bars = bars;
+            HarnessFixture fx;
+            ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+            std::vector<Tick> entry_starts;
+            for (const Span& span : fx.voice_plan.spans) {
+              if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+                entry_starts.push_back(span.start_tick);
+              }
+            }
+            const auto holds_entry = [&](Tick tick) {
+              return std::find(entry_starts.begin(), entry_starts.end(), tick) !=
+                     entry_starts.end();
+            };
+            const std::string where =
+                std::string(formTypeToString(form)) + " bars " + std::to_string(bars) +
+                " character " + std::to_string(static_cast<int>(character)) +
+                (minor ? " minor" : " major") + " seed " + std::to_string(seed);
+            EXPECT_FALSE(fx.material.stretto_entries.empty()) << where << ": no stretto";
+            for (const StrettoDecl& stretto : fx.material.stretto_entries) {
+              EXPECT_TRUE(holds_entry(stretto.leader_entry_tick)) << where;
+            }
+            EXPECT_TRUE(holds_entry(fx.climax_start_tick)) << where << ": climax off an entry";
+            if (entry_starts.size() >= 2) {
+              ASSERT_FALSE(fx.material.pedal_points.empty()) << where << ": no dominant pedal";
+              EXPECT_TRUE(holds_entry(fx.material.pedal_points.front().start_tick)) << where;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// A countersubject over an entry in the bass never strikes a fourth above it
+// on a bar downbeat: under the lowest voice a fourth is a second inversion,
+// and every countersubject path ranks it as one.
+TEST(FormFugueTest, CountersubjectOverABassEntryAvoidsDownbeatFourths) {
+  struct Case {
+    std::uint32_t seed;
+    bool minor;
+  };
+  for (const Case& item : {Case{7, false}, Case{2, false}, Case{8, true}}) {
+    const HarnessFixture fx =
+        buildFixture(FormType::Fugue, item.seed, item.minor, naturalBars(FormType::Fugue));
+    for (const Span& span : fx.voice_plan.spans) {
+      if (span.intent != VoiceIntent::MiddleEntryCarrier &&
+          span.intent != VoiceIntent::SubjectCarrier) {
+        continue;
+      }
+      if (span.voice != 2) {
+        continue;
+      }
+      const std::vector<MaterialNote> entry = entryNotesIn(fx, span.start_tick, span.end_tick);
+      for (const MaterialNote& note : fx.material.countersubject) {
+        if (note.start_tick < span.start_tick || note.start_tick >= span.end_tick ||
+            note.start_tick % kBar != 0) {
+          continue;
+        }
+        const int bass = soundingAt(entry, note.start_tick);
+        EXPECT_FALSE(bass >= 0 && note.pitch > bass && (note.pitch - bass) % 12 == 5)
+            << "seed " << item.seed << (item.minor ? " minor" : " major") << " bar "
+            << note.start_tick / kBar << ": countersubject " << static_cast<int>(note.pitch)
+            << " strikes a fourth over the bass entry " << bass;
+      }
+    }
+  }
+}
+
 // --- 7. P&F: prelude / fugue split, no prelude subjects, downbeat anchoring --
 
 TEST(FormFuguePreludeAndFugueTest, PreludeRegionHasNoSubjectsAndFugueOpensExposition) {
@@ -2139,7 +2421,7 @@ TEST(FormFugueTest, StrettoOverlapNeverSoundsATrueParallel) {
 // getting scarcer, which is a fact about the subject catalog and not a fault in
 // the choice.
 TEST(FormFugueTest, StrettoOverlapSustainsASharpOnlyWhereTheParallelWasRefused) {
-  EXPECT_EQ(measureStrettoOverlaps().sustained_sharps, 12u)
+  EXPECT_EQ(measureStrettoOverlaps().sustained_sharps, 8u)
       << "the beat-long m2/M7 count in the stretto overlap moved";
 }
 
