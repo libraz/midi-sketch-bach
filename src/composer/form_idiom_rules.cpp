@@ -183,8 +183,8 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   // quarter-note intensification), but each ground note on a bar head must
   // equal the canonical material tone sounding at the same cycle-relative
   // position. Any altered, transposed, or reordered restatement changes some
-  // bar head and fails. Off-downbeat ground notes are unconstrained (the
-  // builders keep their pitch equal to the bar tone by construction). The
+  // bar head and fails. Off-downbeat ground notes are unconstrained (decorations
+  // may sound other pitches than the bar tone). The
   // rule is inert when either the canonical ground or the stamped run is
   // empty (fixtures that declare no ground).
   const auto checkImmutableGround = [&](const std::vector<MaterialNote>& ground,
@@ -356,7 +356,7 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   // For each note stamped FigurationCommitted (and not PedalPreparation)
   // whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0), resolve
   // the active ChordEvent (latest plan.chords entry with start_tick <= the note's
-  // onset) and reuse the same chord-tone arithmetic the P7 rules use: triadFor
+  // onset) and reuse the same chord-tone arithmetic the doubling/spacing rules use: triadFor
   // for the root/third/fifth and hasSeventh/seventhOffset for the seventh. If any
   // bar-downbeat figuration note's pitch class is not a chord tone, push ONE
   // MusicalFail. The rule is inert when no FigurationCommitted note exists

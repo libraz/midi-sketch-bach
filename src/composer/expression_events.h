@@ -225,16 +225,21 @@ std::vector<CcEvent> buildPhraseDynamics(std::size_t cycle_count, std::uint16_t 
  * Steps the tempo down across the final ~2 bars of the piece to shape a
  * poco-a-poco closing ritardando. The starting tempo event (at tick 0) is the
  * caller's responsibility; this function returns only the deceleration steps
- * that follow it. Design values (seed-independent), on the half-bar grid:
- *   - 94% of base BPM, entering the penultimate bar.
- *   - 90% of base BPM, at the penultimate bar's mid-point.
- *   - 85% of base BPM, entering the final bar.
- *   - 78% of base BPM, at the final bar's mid-point (the allargando floor).
- * For very short pieces (< 2 bars) a single 85% step is emitted near the end.
+ * that follow it. Design values (seed-independent), on the half-bar grid
+ * (beat grid in 3/4):
+ *   - Rhetorical: 94%, 90% (penultimate bar head and mid-point), 85%, 78%
+ *     (final bar head and mid-point, the allargando floor).
+ *   - Gentle: 98%, 96%, 93%, 90% at the same four positions.
+ * For very short pieces (< 2 bars) a single step is emitted near the end
+ * (85% Rhetorical, 92% Gentle).
  *
  * @param bpm Base tempo in BPM (the tempo in force before the ritardando).
  * @param total_ticks Total length of the piece in ticks.
  * @param ticks_per_bar Ticks per bar for the piece's meter.
+ * @param style None returns no events; Gentle and Rhetorical select the
+ *        step table above.
+ * @param ts_numerator Meter numerator; 3 places the mid-bar steps one beat
+ *        into the bar instead of at the half bar.
  * @return Tempo events with strictly decreasing bpm, in increasing tick order,
  *         all placed before total_ticks. Empty if total_ticks is 0.
  * @note Pure function of its arguments: no RNG, identical output every call.

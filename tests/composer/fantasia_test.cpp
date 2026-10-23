@@ -6,7 +6,7 @@
 //   1. CandidateSearch replays the FantasiaSection whose window matches the
 //      span verbatim (matched by section.start_tick == span.start_tick &&
 //      section.end_tick == span.end_tick, NOT by voice), stamping
-//      FantasiaSectionContrast on every note (plus the baseline ChordTone/P7/P8
+//      FantasiaSectionContrast on every note (plus the baseline ChordTone and harmonic-plan
 //      bits via emitMaterialNote). The branch is inert when
 //      material.fantasia_sections is empty.
 //   2. The Validator's section_contrast_required rule (SOFT MusicalFail when an

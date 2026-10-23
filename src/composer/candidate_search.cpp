@@ -27,7 +27,7 @@ using rule_helpers::triadPitchClasses;
 // Builds one verbatim Candidate from a MaterialNote (pitch / tick / duration
 // copied as-is, score = 1.0) with the standard baseline provenance bits:
 // ChordTone (when the pitch is a triad tone of the chord active at its onset)
-// plus the P7 and P8 bit sets. `extra_bits` are OR-ed in first so the
+// plus the harmonic-plan and modulation bit sets. `extra_bits` are OR-ed in first so the
 // branch-specific provenance bit(s) (EpisodeMotifSourced, PedalCommitted,
 // per-fragment rhythm bits, etc.) survive; baseline OR-ing is
 // order-independent so the resulting mask is identical to the inlined clones
@@ -124,7 +124,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (mnote.start_tick >= span.end_tick)
         break;
       // Branch-specific bits (cadence / leading-tone marker / tonal-answer /
-      // countersubject / imitation-entry); the baseline ChordTone/P7/P8 bits
+      // countersubject / imitation-entry); the baseline ChordTone and harmonic-plan bits
       // are added by emitMaterialNote. OR order is irrelevant.
       RuleIdMask extra_bits = 0;
       if (const CadenceCell* cadence_cell = cadenceCellAt(material, mnote.start_tick);
@@ -151,7 +151,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // the first high-lane (bit >= 64) RuleBit to ship.
         extra_bits |= ruleBitMask(RuleBit::CountersubjectInvertible);
       }
-      // P9 ImitationEntryMatched: set on idx==0 (the entry note) when
+      // ImitationEntryMatched: set on idx==0 (the entry note) when
       // any declared ImitationEntry names this fragment as leader or
       // follower. The Validator's imitation_entry_match rule checks
       // the actual distance and interval against the declaration.
@@ -208,7 +208,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           continue;
         if (n.start_tick >= span.end_tick)
           break;
-        // EpisodeMotifSourced plus the baseline ChordTone/P7/P8 bits (the
+        // EpisodeMotifSourced plus the baseline ChordTone and harmonic-plan bits (the
         // ChordTone bit keeps passing-tone tracking on the next Compose span
         // accurate).
         out.push_back(
@@ -271,7 +271,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // seed motif followed by num_steps-1 transposed copies (each
     // shifted by step_length_ticks*k and step_offset_semis*k). All
     // notes carry FortspinnungSourced; steps 1..N-1 additionally carry
-    // SequenceStep. P9 sequence patterns:
+    // SequenceStep. Sequence patterns:
     //   DescendingFifths → -7 semis per step.
     //   DescendingStep   → -2 semis per step.
     //   AscendingStep    → +2 semis per step.
@@ -333,7 +333,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   if (span.intent == VoiceIntent::PedalCarrier) {
     // Replay each PedalPointDecl that targets this span's voice and whose
     // held note falls inside the span window. Emits exactly one sustained
-    // note carrying PedalCommitted (plus ChordTone/P7/P8 bits so any
+    // note carrying PedalCommitted (plus ChordTone and harmonic-plan bits so any
     // adjacent Compose span reads the boundary correctly).
     for (const auto& pedal : material.pedal_points) {
       if (pedal.voice != span.voice)
@@ -360,8 +360,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Development carriers: verbatim Material replay from a per-intent
     // source vector, stamping one provenance bit. Register safety (no
     // voice crossing) is the fixture's responsibility; because every
-    // development carrier is NoteSource::Material, the Validator's
-    // vertical/parallel rules skip pairs where both notes are Material.
+    // development carrier is NoteSource::Material, Generation-scope
+    // validation exempts pairs where both notes are Material.
     const std::vector<MaterialNote>* source = nullptr;
     const MiddleEntryDecl* middle_entry = nullptr;
     RuleBit bit = RuleBit::MiddleEntryCommitted;
@@ -477,7 +477,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   if (span.intent == VoiceIntent::NctCarrier) {
     // Non-chord-tone carrier: verbatim replay of material.nct_figures
     // that fall inside the span window, mirroring the SubjectCarrier
-    // branch (source = Material, score = 1.0, standard ChordTone/P7/P8
+    // branch (source = Material, score = 1.0, standard ChordTone and harmonic-plan
     // bit-OR set). The figure provenance bits (CambiataDetected etc.) are
     // NOT stamped here: the nct_detector figures need the full sorted
     // single-voice note list, which only exists after the Composer's
@@ -498,7 +498,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Solo String Flow carrier: verbatim replay of the single-voice
     // broken-chord line in material.arpeggio_template that falls inside the
     // span window, like the other Material carriers (source = Material,
-    // score = 1.0, baseline ChordTone/P7/P8 bit set via emitMaterialNote).
+    // score = 1.0, baseline ChordTone and harmonic-plan bit set via emitMaterialNote).
     // Every note additionally carries ArpeggioFlowActive + ImplicitVoiceTracked
     // so the provenance records the Flow device shipped and the
     // Validator's implicit-voice rules cover the line. Implicit-voice
@@ -521,7 +521,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // immutable ground bass (material.ground_bass is one cycle of length
     // material.ground_bass_period ticks). The cycle is laid down repeatedly to
     // fill [span.start_tick, span.end_tick); each note is source = Material,
-    // score = 1.0 (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // score = 1.0 (baseline ChordTone and harmonic-plan bits via emitMaterialNote) plus
     // GroundBassReplayed so the provenance records the ground shipped.
     // The ground is immutable: notes are replayed verbatim, only
     // time-shifted by whole cycles.
@@ -581,7 +581,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Organ Prelude figuration carrier: verbatim replay of the single
     // FigurationSection whose window matches this span (the fixture sets
     // span.start_tick/end_tick to the section's window). Each note is source =
-    // Material, score = 1.0 (baseline ChordTone/P7/P8 bits via emitMaterialNote)
+    // Material, score = 1.0 (baseline ChordTone and harmonic-plan bits via emitMaterialNote)
     // plus FigurationCommitted. A section flagged is_cadenza OR-s CadenzaApplied
     // onto every note; is_pedal_prep OR-s PedalPreparation. These bits let the
     // provenance record the prelude's free figuration / cadenza / dominant
@@ -624,7 +624,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Organ Toccata carrier: verbatim replay of the single ToccataSection
     // whose window matches this span (the fixture sets span.start_tick/end_tick
     // to the section's window). Each note is source = Material, score = 1.0
-    // (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // (baseline ChordTone and harmonic-plan bits via emitMaterialNote) plus
     // ToccataArchetypeApplied. When the section is flagged is_section_head, its
     // FIRST note additionally carries SectionTransition (confirming the
     // sectional layout shipped). The (character, archetype) compatibility is the
@@ -657,7 +657,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // fixed chorale tune that falls inside the span window. Source = the
     // embellished line (material.cf_embellished) when material.cf_is_embellished
     // is set, otherwise the plain skeleton (material.cantus_firmus). Each note is
-    // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
+    // source = Material, score = 1.0 (baseline ChordTone and harmonic-plan bits via
     // emitMaterialNote) plus CantusFirmusReplayed. When the embellished line is
     // replayed, every note additionally carries CFEmbellishmentApplied. The
     // cantus firmus is immutable: its bar-downbeat tones are checked
@@ -682,7 +682,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // 8-bar passacaglia ground bass (material.passacaglia_ground is one
     // cycle of length material.passacaglia_ground_period ticks). The cycle is
     // laid down repeatedly to fill [span.start_tick, span.end_tick); each note is
-    // source = Material, score = 1.0 (baseline ChordTone/P7/P8 bits via
+    // source = Material, score = 1.0 (baseline ChordTone and harmonic-plan bits via
     // emitMaterialNote) plus PassacagliaGroundReplayed so the provenance records
     // the ground shipped. The ground PITCHES are immutable: notes are replayed
     // time-shifted by whole cycles, and from
@@ -827,7 +827,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Organ Trio Sonata carrier: verbatim replay of the single TrioVoiceLine
     // whose voice matches this span (material.trio_voices). Each note that falls
     // inside the span window is source = Material, score = 1.0 (baseline
-    // ChordTone/P7/P8 bits via emitMaterialNote) plus TrioVoiceIndependent so the
+    // ChordTone and harmonic-plan bits via emitMaterialNote) plus TrioVoiceIndependent so the
     // Validator's voice_independence_threshold rule can collect the trio voices
     // and measure their pairwise independence. Inert when trio_voices is empty.
     // Clone of the PassacagliaVariation branch, matched by voice (not window).
@@ -850,7 +850,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // Organ Fantasia carrier: verbatim replay of the single FantasiaSection
     // whose window matches this span (the fixture sets span.start_tick/end_tick
     // to the section's window). Each note is source = Material, score = 1.0
-    // (baseline ChordTone/P7/P8 bits via emitMaterialNote) plus
+    // (baseline ChordTone and harmonic-plan bits via emitMaterialNote) plus
     // FantasiaSectionContrast so the Validator's section_contrast_required rule
     // can collect the sections (by window) and measure the density / register
     // contrast between adjacent sections. Inert when fantasia_sections is empty.

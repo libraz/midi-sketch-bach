@@ -25,8 +25,7 @@ namespace bach::composer {
 
 // Returns the chord tones (root, third, fifth, optional seventh) as
 // pitch classes in [0, 11]. `out_count` is set to 3 for triads and 4
-// for 7th-quality chords. Augmented sixth chords are not handled here
-// (P8 territory).
+// for 7th-quality chords. Augmented sixth chords are not handled here.
 std::array<std::uint8_t, 4> chordPitchClasses(const ChordEvent& chord, std::size_t* out_count);
 
 // True if `chord.quality` carries a seventh chord factor.

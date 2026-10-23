@@ -196,9 +196,10 @@ constexpr CounterpointBudgetEntry kOpenRules[] = {
     // closed permanently. What remains is judged against the harmonic plan.
     {FormType::CelloPrelude, "strong_beat_dissonance"},
     {FormType::CelloPrelude, "unprepared_dissonance"},
-    // Chaconne -- two voices, the lower of them the immutable ground. Every
-    // onset of the upper line is ranked against that ground while the material
-    // is built, and the cadential coda ranks the two tones it writes over the
+    // Chaconne -- three voices: the variation line, a middle line and the
+    // immutable ground below. Every onset of the variation line is ranked
+    // against that ground while the material is built, and the cadential coda ranks the two tones
+    // it writes over the
     // bass at both ends, so no true parallel of either class survives. What the
     // ranking does accept is a lesser fault in place of a worse one, which is
     // why the contrary-motion and hidden rules stay open.

@@ -27,21 +27,20 @@ namespace bach::composer {
 // ---------------------------------------------------------------------------
 // Fugue family: the standalone fugue and the prelude+fugue pair.
 //
-// Both builders are dedicated assemblers (no longer placeholders replaying a
-// proven phase fixture). They honour ResolvedRequest length, mode, character,
+// Both builders are dedicated assemblers. They honour ResolvedRequest length, mode, character,
 // and the arc curve. The fugue is the flagship form, so it is built from a
 // fixed exposition + a variable number of repeatable 8-bar device-cycles +
 // a fixed coda; the prelude+fugue pair reuses the same fugue assembly behind a
 // figuration prelude.
 //
-// EVERY note in both forms is NoteSource::Material (verbatim carriers). The
-// validator's parallel / hidden-parallel / vertical-dissonance / cross-relation
-// / invertible rules all skip a voice pair when BOTH notes are Material (the
-// composer cannot edit fixed inputs), so the only inter-voice constraint that
-// fires on these fixtures is voice_crossing (interval < 0 at a shared tick,
-// where a higher-indexed voice rose above a lower-indexed one). The builders
-// therefore keep a strict per-voice register order V0 >= V1 >= V2 at every
-// shared tick by confining each voice's material to a disjoint register band.
+// EVERY note in both forms is NoteSource::Material (verbatim carriers). At
+// Generation scope the validator exempts a Material x Material pair from the
+// counterpoint rules (the composer cannot edit fixed inputs), leaving
+// voice_crossing as the only live inter-voice constraint. At FinalScore the
+// rules do evaluate such pairs: findings are recorded as failures or
+// informational and gated by the form's counterpoint budget. The builders keep
+// a strict per-voice register order V0 >= V1 >= V2 at every shared tick by
+// confining each voice's material to a disjoint register band.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -1233,8 +1232,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
   // Static compatibility of a candidate countersubject restatement against the
   // entry line it will sound with, over the 4-bar entry window. Both lines are
-  // verbatim Material, so the validator skips every dissonance rule on the pair;
-  // this vets the two combinations the ear rejects that would otherwise ship
+  // verbatim Material, which the Generation-scope validator does not
+  // repair; this vets the two combinations the ear rejects that would otherwise ship
   // unflagged: (a) a sharp dissonance (ic 1/6/11) sustained for a half note or
   // more, and (b) a similar-motion arrival on a perfect interval (ic 0/7) at a
   // shared onset. Band violations are already ruled out by build_restatement,
@@ -2019,7 +2018,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // chord-tone figuration so all three voices sound through the entry. The
       // pedal cycle already places a held tone in V1, so it is excluded. The V1
       // figuration is verbatim Material (both-Material with the V0 figuration, so
-      // the upper-pair invertible / fourth checks are skipped); V2 harmonic
+      // Generation-scope repair never touches the upper pair); V2 harmonic
       // support, placed afterward, avoids parallels against it. A three-voice
       // stretto pile-up already owns every voice, so both accompaniment fills
       // are suppressed for that cycle (second_stretto_placed).
@@ -2035,9 +2034,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
         // V2 bass support is a verbatim Material scalar-wave figuration (quarter
         // notes, one chord-tone anchor per beat connected by scale steps), matching
         // the episode-bass construction. A Material bass walks stepwise instead of
-        // re-striking a single chord root, and because it is Material the validator
-        // skips every inter-voice parallel rule against the faster figuration above
-        // it -- band confinement keeps V0 >= V1 >= V2 so voice_crossing never fires.
+        // re-striking a single chord root, and because it is Material the Generation
+        // validator does not repair parallels against the faster figuration above
+        // it; band confinement keeps V0 >= V1 >= V2 so voice_crossing never fires.
         addFigurationSpan(asm_ctx, 2, me_start, me_start + 3, plan, first_bar, mode, 1, fig_offset);
       }
     }
@@ -2284,8 +2283,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       //
       // Both accompanying lines are verbatim Material scalar-waves whose strong
       // beats anchor on chord tones consonant with the concurrent theme tones;
-      // being Material they skip every inter-voice rule but voice_crossing,
-      // which the disjoint per-voice bands already prevent. A free Compose line
+      // being Material they are exempt from Generation-scope repair except
+      // voice_crossing, which the disjoint per-voice bands already prevent. A free Compose line
       // here would instead be forced into parallels against the fast figuration
       // above it. Where the V1 figuration sounds under a full-length episode it
       // alternates its subdivision tier (eighths / sixteenths) across episodes
@@ -2346,8 +2345,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   addFigurationSpan(asm_ctx, 1, coda_start, coda_start + 1, plan, first_bar, mode, 1, fig_offset);
   // V2 bass under the final subject is a verbatim Material scalar-wave figuration
   // (quarter notes), matching the development bass support: it walks chord tones
-  // by scale steps instead of re-striking one root, and being Material it skips the
-  // inter-voice parallel checks against the Material subject and alto above it.
+  // by scale steps instead of re-striking one root, and being Material it is not
+  // repaired against the Material subject and alto above it at Generation scope.
   addFigurationSpan(asm_ctx, 2, coda_start, coda_start + 1, plan, first_bar, mode, 1, fig_offset);
 
   // V0 cadence figure (CodaCarrier, bars coda_start+2 .. coda_start+3): a

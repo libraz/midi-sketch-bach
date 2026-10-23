@@ -82,10 +82,10 @@ std::vector<NctHit> detectCambiata(const std::vector<MaterialNote>& notes,
     const auto& n2 = notes[i + 2];
     const auto& n3 = notes[i + 3];
     const auto& n4 = notes[i + 4];
-    // M4: the five notes must be melodically back-to-back (no rest/gap).
+    // the five notes must be melodically back-to-back (no rest/gap).
     if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2) || !isAdjacent(n2, n3) || !isAdjacent(n3, n4))
       continue;
-    // M5: anchor the whole figure's chord-tone / NCT classification to the
+    // anchor the whole figure's chord-tone / NCT classification to the
     // chord active at the figure's first note.
     const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
     if (!isChordTone(n0.pitch, anchor))
@@ -126,10 +126,10 @@ std::vector<NctHit> detectEchappee(const std::vector<MaterialNote>& notes,
     const auto& n0 = notes[i];
     const auto& n1 = notes[i + 1];
     const auto& n2 = notes[i + 2];
-    // M4: the three notes must be melodically back-to-back (no rest/gap).
+    // the three notes must be melodically back-to-back (no rest/gap).
     if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2))
       continue;
-    // M5: anchor the whole figure's classification to the first note's chord.
+    // anchor the whole figure's classification to the first note's chord.
     const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
     if (!isChordTone(n0.pitch, anchor))
       continue;
@@ -161,13 +161,13 @@ std::vector<NctHit> detectAnticipation(const std::vector<MaterialNote>& notes,
   for (std::size_t i = 0; i + 1 < notes.size(); ++i) {
     const auto& n0 = notes[i];
     const auto& n1 = notes[i + 1];
-    // M4: n0 and n1 are the melodic approach; they must run forward in time
+    // n0 and n1 are the melodic approach; they must run forward in time
     // without overlap. (Unlike the purely melodic figures, an anticipation
     // is, by definition, temporally separated from its resolution, so the
     // n1 -> resolution leg is not required to be back-to-back.)
     if (n0.start_tick + n0.duration > n1.start_tick)
       continue;
-    // M5: anchor n0 / n1 classification to the chord active at n0.
+    // anchor n0 / n1 classification to the chord active at n0.
     const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
     if (!isChordTone(n0.pitch, anchor))
       continue;
@@ -187,7 +187,7 @@ std::vector<NctHit> detectAnticipation(const std::vector<MaterialNote>& notes,
     const ChordEvent& resolution_chord = activeChord(harmonic_plan, n2.start_tick);
     if (!isChordTone(n2.pitch, resolution_chord))
       continue;
-    // M6: the figure must anticipate the NEXT chord, so a real chord change
+    // the figure must anticipate the NEXT chord, so a real chord change
     // must separate the anticipation note from its resolution. Reject when
     // n1 and n2 fall under the same chord event.
     if (activeChord(harmonic_plan, n1.start_tick).start_tick == resolution_chord.start_tick)
@@ -212,10 +212,10 @@ std::vector<NctHit> detectNotaCambiata(const std::vector<MaterialNote>& notes,
     const auto& n1 = notes[i + 1];
     const auto& n2 = notes[i + 2];
     const auto& n3 = notes[i + 3];
-    // M4: the four notes must be melodically back-to-back (no rest/gap).
+    // the four notes must be melodically back-to-back (no rest/gap).
     if (!isAdjacent(n0, n1) || !isAdjacent(n1, n2) || !isAdjacent(n2, n3))
       continue;
-    // M5: anchor the whole figure's classification to the first note's chord.
+    // anchor the whole figure's classification to the first note's chord.
     const ChordEvent& anchor = activeChord(harmonic_plan, n0.start_tick);
     if (!isChordTone(n0.pitch, anchor))
       continue;

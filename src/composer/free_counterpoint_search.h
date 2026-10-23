@@ -39,7 +39,7 @@ namespace bach::composer {
  *   the already-committed voices) carried across span boundaries.
  * @param saturated_positions If non-null, incremented once per position that
  *   exhausted with no admissible candidate (a silent hole). The caller
- *   escalates a non-zero count to ValidationStatus::FailedSeed.
+ *   only records the count; it never sets ValidationStatus::FailedSeed.
  * @return Candidates in tick order, one per position that yielded a pitch.
  */
 std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& harmonic_plan,

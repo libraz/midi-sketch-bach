@@ -29,8 +29,7 @@ namespace bach::composer {
 // point layer and V1 punctuation layer (BWV565 / BWV538 tonic / dominant pedal
 // idiom), then a 3-voice fugue section to the end, assembled into one fixture.
 //
-// Both builders are dedicated assemblers (no longer placeholders replaying a
-// proven phase fixture). They honour ResolvedRequest length, mode, character,
+// Both builders are dedicated assemblers. They honour ResolvedRequest length, mode, character,
 // and the arc curve.
 //
 // Free section: the toccata generalizes OrganToccata's archetype machinery to the
@@ -43,10 +42,11 @@ namespace bach::composer {
 // built inline with the PreludeAndFugue idiom (it does NOT share the fugue family's
 // assembly cascade, so the two systems stay independent).
 //
-// EVERY note is NoteSource::Material (verbatim carriers). The validator's
-// parallel / hidden-parallel / vertical-dissonance / cross-relation / invertible
-// rules all skip a voice pair when BOTH notes are Material, so the only
-// inter-voice constraint that fires is voice_crossing. Both forms therefore
+// EVERY note is NoteSource::Material (verbatim carriers). At Generation scope
+// the validator exempts a Material x Material pair from the counterpoint rules,
+// leaving voice_crossing as the only live inter-voice constraint; at FinalScore
+// the rules evaluate such pairs and record failures or informational findings,
+// gated by the form's counterpoint budget. Both forms therefore
 // confine each voice's material to a disjoint, strictly-ordered register band
 // (V0 highest, V2 lowest), keeping V0 >= V1 >= V2 at every shared tick. The free
 // section's V2 pedal and V1 punctuation pick their pitches via the shared tier-

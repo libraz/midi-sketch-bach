@@ -790,7 +790,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   std::sort(voices.begin(), voices.end());
   const VoiceOnsetIndex onset_index(notes);
 
-  // P3 cadence voice leading. CadenceEvent marks a required two-note
+  // Cadence voice leading. CadenceEvent marks a required two-note
   // formula at tick-kTicksPerBeat -> tick. The upper line is the
   // lowest-indexed voice actually sounding at the cadence (a decorative
   // voice may already have dropped out); the bass line is the
@@ -1303,8 +1303,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P10 Invertible counterpoint at the octave. Scoped to the adjacent
-  // UPPER voice pairs the P7 spacing rule covers: pair (va, vb) with
+  // Invertible counterpoint at the octave. Scoped to the adjacent
+  // UPPER voice pairs the spacing rule covers: pair (va, vb) with
   // vb == va + 1 (indices into the sorted `voices` list) and the pair
   // is not the bottom-of-texture pair (vb != voices.size() - 1). For a
   // 3-voice texture this is only the (V0, V1) pair.
@@ -1319,7 +1319,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     const std::size_t vb = va + 1;
     if (vb >= voices.size())
       break;
-    // Exclude the bottom-of-texture pair (mirrors P7 spacing scoping).
+    // Exclude the bottom-of-texture pair (mirrors the spacing rule scoping).
     if (vb == voices.size() - 1)
       continue;
     std::uint8_t prev_pa = 0;
@@ -1376,7 +1376,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       return notes[a].start_tick < notes[b].start_tick;
     });
 
-    // Rule P1: forbidden melodic augmented/diminished intervals and direct
+    // Melodic-interval rule: forbidden melodic augmented/diminished intervals and direct
     // tritone leaps. Generation validation limits repair responsibility to
     // Compose notes; final-score validation audits every source.
     for (std::size_t i = 1; i < indices.size(); ++i) {
@@ -1391,7 +1391,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const std::uint8_t current_pitch = notes[current].pitch;
       const int semis =
           std::abs(static_cast<int>(current_pitch) - static_cast<int>(prev_pitch)) % 12;
-      // P8: secondary-dominant exemption. The base augmented_melodic
+      // Secondary-dominant exemption. The base augmented_melodic
       // rule fires on any m3 (semis=3) involving a non-diatonic pitch
       // — but a secondary dominant's chord tones (e.g. F# in V/V of C
       // major) are non-diatonic by design, and m3 motion between two
@@ -1427,7 +1427,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
 
-    // Rule P1: leading tone resolves upward to tonic on the next note.
+    // Leading tone resolves upward to tonic on the next note.
     for (std::size_t i = 0; i < indices.size(); ++i) {
       const std::size_t current = indices[i];
       if (current >= provenance.size())
@@ -1647,7 +1647,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P6 Tonal answer head-mutation check. Bach's tonal answer keeps the
+  // Tonal answer head-mutation check. Bach's tonal answer keeps the
   // answer entry on the dominant key but mutates head-of-subject tonic
   // and dominant degrees so the answer opens on the dominant (mapping
   // I→V) and any subject-dominant pitch resolves back to the tonic
@@ -1681,7 +1681,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P6 Countersubject continuity check. When a Countersubject is
+  // Countersubject continuity check. When a Countersubject is
   // declared (material.countersubject non-empty) AND an answer is
   // also declared (material.answer or material.tonal_answer), the
   // countersubject must sound continuously across the answer's
@@ -1732,7 +1732,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P5 Episode motif-derivation check. For every EpisodeFragment in
+  // Episode motif-derivation check. For every EpisodeFragment in
   // Material::episodes, re-derive the expected notes via
   // motif_ops::applyTransform on the declared source slice of
   // Material::subject and assert that every emitted note in the target
@@ -1785,7 +1785,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P7 doubling / spacing / voice-leading rules.
+  // Doubling / spacing / voice-leading rules.
   //
   // The three checks share a per-chord setup: at each ChordEvent that
   // declares `has_degree`, collect every voice's sounding pitch at the
@@ -1802,8 +1802,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //      bass-to-tenor pair (V2-V3 in 4-voice writing) is allowed to
   //      exceed an octave per Bach textbook spacing.
   //
-  // ChordEvents that leave `has_degree` unset are skipped — pre-P7
-  // fixtures stay backwards-compatible. The rules look only at the
+  // ChordEvents that leave `has_degree` unset are skipped, so
+  // fixtures without functional-harmony data stay valid. The rules look only at the
   // sounding voices at chord_start; mid-chord neighbor/passing motion
   // is not checked here (NCT recognition lives elsewhere).
   if (!harmonic_plan.chords.empty()) {
@@ -1915,7 +1915,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P8 modulation rules.
+  // Modulation rules.
   //
   // modulation_pivot_chord_required: for every ModulationEvent declared
   // with type == Pivot the chord at the event's tick must be diatonic in
@@ -1974,7 +1974,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         break;
       }
     }
-    // Plan §5 P8: secondary_dominant_resolution rule fires when the
+    // The secondary_dominant_resolution rule fires when the
     // chord declared has_secondary_of=true is NOT followed by a chord
     // whose degree equals the declared secondary_of target.
     //
@@ -1988,7 +1988,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     // too (the resolution chord immediately follows the secondary
     // dominant). This keeps the rule from failing free-voice
     // tonicizations where the LT voice is legitimately forced off-step
-    // by P7 doubling/spacing constraints.
+    // by the doubling/spacing constraints.
     const bool degree_ok =
         next != nullptr && next->has_degree && next->degree == chord.secondary_of;
     if (!degree_ok) {
@@ -1999,7 +1999,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // P9 sequence + imitation rules.
+  // Sequence + imitation rules.
   //
   // sequence_pattern_consistency: for every SequenceTemplate in Material,
   // walk the actual emitted notes in the template's voice across the

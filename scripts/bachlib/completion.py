@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a compact P1-P7 fugue completion diagnostic report."""
+"""Generate a compact fugue completion diagnostic report."""
 
 from __future__ import annotations
 

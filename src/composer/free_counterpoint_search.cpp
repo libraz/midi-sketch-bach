@@ -349,7 +349,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         continue;
       }
 
-      // P7 spacing pre-filter. When the active chord declares
+      // Spacing pre-filter. When the active chord declares
       // has_degree=true, reject any candidate that would push an
       // upper-voice adjacent pair past an octave. We check only the
       // pairs the Validator's spacing rule covers (top N-2 pairs in
@@ -392,7 +392,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           continue;
       }
 
-      // P7 doubling pre-filter. When the active chord declares
+      // Doubling pre-filter. When the active chord declares
       // has_degree=true AND owns the leading tone (chord triad
       // contains tonic+11), reject any candidate whose pc matches
       // the leading tone if a previously-placed voice is already
@@ -547,7 +547,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           continue;
       }
 
-      // Melodic rule (mirrors Validator Rule P1): reject a forbidden
+      // Melodic rule (mirrors the Validator melodic-interval rule): reject a forbidden
       // melodic leap — tritone, augmented 2nd/4th, or diminished 5th/octave
       // — from the previous pitch to this candidate. Without this pre-filter
       // the search can pick a best-scoring triad tone that forms such a leap;
@@ -894,7 +894,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         independent_adjustment += 0.50f;
       }
 
-      // P8 Picardy 3rd bias. The final picardy chord's identity is
+      // Picardy 3rd bias. The final picardy chord's identity is
       // carried by its major third (E natural in C major). Without
       // this bias the per-voice prev-distance heuristic pins every
       // voice on the chord root and the major third never sounds.
@@ -1034,7 +1034,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
         rules |= ruleBitMask(RuleBit::ChordTone);
       applyP7Bits(rules, chord, static_cast<std::uint8_t>(pc), is_triad);
       applyP8Bits(rules, harmonic_plan, chord, static_cast<std::uint8_t>(pc), is_triad);
-      // P10 invertibility confirmation. Set InvertibleAt8va when we have
+      // Invertibility confirmation. Set InvertibleAt8va when we have
       // placed context AND this candidate does NOT form a perfect 4th
       // (class 5) on a strong beat with the sounding upper-ADJACENT
       // voice (V_{span.voice-1}). A strong-beat 4th in the upper pair
@@ -1043,7 +1043,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       // consonant strong-beat verticals, so this accrues on most
       // candidates rather than constraining selection.
       //
-      // Scope: only the upper-adjacent pairs the P7 spacing / P10
+      // Scope: only the upper-adjacent pairs the spacing / invertibility
       // validator rules cover (top N-2 pairs). The bottom pair
       // (V_{N-2}, V_{N-1}) is excluded, so the bass voice (the last
       // voice index) never lights the bit against its lower-adjacent
@@ -1256,8 +1256,7 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
     if (best_pitch < 0) {
       // No admissible candidate at this position: a silent hole. Per the
       // no-fallback principle we emit nothing here; report the saturation
-      // so the caller can escalate it to ValidationStatus::FailedSeed
-      // instead of letting the hole pass silently as success.
+      // so the caller can record it instead of letting the hole pass silently.
       if (saturated_positions != nullptr)
         ++*saturated_positions;
       continue;

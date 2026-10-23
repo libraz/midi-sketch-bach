@@ -9,10 +9,9 @@
 
 namespace bach::composer {
 
-// Chord quality. P3-P6 used Major/Minor/Diminished only; P7 adds
-// Augmented and the four 7th-chord qualities the Bach functional
-// vocabulary needs (Major7, minor7, half-dim7=min7b5, dim7,
-// dominant7).
+// Chord quality: the triad qualities plus Augmented and the 7th-chord
+// qualities the Bach functional vocabulary needs (Major7, minor7,
+// half-dim7=min7b5, dim7, dominant7).
 enum class ChordQuality : std::uint8_t {
   Major = 0,
   Minor = 1,
@@ -38,8 +37,7 @@ enum class RomanNumeral : std::uint8_t {
   VII = 6,
 };
 
-// Bass position. P3-P6 produced root-position triads implicitly; P7
-// surfaces inversion as first-class data so doubling/spacing rules
+// Bass position, surfaced as first-class data so doubling/spacing rules
 // and 6/4 type recognition can read it.
 enum class ChordInversion : std::uint8_t {
   Root = 0,
@@ -50,7 +48,7 @@ enum class ChordInversion : std::uint8_t {
 
 // Functional-harmony category. Pred (Predominant) collects ii/IV/vi
 // and secondary dominants; T = Tonic, S = Subdominant region, D =
-// Dominant. P7 uses this for cadence labeling and 6/4 recognition.
+// Dominant. Used for cadence labeling and 6/4 recognition.
 enum class HarmonicFunction : std::uint8_t {
   T = 0,     // Tonic.
   S = 1,     // Subdominant.
@@ -67,7 +65,7 @@ enum class SixFourType : std::uint8_t {
   Neighboring = 2,  // Upper voices neighbor against a stationary bass.
 };
 
-// Modulation taxonomy. P8 surfaces three Bach idioms for moving from
+// Modulation taxonomy: three Bach idioms for moving from
 // one key area to another:
 //
 //   Pivot     — a single chord belongs to both keys (e.g. ii in C =
@@ -104,8 +102,8 @@ using CadenceType = bach::CadenceType;
 // Chord with a start tick. The chord runs until the next ChordEvent or
 // the piece end. Root is expressed as a pitch class (0=C, 1=C#, ..., 11=B).
 //
-// P7 fields (degree, inversion, function) are optional in the sense
-// that pre-P7 fixtures may leave them at their defaults; rules that
+// The functional-harmony fields (degree, inversion, function) are optional:
+// fixtures may leave them at their defaults, and rules that
 // require them (chord_tone_roman, doubling, spacing) skip silently
 // when degree is unset for a particular event by checking
 // `has_degree`. Callers that supply degree/inversion/function are
@@ -120,9 +118,8 @@ struct ChordEvent {
   HarmonicFunction function = HarmonicFunction::T;
   bool has_degree = false;
 
-  // P8 (Modulation / Tonicization / Borrowed chords). All P8 fields
-  // default to "not in effect" so existing fixtures keep behaving
-  // exactly as in P3-P7.
+  // Modulation / tonicization / borrowed-chord fields. All default to
+  // "not in effect".
   //
   // secondary_of:    the secondary key this chord tonicizes. For V/V
   //                  in C major, root_pc=2 (D), quality=Major (or

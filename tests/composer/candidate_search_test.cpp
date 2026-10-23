@@ -1216,7 +1216,7 @@ TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
-// P9 FortspinnungSpan replay: a SequenceTemplate emits one step's notes
+// FortspinnungSpan replay: a SequenceTemplate emits one step's notes
 // transposed by step_offset semitones. DescendingFifths = -7 per step;
 // 2-pitch seed {72, 74}, 3 steps → flat output length = 6 notes.
 TEST(CandidateSearchTest, FortspinnungSpanReplaysDescendingFifths) {
@@ -1306,7 +1306,7 @@ TEST(CandidateSearchTest, FortspinnungSpanSkipsTemplateForWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
-// P11 development carriers: each replays verbatim Material and stamps one
+// development carriers: each replays verbatim Material and stamps one
 // provenance bit. Register/voice-crossing safety is the fixture's job, so
 // these tests only assert replay fidelity and the bit.
 
@@ -1470,7 +1470,7 @@ TEST(CandidateSearchTest, DevelopmentCarrierSkipsWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
-// P12 RhythmCarrier: replays rhythm fragments verbatim, stamping a bit per
+// RhythmCarrier: replays rhythm fragments verbatim, stamping a bit per
 // feature, plus PhrasePeriodicityKept on notes landing on a phrase start.
 
 namespace {

@@ -451,8 +451,8 @@ bool closeMiddleVoiceOnCadence(std::vector<MaterialNote>& notes,
 /// Lays the leader and the delayed follower on a sixteenth grid and scans the
 /// overlap for interval class 1, 6 or 11 (the semitone/tritone family) held
 /// for a full quarter note or longer. Brief passing seconds are idiomatic in a
-/// stretto, but both lines are verbatim Material -- the validator skips every
-/// dissonance rule on Material x Material pairs -- so a beat-long m2/M7
+/// stretto, but both lines are verbatim Material -- Generation-scope validation
+/// exempts Material x Material pairs -- so a beat-long m2/M7
 /// between the two theme statements would ship unflagged. The caller uses this
 /// to vet each (delay, interval) configuration before committing the canon.
 ///

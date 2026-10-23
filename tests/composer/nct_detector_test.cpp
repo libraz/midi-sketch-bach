@@ -287,7 +287,7 @@ TEST(NctDetectorTest, AnticipationDetectedOnAuthoredE4) {
   EXPECT_GE(hits[0].nct_index, 12u) << "anticipation NCT must be the bar-14 E4, not the bar-12 E4";
 }
 
-// --- M4: temporal-contiguity guard. A rest/gap mid-window must suppress
+// --- temporal-contiguity guard. A rest/gap mid-window must suppress
 // the figure even when the pitch shape is otherwise a valid figure. ---
 
 TEST(NctDetectorTest, CambiataRejectsGapMidWindow) {
@@ -328,7 +328,7 @@ TEST(NctDetectorTest, NotaCambiataRejectsGapMidWindow) {
   EXPECT_TRUE(hits.empty()) << "nota cambiata must not fire across a mid-window rest";
 }
 
-// --- M5: a figure straddling a chord boundary is classified against the
+// --- a figure straddling a chord boundary is classified against the
 // chord active at its FIRST note, not a per-note re-query. ---
 
 TEST(NctDetectorTest, EchappeeAnchorsToFirstNoteChordAcrossBoundary) {
@@ -354,7 +354,7 @@ TEST(NctDetectorTest, EchappeeAnchorsToFirstNoteChordAcrossBoundary) {
   EXPECT_EQ(hits[0].nct_index, 1u);
 }
 
-// --- M6: an anticipation requires a real chord change between the NCT and
+// --- an anticipation requires a real chord change between the NCT and
 // its resolution. Identical pitch under the SAME chord is not an
 // anticipation; under a CHANGED chord it is. ---
 

@@ -2351,13 +2351,13 @@ TEST(ValidatorTest, EpisodeMotifDerivedEmptyEpisodesListsPasses) {
 }
 
 // ===================================================================
-// P7: Functional-harmony doubling / spacing rules.
+// Functional-harmony doubling / spacing rules.
 // ===================================================================
 //
 // The three rules (doubling_no_leading_tone, doubling_no_seventh,
 // spacing_adjacent_voices_within_octave) only fire when the active
 // ChordEvent declares `has_degree = true` — that's how callers opt
-// into the P7 stricter regime. Tests below build small HarmonicPlans
+// into the stricter regime. Tests below build small HarmonicPlans
 // inline so each scenario is self-contained.
 
 namespace {
@@ -2442,7 +2442,7 @@ TEST(ValidatorTest, DoublingNoLeadingTonePassesForSingleLeadingTone) {
 
 TEST(ValidatorTest, DoublingNoLeadingToneSkippedOnChordsWithoutDegree) {
   // Same doubled B, but plan defaults (has_degree=false) — rule must
-  // skip silently for pre-P7 fixtures.
+  // skip silently for fixtures without functional-harmony data.
   HarmonicPlan plan = gMajorDominantWithDegree();
   plan.chords.front().has_degree = false;
   const Tick beat = kTicksPerBeat;
@@ -2567,7 +2567,7 @@ TEST(ValidatorTest, SpacingSkippedForTwoVoiceTexture) {
   EXPECT_FALSE(hasRule(r, "spacing_adjacent_voices_within_octave"));
 }
 
-// P8 modulation_pivot_chord_required tests.
+// modulation_pivot_chord_required tests.
 //
 // Plan layout: a single-chord pivot at the modulation tick. A valid
 // pivot must be diatonic in both keys. The unit tests below isolate
@@ -2638,7 +2638,7 @@ TEST(ValidatorTest, ModulationPivotChordRequiredSkippedWhenNoModulations) {
   EXPECT_FALSE(hasRule(r, "modulation_pivot_chord_required"));
 }
 
-// P8 secondary_dominant_resolution tests.
+// secondary_dominant_resolution tests.
 //
 // Plan: chord 0 = V/V (D-major) with has_secondary_of=true and
 // secondary_of=V. Chord 1 = V (G-major) at the next tick. The
@@ -2725,7 +2725,7 @@ TEST(ValidatorTest, SecondaryDominantResolutionFailsForWrongDegreeNext) {
   EXPECT_TRUE(hasRule(r, "secondary_dominant_resolution"));
 }
 
-// P9 sequence_pattern_consistency tests.
+// sequence_pattern_consistency tests.
 //
 // Seed motif: 2 notes (C5=72, D5=74) each 1 quarter long. Three steps.
 // Each pattern transposes by its declared semitones per step:
@@ -2830,7 +2830,7 @@ TEST(ValidatorTest, SequencePatternConsistencySkippedWhenNoTemplate) {
   EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
 }
 
-// P9 imitation_entry_match tests.
+// imitation_entry_match tests.
 //
 // Subject opens at tick 0 with C5 (72). Real answer enters 4 beats
 // later at G4 (67), which equals 72 + (-5) semitones (real answer).
@@ -2924,9 +2924,9 @@ TEST(ValidatorTest, SecondaryDominantResolutionVacuousWhenLeadingToneAbsent) {
   EXPECT_FALSE(hasRule(r, "secondary_dominant_resolution"));
 }
 
-// === P10: invertible counterpoint at the octave ===
+// === Invertible counterpoint at the octave ===
 //
-// All P10 tests use a 3-voice texture (V0=soprano, V1=alto, V2=inert
+// All invertibility tests use a 3-voice texture (V0=soprano, V1=alto, V2=inert
 // bass). The Validator checks only the adjacent UPPER pair (V0, V1);
 // the bottom pair (V1, V2) is excluded, so the tested interval lives
 // in V0-V1 and V2 is kept well below to avoid voice-crossing noise.
@@ -3041,7 +3041,7 @@ TEST(ValidatorTest, InvertibleAt8vaIgnoresWeakBeatOctaves) {
 
 TEST(ValidatorTest, InvertibleAt8vaSkipsBottomPairIn3Voices) {
   // Parallel octaves in the bottom pair (V1/V2); V0/V1 consonant.
-  // Bottom pair is excluded from P10, so no failure.
+  // Bottom pair is excluded from the invertibility rule, so no failure.
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBar, 76, 0),             // E5  V0
       makeNote(0, kTicksPerBar, 60, 1),             // C4  V1
@@ -3097,7 +3097,7 @@ TEST(ValidatorTest, FourthAboveBassSkipsFixedMaterialDuringGenerationValidation)
   EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
 }
 
-// P11 middle_entry_in_related_key tests. Home key is C major
+// middle_entry_in_related_key tests. Home key is C major
 // (cMajorWhole), so related keys are V=G(7), vi=A(9), IV=F(5), ii=D(2).
 
 TEST(ValidatorTest, MiddleEntryInRelatedKeyPassesForDominant) {
@@ -3144,7 +3144,7 @@ TEST(ValidatorTest, MiddleEntryInRelatedKeySkippedWhenEmpty) {
   EXPECT_FALSE(hasRule(r, "middle_entry_in_related_key"));
 }
 
-// P11 stretto_overlap_valid tests. The follower must enter strictly
+// stretto_overlap_valid tests. The follower must enter strictly
 // inside the leader's window and be the subject transposed by
 // interval_semis.
 
@@ -3200,7 +3200,7 @@ TEST(ValidatorTest, StrettoOverlapValidSkippedWhenEmpty) {
   EXPECT_FALSE(hasRule(r, "stretto_overlap_valid"));
 }
 
-// P11 pedal_point_tonic_or_dominant tests. Home key C: tonic pc 0,
+// pedal_point_tonic_or_dominant tests. Home key C: tonic pc 0,
 // dominant pc 7.
 
 TEST(ValidatorTest, PedalPointTonicPasses) {
@@ -3230,7 +3230,7 @@ TEST(ValidatorTest, PedalPointSkippedWhenEmpty) {
   EXPECT_FALSE(hasRule(r, "pedal_point_tonic_or_dominant"));
 }
 
-// P12 phrase_periodicity_4_or_8_bar tests.
+// phrase_periodicity_4_or_8_bar tests.
 
 TEST(ValidatorTest, PhrasePeriodicityPassesForFourBarGrid) {
   Material m;
@@ -3268,7 +3268,7 @@ TEST(ValidatorTest, PhrasePeriodicitySkippedWhenSinglePhrase) {
   EXPECT_FALSE(hasRule(r, "phrase_periodicity_4_or_8_bar"));
 }
 
-// P12 anacrusis_consistent tests. The pickup must begin exactly
+// anacrusis_consistent tests. The pickup must begin exactly
 // anacrusis_ticks before some declared phrase start.
 
 TEST(ValidatorTest, AnacrusisConsistentPassesForAlignedPickup) {
@@ -3327,7 +3327,7 @@ TEST(ValidatorTest, AnacrusisConsistentPassesWhenNoAnacrusis) {
   EXPECT_FALSE(hasRule(r, "anacrusis_consistent"));
 }
 
-// --- P13 texture / instrument / expression rules ---
+// --- Texture / instrument / expression rules ---
 
 TEST(ValidatorTest, VoiceRangeIntegrityPassesWhenInRange) {
   Material m;

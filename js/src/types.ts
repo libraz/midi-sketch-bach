@@ -149,7 +149,7 @@ export interface CounterpointObservation {
   total: number;
   /** Individual findings routed to validation failures. */
   gated: number;
-  /** Findings suppressed because every operand is an immutable input. */
+  /** Findings suppressed at Generation scope because every operand is an immutable input. */
   exempted: number;
 }
 

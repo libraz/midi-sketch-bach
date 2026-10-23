@@ -172,7 +172,8 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
  * `result.provenance`, and `result.tracks` mutually consistent: every replaced
  * candidate expands into its ornament sub-notes in all three views, provenance
  * stays index-parallel with notes, and ornament sub-notes carry
- * NoteSource::Ornament. `result.validation` is left untouched (re-run the
+ * NoteSource::Ornament. `result.validation` keeps its verdict and findings, but its
+ * texture_metrics are recomputed for the ornamented notes (re-run the
  * Validator separately to confirm the ornamented line still passes).
  *
  * Idempotent: a result that already carries NoteSource::Ornament notes is

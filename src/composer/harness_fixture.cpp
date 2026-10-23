@@ -2815,16 +2815,16 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
       c.root_pc = pattern[b].root_pc;
       c.quality = pattern[b].minor ? ChordQuality::Minor : ChordQuality::Major;
       if (spec.with_degree_tagging) {
-        // FugueHarmonized enriches every ChordEvent with degree/inversion/function
-        // so the Validator's doubling/spacing rules fire and the
-        // candidate provenance picks up ChordToneRoman / InversionLabel /
+        // Degree tagging (spec.with_degree_tagging) sets
+        // degree/inversion/function on each ChordEvent so the Validator's doubling/spacing rules
+        // fire and the candidate provenance picks up ChordToneRoman / InversionLabel /
         // DoublingChecked / SpacingChecked bits. Mapping is fixed for the
         // C-major harness vocabulary:
         //   (root=0, !minor) → I (Tonic)
         //   (root=5, !minor) → IV (Subdominant)
         //   (root=7, !minor) → V (Dominant)
         //   (root=9, minor)  → vi (Predominant)
-        // All FugueHarmonized chords are emitted in root position.
+        // Every tagged chord is emitted in root position.
         if (pattern[b].root_pc == 0) {
           c.degree = RomanNumeral::I;
           c.function = HarmonicFunction::T;
@@ -3193,8 +3193,8 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
     out.material.use_tonal_answer = true;
     // FugueExpositionTonalAnswer CS material: stationary G5 (pitch 79) for 16 quarter
     // notes so V0 has a sounding note at every beat of the answer
-    // window. The Validator's vertical/parallel rules skip both-Material
-    // pairs (V0 CS vs V1 tonal_answer are both Material), so a pedal
+    // window. Generation-scope validation exempts both-Material pairs
+    // (V0 CS vs V1 tonal_answer are both Material), so a pedal
     // pitch is safe regardless of the seed's tonal_answer head.
     for (int n = 0; n < 16; ++n) {
       MaterialNote cs;

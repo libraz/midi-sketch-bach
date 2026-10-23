@@ -107,7 +107,7 @@ struct RuleObservation {
   std::string rule_id;
   int total = 0;     // times the rule matched, before any routing decision
   int gated = 0;     // individual findings routed to failures
-  int exempted = 0;  // suppressed because every operand is an immutable input
+  int exempted = 0;  // Generation scope only: every operand is an immutable input
 };
 
 /**

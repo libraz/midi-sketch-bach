@@ -24,16 +24,17 @@ using detail::Mode;
 // ---------------------------------------------------------------------------
 // TrioSonata: three independent voices (V0 = RH/Great high, V1 = LH/Swell mid,
 // V2 = Pedal low). V0/V1 are scalar-wave lines (one 16th line, one 8th line),
-// V2 is a quarter-note root/fifth pedal. The defining technique is rhythmic
-// independence: the three voices keep DISTINCT densities (16 / 8 / 4 notes per
-// bar) so voice_independence_threshold passes comfortably.
+// V2 is a walking pedal: quarter-note chord tones with connecting eighths. The
+// defining technique is rhythmic independence: the three voices keep DISTINCT
+// densities (16 / 8 / 4+ notes per bar) so voice_independence_threshold passes.
 //
 // Progression: one chord per bar from buildCadencedProgression with an internal
 // half cadence (V) at every 8-bar boundary's penultimate bar resolving to I on
 // the boundary, and the design-valued final V -> I close. Voice-pair rotation:
 // which upper voice carries the densest (16th) line rotates by 4-bar cycle (V0
-// then V1 then V0 ...); registers stay banded (V0 high, V1 mid, V2 low) so
-// swapping the density never crosses voices. The arc lifts the upper voices'
+// then V1 then V0 ...). The manual bands overlap (V0 C4 up, V1 G3-E4) and the
+// pedal stays below both; one brief manual exchange near the cadence is the
+// only crossing the form's AllowTrioUpperMomentary policy admits. The arc lifts the upper voices'
 // register toward the climax. Noble character (prefer_dotted) gives V1 a
 // dotted-quarter+eighth pattern at low tiers.
 // ---------------------------------------------------------------------------
@@ -218,8 +219,7 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // Find the chord tone (of any triad pitch class) NEAREST `near`, realized in
     // the voice's register band [band_lo, band_hi]. Used to voice-lead each beat
     // anchor to the closest chord tone, so consecutive anchors move by at most a
-    // third and the line never leaps. The band keeps the voice in its register so
-    // the two upper voices never cross and both stay above the pedal.
+    // third and the line never leaps. The band keeps both manuals above the pedal.
     auto nearestChordTone = [&](int near, int tone_count) {
       int best = band_lo;
       int best_dist = 1 << 20;

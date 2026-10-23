@@ -43,10 +43,9 @@ struct CandidateContext {
   const std::vector<NoteEvent>* placed_notes = nullptr;
 
   // Total voice count in the texture (VoicePlan::num_voices). Used by
-  // P7 spacing rules to know which voice pair is the "bottom" pair
-  // (which the spacing rule excludes). Defaults to 2 so pre-P7
-  // callers get the original behavior — pairs outside the upper
-  // voices are not constrained.
+  // spacing rules to know which voice pair is the "bottom" pair
+  // (which the spacing rule excludes). Defaults to 2, so pairs outside
+  // the upper voices are not constrained.
   std::uint8_t num_voices = 2;
 
   // Category bucket for corpus-statistics melodic scoring. The default weight
@@ -65,9 +64,11 @@ struct CandidateContext {
 
 // Strong-beat consonance + parallel-perfect avoidance.
 //
-// No legacy collision_resolver coupling. Search rules:
-//   1. SubjectCarrier spans replay Material verbatim (one Candidate
-//      per MaterialNote, source = Material, score = 1.0).
+// Search dispatch, by span intent:
+//   1. Carrier intents (subject, answer, countersubject, episode, pedal,
+//      figuration, ground, variation, trio, fantasia, Goldberg, ...) replay
+//      declared Material verbatim (one Candidate per MaterialNote,
+//      source = Material, score = 1.0) and stamp their provenance bits.
 //   2. Compose spans enumerate diatonic pitches inside +-octave of the
 //      voice center, score them with chord-tone preference, and reject
 //      candidates whose only score would come from non-chord-tone usage
@@ -76,14 +77,13 @@ class CandidateSearch {
  public:
   // Returns the candidates for the given span, ordered by score
   // descending. Empty result means the search exhausted with no
-  // admissible candidate; caller must trigger span re-generation or
-  // back-jump.
+  // admissible candidate; the span is left as a rest (no fallback pitch).
   //
   // @param saturated_positions If non-null, incremented once per
   //   enumerated Compose position that exhausted with no admissible
-  //   candidate (a silent hole). The caller escalates a non-zero count
-  //   to ValidationStatus::FailedSeed. Default nullptr preserves the
-  //   behavior of every existing caller.
+  //   candidate (a silent hole). The caller only records the count
+  //   (ComposeResult::saturated_positions); it never sets FailedSeed.
+  //   Default nullptr skips the tally.
   std::vector<Candidate> enumerate(const Span& span, const HarmonicPlan& harmonic_plan,
                                    const Material& material, const CandidateContext& context,
                                    std::size_t* saturated_positions = nullptr) const;

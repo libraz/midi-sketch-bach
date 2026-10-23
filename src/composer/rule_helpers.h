@@ -130,7 +130,7 @@ bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b, std::
 // judged (see keyAt), not the home key.
 bool isCrossRelationPc(std::uint8_t a, std::uint8_t b, std::uint8_t tonic_pc, bool is_minor);
 
-// Melodic-interval rules (mirror Validator Rule P1: forbidden melodic
+// Melodic-interval rules (mirror the Validator melodic-interval rule: forbidden melodic
 // leaps for Compose voices). Shared so the CandidateSearch pre-filter
 // rejects exactly the leaps the Validator would later reject — keeping
 // the two in lockstep instead of letting the search emit a note that

@@ -6,7 +6,7 @@
 //   1. CandidateSearch replays each TrioVoiceLine whose voice matches the span
 //      verbatim (matched by line.voice == span.voice, not by window position),
 //      stamping TrioVoiceIndependent on every note (plus the baseline
-//      ChordTone/P7/P8 bits via emitMaterialNote). The branch is inert when
+//      ChordTone and harmonic-plan bits via emitMaterialNote). The branch is inert when
 //      material.trio_voices is empty.
 //   2. The Validator's voice_independence_threshold rule (SOFT MusicalFail when
 //      the mean pairwise independence of the bit-62 voices drops below 0.6)
