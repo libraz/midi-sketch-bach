@@ -6,12 +6,32 @@
 #include <cstdlib>
 
 #include "composer/bar_material.h"
+#include "composer/rule_helpers.h"
 
 namespace bach::composer {
 
 namespace {
 
 using detail::Mode;
+
+// Bounds a replacement shares with every other: a degree of the local key as
+// spelled under the plan's chord and the tones sounding at `tick`, inside the
+// line's register band.
+struct ReliefBounds {
+  const HarmonicPlan* harmony = nullptr;
+  ReliefLineBounds line;
+
+  bool admits(int cand, Tick tick, const std::vector<ConcurrentMotion>& sounding) const {
+    if (cand < line.floor_pitch || cand > line.ceiling_pitch)
+      return false;
+    const rule_helpers::KeyContext key = rule_helpers::keyAt(*harmony, tick);
+    const Mode mode = key.is_minor ? Mode::Minor : Mode::Major;
+    detail::PcMask pcs = rule_helpers::chordPcsAt(*harmony, tick);
+    for (const ConcurrentMotion& motion : sounding)
+      pcs = detail::withSoundingTone(pcs, motion.curr, key.tonic_pc, mode);
+    return detail::inSpelledScale(cand, key.tonic_pc, mode, pcs);
+  }
+};
 
 // Displace an arrival that the way in cannot answer for.
 //
@@ -30,8 +50,9 @@ using detail::Mode;
 // the fault formed arriving here and may not raise the one formed leaving.
 void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t arrival_idx,
                            const ThemeToneRegistry& registry, VoiceId voice, VoiceId num_voices,
-                           Mode mode, const std::vector<ConcurrentMotion>& into_arrival,
-                           int approach, int original_rank) {
+                           const ReliefBounds& bounds,
+                           const std::vector<ConcurrentMotion>& into_arrival, int approach,
+                           int original_rank) {
   MaterialNote& note = *line[arrival_idx];
   const int original = static_cast<int>(note.pitch);
 
@@ -66,7 +87,9 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
   // fault than the perfect interval being repaired. The bound is the same one
   // the way-in re-aim uses -- an octave, or whatever the design already spanned
   // if that is wider, so a line is never asked to close a gap it wrote itself.
-  const int entry_ceiling = std::max(12, std::abs(original - approach));
+  const int entry_ceiling = std::max(bounds.line.max_leap, std::abs(original - approach));
+  const int exit_ceiling_leap =
+      next_pitch < 0 ? 0 : std::max(bounds.line.max_leap, std::abs(original - next_pitch));
 
   // A replacement that takes a neighbour's pitch the displaced tone did not
   // already share lengthens a static run, so it is tried only after the window
@@ -80,8 +103,9 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
       for (int dist = 1; dist <= displacement; ++dist) {
         for (const int sgn : {-1, 1}) {
           const int cand = original + sgn * dist;
-          if (!detail::inScale(cand, mode) || (!allow_flatten && flattens(cand)) ||
-              std::abs(cand - approach) > entry_ceiling) {
+          if (!bounds.admits(cand, note.start_tick, at_arrival) ||
+              (!allow_flatten && flattens(cand)) || std::abs(cand - approach) > entry_ceiling ||
+              (next_pitch >= 0 && std::abs(cand - next_pitch) > exit_ceiling_leap)) {
             continue;
           }
           bool admissible = true;
@@ -136,7 +160,10 @@ std::vector<MaterialNote*> lineInTickOrder(const std::vector<std::vector<Materia
 }
 
 void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegistry& registry,
-                     VoiceId voice, VoiceId num_voices, int bars, Mode mode, Tick arrival_grain) {
+                     VoiceId voice, VoiceId num_voices, int bars, const HarmonicPlan& harmony,
+                     const ReliefLineBounds& line_bounds, Tick arrival_grain) {
+  const ReliefBounds bounds{&harmony, line_bounds};
+  const ReliefBounds loose{&harmony, ReliefLineBounds{}};
   const int arrival_count =
       arrival_grain > 0 ? static_cast<int>(static_cast<Tick>(bars) * kTicksPerBar / arrival_grain)
                         : 0;
@@ -180,7 +207,7 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
       // dissolves the register order nor worsens the motion out of the beat.
       if (head % kTicksPerBar == 0)
         continue;
-      relieveRunningArrival(line, arrival_idx, registry, voice, num_voices, mode, into_head,
+      relieveRunningArrival(line, arrival_idx, registry, voice, num_voices, bounds, into_head,
                             original, original_rank);
       continue;
     }
@@ -216,8 +243,12 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     // tone already spanned; entering is the free end, and is asked only not to
     // exceed an octave, because tightening it there costs more perfect intervals
     // elsewhere than the wider choice ever buys.
-    const int leap_ceiling = std::max(7, std::abs(arrival - original));
-    const int entry_ceiling = own_prev < 0 ? 0 : std::max(12, std::abs(original - own_prev));
+    const auto leap_ceiling = [&](const ReliefBounds& pass) {
+      return std::max(std::min(7, pass.line.max_leap), std::abs(arrival - original));
+    };
+    const auto entry_ceiling = [&](const ReliefBounds& pass) {
+      return own_prev < 0 ? 0 : std::max(pass.line.max_leap, std::abs(original - own_prev));
+    };
     // Whether the replacement takes a neighbour's pitch that the displaced tone
     // did not already share. Such a tone lengthens a static run, so it is tried
     // only once the window has been swept without one -- ranked, not vetoed,
@@ -225,10 +256,11 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     auto flattens = [&](int cand) {
       return (cand == own_prev && original != own_prev) || (cand == arrival && original != arrival);
     };
-    auto admissible = [&](int cand, bool allow_dissonance) {
-      if (!detail::inScale(cand, mode) || std::abs(arrival - cand) > leap_ceiling)
+    auto admissible = [&](int cand, const ReliefBounds& pass, bool allow_dissonance) {
+      if (!pass.admits(cand, approach.start_tick, at_onset) ||
+          std::abs(arrival - cand) > leap_ceiling(pass))
         return false;
-      if (own_prev >= 0 && std::abs(cand - own_prev) > entry_ceiling)
+      if (own_prev >= 0 && std::abs(cand - own_prev) > entry_ceiling(pass))
         return false;
       for (const ConcurrentMotion& motion : at_onset) {
         // A lower voice index sounds higher.
@@ -259,17 +291,30 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     // fault of the two. So the consonance clause is dropped on a second sweep,
     // reached only after the first has been walked in full: the same trade the
     // bass's own forward guard makes one voice below.
-    const int reach = 2 * leap_ceiling;
+    //
+    // The line's band and leap bound give way the same way, last: only a true
+    // parallel the band holds no answer to, dissonant or not, leaves it.
+    struct Pass {
+      const ReliefBounds* bounds;
+      bool allow_dissonance;
+    };
+    const Pass passes[] = {{&bounds, false}, {&bounds, true}, {&loose, false}, {&loose, true}};
     bool placed = false;
-    for (const bool allow_dissonance : {false, true}) {
-      if (allow_dissonance && (placed || !original_strict || !original_consonant))
+    for (const Pass& pass : passes) {
+      if (placed)
         break;
+      if (pass.bounds == &loose && !original_strict)
+        continue;
+      if (pass.allow_dissonance && (!original_strict || !original_consonant))
+        continue;
+      const int reach = 2 * leap_ceiling(*pass.bounds);
       for (int accept = 0; accept < original_rank && !placed; ++accept) {
         for (const bool allow_flatten : {false, true}) {
           for (int dist = 1; dist <= reach && !placed; ++dist) {
             for (const int sgn : {-1, 1}) {
               const int cand = original + sgn * dist;
-              if ((allow_flatten || !flattens(cand)) && admissible(cand, allow_dissonance) &&
+              if ((allow_flatten || !flattens(cand)) &&
+                  admissible(cand, *pass.bounds, pass.allow_dissonance) &&
                   perfectFaultRank(cand, arrival, into_head) <= accept) {
                 approach.pitch = static_cast<std::uint8_t>(cand);
                 placed = true;

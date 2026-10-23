@@ -152,7 +152,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
                            std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
                            detail::Mode mode, SuspensionPattern* pattern,
-                           const detail::ChordSpec* resolution_chord) {
+                           const detail::ChordSpec* resolution_chord,
+                           const detail::ChordSpec* preparation_chord) {
   if (pattern == nullptr || type == SuspensionType::Sus2_3 || preparation_tick >= suspension_tick ||
       suspension_tick >= resolution_tick || bass_at_preparation == 0 || bass_at_suspension == 0 ||
       bass_at_resolution == 0 || upper_at_preparation == 0 || upper_at_suspension == 0 ||
@@ -162,7 +163,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
     return false;
   auto intervalClass = [](int upper, int bass) { return ((upper - bass) % 12 + 12) % 12; };
   for (int suspended = band_hi; suspended >= band_lo; --suspended) {
-    if (!detail::inScale(suspended, mode, resolution_chord))
+    if (!detail::inScale(suspended, mode, resolution_chord) ||
+        (preparation_chord != nullptr && !detail::inScale(suspended, mode, preparation_chord)))
       continue;
     if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(suspended),
                                             bass_at_preparation))

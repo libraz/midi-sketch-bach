@@ -211,6 +211,11 @@ constexpr int kBassBandHi = 47;  // B2.
 // (the crossing rule is strict).
 constexpr int kV1EmbellishCeiling = 60;  // C4.
 
+// Widest interval arrival relief may open around a V1 tone it re-aims, beyond
+// what the displaced tone spanned: a major sixth, so no passing eighth is
+// reached or left by a seventh.
+constexpr int kV1ReliefMaxLeap = 9;
+
 // Fit a pitch class to the MIDI pitch inside [lo, hi] nearest a center.
 int fitPcToBand(int pitch_class, int center, int lo, int hi) {
   const int base = ((pitch_class % 12) + 12) % 12;
@@ -730,6 +735,22 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                            mode,
                            /*band_lo=*/62, &penult_spec, /*prefer_descending=*/false,
                            /*lift_ceiling=*/organ_range::kManualHigh);
+    // The last beat sounds the declared dominant seventh. A held tonic
+    // anticipation steps up to the 2nd there, on its way to the closing third.
+    if (prefinal % 12 == 0) {
+      const Tick approach_tick = barTick(bars - 1) - kQuarterDur;
+      for (std::size_t idx = 0; idx < fig.notes.size(); ++idx) {
+        MaterialNote& note = fig.notes[idx];
+        if (note.start_tick < approach_tick && note.start_tick + note.duration > approach_tick &&
+            static_cast<int>(note.pitch) % 12 == 0) {
+          const int second = static_cast<int>(note.pitch) + 2;
+          note.duration = approach_tick - note.start_tick;
+          fig.notes.insert(fig.notes.begin() + static_cast<std::ptrdiff_t>(idx + 1),
+                           materialNote(approach_tick, kQuarterDur, second));
+          break;
+        }
+      }
+    }
   }
 
   // V0 figuration registry for the embellishment loop's run-break consonance
@@ -1068,8 +1089,13 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     for (const MaterialNote& note : bass_notes)
       relief_registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch),
                              note.duration);
+    // V1 keeps the cantus band (above the walking bass, under the figuration)
+    // and its stepwise passing eighths.
+    ReliefLineBounds line_bounds;
+    if (voice == 1)
+      line_bounds = {kBassBandHi + 1, kV1EmbellishCeiling, kV1ReliefMaxLeap};
     relieveArrivals(lineInTickOrder({voice == 0 ? &fig_notes : &out.material.cf_embellished}),
-                    relief_registry, voice, /*num_voices=*/3, bars, mode);
+                    relief_registry, voice, /*num_voices=*/3, bars, out.harmony, line_bounds);
   }
 
   // A register-shift change can put the next cycle's chord-tone downbeat an
@@ -1127,6 +1153,39 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     }
     if (best_pitch >= 0)
       downbeat.pitch = static_cast<std::uint8_t>(best_pitch);
+  }
+
+  // The cantus sounds the leading tone under the dominant approach, so the
+  // declared V7 has its third and every tone over the pinned G2 belongs to it.
+  // B2 sits under the cantus band but over the pinned bass, and steps into the
+  // cantus's closing C3.
+  {
+    constexpr int kLeadingTone = 47;  // B2.
+    std::vector<MaterialNote>& cantus = out.material.cf_embellished;
+    cantus.erase(std::remove_if(cantus.begin(), cantus.end(),
+                                [&](const MaterialNote& note) {
+                                  return note.start_tick > final_approach_tick &&
+                                         note.start_tick < final_bar_tick;
+                                }),
+                 cantus.end());
+    bool placed = false;
+    for (MaterialNote& note : cantus) {
+      if (note.start_tick == final_approach_tick) {
+        note.pitch = static_cast<std::uint8_t>(kLeadingTone);
+        note.duration = final_bar_tick - final_approach_tick;
+        placed = true;
+      } else if (note.start_tick < final_approach_tick &&
+                 note.start_tick + note.duration > final_approach_tick) {
+        note.duration = final_approach_tick - note.start_tick;
+      }
+    }
+    if (!placed) {
+      const auto at = std::find_if(cantus.begin(), cantus.end(), [&](const MaterialNote& note) {
+        return note.start_tick > final_approach_tick;
+      });
+      cantus.insert(at, materialNote(final_approach_tick, final_bar_tick - final_approach_tick,
+                                     kLeadingTone));
+    }
   }
 
   ChordEvent approach;
@@ -1187,7 +1246,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const auto& cantus = out.material.cf_embellished;
     const auto& top = out.material.figuration_sections.front().notes;
     bool installed = false;
-    for (int bar_offset : {2, 3, 4, 5}) {
+    for (int bar_offset : {2, 3, 4, 5, 6, 7}) {
       if (installed || bars <= bar_offset)
         break;
       const Tick suspension_tick = barTick(bars - bar_offset);
@@ -1212,6 +1271,20 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       const int bass_before = soundingMaterialPitch(bass, preparation_tick - kSixteenth);
       const int cantus_before = soundingMaterialPitch(cantus, preparation_tick - kSixteenth);
       const int top_before = soundingMaterialPitch(top, preparation_tick - kSixteenth);
+      // The cantus may move again inside the preparation beat; the union-onset
+      // reading pairs that tone, not the beat's, with the bass arriving under
+      // the suspension -- and the bass there is the displaced preparation if its
+      // note still sounds.
+      const int cantus_late = soundingMaterialPitch(cantus, suspension_tick - kSixteenth);
+      const auto bass_late = [&](int displaced) {
+        for (const MaterialNote& note : bass) {
+          if (note.start_tick <= preparation_tick &&
+              preparation_tick < note.start_tick + note.duration &&
+              suspension_tick - kSixteenth < note.start_tick + note.duration)
+            return displaced;
+        }
+        return soundingMaterialPitch(bass, suspension_tick - kSixteenth);
+      };
       // The figure also pins the bass under its resolution, which changes what
       // the bass LEAVES that beat with. The top line rests immediately after, so
       // the pair that carries the motion is the cantus over the bass -- and it
@@ -1243,7 +1316,7 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                     static_cast<std::uint8_t>(cantus_res),
                     /*band_lo=*/
                     std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
-                    band_hi, mode, &suspension, &resolution_spec))
+                    band_hi, mode, &suspension, &resolution_spec, &preparation_spec))
               continue;
             // Displacing the bass and installing the carrier are one choice: the
             // carrier overwrites the top line across the whole figure, so what
@@ -1260,6 +1333,8 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                 formsStrictPerfectParallel(top_before, prep_pitch, bass_before, bass_prep) ||
                 formsStrictPerfectParallel(cantus_before, cantus_prep, bass_before, bass_prep) ||
                 formsStrictPerfectParallel(cantus_prep, cantus_sus, bass_prep, held_bass) ||
+                formsStrictPerfectParallel(cantus_late, cantus_sus, bass_late(bass_prep),
+                                           held_bass) ||
                 formsStrictPerfectParallel(sus_pitch, res_pitch, cantus_sus, cantus_res))
               continue;
             for (MaterialNote& note : bass) {

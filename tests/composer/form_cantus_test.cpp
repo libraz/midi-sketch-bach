@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <string>
@@ -213,6 +214,39 @@ TEST(FormCantusChorale, FinalCadenceContainsTheDeclaredTonicThird) {
       }
       EXPECT_TRUE(saw_tonic) << "minor=" << minor << " seed=" << seed;
       EXPECT_TRUE(saw_third) << "minor=" << minor << " seed=" << seed;
+    }
+  }
+}
+
+// The final authentic cadence is approached by a real dominant: on the beat the
+// plan declares V7, every sounding tone belongs to it and one is the leading tone.
+TEST(FormCantusChorale, FinalApproachSoundsTheDominantSeventhWithItsLeadingTone) {
+  for (bool minor : {false, true}) {
+    for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Noble}) {
+      for (std::uint16_t bars : {std::uint16_t{16}, std::uint16_t{32}}) {
+        for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+          const HarnessFixture fx = build(FormType::ChoralePrelude, minor, character, bars, seed);
+          const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          const auto approach = std::find_if(fx.harmony.chords.begin(), fx.harmony.chords.end(),
+                                             [](const ChordEvent& chord) {
+                                               return chord.quality == ChordQuality::Dominant7 &&
+                                                      chord.start_tick % kTicksPerBar != 0;
+                                             });
+          ASSERT_NE(approach, fx.harmony.chords.end()) << "minor=" << minor << " seed=" << seed;
+          const Tick tick = approach->start_tick;
+          bool leading_tone = false;
+          for (const NoteEvent& note : result.notes) {
+            if (note.start_tick > tick || tick >= note.start_tick + note.duration)
+              continue;
+            const int pc = note.pitch % 12;
+            EXPECT_TRUE(pc == 7 || pc == 11 || pc == 2 || pc == 5)
+                << "minor=" << minor << " seed=" << seed << " bars=" << bars << " voice "
+                << static_cast<int>(note.voice) << " pitch " << static_cast<int>(note.pitch);
+            leading_tone = leading_tone || pc == 11;
+          }
+          EXPECT_TRUE(leading_tone) << "minor=" << minor << " seed=" << seed << " bars=" << bars;
+        }
+      }
     }
   }
 }
@@ -620,6 +654,62 @@ TEST(FormCantusChorale, EmbellishedCantusFirmusRepeatedRunBounded) {
                             << " V1 repeated-pitch run exceeds 4";
     }
   }
+}
+
+// The decorated cantus keeps its band after every rewrite, arrival relief
+// included: a tone sinks into the walking bass's register only where relief has
+// no other escape from a parallel octave, and passing eighths reached or left by
+// a seventh or wider stay at the decoration's own count. RATCHET: measured
+// counts, only ever lowered.
+TEST(FormCantusChorale, EmbellishedCantusFirmusKeepsItsBandAndStepwisePassing) {
+  int lowest = 127;
+  std::size_t wide_passing = 0;
+  std::size_t under_band = 0;
+  for (bool minor : {false, true}) {
+    for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Noble}) {
+      for (std::uint16_t bars : {std::uint16_t{16}, std::uint16_t{32}}) {
+        for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+          const HarnessFixture fx = build(FormType::ChoralePrelude, minor, character, bars, seed);
+          const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          std::vector<NoteEvent> line;
+          for (const NoteEvent& note : result.notes) {
+            if (note.voice == 1)
+              line.push_back(note);
+          }
+          std::sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+            return lhs.start_tick < rhs.start_tick;
+          });
+          for (std::size_t idx = 0; idx < line.size(); ++idx) {
+            lowest = std::min(lowest, static_cast<int>(line[idx].pitch));
+            // The leading tone under the pinned dominant approach is B2 by design.
+            const Tick final_approach = static_cast<Tick>(bars - 1) * kTicksPerBar - kTicksPerBeat;
+            if (line[idx].pitch < 48 && line[idx].start_tick != final_approach)
+              ++under_band;
+            const bool passing = line[idx].duration <= kTicksPerBeat / 2 &&
+                                 line[idx].start_tick % kTicksPerBeat != 0;
+            if (!passing || idx == 0)
+              continue;
+            const int leap_in =
+                std::abs(static_cast<int>(line[idx].pitch) - static_cast<int>(line[idx - 1].pitch));
+            // A leap out into the next bar head lands on the immutable skeleton
+            // tone, which relief never moves; that end is the decoration's own.
+            const bool into_skeleton =
+                idx + 1 < line.size() && line[idx + 1].start_tick % kTicksPerBar == 0;
+            const int leap_out = idx + 1 < line.size() && !into_skeleton
+                                     ? std::abs(static_cast<int>(line[idx + 1].pitch) -
+                                                static_cast<int>(line[idx].pitch))
+                                     : 0;
+            if (std::max(leap_in, leap_out) >= 10)
+              ++wide_passing;
+          }
+        }
+      }
+    }
+  }
+  std::printf("[chorale-v1] lowest=%d under-band=%zu wide-passing=%zu\n", lowest, under_band,
+              wide_passing);
+  EXPECT_LE(under_band, 6u);
+  EXPECT_LE(wide_passing, 8u);
 }
 
 // --- Goldberg structural contracts ------------------------------------------

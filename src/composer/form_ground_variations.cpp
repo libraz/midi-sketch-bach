@@ -2847,6 +2847,10 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
         plan[static_cast<std::size_t>(sus_bar % kPassacagliaCycleBars)];
     const detail::ChordSpec suspension_spec{suspension_chord.root_pc, suspension_chord.minor,
                                             suspension_chord.seventh};
+    const CycleBar& preparation_chord = plan[static_cast<std::size_t>(
+        (sus_bar + kPassacagliaCycleBars - 1) % kPassacagliaCycleBars)];
+    const detail::ChordSpec preparation_spec{preparation_chord.root_pc, preparation_chord.minor,
+                                             preparation_chord.seventh};
     const int chord_third = suspension_chord.minor ? 3 : 4;
     const std::array<int, 3> chord_pcs = {suspension_chord.root_pc,
                                           (suspension_chord.root_pc + chord_third) % 12,
@@ -2962,7 +2966,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                     static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                     static_cast<std::uint8_t>(upper_res),
                     /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
-                    &suspension, &suspension_spec))
+                    &suspension, &suspension_spec, &preparation_spec))
               continue;
             // The suspension's own three tones are a voice, and nothing has judged
             // them: the test above only asks whether relocating V0 to `upper_sus`

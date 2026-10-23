@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "composer/figuration.h"
+#include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
@@ -49,6 +50,15 @@ int perfectFaultRank(int prev, int curr, const std::vector<ConcurrentMotion>& mo
 ///        still one line.
 std::vector<MaterialNote*> lineInTickOrder(const std::vector<std::vector<MaterialNote>*>& parts);
 
+/// @brief Register band of a relieved line, and the widest interval a
+///        replacement may open to a neighbour beyond what the tone it
+///        displaces already spanned.
+struct ReliefLineBounds {
+  int floor_pitch = 0;
+  int ceiling_pitch = 127;
+  int max_leap = 12;
+};
+
 /// @brief Relieve one line's arrivals over the voices already placed.
 ///
 /// Every beat is an arrival, not only the bar head. The voice under this one
@@ -76,18 +86,22 @@ std::vector<MaterialNote*> lineInTickOrder(const std::vector<std::vector<Materia
 /// fault it forms arriving at the beat, and may not raise the one it forms
 /// arriving at its own onset; it keeps the register order, and may be dissonant
 /// only where the tone it displaces already was (the eighth-note fills are
-/// passing tones and dissonant by design).
+/// passing tones and dissonant by design). A replacement is a degree of the
+/// local key as spelled under the plan's chord and the tones sounding with it,
+/// so over a minor dominant it never takes the lowered 7th or 6th; it stays
+/// inside the line's register band and leap bound.
 ///
 /// @param line The voice under repair, in tick order, rewritten in place.
 /// @param registry The voices already placed, this one excluded.
 /// @param voice The physical voice index of `line`.
 /// @param num_voices Voice count of the texture.
 /// @param bars Length of the piece in bars.
-/// @param mode The active diatonic scale.
+/// @param harmony The plan whose key and chords spell every replacement.
+/// @param line_bounds Register band and leap bound of the line.
 /// @param arrival_grain How often the voice below moves.
 void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegistry& registry,
-                     VoiceId voice, VoiceId num_voices, int bars, detail::Mode mode,
-                     Tick arrival_grain = kTicksPerBeat);
+                     VoiceId voice, VoiceId num_voices, int bars, const HarmonicPlan& harmony,
+                     const ReliefLineBounds& line_bounds, Tick arrival_grain = kTicksPerBeat);
 
 }  // namespace bach::composer
 

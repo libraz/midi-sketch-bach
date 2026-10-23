@@ -303,9 +303,8 @@ std::uint32_t lastTick(const std::vector<NoteEvent>& notes) {
 // length: the four spelling faults on the composed array, and the ornament
 // fault on the decorated one. RATCHET: measured counts, only ever lowered.
 // What remains is verbatim material under a dominant the plan declares (the
-// fugue family's minor-station entries, strettos and episode sequences), the
-// goldberg landing run's arrival relief, and augmented seconds across a bar
-// line into or out of V.
+// fugue family's minor-station entries, strettos and episode sequences) and
+// augmented seconds across a bar line into or out of V.
 struct SpellingCeiling {
   FormType form;
   std::size_t lowered_seventh;
@@ -321,8 +320,8 @@ constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
     // reaches steps B-Ab-B over V: augmented seconds 0 -> 12.
     {FormType::Fugue, 75, 0, 12, 5, 0},
     {FormType::PreludeAndFugue, 0, 0, 0, 0, 0},
-    {FormType::TrioSonata, 8, 0, 5, 10, 0},
-    {FormType::ChoralePrelude, 9, 6, 0, 0, 0},
+    {FormType::TrioSonata, 0, 0, 0, 0, 0},
+    {FormType::ChoralePrelude, 0, 0, 0, 0, 0},
     {FormType::ToccataAndFugue, 16, 0, 7, 0, 0},
     // The compass-bound counter-line concedes an augmented second only where
     // every other tone keeps a perfect-motion fault: 3 -> 5.
@@ -330,7 +329,7 @@ constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
     {FormType::FantasiaAndFugue, 17, 0, 5, 0, 0},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0},
     {FormType::Chaconne, 2, 0, 6, 2, 0},
-    {FormType::GoldbergVariations, 8, 8, 18, 16, 4},
+    {FormType::GoldbergVariations, 0, 0, 18, 0, 4},
 }};
 
 TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
@@ -376,6 +375,40 @@ TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
     EXPECT_LE(structural_total.false_relation_over_dominant, ceiling.false_relation) << form;
     EXPECT_LE(shipped_total.ornament_same_letter, ceiling.ornament_same_letter) << form;
   }
+}
+
+// The trio is written bar by bar against its own plan with no verbatim
+// material, so no voice has a reason to contradict the leading tone: across
+// seeds and lengths no lowered 7th sounds over V and no line steps by a
+// chromatic semitone through it. RATCHET: the augmented seconds left are the
+// pedal's leading tone into a deceptive root where no other tone in reach
+// clears a perfect-motion fault, and the middle manual's beat into that bar.
+TEST(MinorSpellingSweep, TrioSonataKeepsTheLeadingToneAtEveryLength) {
+  SpellingCounts total;
+  for (SubjectCharacter character : kCharacters) {
+    for (std::uint16_t bars : {std::uint16_t{0}, std::uint16_t{32}, std::uint16_t{64}}) {
+      for (std::uint32_t seed = 1; seed <= 10; ++seed) {
+        ComposeRequest request;
+        request.form = FormType::TrioSonata;
+        request.character = character;
+        request.seed = seed;
+        request.is_minor = true;
+        request.target_bars = bars;
+        HarnessFixture fixture;
+        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
+          continue;
+        const ComposeResult result =
+            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+        total.add(countSpelling(result.notes, fixture.harmony));
+      }
+    }
+  }
+  std::printf("[minor-spelling] trio lengths b7/V=%zu step=%zu aug2=%zu xrel=%zu\n",
+              total.lowered_seventh_over_dominant, total.same_letter_step_over_dominant,
+              total.augmented_second_over_dominant, total.false_relation_over_dominant);
+  EXPECT_EQ(total.lowered_seventh_over_dominant, 0u);
+  EXPECT_EQ(total.same_letter_step_over_dominant, 0u);
+  EXPECT_LE(total.augmented_second_over_dominant, 17u);
 }
 
 // The passacaglia's closing dominant: whatever the suspension and the seam

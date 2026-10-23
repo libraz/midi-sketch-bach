@@ -43,6 +43,7 @@
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/subject_catalog.h"
+#include "composer/texture_helpers.h"
 #include "composer/validation.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -300,6 +301,28 @@ TEST(FormSectionalTest, FreeSectionCarriesPedalAndPunctuationThenExpositionEnter
 }
 
 // --- 3. Entry transposition relationships (-5 answer, -12 re-entry) ----------
+
+// The tail's devices by length, as the README states them: a bass entry from
+// 24 bars, a stretto from 32.
+TEST(FormSectionalTest, FugueTailDevicesFollowTheDocumentedLengths) {
+  for (FormType form : kForms) {
+    for (std::uint16_t bars : {16, 20, 24, 28, 32, 64}) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(form, 1, minor, bars);
+        const int free_bars = freeBarsFor(bars);
+        bool bass_entry = false;
+        for (const auto& span : fx.voice_plan.spans) {
+          bass_entry =
+              bass_entry || (span.voice == 2 && span.intent == VoiceIntent::SubjectCarrier &&
+                             static_cast<int>(span.start_tick / kBar) == free_bars + 8);
+        }
+        EXPECT_EQ(bass_entry, bars >= 24) << formName(form) << " bars " << bars;
+        EXPECT_EQ(!fx.material.stretto_entries.empty(), bars >= 32)
+            << formName(form) << " bars " << bars;
+      }
+    }
+  }
+}
 
 TEST(FormSectionalTest, ExpositionEntryTranspositionsAreCorrect) {
   for (FormType form : kForms) {
@@ -655,6 +678,60 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
 }
 
 // --- 7. Toccata: Material archetype == seed % 4 -----------------------------
+
+// The V1 punctuation tone is judged at the onset the ear pairs it with: the
+// last attack of every other voice before its bar head, a sixteenth back. No
+// punctuation arrival forms a true parallel against that motion.
+TEST(FormSectionalTest, FreeSectionPunctuationArrivesWithoutParallelPerfects) {
+  for (FormType form : kForms) {
+    for (bool minor : {false, true}) {
+      for (std::uint16_t bars : kBarLengths) {
+        for (std::uint32_t seed : kSeeds) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          const Tick boundary = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+          const auto sounding = [&](VoiceId voice, Tick tick) {
+            int pitch = -1;
+            Tick latest = 0;
+            for (const NoteEvent& note : result.notes) {
+              if (note.voice == voice && note.start_tick <= tick &&
+                  tick < note.start_tick + note.duration &&
+                  (pitch < 0 || note.start_tick >= latest)) {
+                latest = note.start_tick;
+                pitch = note.pitch;
+              }
+            }
+            return pitch;
+          };
+          int v1_prev = -1;
+          std::vector<NoteEvent> line;
+          for (const NoteEvent& note : result.notes) {
+            if (note.voice == 1 && note.start_tick < boundary)
+              line.push_back(note);
+          }
+          std::sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+            return lhs.start_tick < rhs.start_tick;
+          });
+          for (const NoteEvent& note : line) {
+            const Tick head = note.start_tick;
+            if (head % kBar == 0 && head > 0 && v1_prev >= 0) {
+              for (VoiceId other : {VoiceId{0}, VoiceId{2}}) {
+                const int other_prev = sounding(other, head - kTicksPerBeat / 4);
+                const int other_curr = sounding(other, head);
+                EXPECT_FALSE(
+                    other_prev >= 0 && other_curr >= 0 &&
+                    formsStrictPerfectParallel(v1_prev, note.pitch, other_prev, other_curr))
+                    << formName(form) << " minor " << minor << " bars " << bars << " seed " << seed
+                    << " tick " << head << " against V" << other;
+              }
+            }
+            v1_prev = note.pitch;
+          }
+        }
+      }
+    }
+  }
+}
 
 TEST(FormSectionalTest, ToccataArchetypeMatchesSeed) {
   for (std::uint32_t seed : kSeeds) {

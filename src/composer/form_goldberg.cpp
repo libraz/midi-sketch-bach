@@ -1342,7 +1342,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         blocks.push_back(&out.material.goldberg_variations[idx].notes);
     }
     relieveArrivals(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
-                    /*num_voices=*/3, bars, mode, /*arrival_grain=*/kAriaBassFinestUnit);
+                    /*num_voices=*/3, bars, out.harmony, ReliefLineBounds{},
+                    /*arrival_grain=*/kAriaBassFinestUnit);
   }
 
   // The middle voice was written from the ground's bar chords, which describe

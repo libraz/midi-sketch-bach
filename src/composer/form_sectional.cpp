@@ -528,7 +528,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     const Tick bar_start = barTick(bar);
     const int centre = (kFreeV1Lo + kFreeV1Hi) / 2;
     registry.concurrentThemePitches(bar_start, /*voice=*/1, theme_pitches);
-    registry.concurrentMotions(bar_start - kTicksPerBar, bar_start, /*voice=*/1,
+    registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/1,
                                /*num_voices=*/3, motions);
     const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
                                          theme_pitches, v1_prev, motions, mode, /*downbeat=*/true);

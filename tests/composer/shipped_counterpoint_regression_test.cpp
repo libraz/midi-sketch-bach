@@ -1147,7 +1147,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 9 -> 5; hidden 119 -> 126 (worst cell 4 -> 5), anti 2 -> 4, floor -31.
     // V0 kept inside the manual compass: hidden 126 -> 116, battuta 27 -> 18,
     // paid with fourths 5 -> 7 where a neighbour figure turns down from the top.
-    {FormType::TrioSonata, 0, 0, 116, 18, 4, 0, 5, 2, 1, 34784, 7},
+    // Leading tone in the pre-landing thread and suspension preparation: lowered
+    // 7ths over V 8 -> 0, augmented seconds 5 -> 0; battuta 18 -> 20.
+    {FormType::TrioSonata, 0, 0, 116, 20, 4, 0, 5, 2, 1, 34784, 7},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -1220,7 +1222,11 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // paid with fourths 28 -> 29 and a floor 9 lower.
     // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
     // held dominant on the beat grid, fourths 29 -> 31.
-    {FormType::ChoralePrelude, 0, 0, 33, 17, 0, 0, 2, 2, 0, 17163, 31},
+    // Relief keeps V1 out of the bass band (V1 tones under C3 124 -> 6) and its
+    // passing eighths under a seventh (34 -> 8); the suspension's preparation is
+    // spelled under V and searched two bars further back: hidden 33 -> 38 (worst
+    // cell 2 -> 3), fourths 31 -> 28.
+    {FormType::ChoralePrelude, 0, 0, 38, 17, 0, 0, 3, 2, 0, 17163, 28},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1356,7 +1362,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // V0 band topped at the manual compass: hidden 18 -> 12, battuta 14 -> 3,
     // anti 12 -> 0, paid with fourths 140 -> 146.
     // Cadential trill on the real landing tone: hidden 12 -> 11.
-    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 28273, 146},
+    // V1 punctuation judged a sixteenth back, not a bar: its true parallels against
+    // V0 leave (12 in the sectional test sweep), fourths 146 -> 153.
+    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 28273, 153},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1570,7 +1578,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // with one battuta (2 -> 3) where the figuration turns down from the top.
     // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
     // held dominant on the beat grid, fourths 208 -> 209; hidden 16 -> 14.
-    {FormType::FantasiaAndFugue, 0, 0, 14, 3, 16, 0, 2, 1, 1, 29024, 209},
+    // V1 punctuation judged a sixteenth back: fourths 209 -> 214.
+    {FormType::FantasiaAndFugue, 0, 0, 14, 3, 16, 0, 2, 1, 1, 29024, 214},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class

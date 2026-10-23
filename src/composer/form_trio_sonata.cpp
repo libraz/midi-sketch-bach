@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "composer/arrival_relief.h"
 #include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
 #include "composer/figuration.h"
@@ -599,10 +600,18 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     const int p1 = detail::scaleUp(p2, 1, mode);
     const int p0 = detail::scaleUp(p1, 1, mode);
     const std::size_t n = pre_landing_indices.size();
-    v0.notes[pre_landing_indices[n - 4]].pitch = static_cast<std::uint8_t>(p0);
-    v0.notes[pre_landing_indices[n - 3]].pitch = static_cast<std::uint8_t>(p1);
-    v0.notes[pre_landing_indices[n - 2]].pitch = static_cast<std::uint8_t>(p2);
-    v0.notes[pre_landing_indices[n - 1]].pitch = static_cast<std::uint8_t>(p3);
+    // Each degree takes the inflection its own bar's chord spells.
+    const auto place = [&](std::size_t from_end, int pitch) {
+      MaterialNote& note = v0.notes[pre_landing_indices[n - from_end]];
+      const ChordSpec& chord = chords[std::min(
+          static_cast<std::size_t>(note.start_tick / kTicksPerBar), chords.size() - 1)];
+      note.pitch = static_cast<std::uint8_t>(
+          detail::respellInScale(pitch, 0, mode, detail::chordPcMaskInKey(chord, 0, mode)));
+    };
+    place(4, p0);
+    place(3, p1);
+    place(2, p2);
+    place(1, p3);
     v1_repair_start = v0.notes[pre_landing_indices[n - 4]].start_tick;
   }
   appendCadentialLanding(v0.notes, static_cast<Tick>(bars - 2) * kTicksPerBar, kTicksPerBar,
@@ -1033,20 +1042,27 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       // together: a figure is only as good as its worse tone, and an anchor
       // that clears its own arrival while forcing the eighth into a parallel
       // has made the same bad trade one subdivision later.
+      // An augmented second (the leading tone against the lowered 6th, as at a
+      // deceptive arrival) is a step the line cannot take; it ranks with a
+      // hidden perfect.
+      const auto motion_rank = [&](int from, int to, Tick tick) {
+        const int rank = pedal_fault_rank(from, to, tick);
+        return detail::isAugmentedSecond(from, to, 0, mode) ? std::max(rank, kPedalHidden) : rank;
+      };
       const auto beat_rank = [&](int cand) {
         int worst = kPedalClean;
         if (beat != 0 && pedal_prev >= 0)
-          worst = std::max(worst, pedal_fault_rank(pedal_prev, cand, t));
+          worst = std::max(worst, motion_rank(pedal_prev, cand, t));
         if (!boundary || next_root < 0)
           return worst;
-        const int plain = pedal_fault_rank(cand, next_root, t + kTicksPerBeat);
+        const int plain = motion_rank(cand, next_root, t + kTicksPerBeat);
         int link[2];
         const int link_count = wants_link ? connecting_tones(cand, next_root, link) : 0;
         int best_figure = plain;  // the fill is optional, so the plain quarter is the floor.
         for (int idx = 0; idx < link_count; ++idx) {
-          best_figure = std::min(
-              best_figure, std::max(pedal_fault_rank(cand, link[idx], t + kEighth),
-                                    pedal_fault_rank(link[idx], next_root, t + kTicksPerBeat)));
+          best_figure =
+              std::min(best_figure, std::max(motion_rank(cand, link[idx], t + kEighth),
+                                             motion_rank(link[idx], next_root, t + kTicksPerBeat)));
         }
         return std::max(worst, best_figure);
       };
@@ -1337,7 +1353,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
                 static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                 static_cast<std::uint8_t>(upper_res),
                 /*band_lo=*/design_lo, design_hi, mode, &suspension,
-                &chords[static_cast<std::size_t>(bars - bar_offset)]))
+                &chords[static_cast<std::size_t>(bars - bar_offset)],
+                &chords[static_cast<std::size_t>(bars - bar_offset - 1)]))
           continue;
         // Safety net for the register clamp above: the resolution steps one or
         // two semitones below the suspended tone, so it can still fall just
@@ -1547,6 +1564,81 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       }
       note.pitch = static_cast<std::uint8_t>(best);
       prev_pitch = best;
+    }
+  }
+
+  // Bar-line augmented seconds on the manuals. A bar's running tones are spelled
+  // under its own chord before the next bar's anchor exists, so the lowered 6th
+  // over iv can meet the next bar's leading tone. The off-beat tone before the
+  // bar head is re-aimed to the nearest degree of its own bar that reaches the
+  // head without one, no worse in perfect motion at either end; else it stands.
+  for (std::size_t manual = 0; manual < 2; ++manual) {
+    std::vector<MaterialNote>& line = out.material.trio_voices[manual].notes;
+    // The voice sounding above this one (none over the top manual) and below it.
+    const std::vector<MaterialNote>* upper_voice =
+        manual == 0 ? nullptr : &out.material.trio_voices[0].notes;
+    const std::vector<MaterialNote>& lower_voice = out.material.trio_voices[manual + 1].notes;
+    const std::vector<MaterialNote>& far_voice =
+        out.material.trio_voices[manual == 0 ? 2 : 0].notes;
+    const auto motions_at = [&](Tick tick) {
+      std::vector<ConcurrentMotion> motions;
+      for (const std::vector<MaterialNote>* voice : {&lower_voice, &far_voice}) {
+        const int curr = sounding_pitch(*voice, tick);
+        if (curr >= 0)
+          motions.push_back({0, onset_before(*voice, tick), curr});
+      }
+      return motions;
+    };
+    const auto suspended = [&](Tick tick) {
+      for (const SuspensionPattern& pattern : out.material.suspension_patterns) {
+        if (pattern.voice == manual && tick >= pattern.preparation_tick &&
+            tick < pattern.resolution_tick + 2 * kTicksPerBeat)
+          return true;
+      }
+      return false;
+    };
+    const int band_lo = manual == 0 ? kV0BandLo : kV1BandLo;
+    const int band_hi = manual == 0 ? kV0BandHi : kV1BandHi;
+    for (std::size_t idx = 2; idx < line.size(); ++idx) {
+      const MaterialNote& head = line[idx];
+      MaterialNote& tone = line[idx - 1];
+      const int head_pitch = static_cast<int>(head.pitch);
+      const int from = static_cast<int>(line[idx - 2].pitch);
+      const int design = static_cast<int>(tone.pitch);
+      if (head.start_tick % kTicksPerBar != 0 || tone.start_tick % kTicksPerBeat == 0 ||
+          head.start_tick - tone.start_tick > kTicksPerBeat || suspended(tone.start_tick) ||
+          !detail::isAugmentedSecond(design, head_pitch, 0, mode)) {
+        continue;
+      }
+      const ChordSpec& tone_chord = chords[std::min(
+          static_cast<std::size_t>(tone.start_tick / kTicksPerBar), chords.size() - 1)];
+      const std::vector<ConcurrentMotion> into_tone = motions_at(tone.start_tick);
+      const std::vector<ConcurrentMotion> into_head = motions_at(head.start_tick);
+      const auto rank = [&](int cand) {
+        return std::max(perfectFaultRank(from, cand, into_tone),
+                        perfectFaultRank(cand, head_pitch, into_head));
+      };
+      const int design_rank = rank(design);
+      const int upper_now =
+          upper_voice == nullptr ? band_hi + 1 : sounding_pitch(*upper_voice, tone.start_tick);
+      const int lower_now = sounding_pitch(lower_voice, tone.start_tick);
+      const auto admissible = [&](int cand) {
+        return cand >= band_lo && cand <= band_hi && (upper_now < 0 || cand < upper_now) &&
+               cand > lower_now && detail::inScale(cand, mode, &tone_chord) &&
+               std::abs(cand - head_pitch) <= 4 &&
+               !detail::isAugmentedSecond(cand, head_pitch, 0, mode) &&
+               !detail::isAugmentedSecond(from, cand, 0, mode) && rank(cand) <= design_rank;
+      };
+      for (int dist = 1; dist <= 4; ++dist) {
+        if (admissible(design - dist)) {
+          tone.pitch = static_cast<std::uint8_t>(design - dist);
+          break;
+        }
+        if (admissible(design + dist)) {
+          tone.pitch = static_cast<std::uint8_t>(design + dist);
+          break;
+        }
+      }
     }
   }
 

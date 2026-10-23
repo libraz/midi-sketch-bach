@@ -282,15 +282,18 @@ int soundingMaterialPitch(const std::vector<MaterialNote>& notes, Tick tick);
 /// pitch, is consonant over `bass_at_preparation`, and resolves down one
 /// diatonic-sized semitone step to the type-specific consonance. Both tones are
 /// spelled under `resolution_chord` when given, so a 4-3 over the minor
-/// dominant resolves to its leading tone. Returns false when the supplied bass
-/// motion and band admit no valid pattern.
+/// dominant resolves to its leading tone, and the prepared tone under
+/// `preparation_chord` too, so it never sounds the lowered 7th over a major
+/// dominant. Returns false when the supplied bass motion and band admit no
+/// valid pattern.
 bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick suspension_tick,
                            Tick resolution_tick, VoiceId voice, std::uint8_t bass_at_preparation,
                            std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
                            std::uint8_t upper_at_preparation, std::uint8_t upper_at_suspension,
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
                            detail::Mode mode, SuspensionPattern* pattern,
-                           const detail::ChordSpec* resolution_chord);
+                           const detail::ChordSpec* resolution_chord,
+                           const detail::ChordSpec* preparation_chord);
 
 /// @brief Pick the band chord tone that is consonant and parallel-free.
 ///
