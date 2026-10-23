@@ -1701,7 +1701,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // that root. Battuta triples and its worst cell doubles -- a held tone
     // approached from above arrives contrary by definition, and this line is
     // held tones almost throughout. Hidden moves by one.
-    {FormType::GoldbergVariations, 0, 0, 9, 25, 8, 0, 1, 2, 1, 29129, 0},
+    // The closing cadence holds its tonic triad instead of re-striking the inner
+    // line through the final bar: successions 29129 -> 28937, three per cell.
+    {FormType::GoldbergVariations, 0, 0, 8, 15, 8, 0, 1, 1, 1, 28937, 0},
 }};
 
 // Form x character pairs the form director refuses by design: the chorale

@@ -206,8 +206,8 @@ void appendAriaBassBar(std::vector<MaterialNote>& out, int bar, int root, Mode m
 
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
 // unison). Octave membership is preserved because scaleUp walks the scale.
-int transposeUp(int pitch, int degrees, Mode mode) {
-  return degrees <= 0 ? pitch : detail::scaleUp(pitch, degrees, mode);
+int transposeUp(int pitch, int degrees, Mode mode, const detail::ChordSpec* chord = nullptr) {
+  return degrees <= 0 ? pitch : detail::scaleUp(pitch, degrees, mode, chord);
 }
 
 // Append an aria bar (the m=2 two-half-notes SPECIAL layout from GoldbergVariations): a
@@ -342,17 +342,31 @@ struct CanonLines {
 };
 
 // Lay out a canon block from a leader-tone assignment. The dux states the
-// soggetto once per bar, re-anchored to the same source cell; the comes is an
-// exact constant-semitone copy of it, delayed one bar and truncated at the
-// block end.
+// soggetto once per bar, re-anchored to the same source cell; the comes is its
+// diatonic transposition by the imitation interval, delayed one bar and
+// truncated at the block end.
 // The soggetto's neighbours alternate direction bar by bar, which is the shape
 // the cell is designed to have. `rising` carries that default in and lets a
 // caller depart from it where the default is what a fault is made of.
 constexpr std::array<bool, 4> kCanonSoggettoParity = {{true, false, true, false}};
 
+// One follower tone: the leader moved by `imitation_degrees` letters of the
+// scale and `octave_shift` semitones, its inflection read under the harmony of
+// the bar it sounds in -- the comes enters a bar late, over the next chord, so
+// in minor a leader tone spelled for one chord is re-spelled for the other
+// (the leading tone over the dominant, the subtonic elsewhere).
+int canonFollowerPitch(int leader_pitch, int imitation_degrees, int octave_shift,
+                       const BarChord& chord, Mode mode) {
+  const detail::ChordSpec harmony{chord.root_pc, chord.minor};
+  const int transposed =
+      transposeUp(leader_pitch, imitation_degrees, mode, &harmony) + octave_shift;
+  return detail::respellInScale(transposed, 0, mode, detail::chordPcMaskInKey(harmony, 0, mode));
+}
+
 CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
-                       int source_register_shift, int comes_shift, Mode mode,
-                       const std::array<bool, 4>& rising) {
+                       int source_register_shift, int imitation_degrees, int comes_octave_shift,
+                       Mode mode, const std::array<bool, 4>& rising,
+                       const std::array<std::uint8_t, 4>& ground) {
   CanonLines lines;
   lines.dux.reserve(24);
   for (int local = 0; local < 4; ++local) {
@@ -370,7 +384,10 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
       continue;
     MaterialNote copy = note;
     copy.start_tick = delayed;
-    copy.pitch = static_cast<std::uint8_t>(static_cast<int>(copy.pitch) + comes_shift);
+    const int follower_bar = static_cast<int>(delayed / kTicksPerBar);
+    copy.pitch = static_cast<std::uint8_t>(canonFollowerPitch(
+        static_cast<int>(note.pitch), imitation_degrees, comes_octave_shift,
+        goldbergBarChord(ground[static_cast<std::size_t>(follower_bar % 4)], mode), mode));
     lines.comes.push_back(copy);
   }
   return lines;
@@ -398,10 +415,14 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 // the fault the ear names, then the three weaker perfect approaches each in
 // their own column, then the dissonant simultaneities. A caller with its own
 // terms to weigh interleaves them.
+//
+// `entry` is what each voice sounds just before the block (-1 = silent), so the
+// block's first onset is read as the arrival it is.
 std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode,
-                                       bool fill_thirds, AriaBassSurface surface) {
+                                       bool fill_thirds, AriaBassSurface surface,
+                                       const std::array<int, 3>& entry = {-1, -1, -1}) {
   std::vector<MaterialNote> bass;
   bass.reserve(64);
   for (int local = 0; local < 4; ++local) {
@@ -421,7 +442,7 @@ std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
   onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
 
   std::array<int, 8> score{};
-  std::array<int, 3> prev = {-1, -1, -1};
+  std::array<int, 3> prev = entry;
   for (const Tick tick : onsets) {
     std::array<int, 3> curr = {-1, -1, -1};
     for (std::size_t idx = 0; idx < 3; ++idx) {
@@ -510,8 +531,8 @@ struct CanonDesign {
 // is scored and minimised: a block that never needed one keeps it exactly.
 CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                              const std::array<std::uint8_t, 4>& ground, int source_register_shift,
-                             int comes_shift, bool imitate_above, bool fill_thirds,
-                             AriaBassSurface surface) {
+                             int imitation_degrees, int comes_octave_shift, bool imitate_above,
+                             bool fill_thirds, AriaBassSurface surface) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
@@ -541,8 +562,8 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                 }
               }
               const CanonLines lines =
-                  layOutCanon(assignment, /*block_start_bar=*/0, source_register_shift, comes_shift,
-                              mode, rising);
+                  layOutCanon(assignment, /*block_start_bar=*/0, source_register_shift,
+                              imitation_degrees, comes_octave_shift, mode, rising, ground);
               const std::array<int, 8> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
                   /*block_start_bar=*/0, ground, mode, fill_thirds, surface);
@@ -601,18 +622,17 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
 struct CanonLayout {
   bool imitate_above = false;
   int source_register_shift = 0;
-  int comes_shift = 0;
+  // Octaves the comes sits from the dux on top of the imitation interval.
+  int comes_octave_shift = 0;
   int design_ceiling = 0;
 };
 
-CanonLayout canonLayout(int imitation_degrees, Mode mode) {
-  const int imitation_semitones =
-      transposeUp(kCanonLeaderBase, imitation_degrees, mode) - kCanonLeaderBase;
+CanonLayout canonLayout(int imitation_degrees) {
   CanonLayout layout;
   layout.imitate_above = imitation_degrees >= 4;
   layout.source_register_shift = layout.imitate_above ? -12 : 12;
-  layout.comes_shift = layout.imitate_above ? imitation_semitones + 12 : imitation_semitones - 24;
-  layout.design_ceiling = imitation_degrees >= 8 ? 70 : 72;
+  layout.comes_octave_shift = layout.imitate_above ? 12 : -24;
+  layout.design_ceiling = imitation_degrees >= 8 ? 70 : kCanonLeaderBase;
   return layout;
 }
 
@@ -639,10 +659,10 @@ int canonBlockIndex(int imitation_degrees) {
 bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& ground) {
   for (int imitation_degrees = 0; imitation_degrees < kCanonImitationDegreeCount;
        ++imitation_degrees) {
-    const CanonLayout layout = canonLayout(imitation_degrees, mode);
+    const CanonLayout layout = canonLayout(imitation_degrees);
     const CanonDesign probe = designCanonBlock(
-        layout.design_ceiling, mode, ground, layout.source_register_shift, layout.comes_shift,
-        layout.imitate_above, /*fill_thirds=*/true,
+        layout.design_ceiling, mode, ground, layout.source_register_shift, imitation_degrees,
+        layout.comes_octave_shift, layout.imitate_above, /*fill_thirds=*/true,
         goldbergAriaBassSurface(canonBlockIndex(imitation_degrees), /*is_aria_block=*/false));
     if (!probe.clean)
       return false;
@@ -655,15 +675,15 @@ void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>&
                      int block_start_bar, int imitation_degrees, Mode mode,
                      const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
                      AriaBassSurface surface) {
-  const CanonLayout layout = canonLayout(imitation_degrees, mode);
+  const CanonLayout layout = canonLayout(imitation_degrees);
   const bool imitate_above = layout.imitate_above;
   const int source_register_shift = layout.source_register_shift;
-  const int comes_shift = layout.comes_shift;
-  const CanonDesign designed =
-      designCanonBlock(layout.design_ceiling, mode, ground, source_register_shift, comes_shift,
-                       imitate_above, fill_thirds, surface);
-  const CanonLines lines = layOutCanon(designed.assignment, block_start_bar, source_register_shift,
-                                       comes_shift, mode, designed.rising);
+  const CanonDesign designed = designCanonBlock(
+      layout.design_ceiling, mode, ground, source_register_shift, imitation_degrees,
+      layout.comes_octave_shift, imitate_above, fill_thirds, surface);
+  const CanonLines lines =
+      layOutCanon(designed.assignment, block_start_bar, source_register_shift, imitation_degrees,
+                  layout.comes_octave_shift, mode, designed.rising, ground);
 
   if (imitate_above) {
     principal.notes.insert(principal.notes.end(), lines.comes.begin(), lines.comes.end());
@@ -797,7 +817,7 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
                                           int block_start_bar, Mode mode,
                                           const std::array<std::uint8_t, 4>& ground,
                                           bool fill_thirds, AriaBassSurface bass_surface,
-                                          InnerSurface surface) {
+                                          InnerSurface surface, const std::array<int, 3>& entry) {
   const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
   std::vector<MaterialNote> chosen;
   std::array<int, 10> best{};
@@ -823,7 +843,7 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
                            exits[local], surface);
           }
           const std::array<int, 8> faults = goldbergBlockFaults(
-              upper, line, block_start_bar, ground, mode, fill_thirds, bass_surface);
+              upper, line, block_start_bar, ground, mode, fill_thirds, bass_surface, entry);
           // Every bar of a block is laid out on the same surface, so two of them
           // that state the same tones are the same bar. A block that repeats a
           // bar verbatim is not varying anything, which is why this is weighed
@@ -868,6 +888,52 @@ bool innerVoiceWithdraws(int blk, int num_blocks, int da_capo_block) {
     return false;
   return goldbergVariationKind(static_cast<std::size_t>(next - 1)) !=
          GoldbergVariationKind::Figuration;
+}
+
+// Whether a pitch belongs to the dominant triad (G, B, D in the C-tonic frame).
+bool isDominantTriadTone(int pitch) {
+  const int pcl = pitch % 12;
+  return pcl == 7 || pcl == 11 || pcl == 2;
+}
+
+// Assemble the final cadence over the coda bass, on either exit (a free
+// variation's landing or the da capo's half notes).
+//
+// Both upper-voice layouts hold a tone from the penultimate bar's third beat,
+// chosen against the ground chord there, so the coda's dominant on the fourth
+// beat may find it a non-chord tone. That beat is given to the dominant tone
+// nearest the tone the line lands on (the leading tone before a tonic, a common
+// tone before a fifth). The middle voice then states the cadence with the tone
+// the variation leaves missing and the tonic third. Returns whether the middle
+// voice was closed.
+bool closeGoldbergOnCoda(std::vector<MaterialNote>& variation, std::vector<MaterialNote>& inner,
+                         Tick final_bar_tick, Tick approach_tick, int coda_support,
+                         int coda_dominant, int coda_tonic, bool major_close) {
+  const auto held = std::find_if(variation.begin(), variation.end(), [&](const MaterialNote& note) {
+    return note.start_tick <= approach_tick && approach_tick < note.start_tick + note.duration;
+  });
+  const int landing = soundingMaterialPitch(variation, final_bar_tick);
+  if (held != variation.end() && landing >= 0 && !isDominantTriadTone(held->pitch)) {
+    // Nearest first; at equal distance the leading tone.
+    const auto rank = [&](int cand) { return std::abs(cand - landing) * 2 + (cand % 12 != 11); };
+    int best = -1;
+    for (int cand = landing - 2; cand <= landing + 2; ++cand) {
+      if (isDominantTriadTone(cand) && (best < 0 || rank(cand) < rank(best)))
+        best = cand;
+    }
+    if (best >= 0) {
+      const Tick held_end = held->start_tick + held->duration;
+      if (held->start_tick == approach_tick) {
+        held->pitch = static_cast<std::uint8_t>(best);
+      } else {
+        held->duration = approach_tick - held->start_tick;
+        variation.insert(held + 1, materialNote(approach_tick, held_end - approach_tick, best));
+      }
+    }
+  }
+  return closeMiddleVoiceOnCadence(inner, variation, final_bar_tick, approach_tick, kTicksPerBar,
+                                   coda_support, coda_dominant, coda_tonic, major_close,
+                                   /*fallback_previous=*/kInnerBandCeiling);
 }
 
 }  // namespace
@@ -1177,9 +1243,19 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     if (fill_middle_voice) {
       const int ceiling = goldbergInnerBandCeilingFor(var.notes);
       if (ceiling > 0) {
-        const std::vector<MaterialNote> line = designInnerLine(
-            var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds,
-            bass_surface_of_block(blk), kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()]);
+        // The voices as they leave the previous block, so the line's first
+        // tone is chosen as an arrival from them.
+        const Tick entry_tick = barTick(blk * kCycleBars) - 1;
+        const std::array<int, 3> entry = {
+            out.material.goldberg_variations.empty()
+                ? -1
+                : soundingMaterialPitch(out.material.goldberg_variations.back().notes, entry_tick),
+            soundingMaterialPitch(inner_voice, entry_tick),
+            soundingMaterialPitch(out.material.goldberg_aria_bass, entry_tick)};
+        const std::vector<MaterialNote> line =
+            designInnerLine(var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds,
+                            bass_surface_of_block(blk),
+                            kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()], entry);
         ++inner_surface_slot;
         inner_voice.insert(inner_voice.end(), line.begin(), line.end());
         inner_blocks.push_back(blk);
@@ -1208,9 +1284,10 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
 
   // The immutable four-bar aria bass deliberately stops before the final bar.
   // Its explicit tonic coda resolves the otherwise open V/vi terminal ground.
+  constexpr int kCodaBassDominant = 43;  // G2.
   CodaDecl coda;
   coda.voice = 2;
-  coda.notes.push_back(materialNote(final_approach_tick, kTicksPerBeat, 43));
+  coda.notes.push_back(materialNote(final_approach_tick, kTicksPerBeat, kCodaBassDominant));
   coda.notes.push_back(materialNote(final_bar_tick, kTicksPerBar, ground.front()));
   out.material.coda_extensions.push_back(std::move(coda));
 
@@ -1245,7 +1322,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       relief_registry.record(note.start_tick, /*voice=*/1, static_cast<int>(note.pitch),
                              note.duration);
     // Canon blocks are excluded. Their variation line is the canon LEADER, and
-    // the follower on V1 is that leader plus one fixed imitation interval;
+    // the follower on V1 is that leader transposed by the imitation interval;
     // moving a leader tone without moving its comes breaks the imitation the
     // block exists to state. The quodlibet block also carries a second line on
     // V1, but that one is a free chord-tone tune rather than a copy of the
@@ -1265,6 +1342,21 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     relieveArrivals(lineInTickOrder(blocks), relief_registry, /*voice=*/0,
                     /*num_voices=*/3, bars, mode, /*arrival_grain=*/kAriaBassFinestUnit);
   }
+
+  // The middle voice was written from the ground's bar chords, which describe
+  // neither the coda's dominant nor its tonic, so it states the cadence itself
+  // on both exits -- after a free variation and after the da capo, where it
+  // enters for the close alone. The tonic third is what makes the final bar a
+  // triad over the outer voices' tonic. Assembled after the relief above, so
+  // the cadence has the last word on the final bar.
+  const bool inner_closed = closeGoldbergOnCoda(
+      out.material.goldberg_variations.back().notes, out.material.goldberg_inner_voice,
+      final_bar_tick, final_approach_tick,
+      soundingMaterialPitch(out.material.goldberg_aria_bass, final_approach_tick - 1),
+      kCodaBassDominant, static_cast<int>(ground.front()), !final_cadence_chord.minor);
+  // A final block that carried no middle voice gets a span for the close alone.
+  const bool close_needs_span =
+      inner_closed && (inner_blocks.empty() || inner_blocks.back() != num_blocks - 1);
 
   Span coda_span;
   coda_span.id = next_span_id++;
@@ -1309,6 +1401,16 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     follower_span.intent = VoiceIntent::GoldbergInnerVoiceCarrier;
     follower_span.subdivision = Subdivision::Quarter;
     out.voice_plan.spans.push_back(follower_span);
+  }
+  if (close_needs_span) {
+    Span close_span;
+    close_span.id = next_span_id++;
+    close_span.start_tick = final_approach_tick;
+    close_span.end_tick = barTick(bars);
+    close_span.voice = 1;
+    close_span.intent = VoiceIntent::GoldbergInnerVoiceCarrier;
+    close_span.subdivision = Subdivision::Quarter;
+    out.voice_plan.spans.push_back(close_span);
   }
 
   return out;

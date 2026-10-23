@@ -889,6 +889,78 @@ TEST(CompositionServiceTest, ChaconneInGMinorAtFullLengthShipsOnEverySeed) {
   EXPECT_TRUE(needed_nearest_placement);
 }
 
+// Pitch classes sounding at `tick`, optionally restricted to one voice.
+std::set<int> sonorityAt(const std::vector<NoteEvent>& notes, Tick tick, int voice = -1) {
+  std::set<int> pcs;
+  for (const NoteEvent& note : notes) {
+    if ((voice < 0 || note.voice == voice) && note.start_tick <= tick &&
+        tick < note.start_tick + note.duration)
+      pcs.insert(note.pitch % 12);
+  }
+  return pcs;
+}
+
+// The goldberg ends on the cadence its plan declares, on both exits (a free
+// variation below 24 bars, the da capo above): the dominant approach beat
+// sounds the leading tone, the middle voice sounds only tones of the declared
+// chord from that beat on, and the final sonority is the declared tonic triad
+// with its third.
+TEST(CompositionServiceTest, GoldbergEndsOnTheDeclaredResolvedTonicTriad) {
+  for (DurationScale scale : {DurationScale::Short, DurationScale::Medium}) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+        SCOPED_TRACE(minor ? "minor" : "major");
+        SCOPED_TRACE(seed);
+        SCOPED_TRACE(static_cast<int>(scale));
+        CompositionRequest request;
+        request.form = FormType::GoldbergVariations;
+        request.scale = scale;
+        request.key = {Key::C, minor};
+        request.seed = seed;
+        CompositionProduct product;
+        ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+
+        composer::ComposeRequest plan_request;
+        plan_request.form = FormType::GoldbergVariations;
+        plan_request.is_minor = minor;
+        plan_request.target_bars = product.resolved_bars;
+        plan_request.seed = seed;
+        composer::HarnessFixture fixture;
+        ASSERT_EQ(composer::buildFormFixture(plan_request, &fixture),
+                  composer::FormDirectorStatus::Ok);
+        const composer::ChordEvent& final_chord = fixture.harmony.chords.back();
+        ASSERT_EQ(final_chord.root_pc, 0);
+        const int third = final_chord.quality == composer::ChordQuality::Minor ? 3 : 4;
+        const std::set<int> tonic_triad = {0, third, 7};
+
+        const std::vector<NoteEvent>& notes = product.composition.notes;
+        Tick end = 0;
+        for (const NoteEvent& note : notes)
+          end = std::max<Tick>(end, note.start_tick + note.duration);
+        const Tick final_bar = end - kTicksPerBar;
+        const Tick approach = final_bar - kTicksPerBeat;
+        ASSERT_EQ(final_chord.start_tick, final_bar);
+
+        const std::set<int> last = sonorityAt(notes, end - 1);
+        EXPECT_TRUE(last.count(third)) << "the final sonority has no tonic third";
+        for (int pcl : last)
+          EXPECT_TRUE(tonic_triad.count(pcl)) << "pc " << pcl << " held over the final tonic";
+        EXPECT_TRUE(sonorityAt(notes, approach).count(11)) << "no leading tone on the approach";
+
+        for (const NoteEvent& note : notes) {
+          if (note.voice != 1 || note.start_tick + note.duration <= approach)
+            continue;
+          const int pcl = note.pitch % 12;
+          if (note.start_tick < final_bar)
+            EXPECT_TRUE(pcl == 7 || pcl == 11 || pcl == 2 || pcl == 5) << "middle voice " << pcl;
+          else
+            EXPECT_TRUE(tonic_triad.count(pcl)) << "middle voice " << pcl;
+        }
+      }
+    }
+  }
+}
+
 // The organ has no key outside its compass, so every organ form sounds inside it
 // in every key: a whole octave places most scores, the output placement moves
 // what one cannot, and the key never costs the piece its validity.

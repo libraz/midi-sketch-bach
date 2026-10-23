@@ -7,7 +7,7 @@
 // register.
 //
 // Canon correctness is guaranteed by construction and asserted STRUCTURALLY
-// (the comes is a constant-interval copy of the dux, delayed one bar and
+// (the comes is the diatonic transposition of the dux, delayed one bar and
 // truncated at the block end). There is no canon identity provenance bit with
 // dedicated Goldberg carrier provenance.
 
@@ -48,15 +48,41 @@ HarnessFixture build(bool minor, std::uint16_t target_bars, std::uint32_t seed) 
 
 constexpr std::array<std::uint32_t, 4> kSeeds = {{1, 5, 42, 99}};
 
-// detail::scaleUp mirror for the structural canon-transposition check.
-int transposeUp(int pitch, int degrees, detail::Mode mode) {
-  return degrees <= 0 ? pitch : detail::scaleUp(pitch, degrees, mode);
+// Whether a pitch belongs to the key: the major scale, or in minor the natural
+// minor with the raised sixth and seventh the dominant spells.
+bool inKey(int pitch, detail::Mode mode) {
+  const int pcl = pitch % 12;
+  if (mode == detail::Mode::Major)
+    return detail::inScale(pitch, mode);
+  return detail::inScale(pitch, mode) || pcl == 9 || pcl == 11;
+}
+
+// The harmony the plan declares at a tick, as the spelling helpers read it.
+detail::ChordSpec chordAt(const HarmonicPlan& plan, Tick tick) {
+  const ChordEvent* active = &plan.chords.front();
+  for (const ChordEvent& chord : plan.chords) {
+    if (chord.start_tick <= tick)
+      active = &chord;
+  }
+  return {active->root_pc, active->quality == ChordQuality::Minor};
 }
 
 // Block index of the b-th 4-bar block (0 = aria).
 constexpr int kCycleBars = 4;
 Tick blockStart(int blk) {
   return static_cast<Tick>(blk * kCycleBars) * kTicksPerBar;
+}
+
+// The aria's half-note layout as the da capo restates it. The coda's dominant
+// may take the closing beat of the penultimate bar, so that beat's split-off
+// quarter is not part of the layout.
+std::vector<MaterialNote> halfNoteLayout(const std::vector<MaterialNote>& notes) {
+  std::vector<MaterialNote> layout;
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick % (kTicksPerBeat * 2) == 0)
+      layout.push_back(note);
+  }
+  return layout;
 }
 
 // --- Full-set structure -----------------------------------------------------
@@ -75,7 +101,7 @@ TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
     // Aria and da capo are the m=2 layout (8 half notes, density 0).
     EXPECT_EQ(blocks.front().notes.size(), 8u);
     EXPECT_EQ(blocks.front().density_level, 0);
-    EXPECT_EQ(blocks.back().notes.size(), 8u);
+    EXPECT_EQ(halfNoteLayout(blocks.back().notes).size(), 8u);
     EXPECT_EQ(blocks.back().density_level, 0);
     EXPECT_TRUE(fx.material.passacaglia_ground.empty());
     EXPECT_TRUE(fx.material.passacaglia_variations.empty());
@@ -101,13 +127,16 @@ TEST(GoldbergCanon, FullSetIsThirtyTwoBlocksWithCanonsAtEveryThird) {
 TEST(GoldbergCanon, DaCapoRestatesAriaUntilItsExplicitTerminalCoda) {
   const HarnessFixture fx = build(false, 128, 1);
   const auto& aria = fx.material.goldberg_variations.front().notes;
-  const auto& da_capo = fx.material.goldberg_variations.back().notes;
+  const std::vector<MaterialNote> da_capo =
+      halfNoteLayout(fx.material.goldberg_variations.back().notes);
   ASSERT_EQ(aria.size(), da_capo.size());
   const Tick shift = blockStart(31);
+  const Tick approach = blockStart(32) - kTicksPerBar - kTicksPerBeat;
   ASSERT_GE(aria.size(), 2u);
   for (std::size_t i = 0; i + 2 < aria.size(); ++i) {
     EXPECT_EQ(da_capo[i].pitch, aria[i].pitch);
-    EXPECT_EQ(da_capo[i].duration, aria[i].duration);
+    if (da_capo[i].start_tick + da_capo[i].duration != approach)
+      EXPECT_EQ(da_capo[i].duration, aria[i].duration);
     EXPECT_EQ(da_capo[i].start_tick, aria[i].start_tick + shift);
   }
   // The da capo retains the aria's m=2 rhythm, but its final bar is the
@@ -117,6 +146,14 @@ TEST(GoldbergCanon, DaCapoRestatesAriaUntilItsExplicitTerminalCoda) {
   EXPECT_EQ(da_capo.back().start_tick, aria.back().start_tick + shift);
   EXPECT_EQ(da_capo[aria.size() - 2].pitch % 12, 7);
   EXPECT_EQ(da_capo.back().pitch % 12, 0);
+  // A split-off closing beat sounds a tone of the coda's dominant.
+  for (const MaterialNote& note : fx.material.goldberg_variations.back().notes) {
+    if (note.start_tick % (kTicksPerBeat * 2) == 0)
+      continue;
+    EXPECT_EQ(note.start_tick, approach);
+    EXPECT_TRUE(note.pitch % 12 == 7 || note.pitch % 12 == 11 || note.pitch % 12 == 2)
+        << static_cast<int>(note.pitch);
+  }
 }
 
 TEST(GoldbergCanon, AriaBassMutationFailsDedicatedImmutableRule) {
@@ -214,63 +251,81 @@ TEST(GoldbergCanon, FullSetValidatesCleanAndDeterministic) {
 
 // --- Canon structural assertions --------------------------------------------
 
-// For every canon variation, the comes is a constant-semitone copy of the dux,
-// delayed exactly one bar and truncated at the block end. Canons through the
-// fourth imitate below; fifth-and-wider canons imitate above.
-TEST(GoldbergCanon, ComesUsesOneFixedIntervalDelayDirectionAndTruncation) {
+// For every canon variation, the comes is the diatonic transposition of the dux
+// by the canon's interval -- the same letter distance on every note, each note
+// inflected as its own bar's harmony spells the key -- delayed exactly one bar
+// and truncated at the block end, and every note of both lines is in the key.
+// Canons through the fourth imitate below; fifth-and-wider canons imitate above.
+TEST(GoldbergCanon, ComesIsTheDiatonicTranspositionDelayedAndTruncated) {
   for (bool minor : {false, true}) {
-    const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
-    const HarnessFixture fx = build(minor, 128, 1);
-    const auto& blocks = fx.material.goldberg_variations;
-    ASSERT_EQ(blocks.size(), 32u);
-    const auto& inner = fx.material.goldberg_inner_voice;
-    ASSERT_FALSE(inner.empty()) << "minor=" << minor;
+    for (std::uint32_t seed : kSeeds) {
+      const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
+      const HarnessFixture fx = build(minor, 128, seed);
+      const auto& blocks = fx.material.goldberg_variations;
+      ASSERT_EQ(blocks.size(), 32u);
+      const auto& inner = fx.material.goldberg_inner_voice;
+      ASSERT_FALSE(inner.empty()) << "minor=" << minor;
 
-    for (int v = 3; v < 30; v += 3) {
-      const int blk = v;  // block index == variation number.
-      const auto& principal = blocks[static_cast<std::size_t>(blk)].notes;
-      const int canon_number = v / 3;
-      const int imitation_degrees = canon_number - 1;
-      const bool imitate_above = imitation_degrees >= 4;
-      const Tick block_end = blockStart(blk + 1);
+      for (int v = 3; v < 30; v += 3) {
+        const int blk = v;  // block index == variation number.
+        const auto& principal = blocks[static_cast<std::size_t>(blk)].notes;
+        const int canon_number = v / 3;
+        const int imitation_degrees = canon_number - 1;
+        const bool imitate_above = imitation_degrees >= 4;
+        const Tick block_end = blockStart(blk + 1);
 
-      std::vector<const MaterialNote*> block_inner;
-      for (const auto& note : inner) {
-        if (note.start_tick >= blockStart(blk) && note.start_tick < block_end)
-          block_inner.push_back(&note);
-      }
-      const std::vector<const MaterialNote*>* dux = nullptr;
-      const std::vector<const MaterialNote*>* comes = nullptr;
-      std::vector<const MaterialNote*> block_principal;
-      for (const auto& note : principal)
-        block_principal.push_back(&note);
-      if (imitate_above) {
-        dux = &block_inner;
-        comes = &block_principal;
-      } else {
-        dux = &block_principal;
-        comes = &block_inner;
-      }
-      ASSERT_EQ(dux->size(), 24u) << "variation " << v << " dux note count";
-      ASSERT_EQ(comes->size(), 18u) << "variation " << v << " comes note count";
-      EXPECT_GE(comes->front()->start_tick, blockStart(blk) + kTicksPerBar)
-          << "variation " << v << " comes must start one bar late";
+        std::vector<const MaterialNote*> block_inner;
+        for (const auto& note : inner) {
+          if (note.start_tick >= blockStart(blk) && note.start_tick < block_end)
+            block_inner.push_back(&note);
+        }
+        const std::vector<const MaterialNote*>* dux = nullptr;
+        const std::vector<const MaterialNote*>* comes = nullptr;
+        std::vector<const MaterialNote*> block_principal;
+        for (const auto& note : principal)
+          block_principal.push_back(&note);
+        if (imitate_above) {
+          dux = &block_inner;
+          comes = &block_principal;
+        } else {
+          dux = &block_principal;
+          comes = &block_inner;
+        }
+        ASSERT_EQ(dux->size(), 24u) << "variation " << v << " dux note count";
+        ASSERT_EQ(comes->size(), 18u) << "variation " << v << " comes note count";
+        EXPECT_GE(comes->front()->start_tick, blockStart(blk) + kTicksPerBar)
+            << "variation " << v << " comes must start one bar late";
 
-      const int diatonic_semitones = transposeUp(72, imitation_degrees, mode) - 72;
-      const int expected_shift = imitate_above ? diatonic_semitones + 12 : diatonic_semitones - 24;
-      for (std::size_t k = 0; k < comes->size(); ++k) {
-        const MaterialNote& ld = *(*dux)[k];
-        const MaterialNote& fo = *(*comes)[k];
-        // Delay: exactly one bar.
-        EXPECT_EQ(fo.start_tick, ld.start_tick + kTicksPerBar)
-            << "variation " << v << " note " << k << " onset delay";
-        EXPECT_EQ(fo.duration, ld.duration) << "variation " << v << " note " << k << " duration";
-        EXPECT_EQ(static_cast<int>(fo.pitch) - static_cast<int>(ld.pitch), expected_shift)
-            << "variation " << v << " note " << k << " fixed imitation interval";
-        if (imitate_above)
-          EXPECT_GT(fo.pitch, ld.pitch) << "variation " << v << " comes must be above";
-        else
-          EXPECT_LT(fo.pitch, ld.pitch) << "variation " << v << " comes must be below";
+        // Letters between the lines: the interval plus one octave up, or two down.
+        const int expected_letters = imitation_degrees + (imitate_above ? 7 : -14);
+        for (const auto* line : {dux, comes}) {
+          for (const MaterialNote* note : *line) {
+            EXPECT_TRUE(inKey(note->pitch, mode))
+                << "seed " << seed << " variation " << v << " pitch "
+                << static_cast<int>(note->pitch) << " is outside the key";
+          }
+        }
+        for (std::size_t k = 0; k < comes->size(); ++k) {
+          const MaterialNote& ld = *(*dux)[k];
+          const MaterialNote& fo = *(*comes)[k];
+          // Delay: exactly one bar.
+          EXPECT_EQ(fo.start_tick, ld.start_tick + kTicksPerBar)
+              << "variation " << v << " note " << k << " onset delay";
+          EXPECT_EQ(fo.duration, ld.duration) << "variation " << v << " note " << k << " duration";
+          EXPECT_EQ(
+              detail::diatonicLetter(fo.pitch, 0, mode) - detail::diatonicLetter(ld.pitch, 0, mode),
+              expected_letters)
+              << "seed " << seed << " variation " << v << " note " << k << " diatonic interval";
+          const detail::ChordSpec harmony = chordAt(fx.harmony, fo.start_tick);
+          EXPECT_TRUE(
+              detail::inSpelledScale(fo.pitch, 0, mode, detail::chordPcMaskInKey(harmony, 0, mode)))
+              << "seed " << seed << " variation " << v << " note " << k
+              << " is not spelled for its own bar's harmony";
+          if (imitate_above)
+            EXPECT_GT(fo.pitch, ld.pitch) << "variation " << v << " comes must be above";
+          else
+            EXPECT_LT(fo.pitch, ld.pitch) << "variation " << v << " comes must be below";
+        }
       }
     }
   }
@@ -300,10 +355,11 @@ TEST(GoldbergCanon, EveryCanonHasADistinctPitchSequence) {
 // rather than as an outer pair with an occasional companion.
 //
 // It is not a wall either. It rests through the aria and its da capo -- the two
-// blocks that frame the set -- and steps aside for the block before each
-// imitative one, so a canon's pair enters against a texture that has just
-// thinned. Both halves are asserted: a filled block that fell silent and a
-// resting block that started sounding are each a departure from that design.
+// blocks that frame the set, entering in the da capo only for the closing
+// cadence -- and steps aside for the block before each imitative one, so a
+// canon's pair enters against a texture that has just thinned. Both halves are
+// asserted: a filled block that fell silent and a resting block that started
+// sounding are each a departure from that design.
 TEST(GoldbergCanon, MiddleVoiceFillsEveryBlockButTheFrameAndTheOnesThatWithdraw) {
   constexpr int kBlocks = 32;  // 128 / 4.
   constexpr int kDaCapo = 31;  // Present at >= 24 bars.
@@ -323,10 +379,16 @@ TEST(GoldbergCanon, MiddleVoiceFillsEveryBlockButTheFrameAndTheOnesThatWithdraw)
   const HarnessFixture fx = build(false, 128, 1);
   const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
 
+  const Tick approach = blockStart(kBlocks) - kTicksPerBar - kTicksPerBeat;
+  int closing = 0;
   std::array<int, kBlocks> v1_per_block{};
   for (const auto& n : r.notes) {
     if (n.voice != 1)
       continue;
+    if (n.start_tick >= approach) {
+      ++closing;
+      continue;
+    }
     const int blk = static_cast<int>(n.start_tick / (static_cast<Tick>(kCycleBars) * kTicksPerBar));
     ASSERT_GE(blk, 0);
     ASSERT_LT(blk, kBlocks);
@@ -344,6 +406,8 @@ TEST(GoldbergCanon, MiddleVoiceFillsEveryBlockButTheFrameAndTheOnesThatWithdraw)
   }
   // Aria, da capo and the ten blocks that withdraw are the two-voice blocks.
   EXPECT_EQ(filled, 20);
+  // The cadence: the coda's dominant, then the tonic third.
+  EXPECT_EQ(closing, 2);
 }
 
 // The middle voice sounds for a clear majority of the set, at every length and
@@ -497,7 +561,7 @@ TEST(GoldbergCanon, MidSizeKindsAndDaCapo) {
   const auto& blocks = fx.material.goldberg_variations;
   ASSERT_EQ(blocks.size(), 16u);  // 64 / 4.
   // Da capo present: last block is the m=2 aria.
-  EXPECT_EQ(blocks.back().notes.size(), 8u);
+  EXPECT_EQ(halfNoteLayout(blocks.back().notes).size(), 8u);
   EXPECT_EQ(blocks.back().density_level, 0);
   // Variations 1..14 (blocks 1..14); da capo block is block 15.
   for (int v = 1; v <= 14; ++v) {
@@ -536,11 +600,14 @@ TEST(GoldbergCanon, MinimumSizeHasNoCanonAndGracefulDegrade) {
     // "no follower here", but a line that never moves faster than the half note
     // still does.
     ASSERT_FALSE(fx.material.goldberg_inner_voice.empty()) << "minor=" << minor;
+    // The closing cadence's approach beat is the coda's, not the line's pace.
+    const Tick approach = blockStart(3) - kTicksPerBar - kTicksPerBeat;
     std::map<Tick, int> inner_per_bar;
     for (const auto& note : fx.material.goldberg_inner_voice) {
       EXPECT_GE(note.start_tick, blockStart(1))
           << "minor=" << minor << " the aria must keep its two voices";
-      ++inner_per_bar[note.start_tick / kTicksPerBar];
+      if (note.start_tick != approach)
+        ++inner_per_bar[note.start_tick / kTicksPerBar];
     }
     for (const auto& [bar, count] : inner_per_bar) {
       EXPECT_LE(count, 2) << "minor=" << minor << " bar " << bar

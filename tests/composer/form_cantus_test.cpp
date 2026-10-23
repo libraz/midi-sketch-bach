@@ -787,11 +787,22 @@ TEST(FormCantusGoldberg, DaCapoRestatementWhenLongEnough) {
     ASSERT_FALSE(blocks.empty());
     const auto& last = blocks.back();
     EXPECT_EQ(last.density_level, 0) << "bars=" << bars;
-    EXPECT_EQ(last.notes.size(), 8u) << "bars=" << bars << " da-capo aria must be m=2";
+    // The coda's dominant may split off the penultimate bar's closing beat.
+    const Tick approach = static_cast<Tick>(bars - 1) * kTicksPerBar - kTicksPerBeat;
+    std::size_t half_notes = 0;
+    std::size_t split_beats = 0;
+    for (const auto& n : last.notes) {
+      if (n.start_tick == approach || n.start_tick + n.duration == approach) {
+        EXPECT_EQ(n.duration, kTicksPerBeat) << "bars=" << bars;
+        ++split_beats;
+        continue;
+      }
+      EXPECT_EQ(n.duration, kTicksPerBeat * 2) << "bars=" << bars;
+      ++half_notes;
+    }
+    EXPECT_EQ(half_notes + split_beats / 2, 8u) << "bars=" << bars << " da-capo aria must be m=2";
     EXPECT_FALSE(last.is_climax) << "bars=" << bars << " da-capo block is never the climax";
     EXPECT_EQ(last.start_tick, static_cast<Tick>(bars - 4) * kTicksPerBar) << "bars=" << bars;
-    for (const auto& n : last.notes)
-      EXPECT_EQ(n.duration, kTicksPerBeat * 2) << "bars=" << bars;
   }
 }
 

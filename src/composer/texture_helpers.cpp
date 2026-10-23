@@ -1080,6 +1080,112 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
   line.push_back(last);
 }
 
+bool closeMiddleVoiceOnCadence(std::vector<MaterialNote>& notes,
+                               const std::vector<MaterialNote>& final_variation,
+                               Tick final_bar_tick, Tick approach_tick, Tick final_duration,
+                               int coda_support, int coda_dominant, int coda_tonic,
+                               bool major_close, int fallback_previous) {
+  int previous = -1;
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick < approach_tick)
+      previous = static_cast<int>(note.pitch);
+  }
+  if (previous < 0)
+    previous = fallback_previous;
+  if (previous < 0)
+    return false;  // the line carries no middle voice to land.
+  notes.erase(
+      std::remove_if(notes.begin(), notes.end(),
+                     [&](const MaterialNote& note) { return note.start_tick >= approach_tick; }),
+      notes.end());
+  for (MaterialNote& note : notes) {
+    if (note.start_tick + note.duration > approach_tick)
+      note.duration = approach_tick - note.start_tick;
+  }
+
+  int variation_prev = -1;
+  for (const MaterialNote& note : final_variation) {
+    if (note.start_tick < approach_tick)
+      variation_prev = static_cast<int>(note.pitch);
+  }
+  const int variation_approach = soundingMaterialPitch(final_variation, approach_tick);
+  const int variation_head = soundingMaterialPitch(final_variation, final_bar_tick);
+  int variation_final = 128;
+  for (const MaterialNote& note : final_variation) {
+    if (note.start_tick >= final_bar_tick)
+      variation_final = std::min(variation_final, static_cast<int>(note.pitch));
+  }
+
+  const auto pick = [](const int(&chord_pcs)[3], int floor_excl, int ceiling_incl, int line_prev,
+                       const std::vector<int>& against, int other_prev, int other_curr,
+                       int bass_prev, int bass_curr) {
+    int best = -1;
+    int best_key = 1 << 24;
+    for (int idx = 0; idx < 3; ++idx) {
+      for (int cand = line_prev - 12; cand <= line_prev + 12; ++cand) {
+        if (cand <= floor_excl || cand > ceiling_incl || cand % 12 != chord_pcs[idx])
+          continue;
+        int key = std::abs(cand - line_prev) + idx * (1 << 6);
+        // A tritone leap is as unvocal an approach as a doubled tone.
+        if (std::abs(cand - line_prev) % 12 == interval::kTritone)
+          key += 1 << 8;
+        for (const int other : against) {
+          if (other >= 0 && !isConsonantIc(cand - other))
+            key += 1 << 12;
+          // A tone the variation already sounds is not the one the chord lacks.
+          if (other >= 0 && (cand - other) % 12 == 0)
+            key += 1 << 8;
+        }
+        if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr) ||
+            formsStrictPerfectParallel(line_prev, cand, bass_prev, bass_curr))
+          key += 1 << 18;
+        else if (formsPerfectParallel(line_prev, cand, other_prev, other_curr) ||
+                 formsPerfectParallel(line_prev, cand, bass_prev, bass_curr))
+          key += 1 << 10;
+        if (key < best_key) {
+          best_key = key;
+          best = cand;
+        }
+      }
+    }
+    return best;
+  };
+
+  // The dominant, third first: the outer pair takes the root and the fifth
+  // between them, so the leading tone is the tone the chord is still missing.
+  // Under the variation's closing tone as well, so the closing third is not
+  // reached by a leap down from above it.
+  static constexpr int kDominantPcs[3] = {11, 2, 7};
+  const int approach_ceiling =
+      std::min(variation_approach >= 0 ? variation_approach : 127, variation_final);
+  const int approach_pitch =
+      pick(kDominantPcs, coda_dominant, approach_ceiling, previous, {variation_approach},
+           variation_prev, variation_approach, coda_support, coda_dominant);
+  if (approach_pitch < 0)
+    return false;
+  MaterialNote approach;
+  approach.start_tick = approach_tick;
+  approach.duration = final_bar_tick - approach_tick;
+  approach.pitch = static_cast<std::uint8_t>(approach_pitch);
+  notes.push_back(approach);
+
+  // The closing triad, third first for the same reason: the variation lands on
+  // the tonic over a tonic bass, so the third is what makes the chord a triad.
+  const int tonic_pcs[3] = {major_close ? 4 : 3, 7, 0};
+  const int final_pitch =
+      pick(tonic_pcs, coda_tonic, variation_final <= 127 ? variation_final : 127, approach_pitch,
+           {variation_head, variation_final}, variation_approach, variation_head, coda_dominant,
+           coda_tonic);
+  if (final_pitch < 0)
+    return false;
+  MaterialNote last;
+  last.start_tick = final_bar_tick;
+  last.duration = final_duration;
+  last.pitch = static_cast<std::uint8_t>(final_pitch);
+  notes.push_back(last);
+  return true;
+}
+
 void appendCadentialSixFourLanding(std::vector<MaterialNote>& line, Tick penult_bar_start,
                                    Tick ticks_per_bar, int tonic, int leading_tone) {
   line.erase(

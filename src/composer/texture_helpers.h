@@ -405,6 +405,37 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
                             bool prefer_descending = false, int lift_ceiling = 0,
                             std::uint8_t ts_numerator = 4);
 
+/// @brief Land a middle voice on a closing V-I cadence over a coda bass.
+///
+/// A middle line written from the bar chords of a ground no longer describes a
+/// coda that steps to the dominant on the penultimate bar's closing beat and
+/// states the tonic under the final bar. The line therefore stops at that
+/// approach beat (a note held into it is cut there) and states the cadence
+/// itself: a dominant tone, leading tone first, then the tone completing the
+/// closing triad, third first. Both are taken under the variation (the approach
+/// under its closing tone too) and over the bass, ranked rather than filtered: a true parallel
+/// outranks a clash with the variation, which outranks a hidden perfect, which outranks doubling a
+/// tone the variation sounds or leaping a tritone, which outranks a less characteristic chord tone,
+/// which outranks distance from the tone just sounded. Pitches are in the C-tonic frame.
+///
+/// @param notes The middle line in tick order, edited in place.
+/// @param final_variation The upper line sounding over the close.
+/// @param final_bar_tick Tick of the final bar's downbeat.
+/// @param approach_tick Tick of the dominant approach beat.
+/// @param final_duration Duration of the closing tone.
+/// @param coda_support Bass tone sounding just before the approach beat.
+/// @param coda_dominant Bass tone on the approach beat.
+/// @param coda_tonic Bass tone under the final bar.
+/// @param major_close Whether the closing triad takes a major third.
+/// @param fallback_previous Reference pitch when the line has sounded nothing
+///        before the approach; -1 leaves such a line untouched.
+/// @return True when both cadence tones were placed.
+bool closeMiddleVoiceOnCadence(std::vector<MaterialNote>& notes,
+                               const std::vector<MaterialNote>& final_variation,
+                               Tick final_bar_tick, Tick approach_tick, Tick final_duration,
+                               int coda_support, int coda_dominant, int coda_tonic,
+                               bool major_close, int fallback_previous = -1);
+
 /// @brief How a candidate stretto canon reads against itself.
 ///
 /// Lays the leader and the delayed follower on a sixteenth grid and scans the

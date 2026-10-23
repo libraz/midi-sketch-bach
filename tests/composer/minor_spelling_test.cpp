@@ -304,8 +304,8 @@ std::uint32_t lastTick(const std::vector<NoteEvent>& notes) {
 // fault on the decorated one. RATCHET: measured counts, only ever lowered.
 // What remains is verbatim material under a dominant the plan declares (the
 // fugue family's minor-station entries, strettos and episode sequences), the
-// goldberg canon's exact imitation, and augmented seconds across a bar line
-// into or out of V.
+// goldberg landing run's arrival relief, and augmented seconds across a bar
+// line into or out of V.
 struct SpellingCeiling {
   FormType form;
   std::size_t lowered_seventh;
@@ -327,7 +327,7 @@ constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
     {FormType::FantasiaAndFugue, 17, 0, 5, 0, 0},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0},
     {FormType::Chaconne, 2, 0, 6, 2, 0},
-    {FormType::GoldbergVariations, 32, 8, 42, 64, 4},
+    {FormType::GoldbergVariations, 8, 8, 18, 16, 4},
 }};
 
 TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
