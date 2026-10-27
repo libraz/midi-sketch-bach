@@ -47,14 +47,14 @@
     "node": ">=16.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@vitest/coverage-v8": "5.0.1",
+    "@biomejs/biome": "^2.6.3",
+    "@vitest/coverage-v8": "5.0.5",
     "esbuild": "^0.28.2",
-    "lint-staged": "^17.5.1",
+    "lint-staged": "^17.6.0",
     "simple-git-hooks": "^2.14.0",
     "typescript": "^6.0.3",
-    "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   },
   "simple-git-hooks": {
     "pre-commit": "yarn lint-staged"
