@@ -31,10 +31,12 @@ jobs:
       - name: Generate coverage report
         run: |
           pipx install gcovr
-          # suspicious_hits.warn: gcov sometimes emits garbage hit counts
-          # (gcovr SuspiciousHits); downgrade to a warning instead of failing.
+          # gcov sometimes emits garbage or negative hit counts (gcovr
+          # SuspiciousHits / NegativeHits, GCC bug 68080); downgrade both to
+          # warnings instead of failing.
           gcovr --root . --filter 'src/' \
             --gcov-ignore-parse-errors suspicious_hits.warn \
+            --gcov-ignore-parse-errors negative_hits.warn \
             --xml -o coverage-cpp.xml
 
       - name: Upload coverage to Codecov
