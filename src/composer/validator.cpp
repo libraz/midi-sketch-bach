@@ -1681,53 +1681,143 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
   }
 
-  // Countersubject continuity check. When a Countersubject is
-  // declared (material.countersubject non-empty) AND an answer is
-  // also declared (material.answer or material.tonal_answer), the
-  // countersubject must sound continuously across the answer's
-  // tick window (every quarter-note position in the window has a
-  // sounding note from the CS, allowing for tied notes that span
-  // multiple beats). Any gap fires `countersubject_continuous`.
-  //
-  // The CS voice is derived from provenance, not hardcoded: MaterialNote
-  // carries no voice field, so we read it from the emitted notes. The CS
-  // voice is the voice of the first note whose provenance voice_intent is
-  // VoiceIntent::CountersubjectCarrier (notes and provenance are
-  // index-aligned). When no CountersubjectCarrier note was placed, a
-  // declared-but-unplaced CS cannot be checked, so the continuity check is
-  // skipped entirely rather than sampling an arbitrary voice. The answer
-  // window is the [first, last] tick range of material.tonal_answer if
-  // used, else material.answer.
+  // A declared countersubject is active only when its selected answer is
+  // actually emitted as AnswerCarrier in that answer's window. Once active,
+  // one CountersubjectCarrier voice must sound at each quarter-note position.
+  // The voice comes from the earliest overlapping tagged onset; unrelated
+  // carriers and another countersubject voice cannot fill its gaps.
+  struct CountersubjectInterval {
+    Tick start = 0;
+    Tick end = 0;
+  };
   if (!material.countersubject.empty()) {
     const std::vector<MaterialNote>& answer_src =
         (material.use_tonal_answer && !material.tonal_answer.empty()) ? material.tonal_answer
                                                                       : material.answer;
-    bool cs_placed = false;
-    VoiceId cs_voice = 0;
-    for (std::size_t k = 0; k < notes.size() && k < provenance.size(); ++k) {
-      if (provenance[k].voice_intent == VoiceIntent::CountersubjectCarrier) {
-        cs_voice = notes[k].voice;
-        cs_placed = true;
-        break;
-      }
-    }
-    if (!answer_src.empty() && cs_placed) {
+    if (!answer_src.empty()) {
       const Tick window_start = answer_src.front().start_tick;
-      const Tick window_end = answer_src.back().start_tick + answer_src.back().duration;
-      // Walk window in quarter-beat increments; require a CS-voice note
-      // sounding at every step.
-      bool gap_found = false;
-      for (Tick t = window_start; t < window_end; t += kTicksPerBeat) {
-        if (onset_index.pitchAt(cs_voice, t) == 0) {
-          gap_found = true;
-          break;
+      const std::uint64_t wide_window_end =
+          static_cast<std::uint64_t>(answer_src.back().start_tick) + answer_src.back().duration;
+      const bool window_valid =
+          wide_window_end <= std::numeric_limits<Tick>::max() && wide_window_end > window_start;
+      if (window_valid) {
+        const Tick window_end = static_cast<Tick>(wide_window_end);
+        bool answer_emitted = false;
+        for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+          if (provenance[index].voice_intent != VoiceIntent::AnswerCarrier ||
+              notes[index].duration == 0) {
+            continue;
+          }
+          const std::uint64_t note_end =
+              static_cast<std::uint64_t>(notes[index].start_tick) + notes[index].duration;
+          if (note_end <= std::numeric_limits<Tick>::max() &&
+              notes[index].start_tick < window_end && note_end > window_start) {
+            answer_emitted = true;
+            break;
+          }
         }
-      }
-      if (gap_found) {
-        ValidationFailure failure;
-        failure.rule_id = "countersubject_continuous";
-        failure.kind = FailKind::MusicalFail;
-        report.failures.push_back(failure);
+
+        bool declared_cs_overlaps_answer = false;
+        for (const MaterialNote& declared_note : material.countersubject) {
+          if (declared_note.duration == 0 || declared_note.start_tick >= window_end)
+            continue;
+          const std::uint64_t declared_end =
+              static_cast<std::uint64_t>(declared_note.start_tick) + declared_note.duration;
+          if (declared_end <= std::numeric_limits<Tick>::max() && declared_end > window_start) {
+            declared_cs_overlaps_answer = true;
+            break;
+          }
+        }
+
+        if (answer_emitted && declared_cs_overlaps_answer) {
+          bool found_cs = false;
+          VoiceId cs_voice = 0;
+          Tick earliest_onset = std::numeric_limits<Tick>::max();
+          for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+            if (provenance[index].voice_intent != VoiceIntent::CountersubjectCarrier ||
+                notes[index].duration == 0) {
+              continue;
+            }
+            const std::uint64_t note_end =
+                static_cast<std::uint64_t>(notes[index].start_tick) + notes[index].duration;
+            if (note_end > std::numeric_limits<Tick>::max() ||
+                notes[index].start_tick >= window_end || note_end <= window_start) {
+              continue;
+            }
+            const Tick raw_onset = notes[index].start_tick;
+            if (!found_cs || raw_onset < earliest_onset) {
+              found_cs = true;
+              earliest_onset = raw_onset;
+              cs_voice = notes[index].voice;
+            }
+          }
+
+          std::vector<CountersubjectInterval> cs_intervals;
+          if (found_cs) {
+            for (std::size_t index = 0; index < notes.size() && index < provenance.size();
+                 ++index) {
+              if (notes[index].voice != cs_voice ||
+                  provenance[index].voice_intent != VoiceIntent::CountersubjectCarrier ||
+                  notes[index].duration == 0) {
+                continue;
+              }
+              if (provenance[index].source == NoteSource::Ornament &&
+                  (!(provenance[index].satisfied_rules & ruleBitMask(RuleBit::OrnamentRealized)) ||
+                   !matchesAuthoredContext(notes[index], provenance[index]))) {
+                continue;
+              }
+              if (audit_final_score && provenance[index].source == NoteSource::Material &&
+                  !authored_context[index]) {
+                continue;
+              }
+              const std::uint64_t note_end =
+                  static_cast<std::uint64_t>(notes[index].start_tick) + notes[index].duration;
+              if (note_end > std::numeric_limits<Tick>::max())
+                continue;
+              const Tick clipped_start = std::max(window_start, notes[index].start_tick);
+              const Tick clipped_end = std::min(window_end, static_cast<Tick>(note_end));
+              if (clipped_start < clipped_end)
+                cs_intervals.push_back({clipped_start, clipped_end});
+            }
+          }
+
+          std::sort(cs_intervals.begin(), cs_intervals.end(),
+                    [](const CountersubjectInterval& lhs, const CountersubjectInterval& rhs) {
+                      return lhs.start != rhs.start ? lhs.start < rhs.start : lhs.end < rhs.end;
+                    });
+          std::vector<CountersubjectInterval> merged_intervals;
+          merged_intervals.reserve(cs_intervals.size());
+          for (const CountersubjectInterval& interval : cs_intervals) {
+            if (!merged_intervals.empty() && interval.start <= merged_intervals.back().end) {
+              merged_intervals.back().end = std::max(merged_intervals.back().end, interval.end);
+            } else {
+              merged_intervals.push_back(interval);
+            }
+          }
+
+          bool gap_found = !found_cs;
+          std::uint64_t sample = window_start;
+          for (const CountersubjectInterval& interval : merged_intervals) {
+            if (sample >= window_end)
+              break;
+            if (interval.end <= sample)
+              continue;
+            if (interval.start > sample) {
+              gap_found = true;
+              break;
+            }
+            const std::uint64_t covered_samples =
+                (static_cast<std::uint64_t>(interval.end) - 1 - sample) / kTicksPerBeat + 1;
+            sample += covered_samples * kTicksPerBeat;
+          }
+          gap_found = gap_found || sample < window_end;
+          if (gap_found) {
+            ValidationFailure failure;
+            failure.rule_id = "countersubject_continuous";
+            failure.kind = FailKind::MusicalFail;
+            report.failures.push_back(failure);
+          }
+        }
       }
     }
   }
@@ -2130,22 +2220,50 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
     return &material.subject;
   };
+  const auto fragmentIntent = [](MaterialFragment fragment) {
+    switch (fragment) {
+      case MaterialFragment::Subject:
+        return VoiceIntent::SubjectCarrier;
+      case MaterialFragment::Answer:
+      case MaterialFragment::TonalAnswer:
+        return VoiceIntent::AnswerCarrier;
+      case MaterialFragment::Countersubject:
+        return VoiceIntent::CountersubjectCarrier;
+    }
+    return VoiceIntent::FillerGap;
+  };
+  const auto addImitationFailure = [&report](const char* rule_id, FailKind kind) {
+    ValidationFailure failure;
+    failure.rule_id = rule_id;
+    failure.kind = kind;
+    report.failures.push_back(failure);
+  };
   for (const auto& entry : material.imitation_entries) {
     const std::vector<MaterialNote>* leader = fragmentNotes(entry.leader_fragment);
     const std::vector<MaterialNote>* follower = fragmentNotes(entry.follower_fragment);
-    if (entry.leader_start_index >= leader->size() ||
-        entry.follower_start_index >= follower->size())
+    if (entry.leader_start_index > leader->size() ||
+        entry.follower_start_index > follower->size() ||
+        (entry.note_count > 0 && (entry.leader_start_index == leader->size() ||
+                                  entry.follower_start_index == follower->size()))) {
+      addImitationFailure("imitation_entry_match", FailKind::StructuralFail);
       continue;
+    }
     const std::size_t available = std::min(leader->size() - entry.leader_start_index,
                                            follower->size() - entry.follower_start_index);
     const std::size_t count = entry.note_count == 0 ? available : entry.note_count;
-    if (count == 0 || count > available)
+    if (count > available) {
+      addImitationFailure("imitation_entry_match", FailKind::StructuralFail);
+      continue;
+    }
+    if (count == 0)
       continue;
     const MaterialNote& leader_head = (*leader)[entry.leader_start_index];
     const MaterialNote& follower_head = (*follower)[entry.follower_start_index];
-    const Tick expected_follower_tick = leader_head.start_tick + entry.distance_ticks;
+    const std::uint64_t expected_follower_tick_wide =
+        static_cast<std::uint64_t>(leader_head.start_tick) + entry.distance_ticks;
     const int expected_follower_pitch = static_cast<int>(leader_head.pitch) + entry.interval_semis;
-    bool declaration_ok = follower_head.start_tick == expected_follower_tick;
+    bool declaration_ok = expected_follower_tick_wide <= std::numeric_limits<Tick>::max() &&
+                          follower_head.start_tick == expected_follower_tick_wide;
     const bool pitch_ok = expected_follower_pitch >= 0 && expected_follower_pitch <= 127 &&
                           follower_head.pitch == static_cast<std::uint8_t>(expected_follower_pitch);
     declaration_ok = declaration_ok && pitch_ok;
@@ -2161,7 +2279,10 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     for (std::size_t offset = 0; offset < count && declaration_ok; ++offset) {
       const MaterialNote& leader_note = (*leader)[entry.leader_start_index + offset];
       const MaterialNote& follower_note = (*follower)[entry.follower_start_index + offset];
-      declaration_ok = follower_note.start_tick == leader_note.start_tick + entry.distance_ticks &&
+      const std::uint64_t expected_tick =
+          static_cast<std::uint64_t>(leader_note.start_tick) + entry.distance_ticks;
+      declaration_ok = expected_tick <= std::numeric_limits<Tick>::max() &&
+                       follower_note.start_tick == expected_tick &&
                        follower_note.duration == leader_note.duration;
       if (!declaration_ok)
         break;
@@ -2187,53 +2308,152 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     }
 
     if (!declaration_ok) {
-      ValidationFailure failure;
-      failure.rule_id = "imitation_entry_match";
-      failure.kind = FailKind::MusicalFail;
-      report.failures.push_back(failure);
+      addImitationFailure("imitation_entry_match", FailKind::MusicalFail);
       continue;
     }
 
-    // On the generation carrier, verify that the declared material window is
-    // actually present in the emitted notes for the declared voices, with
-    // Material provenance and ImitationEntryMatched stamped on both heads.
-    if (!audit_final_score && !notes.empty() && notes.size() == provenance.size()) {
-      const auto emittedMatches = [&](const std::vector<MaterialNote>& expected,
-                                      std::size_t start_index, VoiceId voice, VoiceIntent intent) {
-        for (std::size_t offset = 0; offset < count; ++offset) {
-          const MaterialNote& material_note = expected[start_index + offset];
-          bool found = false;
-          const auto onsets = onset_index.startingRange(voice, material_note.start_tick);
-          for (auto onset = onsets.first; onset != onsets.second; ++onset) {
-            const std::size_t note_index = *onset;
-            const NoteEvent& note = notes[note_index];
-            const NoteProvenance& note_provenance = provenance[note_index];
-            if (note.duration != material_note.duration || note.pitch != material_note.pitch ||
-                note_provenance.source != NoteSource::Material ||
-                note_provenance.voice_intent != intent) {
-              continue;
+    // Validate the selected leader and follower fragments against the actual
+    // score. A tone is realized exactly once by either its Material note or a
+    // complete ornament group that retains the same authored-note identity.
+    const bool should_check_realization = audit_final_score || !notes.empty();
+    if (!should_check_realization)
+      continue;
+    bool realization_ok = notes.size() == provenance.size();
+    const auto emittedFragmentMatches = [&](const std::vector<MaterialNote>& fragment,
+                                            std::size_t start_index, VoiceId voice,
+                                            VoiceIntent intent) {
+      SpanId fragment_span = kInvalidSpanId;
+      bool has_fragment_span = false;
+      for (std::size_t offset = 0; offset < count && realization_ok; ++offset) {
+        const MaterialNote& expected = fragment[start_index + offset];
+        std::vector<std::size_t> material_matches;
+        bool has_compose_match = false;
+        bool invalid_ornament = false;
+        std::vector<std::size_t> ornament_indices;
+        for (std::size_t index = 0; index < notes.size(); ++index) {
+          const NoteEvent& note = notes[index];
+          const NoteProvenance& note_provenance = provenance[index];
+          if (note.voice != voice || note_provenance.voice_intent != intent)
+            continue;
+          const bool exact_sounding_note = note.start_tick == expected.start_tick &&
+                                           note.duration == expected.duration &&
+                                           note.pitch == expected.pitch;
+          if (note_provenance.source == NoteSource::Material && exact_sounding_note) {
+            if (audit_final_score && !authored_context[index]) {
+              invalid_ornament = true;
+            } else {
+              material_matches.push_back(index);
             }
-            if (offset == 0 &&
-                !(note_provenance.satisfied_rules & ruleBitMask(RuleBit::ImitationEntryMatched))) {
-              return false;
-            }
-            found = true;
-            break;
+          } else if (note_provenance.source == NoteSource::Compose && exact_sounding_note) {
+            has_compose_match = true;
           }
-          if (!found)
-            return false;
+          if (note_provenance.source != NoteSource::Ornament ||
+              !note_provenance.has_authored_note ||
+              note_provenance.authored_start_tick != expected.start_tick ||
+              note_provenance.authored_duration != expected.duration ||
+              note_provenance.authored_pitch != expected.pitch) {
+            continue;
+          }
+          if (!matchesAuthoredContext(note, note_provenance) ||
+              !(note_provenance.satisfied_rules & ruleBitMask(RuleBit::OrnamentRealized))) {
+            invalid_ornament = true;
+          }
+          ornament_indices.push_back(index);
         }
-        return true;
-      };
-      if (!emittedMatches(*leader, entry.leader_start_index, entry.leader_voice,
-                          VoiceIntent::SubjectCarrier) ||
-          !emittedMatches(*follower, entry.follower_start_index, entry.follower_voice,
-                          VoiceIntent::AnswerCarrier)) {
-        ValidationFailure failure;
-        failure.rule_id = "imitation_entry_realization";
-        failure.kind = FailKind::MusicalFail;
-        report.failures.push_back(failure);
+
+        std::vector<std::vector<std::size_t>> valid_ornament_groups;
+        if (!ornament_indices.empty()) {
+          std::sort(ornament_indices.begin(), ornament_indices.end(),
+                    [&notes, &provenance](std::size_t lhs, std::size_t rhs) {
+                      if (provenance[lhs].span_id != provenance[rhs].span_id)
+                        return provenance[lhs].span_id < provenance[rhs].span_id;
+                      if (notes[lhs].start_tick != notes[rhs].start_tick)
+                        return notes[lhs].start_tick < notes[rhs].start_tick;
+                      return lhs < rhs;
+                    });
+          std::size_t group_begin = 0;
+          while (group_begin < ornament_indices.size()) {
+            std::size_t group_end = group_begin + 1;
+            const SpanId group_span = provenance[ornament_indices[group_begin]].span_id;
+            while (group_end < ornament_indices.size() &&
+                   provenance[ornament_indices[group_end]].span_id == group_span) {
+              ++group_end;
+            }
+            std::vector<std::size_t> group(ornament_indices.begin() + group_begin,
+                                           ornament_indices.begin() + group_end);
+            std::sort(group.begin(), group.end(), [&notes](std::size_t lhs, std::size_t rhs) {
+              return notes[lhs].start_tick != notes[rhs].start_tick
+                         ? notes[lhs].start_tick < notes[rhs].start_tick
+                         : lhs < rhs;
+            });
+            std::uint64_t cursor = expected.start_tick;
+            bool group_ok = group.size() >= 2;
+            for (const std::size_t index : group) {
+              const NoteEvent& note = notes[index];
+              const NoteProvenance& note_provenance = provenance[index];
+              const std::uint64_t note_end =
+                  static_cast<std::uint64_t>(note.start_tick) + note.duration;
+              if (note.duration == 0 || note.start_tick != cursor ||
+                  note_end > std::numeric_limits<Tick>::max()) {
+                group_ok = false;
+                break;
+              }
+              cursor = note_end;
+              group_ok =
+                  group_ok && note_provenance.voice_intent == intent &&
+                  note_provenance.authored_start_tick == expected.start_tick &&
+                  note_provenance.authored_duration == expected.duration &&
+                  note_provenance.authored_pitch == expected.pitch &&
+                  note_provenance.source == NoteSource::Ornament &&
+                  (note_provenance.satisfied_rules & ruleBitMask(RuleBit::OrnamentRealized)) &&
+                  matchesAuthoredContext(note, note_provenance);
+            }
+            group_ok =
+                group_ok &&
+                cursor == static_cast<std::uint64_t>(expected.start_tick) + expected.duration &&
+                notes[group.back()].pitch == expected.pitch;
+            if (group_ok) {
+              valid_ornament_groups.push_back(std::move(group));
+            } else {
+              invalid_ornament = true;
+            }
+            group_begin = group_end;
+          }
+        }
+
+        if (invalid_ornament || has_compose_match || material_matches.size() > 1 ||
+            valid_ornament_groups.size() > 1 ||
+            (material_matches.size() + valid_ornament_groups.size()) != 1) {
+          return false;
+        }
+        const SpanId matched_span = !material_matches.empty()
+                                        ? provenance[material_matches.front()].span_id
+                                        : provenance[valid_ornament_groups.front().front()].span_id;
+        if (!has_fragment_span) {
+          fragment_span = matched_span;
+          has_fragment_span = true;
+        } else if (fragment_span != matched_span) {
+          return false;
+        }
+        if (offset == 0) {
+          const std::size_t head_index = !material_matches.empty()
+                                             ? material_matches.front()
+                                             : valid_ornament_groups.front().front();
+          if (!(provenance[head_index].satisfied_rules &
+                ruleBitMask(RuleBit::ImitationEntryMatched))) {
+            return false;
+          }
+        }
       }
+      return realization_ok && has_fragment_span;
+    };
+
+    if (!realization_ok ||
+        !emittedFragmentMatches(*leader, entry.leader_start_index, entry.leader_voice,
+                                fragmentIntent(entry.leader_fragment)) ||
+        !emittedFragmentMatches(*follower, entry.follower_start_index, entry.follower_voice,
+                                fragmentIntent(entry.follower_fragment))) {
+      addImitationFailure("imitation_entry_realization", FailKind::StructuralFail);
     }
   }
 

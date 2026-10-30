@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "composer/chord_voicing.h"
@@ -35,6 +36,458 @@ bool isToccataPairCompatible(SubjectCharacter character, ToccataArchetype archet
 
 bool isPerfectFifth(int semitones) {
   return std::abs(semitones) % 12 == 7;
+}
+
+struct TickInterval {
+  Tick start = 0;
+  Tick end = 0;
+
+  bool operator==(const TickInterval& other) const {
+    return start == other.start && end == other.end;
+  }
+};
+
+struct PitchInterval {
+  Tick start = 0;
+  Tick end = 0;
+  std::uint8_t pitch = 0;
+};
+
+struct NoteKey {
+  Tick start = 0;
+  Tick duration = 0;
+  std::uint8_t pitch = 0;
+
+  bool operator<(const NoteKey& other) const {
+    if (start != other.start)
+      return start < other.start;
+    if (duration != other.duration)
+      return duration < other.duration;
+    return pitch < other.pitch;
+  }
+
+  bool operator==(const NoteKey& other) const {
+    return start == other.start && duration == other.duration && pitch == other.pitch;
+  }
+};
+
+bool checkedTickEnd(Tick start, Tick duration, Tick* end) {
+  const std::uint64_t wide_end = static_cast<std::uint64_t>(start) + duration;
+  if (wide_end > std::numeric_limits<Tick>::max())
+    return false;
+  *end = static_cast<Tick>(wide_end);
+  return true;
+}
+
+bool materialEnd(const std::vector<MaterialNote>& material_notes, Tick* end) {
+  *end = 0;
+  for (const MaterialNote& note : material_notes) {
+    Tick note_end = 0;
+    if (!checkedTickEnd(note.start_tick, note.duration, &note_end))
+      return false;
+    *end = std::max(*end, note_end);
+  }
+  return true;
+}
+
+bool scoreEnd(const std::vector<NoteEvent>& notes, Tick* end) {
+  *end = 0;
+  for (const NoteEvent& note : notes) {
+    Tick note_end = 0;
+    if (!checkedTickEnd(note.start_tick, note.duration, &note_end))
+      return false;
+    *end = std::max(*end, note_end);
+  }
+  return true;
+}
+
+bool authoritativeExtent(const HarmonicPlan& harmonic_plan, const Material& material,
+                         Tick ticks_per_bar, const std::vector<NoteEvent>& notes, Tick* extent) {
+  Tick end = 0;
+  for (const ChordEvent& chord : harmonic_plan.chords) {
+    Tick chord_end = 0;
+    if (!checkedTickEnd(chord.start_tick, ticks_per_bar, &chord_end))
+      return false;
+    end = std::max(end, chord_end);
+  }
+  for (const VariationDecl& variation : material.variations)
+    end = std::max(end, variation.end_tick);
+  for (const PassacagliaVariation& variation : material.passacaglia_variations)
+    end = std::max(end, variation.end_tick);
+  for (const PassacagliaVariation& variation : material.goldberg_variations)
+    end = std::max(end, variation.end_tick);
+
+  Tick declaration_end = 0;
+  for (const std::vector<MaterialNote>* line :
+       {&material.ground_bass, &material.passacaglia_ground, &material.goldberg_aria_bass,
+        &material.cantus_firmus, &material.cf_embellished}) {
+    if (!materialEnd(*line, &declaration_end))
+      return false;
+    end = std::max(end, declaration_end);
+  }
+  for (const CodaDecl& coda : material.coda_extensions) {
+    if (!materialEnd(coda.notes, &declaration_end))
+      return false;
+    end = std::max(end, declaration_end);
+  }
+
+  const bool has_owning_blocks = !material.variations.empty() ||
+                                 !material.passacaglia_variations.empty() ||
+                                 !material.goldberg_variations.empty() ||
+                                 !material.cantus_firmus.empty() || harmonic_plan.chords.size() > 1;
+  if (!has_owning_blocks) {
+    Tick emitted_end = 0;
+    if (!scoreEnd(notes, &emitted_end))
+      return false;
+    end = std::max(end, emitted_end);
+  }
+  *extent = end;
+  return true;
+}
+
+bool usesPeriodicReplay(Tick period, Tick cycle, Tick extent, Tick declaration_end) {
+  return period > 0 && period < extent && (cycle == 0 || cycle >= period) &&
+         declaration_end <= period;
+}
+
+bool appendExpectedNote(const MaterialNote& source, std::uint64_t start, Tick truncate_at,
+                        bool truncate, std::vector<MaterialNote>* expanded) {
+  if (start >= truncate_at)
+    return true;
+  if (start > std::numeric_limits<Tick>::max())
+    return false;
+  MaterialNote note = source;
+  note.start_tick = static_cast<Tick>(start);
+  if (truncate) {
+    const std::uint64_t wide_end = start + note.duration;
+    if (wide_end > truncate_at)
+      note.duration = static_cast<Tick>(truncate_at - note.start_tick);
+  }
+  Tick note_end = 0;
+  if (note.duration == 0 || !checkedTickEnd(note.start_tick, note.duration, &note_end))
+    return false;
+  expanded->push_back(note);
+  return true;
+}
+
+bool expandGroundDeclaration(const std::vector<MaterialNote>& declaration, Tick period, Tick cycle,
+                             Tick extent, Tick truncate_at, bool truncate,
+                             std::size_t available_replay_notes,
+                             std::vector<MaterialNote>* expanded) {
+  Tick declaration_end = 0;
+  if (!materialEnd(declaration, &declaration_end))
+    return false;
+  const bool tiled = usesPeriodicReplay(period, cycle, extent, declaration_end);
+  const Tick expected_limit = truncate ? std::min(extent, truncate_at) : extent;
+  std::uint64_t required_count = 0;
+  for (const MaterialNote& source : declaration) {
+    if (source.duration == 0 || (tiled && source.start_tick >= period) ||
+        source.start_tick >= expected_limit) {
+      continue;
+    }
+    const std::uint64_t remaining = static_cast<std::uint64_t>(expected_limit) - source.start_tick;
+    const std::uint64_t copies =
+        tiled ? (remaining + period - 1) / period : static_cast<std::uint64_t>(1);
+    if (copies > std::numeric_limits<std::uint64_t>::max() - required_count)
+      return false;
+    required_count += copies;
+    if (required_count > available_replay_notes ||
+        required_count > std::numeric_limits<std::size_t>::max()) {
+      return false;
+    }
+  }
+
+  if (required_count == 0)
+    return false;
+
+  expanded->clear();
+  expanded->reserve(static_cast<std::size_t>(required_count));
+  if (tiled) {
+    for (std::uint64_t base = 0; base < expected_limit; base += period) {
+      for (const MaterialNote& source : declaration) {
+        if (source.start_tick >= period)
+          continue;
+        const std::uint64_t start = base + source.start_tick;
+        if (start >= expected_limit)
+          continue;
+        if (!appendExpectedNote(source, start, truncate_at, truncate, expanded))
+          return false;
+      }
+    }
+  } else {
+    for (const MaterialNote& source : declaration) {
+      if (source.start_tick >= expected_limit)
+        continue;
+      if (!appendExpectedNote(source, source.start_tick, truncate_at, truncate, expanded))
+        return false;
+    }
+  }
+  return true;
+}
+
+std::size_t replayCount(const std::vector<NoteEvent>& notes,
+                        const std::vector<NoteProvenance>& provenance, RuleBit bit) {
+  std::size_t count = 0;
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index)
+    count += hasRuleBit(provenance, index, bit) ? 1 : 0;
+  return count;
+}
+
+bool normalizeSingleCoverage(std::vector<TickInterval>* intervals) {
+  std::sort(intervals->begin(), intervals->end(),
+            [](const TickInterval& left, const TickInterval& right) {
+              if (left.start != right.start)
+                return left.start < right.start;
+              return left.end < right.end;
+            });
+  std::vector<TickInterval> merged;
+  merged.reserve(intervals->size());
+  for (const TickInterval& interval : *intervals) {
+    if (interval.end <= interval.start)
+      return false;
+    if (!merged.empty() && interval.start < merged.back().end)
+      return false;
+    if (!merged.empty() && interval.start == merged.back().end) {
+      merged.back().end = interval.end;
+    } else {
+      merged.push_back(interval);
+    }
+  }
+  *intervals = std::move(merged);
+  return true;
+}
+
+bool hasExactSingleCoverage(const std::vector<MaterialNote>& expected,
+                            const std::vector<TickInterval>& replayed_intervals) {
+  std::vector<TickInterval> expected_intervals;
+  expected_intervals.reserve(expected.size());
+  for (const MaterialNote& note : expected) {
+    Tick note_end = 0;
+    if (!checkedTickEnd(note.start_tick, note.duration, &note_end))
+      return false;
+    expected_intervals.push_back({note.start_tick, note_end});
+  }
+  std::vector<TickInterval> actual_intervals = replayed_intervals;
+  if (!normalizeSingleCoverage(&expected_intervals) ||
+      !normalizeSingleCoverage(&actual_intervals)) {
+    return false;
+  }
+  return expected_intervals == actual_intervals;
+}
+
+std::vector<NoteKey> materialKeys(const std::vector<MaterialNote>& notes, Tick before_tick) {
+  std::vector<NoteKey> keys;
+  keys.reserve(notes.size());
+  for (const MaterialNote& note : notes) {
+    if (note.start_tick < before_tick)
+      keys.push_back({note.start_tick, note.duration, note.pitch});
+  }
+  std::sort(keys.begin(), keys.end());
+  return keys;
+}
+
+std::vector<NoteKey> replayKeys(const std::vector<NoteEvent>& notes,
+                                const std::vector<NoteProvenance>& provenance, RuleBit bit) {
+  std::vector<NoteKey> keys;
+  keys.reserve(std::min(notes.size(), provenance.size()));
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+    if (hasRuleBit(provenance, index, bit))
+      keys.push_back({notes[index].start_tick, notes[index].duration, notes[index].pitch});
+  }
+  std::sort(keys.begin(), keys.end());
+  return keys;
+}
+
+bool findProtectedVoice(const std::vector<NoteEvent>& notes,
+                        const std::vector<NoteProvenance>& provenance, RuleBit bit,
+                        VoiceId* protected_voice, bool* has_replay) {
+  *has_replay = false;
+  bool one_voice = true;
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+    if (!hasRuleBit(provenance, index, bit))
+      continue;
+    if (!*has_replay) {
+      *protected_voice = notes[index].voice;
+      *has_replay = true;
+    } else if (*protected_voice != notes[index].voice) {
+      one_voice = false;
+    }
+  }
+  return one_voice;
+}
+
+struct TerminalCoda {
+  bool declared = false;
+  bool matches = false;
+  Tick start = 0;
+  std::vector<MaterialNote> notes;
+};
+
+TerminalCoda findTerminalCoda(const std::vector<CodaDecl>& declarations,
+                              const std::vector<NoteEvent>& notes,
+                              const std::vector<NoteProvenance>& provenance,
+                              VoiceId protected_voice, Tick extent, Tick cycle) {
+  TerminalCoda result;
+  if (extent == 0 || cycle == 0)
+    return result;
+  const Tick last_cycle_start = extent > cycle ? extent - cycle : 0;
+  Tick coda_end = 0;
+  result.start = extent;
+  for (const CodaDecl& declaration : declarations) {
+    if (declaration.voice != protected_voice || declaration.notes.empty())
+      continue;
+    bool terminal = true;
+    Tick declaration_start = extent;
+    Tick declaration_end = 0;
+    for (const MaterialNote& note : declaration.notes) {
+      Tick note_end = 0;
+      if (note.duration == 0 || !checkedTickEnd(note.start_tick, note.duration, &note_end) ||
+          note.start_tick < last_cycle_start || note_end > extent) {
+        terminal = false;
+        continue;
+      }
+      declaration_start = std::min(declaration_start, note.start_tick);
+      declaration_end = std::max(declaration_end, note_end);
+    }
+    if (terminal && declaration_end == extent) {
+      result.notes.insert(result.notes.end(), declaration.notes.begin(), declaration.notes.end());
+      result.start = std::min(result.start, declaration_start);
+      coda_end = std::max(coda_end, declaration_end);
+    }
+  }
+  if (result.notes.empty() || coda_end != extent) {
+    result.start = extent;
+    result.notes.clear();
+    return result;
+  }
+  result.declared = true;
+
+  std::vector<NoteKey> expected;
+  expected.reserve(result.notes.size());
+  for (const MaterialNote& note : result.notes)
+    expected.push_back({note.start_tick, note.duration, note.pitch});
+  std::sort(expected.begin(), expected.end());
+
+  std::vector<NoteKey> committed;
+  bool coda_carrier_only = true;
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+    if (notes[index].voice == protected_voice && notes[index].start_tick >= last_cycle_start &&
+        hasRuleBit(provenance, index, RuleBit::CodaCommitted)) {
+      coda_carrier_only &= provenance[index].voice_intent == VoiceIntent::CodaCarrier;
+      committed.push_back({notes[index].start_tick, notes[index].duration, notes[index].pitch});
+    }
+  }
+  std::sort(committed.begin(), committed.end());
+  result.matches = coda_carrier_only && expected == committed;
+  return result;
+}
+
+std::vector<TickInterval> replayIntervals(const std::vector<NoteEvent>& notes,
+                                          const std::vector<NoteProvenance>& provenance,
+                                          RuleBit bit, bool include_terminal_coda,
+                                          VoiceId protected_voice, bool* valid) {
+  std::vector<TickInterval> intervals;
+  intervals.reserve(std::min(notes.size(), provenance.size()));
+  *valid = true;
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+    if (hasRuleBit(provenance, index, bit) ||
+        (include_terminal_coda && notes[index].voice == protected_voice &&
+         hasRuleBit(provenance, index, RuleBit::CodaCommitted))) {
+      Tick note_end = 0;
+      if (!checkedTickEnd(notes[index].start_tick, notes[index].duration, &note_end)) {
+        *valid = false;
+        continue;
+      }
+      intervals.push_back({notes[index].start_tick, note_end});
+    }
+  }
+  return intervals;
+}
+
+bool pitchIntervalsMatchAtBarHeads(std::vector<PitchInterval>* expected,
+                                   std::vector<PitchInterval>* actual, Tick ticks_per_bar) {
+  if (ticks_per_bar == 0 || expected->empty() || actual->empty())
+    return false;
+
+  const auto sortIntervals = [](std::vector<PitchInterval>* intervals) {
+    std::sort(intervals->begin(), intervals->end(),
+              [](const PitchInterval& lhs, const PitchInterval& rhs) {
+                if (lhs.start != rhs.start)
+                  return lhs.start < rhs.start;
+                return lhs.end < rhs.end;
+              });
+  };
+  sortIntervals(expected);
+  sortIntervals(actual);
+
+  std::vector<TickInterval> expected_coverage;
+  expected_coverage.reserve(expected->size());
+  for (const PitchInterval& note : *expected) {
+    if (note.end <= note.start)
+      return false;
+    expected_coverage.push_back({note.start, note.end});
+  }
+  std::vector<TickInterval> actual_coverage;
+  actual_coverage.reserve(actual->size());
+  for (const PitchInterval& note : *actual) {
+    if (note.end <= note.start)
+      return false;
+    actual_coverage.push_back({note.start, note.end});
+  }
+  if (!normalizeSingleCoverage(&expected_coverage) || !normalizeSingleCoverage(&actual_coverage) ||
+      expected_coverage != actual_coverage) {
+    return false;
+  }
+
+  // Coverage permits subdivision and ties, but forbids both overlap and gaps.
+  // The two sorted timelines therefore identify one sounding note per tick.
+  // Compare one bar head in each constant-pitch intersection rather than
+  // walking every bar of a potentially very long declared line.
+  std::size_t expected_index = 0;
+  std::size_t actual_index = 0;
+  while (expected_index < expected->size() && actual_index < actual->size()) {
+    const PitchInterval& expected_note = (*expected)[expected_index];
+    const PitchInterval& actual_note = (*actual)[actual_index];
+    const Tick overlap_start = std::max(expected_note.start, actual_note.start);
+    const Tick overlap_end = std::min(expected_note.end, actual_note.end);
+    if (overlap_start < overlap_end) {
+      const std::uint64_t first_head =
+          ((static_cast<std::uint64_t>(overlap_start) + ticks_per_bar - 1) / ticks_per_bar) *
+          ticks_per_bar;
+      if (first_head < overlap_end && expected_note.pitch != actual_note.pitch)
+        return false;
+    }
+    if (expected_note.end <= actual_note.end)
+      ++expected_index;
+    if (actual_note.end <= expected_note.end)
+      ++actual_index;
+  }
+  return true;
+}
+
+bool protectedBarHeadsMatch(const std::vector<MaterialNote>& expanded,
+                            const std::vector<NoteEvent>& notes,
+                            const std::vector<NoteProvenance>& provenance, RuleBit bit,
+                            Tick ticks_per_bar) {
+  std::vector<PitchInterval> expected;
+  expected.reserve(expanded.size());
+  for (const MaterialNote& note : expanded) {
+    Tick end = 0;
+    if (!checkedTickEnd(note.start_tick, note.duration, &end))
+      return false;
+    expected.push_back({note.start_tick, end, note.pitch});
+  }
+  std::vector<PitchInterval> actual;
+  actual.reserve(std::min(notes.size(), provenance.size()));
+  for (std::size_t index = 0; index < notes.size() && index < provenance.size(); ++index) {
+    if (!hasRuleBit(provenance, index, bit))
+      continue;
+    Tick end = 0;
+    if (!checkedTickEnd(notes[index].start_tick, notes[index].duration, &end))
+      return false;
+    actual.push_back({notes[index].start_tick, end, notes[index].pitch});
+  }
+  return pitchIntervalsMatchAtBarHeads(&expected, &actual, ticks_per_bar);
 }
 
 }  // namespace
@@ -174,139 +627,127 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
     }
   }
 
-  // Immutable-ground skeleton rules. One shared check for both ground
-  // families: an immutable ground (Chaconne ground bass / Passacaglia
-  // ground) is the harmonic skeleton of its form and must be replayed
-  // unchanged on every cycle. The check is a bar-head skeleton match (the
-  // same granularity as cantus_firmus_immutable): a replayed ground may
-  // subdivide a bar rhythmically (repeated same-pitch notes, the late-cycle
-  // quarter-note intensification), but each ground note on a bar head must
-  // equal the canonical material tone sounding at the same cycle-relative
-  // position. Any altered, transposed, or reordered restatement changes some
-  // bar head and fails. Off-downbeat ground notes are unconstrained (decorations
-  // may sound other pitches than the bar tone). The
-  // rule is inert when either the canonical ground or the stamped run is
-  // empty (fixtures that declare no ground).
-  const auto checkImmutableGround = [&](const std::vector<MaterialNote>& ground,
-                                        Tick declared_period, RuleBit replay_bit,
-                                        const char* rule_id) {
-    bool has_ground_note = false;
-    bool ground_ok = true;
-    const std::size_t n = ground.size();
-    if (n > 0) {
-      const Tick period =
-          declared_period > 0 ? declared_period : static_cast<Tick>(n) * ticks_per_bar;
-      for (std::size_t i = 0; i < notes.size() && ground_ok; ++i) {
-        if (i >= provenance.size() || !hasRuleBit(provenance, i, replay_bit))
-          continue;
-        has_ground_note = true;
-        const auto& note = notes[i];
-        if (note.start_tick % ticks_per_bar != 0)
-          continue;  // only the bar head carries the skeleton tone.
-        // Canonical tone: the material note sounding at this cycle-relative
-        // position (the latest material onset at or before it).
-        const Tick cycle_tick = note.start_tick % period;
-        int expected = -1;
-        for (const MaterialNote& mnote : ground) {
-          if (mnote.start_tick <= cycle_tick)
-            expected = mnote.pitch;
-        }
-        if (expected >= 0 && note.pitch != expected)
-          ground_ok = false;
-      }
+  // Ground replay must cover the declared line once and preserve each bar head.
+  // The line may be subdivided or decorated away from the bar head, but those
+  // notes cannot create a gap or overlap in its protected time.
+  const auto checkImmutableGround = [&](const std::vector<MaterialNote>& ground, Tick period,
+                                        Tick cycle, RuleBit replay_bit, const char* rule_id) {
+    if (ground.empty())
+      return;
+    Tick line_extent = 0;
+    if (!authoritativeExtent(harmonic_plan, material, ticks_per_bar, notes, &line_extent)) {
+      ValidationFailure failure;
+      failure.rule_id = rule_id;
+      failure.kind = FailKind::StructuralFail;
+      report.failures.push_back(failure);
+      return;
     }
-    if (has_ground_note && !ground_ok) {
+
+    VoiceId protected_voice = 0;
+    bool has_replay = false;
+    const bool one_voice =
+        findProtectedVoice(notes, provenance, replay_bit, &protected_voice, &has_replay);
+    TerminalCoda coda;
+    if (one_voice && has_replay)
+      coda = findTerminalCoda(material.coda_extensions, notes, provenance, protected_voice,
+                              line_extent, cycle > 0 ? cycle : period);
+    const bool use_coda = coda.declared && coda.matches;
+    std::vector<MaterialNote> expected;
+    const bool expected_valid = expandGroundDeclaration(
+        ground, period, cycle, line_extent, use_coda ? coda.start : line_extent, use_coda,
+        replayCount(notes, provenance, replay_bit), &expected);
+
+    bool ground_ok = one_voice && expected_valid;
+    if (coda.declared && !coda.matches)
+      ground_ok = false;
+
+    std::vector<TickInterval> expected_intervals;
+    expected_intervals.reserve(expected.size() + (use_coda ? coda.notes.size() : 0));
+    for (const MaterialNote& note : expected) {
+      Tick note_end = 0;
+      if (!checkedTickEnd(note.start_tick, note.duration, &note_end))
+        ground_ok = false;
+      else
+        expected_intervals.push_back({note.start_tick, note_end});
+    }
+    if (use_coda) {
+      for (const MaterialNote& note : coda.notes)
+        expected_intervals.push_back({note.start_tick, note.start_tick + note.duration});
+    }
+    bool replayed_intervals_valid = false;
+    std::vector<TickInterval> actual_intervals =
+        replayIntervals(notes, provenance, replay_bit, use_coda && one_voice && has_replay,
+                        protected_voice, &replayed_intervals_valid);
+    std::vector<TickInterval> normalized_expected = expected_intervals;
+    const bool coverage_ok = expected_valid && replayed_intervals_valid &&
+                             normalizeSingleCoverage(&normalized_expected) &&
+                             normalizeSingleCoverage(&actual_intervals) &&
+                             normalized_expected == actual_intervals;
+    const bool heads_ok = expected_valid && protectedBarHeadsMatch(expected, notes, provenance,
+                                                                   replay_bit, ticks_per_bar);
+    Tick protected_end = 0;
+    if (!materialEnd(expected, &protected_end))
+      ground_ok = false;
+    if (use_coda)
+      protected_end = line_extent;
+    if (protected_end < line_extent && !use_coda)
+      ground_ok = false;
+    if (!coverage_ok || !heads_ok || !has_replay || !ground_ok) {
       ValidationFailure failure;
       failure.rule_id = rule_id;
       failure.kind = FailKind::StructuralFail;
       report.failures.push_back(failure);
     }
   };
-  // The cycle rather than the replay period is what this check reads. A ground
-  // that states its cycle on a different surface each time it returns declares
-  // the whole line and is laid down once, so its period is the piece; reading
-  // that period here would compare every bar head only with itself and the rule
-  // would stop saying anything about the return. The cycle keeps each statement
-  // measured against the first one. A declaration that is one cycle leaves the
-  // field at zero and falls back to its period, which is the same tick count.
-  const auto groundCycle = [](Tick cycle, Tick period) { return cycle > 0 ? cycle : period; };
-  // Solo String Arch (BWV1004 Chaconne).
-  checkImmutableGround(material.ground_bass,
-                       groundCycle(material.ground_bass_cycle, material.ground_bass_period),
-                       RuleBit::GroundBassReplayed, "ground_bass_immutable");
-  // Organ Passacaglia.
-  checkImmutableGround(
-      material.passacaglia_ground,
-      groundCycle(material.passacaglia_ground_cycle, material.passacaglia_ground_period),
-      RuleBit::PassacagliaGroundReplayed, "passacaglia_ground_immutable");
-  // Goldberg's aria bass takes the same bar-head skeleton check. The exact
-  // onset/duration/pitch match below says the declared line reaches the output
-  // unchanged; this says the cycle under that line still comes back.
-  checkImmutableGround(
-      material.goldberg_aria_bass,
-      groundCycle(material.goldberg_aria_bass_cycle, material.goldberg_aria_bass_period),
-      RuleBit::GoldbergBassReplayed, "goldberg_aria_bass_immutable");
-  // Goldberg's aria bass is a dedicated declaration, not a passacaglia bar-head
-  // ground: every declared onset/duration/pitch must be emitted exactly. A
-  // terminal CodaCarrier may replace the ground's last return with a tonic
-  // cadence, so a CodaCommitted note inside the score's final period ends the
-  // immutable region there. When the period is not shorter than the score there
-  // is no trailing return to give up -- the line is declared right up to the
-  // coda -- so nothing is exempt, and a coda tone earlier in the piece must not
-  // be able to shorten what this rule reads.
-  if (!material.goldberg_aria_bass.empty() && material.goldberg_aria_bass_period > 0) {
-    Tick score_end = 0;
-    for (const auto& note : notes)
-      score_end = std::max(score_end, note.start_tick + note.duration);
-    Tick immutable_end = score_end;
-    if (score_end > material.goldberg_aria_bass_period) {
-      const Tick terminal_window = score_end - material.goldberg_aria_bass_period;
-      for (std::size_t i = 0; i < notes.size(); ++i) {
-        if (notes[i].start_tick >= terminal_window &&
-            hasRuleBit(provenance, i, RuleBit::CodaCommitted)) {
-          immutable_end = std::min(immutable_end, notes[i].start_tick);
-        }
-      }
-    }
-    // The replayed bass tones as sorted (onset, duration, pitch) keys, so each
-    // expected tone is one binary search.
-    struct BassTone {
-      Tick start_tick;
-      Tick duration;
-      std::uint8_t pitch;
-      bool operator<(const BassTone& other) const {
-        if (start_tick != other.start_tick)
-          return start_tick < other.start_tick;
-        if (duration != other.duration)
-          return duration < other.duration;
-        return pitch < other.pitch;
-      }
-    };
-    std::vector<BassTone> replayed;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-      if (hasRuleBit(provenance, i, RuleBit::GoldbergBassReplayed))
-        replayed.push_back({notes[i].start_tick, notes[i].duration, notes[i].pitch});
-    }
-    std::sort(replayed.begin(), replayed.end());
-    bool searched = false;
-    bool ok = true;
-    for (Tick base = 0; base < immutable_end && ok; base += material.goldberg_aria_bass_period) {
-      for (const auto& expected : material.goldberg_aria_bass) {
-        const Tick tick = base + expected.start_tick;
-        if (tick >= immutable_end)
-          break;
-        searched = true;
-        if (!std::binary_search(replayed.begin(), replayed.end(),
-                                BassTone{tick, expected.duration, expected.pitch})) {
-          ok = false;
-          break;
-        }
-      }
-    }
-    // Without any replayed tone, or without a single expected tone inside the
-    // immutable region, the declared line is not shown to reach the output.
-    const bool any = searched && !replayed.empty();
-    if (!any || !ok) {
+
+  checkImmutableGround(material.ground_bass, material.ground_bass_period,
+                       material.ground_bass_cycle, RuleBit::GroundBassReplayed,
+                       "ground_bass_immutable");
+  checkImmutableGround(material.passacaglia_ground, material.passacaglia_ground_period,
+                       material.passacaglia_ground_cycle, RuleBit::PassacagliaGroundReplayed,
+                       "passacaglia_ground_immutable");
+
+  // Goldberg retains the aria's exact surface in every block. Compare sorted
+  // multisets so missing events, repeated events and differences in the
+  // Dotted/Pulsed/Gathering surfaces all remain visible.
+  if (!material.goldberg_aria_bass.empty()) {
+    Tick line_extent = 0;
+    bool bass_ok = authoritativeExtent(harmonic_plan, material, ticks_per_bar, notes, &line_extent);
+    VoiceId protected_voice = 0;
+    bool has_replay = false;
+    const bool one_voice = findProtectedVoice(notes, provenance, RuleBit::GoldbergBassReplayed,
+                                              &protected_voice, &has_replay);
+    TerminalCoda coda;
+    if (one_voice && has_replay)
+      coda = findTerminalCoda(
+          material.coda_extensions, notes, provenance, protected_voice, line_extent,
+          material.goldberg_aria_bass_cycle > 0 ? material.goldberg_aria_bass_cycle
+                                                : material.goldberg_aria_bass_period);
+    const bool use_coda = coda.declared && coda.matches;
+    Tick bass_declaration_end = 0;
+    const bool bass_declaration_valid =
+        materialEnd(material.goldberg_aria_bass, &bass_declaration_end);
+    std::vector<MaterialNote> expected_notes;
+    const bool expected_valid =
+        bass_declaration_valid &&
+        expandGroundDeclaration(material.goldberg_aria_bass, material.goldberg_aria_bass_period,
+                                material.goldberg_aria_bass_cycle, line_extent,
+                                use_coda ? coda.start : line_extent, use_coda,
+                                replayCount(notes, provenance, RuleBit::GoldbergBassReplayed),
+                                &expected_notes);
+    bass_ok = bass_ok && expected_valid;
+    const std::vector<NoteKey> expected = materialKeys(expected_notes, line_extent);
+    const std::vector<NoteKey> replayed =
+        replayKeys(notes, provenance, RuleBit::GoldbergBassReplayed);
+    const bool heads_ok =
+        expected_valid && protectedBarHeadsMatch(expected_notes, notes, provenance,
+                                                 RuleBit::GoldbergBassReplayed, ticks_per_bar);
+    const bool periodic =
+        usesPeriodicReplay(material.goldberg_aria_bass_period, material.goldberg_aria_bass_cycle,
+                           line_extent, bass_declaration_end);
+    const bool missing_terminal = !periodic && bass_declaration_end < line_extent && !use_coda;
+    if (!bass_ok || !one_voice || !has_replay || expected != replayed || !heads_ok ||
+        (coda.declared && !coda.matches) || missing_terminal) {
       ValidationFailure failure;
       failure.rule_id = "goldberg_aria_bass_immutable";
       failure.kind = FailKind::StructuralFail;
@@ -420,48 +861,45 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
     }
   }
 
-  // cantus_firmus_immutable: the cantus firmus skeleton (the fixed chorale tune,
-  // material.cantus_firmus) is the structural backbone of the chorale prelude and
-  // is immutable. A CantusFirmusCarrier may replay an embellished
-  // line, but each bar's DOWNBEAT tone must still equal the skeleton tone for
-  // that bar. Gather every note stamped CantusFirmusReplayed in onset order; for
-  // each whose onset lands on a bar downbeat (start_tick % ticks_per_bar == 0),
-  // look up the expected skeleton tone material.cantus_firmus[bar_index] where
-  // bar_index = start_tick / ticks_per_bar (bounds-guarded). If the replayed
-  // downbeat pitch differs from the skeleton pitch, push ONE StructuralFail.
-  // Off-downbeat embellishment notes are unconstrained. The rule is inert when
-  // material.cantus_firmus is empty or no CantusFirmusReplayed note exists
-  // (fixtures that declare no cantus firmus).
-  {
-    std::vector<std::size_t> cf_indices;
-    for (std::size_t i = 0; i < notes.size(); ++i) {
-      if (i < provenance.size() && hasRuleBit(provenance, i, RuleBit::CantusFirmusReplayed))
-        cf_indices.push_back(i);
+  // The cantus may change pitch between downbeats, but its declared timeline
+  // must be covered once without holes or overlaps. Each structural bar head
+  // still has to appear once with the skeleton pitch.
+  if (!material.cantus_firmus.empty()) {
+    const std::vector<MaterialNote>& cantus =
+        material.cf_is_embellished ? material.cf_embellished : material.cantus_firmus;
+    bool replayed_intervals_valid = false;
+    const std::vector<TickInterval> replayed_intervals = replayIntervals(
+        notes, provenance, RuleBit::CantusFirmusReplayed, false, 0, &replayed_intervals_valid);
+    std::vector<TickInterval> cantus_intervals;
+    cantus_intervals.reserve(cantus.size());
+    bool cantus_intervals_valid = true;
+    for (const MaterialNote& note : cantus) {
+      Tick note_end = 0;
+      if (!checkedTickEnd(note.start_tick, note.duration, &note_end)) {
+        cantus_intervals_valid = false;
+        break;
+      }
+      cantus_intervals.push_back({note.start_tick, note_end});
     }
-    std::sort(cf_indices.begin(), cf_indices.end(), [&](std::size_t a, std::size_t b) {
-      return notes[a].start_tick < notes[b].start_tick;
-    });
-
-    if (!material.cantus_firmus.empty() && !cf_indices.empty()) {
-      bool cf_altered = false;
-      for (std::size_t idx : cf_indices) {
-        const auto& note = notes[idx];
-        if (note.start_tick % ticks_per_bar != 0)
-          continue;  // only bar downbeats are constrained.
-        const std::size_t bar_index = static_cast<std::size_t>(note.start_tick / ticks_per_bar);
-        if (bar_index >= material.cantus_firmus.size())
-          continue;  // out of skeleton range; unconstrained.
-        if (note.pitch != material.cantus_firmus[bar_index].pitch) {
-          cf_altered = true;
-          break;
-        }
-      }
-      if (cf_altered) {
-        ValidationFailure failure;
-        failure.rule_id = "cantus_firmus_immutable";
-        failure.kind = FailKind::StructuralFail;
-        report.failures.push_back(failure);
-      }
+    const bool replay_covers_skeleton =
+        hasExactSingleCoverage(material.cantus_firmus, replayed_intervals);
+    const bool bar_heads_match = protectedBarHeadsMatch(
+        material.cantus_firmus, notes, provenance, RuleBit::CantusFirmusReplayed, ticks_per_bar);
+    Tick extent = 0;
+    Tick skeleton_end = 0;
+    const bool extent_valid =
+        authoritativeExtent(harmonic_plan, material, ticks_per_bar, notes, &extent);
+    const bool skeleton_valid = materialEnd(material.cantus_firmus, &skeleton_end);
+    const bool reaches_form_end =
+        extent_valid && skeleton_valid && (extent == 0 || skeleton_end >= extent);
+    const bool same_declared_coverage =
+        cantus_intervals_valid && hasExactSingleCoverage(material.cantus_firmus, cantus_intervals);
+    if (!replayed_intervals_valid || !same_declared_coverage || !replay_covers_skeleton ||
+        !bar_heads_match || !reaches_form_end) {
+      ValidationFailure failure;
+      failure.rule_id = "cantus_firmus_immutable";
+      failure.kind = FailKind::StructuralFail;
+      report.failures.push_back(failure);
     }
   }
 

@@ -3,13 +3,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "composer/composer.h"
 #include "composer/counterpoint_budget.h"
+#include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
 #include "composer/motif_ops.h"
@@ -3953,6 +3957,715 @@ TEST(CounterpointBudgetTest, BudgetFailureLeavesTheFindingTallyUntouched) {
   EXPECT_EQ(tally.exempted, 0);
   EXPECT_EQ(tally.total - tally.gated - tally.exempted,
             static_cast<int>(report.informational.size()));
+}
+
+namespace {
+
+struct ImmutableReplayCase {
+  HarnessFixture fixture;
+  ComposeResult score;
+  VoiceIntent protected_intent = VoiceIntent::SubjectCarrier;
+  std::string rule_id;
+};
+
+bool buildImmutableReplayCase(FormType form, std::uint16_t bars, VoiceIntent protected_intent,
+                              const char* rule_id, ImmutableReplayCase* out_case) {
+  ComposeRequest request;
+  request.form = form;
+  request.seed = 42;
+  request.target_bars = bars;
+  if (buildFormFixture(request, &out_case->fixture) != FormDirectorStatus::Ok)
+    return false;
+  out_case->score = Composer{}.run(out_case->fixture.material, out_case->fixture.harmony,
+                                   out_case->fixture.voice_plan);
+  out_case->protected_intent = protected_intent;
+  out_case->rule_id = rule_id;
+  return true;
+}
+
+std::vector<std::size_t> protectedNoteIndices(const ImmutableReplayCase& replay) {
+  std::vector<std::size_t> indices;
+  for (std::size_t index = 0; index < replay.score.provenance.size(); ++index) {
+    if (replay.score.provenance[index].voice_intent == replay.protected_intent)
+      indices.push_back(index);
+  }
+  return indices;
+}
+
+void eraseAlignedNote(ComposeResult* score, std::size_t index) {
+  score->notes.erase(score->notes.begin() + static_cast<std::ptrdiff_t>(index));
+  score->provenance.erase(score->provenance.begin() + static_cast<std::ptrdiff_t>(index));
+}
+
+bool hasProvenanceBit(const NoteProvenance& provenance, RuleBit bit) {
+  return (provenance.satisfied_rules & ruleBitMask(bit)) != 0;
+}
+
+ValidationReport validateReplay(const ImmutableReplayCase& replay, const ComposeResult& score) {
+  return Validator{}.validate(score.notes, score.provenance, replay.fixture.harmony,
+                              replay.fixture.material, ValidationScope::FinalScore);
+}
+
+void expectStructuralImmutableFailure(const ValidationReport& report, const char* rule_id) {
+  bool found = false;
+  for (const ValidationFailure& failure : report.failures) {
+    if (failure.rule_id == rule_id && failure.kind == FailKind::StructuralFail) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found) << "expected StructuralFail for " << rule_id;
+}
+
+}  // namespace
+
+TEST(ValidatorImmutableReplayTest, GeneratedProtectedLinesFailClosedForMissingAndDuplicateNotes) {
+  struct CaseSpec {
+    FormType form;
+    std::uint16_t bars;
+    VoiceIntent intent;
+    const char* rule_id;
+  };
+  const CaseSpec specs[] = {
+      {FormType::Chaconne, 24, VoiceIntent::GroundCarrier, "ground_bass_immutable"},
+      {FormType::Passacaglia, 24, VoiceIntent::PassacagliaGround, "passacaglia_ground_immutable"},
+      {FormType::ChoralePrelude, 24, VoiceIntent::CantusFirmusCarrier, "cantus_firmus_immutable"},
+      {FormType::GoldbergVariations, 128, VoiceIntent::GoldbergBassCarrier,
+       "goldberg_aria_bass_immutable"},
+  };
+
+  for (const CaseSpec& spec : specs) {
+    ImmutableReplayCase replay;
+    ASSERT_TRUE(buildImmutableReplayCase(spec.form, spec.bars, spec.intent, spec.rule_id, &replay));
+    const std::vector<std::size_t> indices = protectedNoteIndices(replay);
+    ASSERT_GE(indices.size(), 3u) << spec.rule_id;
+    EXPECT_FALSE(hasRule(validateReplay(replay, replay.score), spec.rule_id)) << spec.rule_id;
+
+    for (const std::size_t protected_position :
+         {std::size_t{0}, indices.size() / 2, indices.size() - 1}) {
+      ComposeResult missing = replay.score;
+      eraseAlignedNote(&missing, indices[protected_position]);
+      expectStructuralImmutableFailure(validateReplay(replay, missing), spec.rule_id);
+    }
+
+    ComposeResult missing_all = replay.score;
+    for (auto iter = indices.rbegin(); iter != indices.rend(); ++iter)
+      eraseAlignedNote(&missing_all, *iter);
+    expectStructuralImmutableFailure(validateReplay(replay, missing_all), spec.rule_id);
+
+    ComposeResult duplicate = replay.score;
+    duplicate.notes.push_back(replay.score.notes[indices.front()]);
+    duplicate.provenance.push_back(replay.score.provenance[indices.front()]);
+    expectStructuralImmutableFailure(validateReplay(replay, duplicate), spec.rule_id);
+  }
+}
+
+TEST(ValidatorImmutableReplayTest, GroundSubdivisionsAndCantusOffbeatEmbellishmentsRemainValid) {
+  Material ground_material;
+  ground_material.ground_bass = {{0, 2 * kTicksPerBar, 48}};
+  ground_material.ground_bass_period = 2 * kTicksPerBar;
+  const std::vector<NoteEvent> subdivided_ground = {makeNote(0, kTicksPerBar, 48, 1),
+                                                    makeNote(kTicksPerBar, kTicksPerBar, 48, 1)};
+  std::vector<NoteProvenance> ground_provenance(subdivided_ground.size(),
+                                                makeProv(1, NoteSource::Material));
+  for (NoteProvenance& provenance : ground_provenance)
+    provenance.satisfied_rules |= ruleBitMask(RuleBit::GroundBassReplayed);
+  EXPECT_FALSE(hasRule(
+      Validator{}.validate(subdivided_ground, ground_provenance, cMajorWhole(), ground_material),
+      "ground_bass_immutable"));
+
+  Material cf_material;
+  cf_material.cantus_firmus = {{0, kTicksPerBar, 72}};
+  const std::vector<NoteEvent> embellished_cf = {
+      makeNote(0, kTicksPerBeat, 72, 1),
+      makeNote(kTicksPerBeat, kTicksPerBar - kTicksPerBeat, 74, 1)};
+  std::vector<NoteProvenance> cf_provenance(embellished_cf.size(),
+                                            makeProv(2, NoteSource::Material));
+  for (NoteProvenance& provenance : cf_provenance)
+    provenance.satisfied_rules |= ruleBitMask(RuleBit::CantusFirmusReplayed);
+  EXPECT_FALSE(
+      hasRule(Validator{}.validate(embellished_cf, cf_provenance, cMajorWhole(), cf_material),
+              "cantus_firmus_immutable"));
+}
+
+TEST(ValidatorImmutableReplayTest, EmptyDeclarationsDoNotConstrainStampedNotes) {
+  const std::vector<NoteEvent> notes = {makeNote(0, kTicksPerBeat, 48, 0),
+                                        makeNote(kTicksPerBeat, kTicksPerBeat, 52, 1),
+                                        makeNote(2 * kTicksPerBeat, kTicksPerBeat, 55, 2),
+                                        makeNote(3 * kTicksPerBeat, kTicksPerBeat, 72, 3)};
+  std::vector<NoteProvenance> provenance(notes.size(), makeProv(0, NoteSource::Material));
+  provenance[0].satisfied_rules |= ruleBitMask(RuleBit::GroundBassReplayed);
+  provenance[1].satisfied_rules |= ruleBitMask(RuleBit::PassacagliaGroundReplayed);
+  provenance[2].satisfied_rules |= ruleBitMask(RuleBit::GoldbergBassReplayed);
+  provenance[3].satisfied_rules |= ruleBitMask(RuleBit::CantusFirmusReplayed);
+
+  const ValidationReport report =
+      Validator{}.validate(notes, provenance, cMajorWhole(), Material{});
+  EXPECT_FALSE(hasRule(report, "ground_bass_immutable"));
+  EXPECT_FALSE(hasRule(report, "passacaglia_ground_immutable"));
+  EXPECT_FALSE(hasRule(report, "goldberg_aria_bass_immutable"));
+  EXPECT_FALSE(hasRule(report, "cantus_firmus_immutable"));
+}
+
+TEST(ValidatorImmutableReplayTest, OversizedPeriodicDeclarationFailsBeforeExpansion) {
+  constexpr Tick kLargePeriod = static_cast<Tick>(0x80000000u);
+  Material material;
+  material.ground_bass = {{0, kLargePeriod, 48}};
+  material.ground_bass_period = kLargePeriod;
+  VariationDecl variation;
+  variation.end_tick = std::numeric_limits<Tick>::max();
+  material.variations.push_back(variation);
+
+  const std::vector<NoteEvent> notes = {makeNote(0, kLargePeriod, 48, 1)};
+  std::vector<NoteProvenance> provenance(1, makeProv(1, NoteSource::Material));
+  provenance.front().satisfied_rules |= ruleBitMask(RuleBit::GroundBassReplayed);
+
+  const ValidationReport report = Validator{}.validate(notes, provenance, cMajorWhole(), material);
+  expectStructuralImmutableFailure(report, "ground_bass_immutable");
+}
+
+TEST(ValidatorImmutableReplayTest, UpperCodaStampCannotExcuseMissingGoldbergBass) {
+  ImmutableReplayCase replay;
+  ASSERT_TRUE(buildImmutableReplayCase(FormType::GoldbergVariations, 128,
+                                       VoiceIntent::GoldbergBassCarrier,
+                                       "goldberg_aria_bass_immutable", &replay));
+  ASSERT_FALSE(replay.fixture.material.goldberg_aria_bass.empty());
+  ASSERT_FALSE(replay.fixture.material.coda_extensions.empty());
+  EXPECT_FALSE(hasRule(validateReplay(replay, replay.score), replay.rule_id));
+
+  Tick score_end = 0;
+  for (const NoteEvent& note : replay.score.notes)
+    score_end = std::max(score_end, note.start_tick + note.duration);
+  const Tick terminal_window = score_end - replay.fixture.material.goldberg_aria_bass_period;
+  Tick declared_coda_start = std::numeric_limits<Tick>::max();
+  for (const CodaDecl& coda : replay.fixture.material.coda_extensions) {
+    if (coda.voice != 2)
+      continue;
+    for (const MaterialNote& note : coda.notes)
+      declared_coda_start = std::min(declared_coda_start, note.start_tick);
+  }
+  ASSERT_LT(terminal_window, declared_coda_start);
+
+  const std::vector<std::size_t> protected_indices = protectedNoteIndices(replay);
+  const auto target =
+      std::find_if(protected_indices.begin(), protected_indices.end(), [&](std::size_t index) {
+        const Tick tick = replay.score.notes[index].start_tick;
+        return tick > terminal_window && tick < declared_coda_start;
+      });
+  ASSERT_NE(target, protected_indices.end());
+  ComposeResult fake_upper_coda = replay.score;
+  fake_upper_coda.notes.push_back(makeNote(terminal_window, kTicksPerBeat, 84, 0));
+  NoteProvenance upper_coda_provenance = makeProv(0, NoteSource::Material);
+  upper_coda_provenance.voice_intent = VoiceIntent::CodaCarrier;
+  upper_coda_provenance.satisfied_rules |= ruleBitMask(RuleBit::CodaCommitted);
+  bindAuthoredNote(fake_upper_coda.notes.back(), &upper_coda_provenance);
+  fake_upper_coda.provenance.push_back(upper_coda_provenance);
+  eraseAlignedNote(&fake_upper_coda, *target);
+
+  expectStructuralImmutableFailure(validateReplay(replay, fake_upper_coda), replay.rule_id.c_str());
+}
+
+TEST(ValidatorImmutableReplayTest, DeclaredTerminalCodaMustMatchTheProtectedVoice) {
+  ImmutableReplayCase replay;
+  ASSERT_TRUE(buildImmutableReplayCase(FormType::GoldbergVariations, 128,
+                                       VoiceIntent::GoldbergBassCarrier,
+                                       "goldberg_aria_bass_immutable", &replay));
+  ASSERT_FALSE(replay.fixture.material.coda_extensions.empty());
+  EXPECT_FALSE(hasRule(validateReplay(replay, replay.score), replay.rule_id));
+
+  ComposeResult mismatched_coda = replay.score;
+  bool changed_protected_coda = false;
+  for (std::size_t index = 0; index < mismatched_coda.notes.size(); ++index) {
+    NoteProvenance& provenance = mismatched_coda.provenance[index];
+    if (mismatched_coda.notes[index].voice == 2 &&
+        hasProvenanceBit(provenance, RuleBit::CodaCommitted)) {
+      ++mismatched_coda.notes[index].pitch;
+      bindAuthoredNote(mismatched_coda.notes[index], &provenance);
+      changed_protected_coda = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(changed_protected_coda);
+  expectStructuralImmutableFailure(validateReplay(replay, mismatched_coda), replay.rule_id.c_str());
+}
+
+TEST(ValidatorImmutableReplayTest, ZeroDurationPeriodicDeclarationFailsBeforeExpansion) {
+  Material material;
+  material.ground_bass = {{1, 0, 48}};
+  material.ground_bass_period = 1;
+  VariationDecl variation;
+  variation.end_tick = std::numeric_limits<Tick>::max();
+  material.variations.push_back(variation);
+
+  const ValidationReport report = Validator{}.validate({}, {}, cMajorWhole(), material);
+  expectStructuralImmutableFailure(report, "ground_bass_immutable");
+}
+
+TEST(ValidatorImmutableReplayTest, UnsplitCanonicalGroundAndCantusCanHoldAcrossBarHeads) {
+  Material ground_material;
+  ground_material.ground_bass = {{0, 2 * kTicksPerBar, 48}};
+  ground_material.ground_bass_period = 2 * kTicksPerBar;
+  const std::vector<NoteEvent> held_ground = {makeNote(0, 2 * kTicksPerBar, 48, 1)};
+  std::vector<NoteProvenance> ground_provenance(1, makeProv(1, NoteSource::Material));
+  ground_provenance.front().satisfied_rules |= ruleBitMask(RuleBit::GroundBassReplayed);
+  EXPECT_FALSE(
+      hasRule(Validator{}.validate(held_ground, ground_provenance, cMajorWhole(), ground_material),
+              "ground_bass_immutable"));
+
+  Material cf_material;
+  cf_material.cantus_firmus = {{0, kTicksPerBar, 72}, {kTicksPerBar, kTicksPerBar, 72}};
+  const std::vector<NoteEvent> held_cantus = {makeNote(0, 2 * kTicksPerBar, 72, 1)};
+  std::vector<NoteProvenance> cf_provenance(1, makeProv(2, NoteSource::Material));
+  cf_provenance.front().satisfied_rules |= ruleBitMask(RuleBit::CantusFirmusReplayed);
+  EXPECT_FALSE(hasRule(Validator{}.validate(held_cantus, cf_provenance, cMajorWhole(), cf_material),
+                       "cantus_firmus_immutable"));
+}
+
+TEST(ValidatorImmutableReplayTest, OffbeatDifferentPitchHeldAcrossBarHeadFailsForGroundAndCantus) {
+  Material ground_material;
+  ground_material.ground_bass = {{0, kTicksPerBar, 48}, {kTicksPerBar, kTicksPerBar, 48}};
+  ground_material.ground_bass_period = 2 * kTicksPerBar;
+  const std::vector<NoteEvent> wrong_ground = {
+      makeNote(0, kTicksPerBar - 1, 48, 1),
+      makeNote(kTicksPerBar - 1, kTicksPerBeat, 50, 1),
+  };
+  std::vector<NoteProvenance> ground_provenance(wrong_ground.size(),
+                                                makeProv(1, NoteSource::Material));
+  for (NoteProvenance& provenance : ground_provenance)
+    provenance.satisfied_rules |= ruleBitMask(RuleBit::GroundBassReplayed);
+  expectStructuralImmutableFailure(
+      Validator{}.validate(wrong_ground, ground_provenance, cMajorWhole(), ground_material),
+      "ground_bass_immutable");
+
+  Material cf_material;
+  cf_material.cantus_firmus = {{0, kTicksPerBar, 72}, {kTicksPerBar, kTicksPerBar, 72}};
+  const std::vector<NoteEvent> wrong_cantus = {
+      makeNote(0, kTicksPerBar - 1, 72, 1),
+      makeNote(kTicksPerBar - 1, kTicksPerBeat, 74, 1),
+  };
+  std::vector<NoteProvenance> cf_provenance(wrong_cantus.size(), makeProv(2, NoteSource::Material));
+  for (NoteProvenance& provenance : cf_provenance)
+    provenance.satisfied_rules |= ruleBitMask(RuleBit::CantusFirmusReplayed);
+  expectStructuralImmutableFailure(
+      Validator{}.validate(wrong_cantus, cf_provenance, cMajorWhole(), cf_material),
+      "cantus_firmus_immutable");
+}
+
+namespace {
+
+struct SyntheticImitationReplay {
+  Material material;
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+};
+
+SyntheticImitationReplay makeSyntheticImitationReplay() {
+  SyntheticImitationReplay replay;
+  replay.material.subject = {{0, kTicksPerBeat, 72}, {kTicksPerBeat, kTicksPerBeat, 74}};
+  replay.material.answer = {{4 * kTicksPerBeat, kTicksPerBeat, 67},
+                            {5 * kTicksPerBeat, kTicksPerBeat, 69}};
+  ImitationEntry entry;
+  entry.note_count = 2;
+  entry.distance_ticks = 4 * kTicksPerBeat;
+  entry.interval_semis = -5;
+  replay.material.imitation_entries.push_back(entry);
+
+  const auto append_line = [&replay](const std::vector<MaterialNote>& material_line, VoiceId voice,
+                                     VoiceIntent intent, SpanId span_id) {
+    for (std::size_t index = 0; index < material_line.size(); ++index) {
+      const MaterialNote& material_note = material_line[index];
+      NoteEvent note =
+          makeNote(material_note.start_tick, material_note.duration, material_note.pitch, voice);
+      NoteProvenance provenance = makeProvIntent(span_id, NoteSource::Material, intent);
+      bindAuthoredNote(note, &provenance);
+      if (index == 0)
+        provenance.satisfied_rules |= ruleBitMask(RuleBit::ImitationEntryMatched);
+      replay.notes.push_back(note);
+      replay.provenance.push_back(provenance);
+    }
+  };
+  append_line(replay.material.subject, 0, VoiceIntent::SubjectCarrier, 1);
+  append_line(replay.material.answer, 1, VoiceIntent::AnswerCarrier, 2);
+  return replay;
+}
+
+ValidationReport validateSyntheticImitation(const SyntheticImitationReplay& replay,
+                                            ValidationScope scope) {
+  return Validator{}.validate(replay.notes, replay.provenance, cMajorWhole(), replay.material,
+                              scope);
+}
+
+const std::vector<MaterialNote>& imitationFragmentForTest(const Material& material,
+                                                          MaterialFragment fragment) {
+  switch (fragment) {
+    case MaterialFragment::Subject:
+      return material.subject;
+    case MaterialFragment::Answer:
+      return material.answer;
+    case MaterialFragment::TonalAnswer:
+      return material.tonal_answer;
+    case MaterialFragment::Countersubject:
+      return material.countersubject;
+  }
+  return material.subject;
+}
+
+VoiceIntent imitationIntentForTest(MaterialFragment fragment) {
+  switch (fragment) {
+    case MaterialFragment::Subject:
+      return VoiceIntent::SubjectCarrier;
+    case MaterialFragment::Answer:
+    case MaterialFragment::TonalAnswer:
+      return VoiceIntent::AnswerCarrier;
+    case MaterialFragment::Countersubject:
+      return VoiceIntent::CountersubjectCarrier;
+  }
+  return VoiceIntent::FillerGap;
+}
+
+std::vector<std::size_t> exactImitationEvents(const ComposeResult& score, const Material& material,
+                                              const ImitationEntry& entry, bool leader) {
+  const MaterialFragment fragment = leader ? entry.leader_fragment : entry.follower_fragment;
+  const std::vector<MaterialNote>& line = imitationFragmentForTest(material, fragment);
+  const std::size_t start_index = leader ? entry.leader_start_index : entry.follower_start_index;
+  const std::size_t available = start_index < line.size() ? line.size() - start_index : 0;
+  const std::size_t count = entry.note_count == 0 ? available : entry.note_count;
+  const VoiceId voice = leader ? entry.leader_voice : entry.follower_voice;
+  const VoiceIntent intent = imitationIntentForTest(fragment);
+  std::vector<std::size_t> matched;
+  for (std::size_t offset = 0; offset < count && start_index + offset < line.size(); ++offset) {
+    const MaterialNote& expected = line[start_index + offset];
+    for (std::size_t index = 0; index < score.notes.size() && index < score.provenance.size();
+         ++index) {
+      const NoteEvent& note = score.notes[index];
+      const NoteProvenance& provenance = score.provenance[index];
+      if (note.voice == voice && note.start_tick == expected.start_tick &&
+          note.duration == expected.duration && note.pitch == expected.pitch &&
+          provenance.voice_intent == intent && provenance.source == NoteSource::Material) {
+        matched.push_back(index);
+        break;
+      }
+    }
+  }
+  return matched;
+}
+
+struct PublicImitationReplay {
+  HarnessFixture fixture;
+  ComposeResult score;
+};
+
+bool buildPublicImitationReplay(PublicImitationReplay* replay) {
+  ComposeRequest request;
+  request.form = FormType::Fugue;
+  request.seed = 42;
+  request.target_bars = 128;
+  if (buildFormFixture(request, &replay->fixture) != FormDirectorStatus::Ok ||
+      replay->fixture.material.imitation_entries.empty()) {
+    return false;
+  }
+  replay->score =
+      Composer{}.run(replay->fixture.material, replay->fixture.harmony, replay->fixture.voice_plan);
+  return true;
+}
+
+void appendAuthoredTestNote(std::vector<NoteEvent>* notes, std::vector<NoteProvenance>* provenance,
+                            Tick start, Tick duration, std::uint8_t pitch, VoiceId voice,
+                            VoiceIntent intent, SpanId span_id,
+                            NoteSource source = NoteSource::Material) {
+  NoteEvent note = makeNote(start, duration, pitch, voice);
+  NoteProvenance prov = makeProvIntent(span_id, source, intent);
+  bindAuthoredNote(note, &prov);
+  notes->push_back(note);
+  provenance->push_back(prov);
+}
+
+}  // namespace
+
+TEST(ValidatorImitationIntegrityTest, PublicFugueReplayFailsClosedForMissingAndDuplicateNotes) {
+  PublicImitationReplay replay;
+  ASSERT_TRUE(buildPublicImitationReplay(&replay));
+  const ImitationEntry& entry = replay.fixture.material.imitation_entries.front();
+  const std::vector<std::size_t> follower_indices =
+      exactImitationEvents(replay.score, replay.fixture.material, entry, /*leader=*/false);
+  ASSERT_GE(follower_indices.size(), 3u);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_FALSE(
+        hasRule(Validator{}.validate(replay.score.notes, replay.score.provenance,
+                                     replay.fixture.harmony, replay.fixture.material, scope),
+                "imitation_entry_realization"));
+
+  for (const std::size_t position :
+       {std::size_t{0}, follower_indices.size() / 2, follower_indices.size() - 1}) {
+    ComposeResult missing = replay.score;
+    eraseAlignedNote(&missing, follower_indices[position]);
+    for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore}) {
+      const ValidationReport report =
+          Validator{}.validate(missing.notes, missing.provenance, replay.fixture.harmony,
+                               replay.fixture.material, scope);
+      expectStructuralImmutableFailure(report, "imitation_entry_realization");
+    }
+  }
+
+  ComposeResult missing_all = replay.score;
+  for (auto iter = follower_indices.rbegin(); iter != follower_indices.rend(); ++iter)
+    eraseAlignedNote(&missing_all, *iter);
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore}) {
+    const ValidationReport report =
+        Validator{}.validate(missing_all.notes, missing_all.provenance, replay.fixture.harmony,
+                             replay.fixture.material, scope);
+    expectStructuralImmutableFailure(report, "imitation_entry_realization");
+  }
+
+  ComposeResult duplicate = replay.score;
+  duplicate.notes.push_back(replay.score.notes[follower_indices.front()]);
+  duplicate.provenance.push_back(replay.score.provenance[follower_indices.front()]);
+  expectStructuralImmutableFailure(
+      Validator{}.validate(duplicate.notes, duplicate.provenance, replay.fixture.harmony,
+                           replay.fixture.material, ValidationScope::FinalScore),
+      "imitation_entry_realization");
+}
+
+TEST(ValidatorImitationIntegrityTest,
+     FinalScoreRequiresActualReplayAndAcceptsCompleteOrnamentGroup) {
+  SyntheticImitationReplay replay = makeSyntheticImitationReplay();
+  EXPECT_FALSE(hasRule(validateSyntheticImitation(replay, ValidationScope::FinalScore),
+                       "imitation_entry_realization"));
+
+  SyntheticImitationReplay empty_actual = replay;
+  empty_actual.notes.clear();
+  empty_actual.provenance.clear();
+  expectStructuralImmutableFailure(
+      validateSyntheticImitation(empty_actual, ValidationScope::FinalScore),
+      "imitation_entry_realization");
+  EXPECT_FALSE(hasRule(validateSyntheticImitation(empty_actual, ValidationScope::Generation),
+                       "imitation_entry_realization"));
+
+  NoteProvenance authored = replay.provenance.front();
+  authored.source = NoteSource::Ornament;
+  authored.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
+  NoteEvent upper = makeNote(0, kTicksPerBeat / 2, 74, 0);
+  NoteEvent main = makeNote(kTicksPerBeat / 2, kTicksPerBeat / 2, 72, 0);
+  NoteProvenance upper_provenance = authored;
+  NoteProvenance main_provenance = authored;
+  main_provenance.satisfied_rules = ruleBitMask(RuleBit::OrnamentRealized);
+  replay.notes.erase(replay.notes.begin());
+  replay.provenance.erase(replay.provenance.begin());
+  replay.notes.insert(replay.notes.begin(), {upper, main});
+  replay.provenance.insert(replay.provenance.begin(), {upper_provenance, main_provenance});
+  EXPECT_FALSE(hasRule(validateSyntheticImitation(replay, ValidationScope::FinalScore),
+                       "imitation_entry_realization"));
+
+  replay.provenance[2].span_id = 9;
+  expectStructuralImmutableFailure(validateSyntheticImitation(replay, ValidationScope::FinalScore),
+                                   "imitation_entry_realization");
+}
+
+TEST(ValidatorImitationIntegrityTest, InvalidExplicitBoundsFailButEmptyEndWindowIsInert) {
+  SyntheticImitationReplay replay = makeSyntheticImitationReplay();
+  replay.material.imitation_entries.front().leader_start_index = replay.material.subject.size();
+  expectStructuralImmutableFailure(validateSyntheticImitation(replay, ValidationScope::Generation),
+                                   "imitation_entry_match");
+
+  replay = makeSyntheticImitationReplay();
+  replay.material.imitation_entries.front().note_count = 3;
+  expectStructuralImmutableFailure(validateSyntheticImitation(replay, ValidationScope::Generation),
+                                   "imitation_entry_match");
+
+  replay = makeSyntheticImitationReplay();
+  ImitationEntry& entry = replay.material.imitation_entries.front();
+  entry.leader_start_index = replay.material.subject.size();
+  entry.follower_start_index = replay.material.answer.size();
+  entry.note_count = 0;
+  replay.notes.clear();
+  replay.provenance.clear();
+  EXPECT_FALSE(hasRule(validateSyntheticImitation(replay, ValidationScope::Generation),
+                       "imitation_entry_match"));
+  EXPECT_FALSE(hasRule(validateSyntheticImitation(replay, ValidationScope::Generation),
+                       "imitation_entry_realization"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest, MissingCoverageFailsOnlyWhenAnswerCarrierIsEmitted) {
+  Material material;
+  for (int index = 0; index < 4; ++index)
+    material.answer.push_back({index * kTicksPerBeat, kTicksPerBeat, 60});
+  material.countersubject = {{0, 4 * kTicksPerBeat, 71}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  appendAuthoredTestNote(&notes, &provenance, 0, kTicksPerBeat, 69, 0,
+                         VoiceIntent::CountersubjectCarrier, 1);
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_FALSE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                         "countersubject_continuous"));
+
+  for (int index = 0; index < 4; ++index)
+    appendAuthoredTestNote(&notes, &provenance, index * kTicksPerBeat, kTicksPerBeat, 60, 1,
+                           VoiceIntent::AnswerCarrier, 2);
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                        "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest, CountersubjectDeclaredAfterAnswerWindowIsDeferred) {
+  Material material;
+  material.answer = {{0, 4 * kTicksPerBeat, 60}};
+  material.countersubject = {{4 * kTicksPerBeat, 4 * kTicksPerBeat, 71}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  appendAuthoredTestNote(&notes, &provenance, 0, 4 * kTicksPerBeat, 60, 1,
+                         VoiceIntent::AnswerCarrier, 2);
+  appendAuthoredTestNote(&notes, &provenance, 4 * kTicksPerBeat, 4 * kTicksPerBeat, 71, 0,
+                         VoiceIntent::CountersubjectCarrier, 3);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_FALSE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                         "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest,
+     CoverageUsesEarliestCountersubjectVoiceAndValidOrnament) {
+  Material material;
+  for (int index = 0; index < 4; ++index)
+    material.answer.push_back({index * kTicksPerBeat, kTicksPerBeat, 60});
+  material.countersubject = {{0, 4 * kTicksPerBeat, 71}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  for (int index = 0; index < 4; ++index)
+    appendAuthoredTestNote(&notes, &provenance, index * kTicksPerBeat, kTicksPerBeat, 60, 1,
+                           VoiceIntent::AnswerCarrier, 2);
+  // Deliberately insert the later voice first; the earlier overlapping line in V2 wins.
+  appendAuthoredTestNote(&notes, &provenance, kTicksPerBeat, kTicksPerBeat, 70, 0,
+                         VoiceIntent::CountersubjectCarrier, 3);
+
+  NoteEvent ornament_first = makeNote(0, 2 * kTicksPerBeat, 73, 2);
+  NoteEvent ornament_last = makeNote(2 * kTicksPerBeat, 2 * kTicksPerBeat, 69, 2);
+  NoteProvenance ornament_provenance =
+      makeProvIntent(4, NoteSource::Ornament, VoiceIntent::CountersubjectCarrier);
+  ornament_provenance.has_authored_note = true;
+  ornament_provenance.authored_start_tick = 0;
+  ornament_provenance.authored_duration = 4 * kTicksPerBeat;
+  ornament_provenance.authored_pitch = 69;
+  ornament_provenance.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
+  notes.push_back(ornament_first);
+  provenance.push_back(ornament_provenance);
+  notes.push_back(ornament_last);
+  provenance.push_back(ornament_provenance);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_FALSE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                         "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest,
+     CoverageSelectsEarliestRawOnsetBeforeClippingToAnswerWindow) {
+  Material material;
+  material.answer = {{kTicksPerBeat, 4 * kTicksPerBeat, 60}};
+  material.countersubject = {{kTicksPerBeat, 4 * kTicksPerBeat, 71}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  appendAuthoredTestNote(&notes, &provenance, kTicksPerBeat / 2, 9 * kTicksPerBeat / 2, 69, 0,
+                         VoiceIntent::CountersubjectCarrier, 3);
+  appendAuthoredTestNote(&notes, &provenance, 0, 2 * kTicksPerBeat, 70, 2,
+                         VoiceIntent::CountersubjectCarrier, 4);
+  appendAuthoredTestNote(&notes, &provenance, kTicksPerBeat, 4 * kTicksPerBeat, 60, 1,
+                         VoiceIntent::AnswerCarrier, 5);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                        "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest,
+     InvalidOrnamentAuthorshipCannotFillCountersubjectCoverage) {
+  Material material;
+  material.answer = {{0, 4 * kTicksPerBeat, 60}};
+  material.countersubject = {{0, 4 * kTicksPerBeat, 69}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  appendAuthoredTestNote(&notes, &provenance, 0, 4 * kTicksPerBeat, 60, 1,
+                         VoiceIntent::AnswerCarrier, 2);
+
+  NoteProvenance invalid_ornament =
+      makeProvIntent(3, NoteSource::Ornament, VoiceIntent::CountersubjectCarrier);
+  invalid_ornament.has_authored_note = true;
+  invalid_ornament.authored_start_tick = 1;
+  invalid_ornament.authored_duration = 4 * kTicksPerBeat;
+  invalid_ornament.authored_pitch = 69;
+  invalid_ornament.satisfied_rules |= ruleBitMask(RuleBit::OrnamentRealized);
+  notes.push_back(makeNote(0, 2 * kTicksPerBeat, 70, 0));
+  provenance.push_back(invalid_ornament);
+  notes.push_back(makeNote(2 * kTicksPerBeat, 2 * kTicksPerBeat, 69, 0));
+  provenance.push_back(invalid_ornament);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                        "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest, ComposeCountersubjectIntentCanCoverSelectedVoice) {
+  Material material;
+  material.answer = {{0, 4 * kTicksPerBeat, 60}};
+  material.countersubject = {{0, 4 * kTicksPerBeat, 69}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  appendAuthoredTestNote(&notes, &provenance, 0, 4 * kTicksPerBeat, 60, 1,
+                         VoiceIntent::AnswerCarrier, 2);
+  appendAuthoredTestNote(&notes, &provenance, 0, 4 * kTicksPerBeat, 69, 0,
+                         VoiceIntent::CountersubjectCarrier, 3, NoteSource::Compose);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_FALSE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                         "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest, OtherIntentAndOtherCountersubjectVoiceCannotFillGaps) {
+  Material material;
+  for (int index = 0; index < 4; ++index)
+    material.answer.push_back({index * kTicksPerBeat, kTicksPerBeat, 60});
+  material.countersubject = {{0, 4 * kTicksPerBeat, 71}};
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+  for (int index = 0; index < 4; ++index)
+    appendAuthoredTestNote(&notes, &provenance, index * kTicksPerBeat, kTicksPerBeat, 60, 1,
+                           VoiceIntent::AnswerCarrier, 2);
+  appendAuthoredTestNote(&notes, &provenance, 0, 2 * kTicksPerBeat, 71, 0,
+                         VoiceIntent::CountersubjectCarrier, 3);
+  appendAuthoredTestNote(&notes, &provenance, 2 * kTicksPerBeat, 2 * kTicksPerBeat, 72, 2,
+                         VoiceIntent::CountersubjectCarrier, 4);
+  appendAuthoredTestNote(&notes, &provenance, 2 * kTicksPerBeat, 2 * kTicksPerBeat, 60, 0,
+                         VoiceIntent::HarmonicSupport, 5);
+
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_TRUE(hasRule(Validator{}.validate(notes, provenance, cMajorWhole(), material, scope),
+                        "countersubject_continuous"));
+}
+
+TEST(ValidatorCountersubjectIntegrityTest, PublicFugueFailsClosedWhenCountersubjectIsMissing) {
+  PublicImitationReplay replay;
+  ASSERT_TRUE(buildPublicImitationReplay(&replay));
+  EXPECT_FALSE(hasRule(
+      Validator{}.validate(replay.score.notes, replay.score.provenance, replay.fixture.harmony,
+                           replay.fixture.material, ValidationScope::Generation),
+      "countersubject_continuous"));
+
+  ComposeResult missing = replay.score;
+  for (std::size_t index = missing.provenance.size(); index > 0; --index) {
+    if (missing.provenance[index - 1].voice_intent == VoiceIntent::CountersubjectCarrier)
+      eraseAlignedNote(&missing, index - 1);
+  }
+  for (ValidationScope scope : {ValidationScope::Generation, ValidationScope::FinalScore})
+    EXPECT_TRUE(
+        hasRule(Validator{}.validate(missing.notes, missing.provenance, replay.fixture.harmony,
+                                     replay.fixture.material, scope),
+                "countersubject_continuous"));
 }
 
 }  // namespace bach::composer
