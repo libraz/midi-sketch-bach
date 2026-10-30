@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "composer/cadenced_progression.h"
@@ -2793,6 +2794,670 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
   return respelled;
 }
 
+/// A figuration section that hands its voice to a theme entry at `seam`, paired
+/// with the bass figuration that starts on the same tick.
+struct FigurationHandoff {
+  std::size_t outgoing_section = 0;
+  std::size_t bass_section = 0;
+  Tick seam = 0;
+};
+
+struct HandoffToneSlot {
+  MaterialNote* note = nullptr;
+  VoiceId voice = 0;
+  int original = -1;
+  KeyContext key;
+  std::vector<int> candidates;
+};
+
+struct HandoffFaultCounts {
+  int parallel = 0;
+  int anti_parallel = 0;
+  int hidden = 0;
+  int battuta = 0;
+  int bass_fourths = 0;
+  int seam_battuta = 0;
+  int seam_bass_fourths = 0;
+};
+
+bool isFugueThemeEntry(VoiceIntent intent) {
+  switch (intent) {
+    case VoiceIntent::SubjectCarrier:
+    case VoiceIntent::AnswerCarrier:
+    case VoiceIntent::MiddleEntryCarrier:
+    case VoiceIntent::StrettoCarrier:
+    case VoiceIntent::SubjectCarrierAugmented:
+    case VoiceIntent::SubjectCarrierDiminished:
+    case VoiceIntent::SubjectCarrierInverted:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool anchorsHandoffBarHarmony(const HarmonicPlan& plan, Tick tick, int pitch) {
+  if (tick % kTicksPerBar != 0)
+    return true;
+  const ChordEvent* chord = rule_helpers::chordAt(plan, tick);
+  if (chord == nullptr)
+    return false;
+  std::size_t tone_count = 0;
+  const auto tones = chordPitchClasses(*chord, &tone_count);
+  const int pc = ((pitch % 12) + 12) % 12;
+  for (std::size_t idx = 0; idx < tone_count; ++idx) {
+    if (tones[idx] == pc)
+      return true;
+  }
+  return false;
+}
+
+std::vector<int> handoffPitchCandidates(const HarmonicPlan& plan, VoiceId voice,
+                                        const MaterialNote& note) {
+  const KeyContext key = localKeyAt(plan, note.start_tick);
+  std::vector<int> candidates;
+  for (int pitch = kBandLo[voice]; pitch <= kBandHi[voice]; ++pitch) {
+    if (inKey(pitch, key) && anchorsHandoffBarHarmony(plan, note.start_tick, pitch))
+      candidates.push_back(pitch);
+  }
+  std::stable_sort(candidates.begin(), candidates.end(), [&](int a, int b) {
+    const int da = std::abs(a - static_cast<int>(note.pitch));
+    const int db = std::abs(b - static_cast<int>(note.pitch));
+    return da == db ? a < b : da < db;
+  });
+  return candidates;
+}
+
+std::vector<FigurationHandoff> findFigurationHandoffs(const FugueAssembly& asm_ctx) {
+  const Material& material = asm_ctx.out->material;
+  std::vector<FigurationHandoff> handoffs;
+  for (std::size_t outgoing_idx = 0; outgoing_idx < material.figuration_sections.size();
+       ++outgoing_idx) {
+    const FigurationSection& outgoing = material.figuration_sections[outgoing_idx];
+    if (outgoing.voice >= kFugueVoices || outgoing.voice == 2 || outgoing.notes.empty())
+      continue;
+    const MaterialNote& tail = outgoing.notes.back();
+    const Tick seam = tail.start_tick + tail.duration;
+    if (seam != outgoing.end_tick)
+      continue;
+    const bool has_entry = std::any_of(asm_ctx.out->voice_plan.spans.begin(),
+                                       asm_ctx.out->voice_plan.spans.end(), [&](const Span& span) {
+                                         return span.voice == outgoing.voice &&
+                                                span.start_tick == seam &&
+                                                isFugueThemeEntry(span.intent);
+                                       });
+    if (!has_entry)
+      continue;
+    for (std::size_t bass_idx = 0; bass_idx < material.figuration_sections.size(); ++bass_idx) {
+      const FigurationSection& bass = material.figuration_sections[bass_idx];
+      if (bass_idx != outgoing_idx && bass.voice == 2 && bass.start_tick == seam &&
+          !bass.notes.empty() && bass.notes.front().start_tick == seam &&
+          bass.notes.front().duration > 0) {
+        handoffs.push_back({outgoing_idx, bass_idx, seam});
+      }
+    }
+  }
+  std::stable_sort(
+      handoffs.begin(), handoffs.end(),
+      [](const FigurationHandoff& a, const FigurationHandoff& b) { return a.seam < b.seam; });
+  return handoffs;
+}
+
+std::vector<Tick> handoffEventTicks(const Material& material) {
+  std::vector<Tick> ticks;
+  const auto collect = [&](const std::vector<MaterialNote>& notes) {
+    for (const MaterialNote& note : notes) {
+      ticks.push_back(note.start_tick);
+      ticks.push_back(note.start_tick + note.duration);
+    }
+  };
+  collect(material.subject);
+  collect(material.answer);
+  collect(material.tonal_answer);
+  collect(material.countersubject);
+  for (const FigurationSection& section : material.figuration_sections)
+    collect(section.notes);
+  for (const MiddleEntryDecl& entry : material.middle_entries)
+    collect(entry.notes);
+  for (const StrettoDecl& stretto : material.stretto_entries)
+    collect(stretto.follower_notes);
+  for (const SubjectVariantDecl& variant : material.subject_variants)
+    collect(variant.notes);
+  for (const CodaDecl& coda : material.coda_extensions)
+    collect(coda.notes);
+  for (const PedalPointDecl& pedal : material.pedal_points) {
+    ticks.push_back(pedal.start_tick);
+    ticks.push_back(pedal.start_tick + pedal.duration);
+  }
+  for (const SequenceTemplate& sequence : material.sequence_templates) {
+    for (std::uint8_t step = 0; step < sequence.num_steps; ++step) {
+      Tick cursor = sequence.target_start_tick + sequence.step_length_ticks * step;
+      for (Tick duration : sequence.seed_durations) {
+        ticks.push_back(cursor);
+        cursor += duration;
+        ticks.push_back(cursor);
+      }
+    }
+  }
+  std::sort(ticks.begin(), ticks.end());
+  ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
+  return ticks;
+}
+
+int handoffBasePitch(const FugueAssembly& asm_ctx, const std::vector<PlacedTone>& replaced,
+                     VoiceId voice, Tick tick) {
+  for (auto moved = replaced.rbegin(); moved != replaced.rend(); ++moved) {
+    if (moved->voice == voice && tick >= moved->start && tick < moved->start + moved->duration)
+      return moved->pitch;
+  }
+  return asm_ctx.theme_tones.soundingPitchInVoice(voice, tick);
+}
+
+bool handoffBassIsPedal(const FugueAssembly& asm_ctx, Tick tick) {
+  for (const Span& span : asm_ctx.out->voice_plan.spans) {
+    if (span.voice == 2 && span.intent == VoiceIntent::PedalCarrier && span.start_tick <= tick &&
+        tick < span.end_tick)
+      return true;
+  }
+  return false;
+}
+
+bool formsHandoffAugmentedSecond(int a, int b, const KeyContext& key) {
+  if (!key.is_minor || std::abs(a - b) != 3)
+    return false;
+  const int sixth_pc = (static_cast<int>(key.tonic_pc) + 8) % 12;
+  const int leading_pc = (static_cast<int>(key.tonic_pc) + 11) % 12;
+  const int a_pc = ((a % 12) + 12) % 12;
+  const int b_pc = ((b % 12) + 12) % 12;
+  return (a_pc == sixth_pc && b_pc == leading_pc) || (a_pc == leading_pc && b_pc == sixth_pc);
+}
+
+/// Precomputes the unchanged sounding context once for a bounded handoff
+/// window. Both candidate families use the same event, motion, and quarter grid.
+class HandoffWindow {
+ public:
+  HandoffWindow(const FugueAssembly& asm_ctx, const std::vector<PlacedTone>& replaced,
+                const std::array<HandoffToneSlot, 4>& slots, std::array<bool, 4> active,
+                const std::vector<Tick>& event_ticks, Tick seam)
+      : asm_ctx_(asm_ctx), replaced_(replaced), slots_(slots), active_(active), seam_(seam) {
+    window_start_ = std::numeric_limits<Tick>::max();
+    Tick latest_release = seam;
+    for (std::size_t idx = 0; idx < slots_.size(); ++idx) {
+      if (!active_[idx])
+        continue;
+      window_start_ = std::min(window_start_, slots_[idx].note->start_tick);
+      latest_release =
+          std::max(latest_release, slots_[idx].note->start_tick + slots_[idx].note->duration);
+    }
+    window_end_ = latest_release + kQuarter;
+
+    Tick previous_tick = 0;
+    bool has_previous = false;
+    std::vector<Tick> ticks;
+    for (Tick tick : event_ticks) {
+      if (tick < window_start_) {
+        previous_tick = tick;
+        has_previous = true;
+      } else if (tick <= window_end_) {
+        ticks.push_back(tick);
+      }
+    }
+    ticks.push_back(seam_);
+    ticks.push_back(window_end_);
+    ticks.insert(ticks.begin(), has_previous ? previous_tick : window_start_);
+    std::sort(ticks.begin(), ticks.end());
+    ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
+    for (Tick tick : ticks)
+      motion_.push_back({tick, basePitches(tick)});
+
+    first_quarter_ = (window_start_ / kQuarter) * kQuarter;
+    if (first_quarter_ >= kQuarter)
+      first_quarter_ -= kQuarter;
+    for (Tick tick = first_quarter_; tick < window_end_; tick += kQuarter) {
+      quarter_.push_back({tick, basePitches(tick), basePitches(tick + kQuarter),
+                          handoffBassIsPedal(asm_ctx_, tick)});
+    }
+    seam_base_ = basePitches(seam_);
+    seam_next_base_ = basePitches(seam_ + kQuarter);
+    seam_is_pedal_ = handoffBassIsPedal(asm_ctx_, seam_);
+
+    for (std::size_t idx = 0; idx < slots_.size(); ++idx) {
+      if (!active_[idx])
+        continue;
+      before_[idx] = handoffBasePitch(
+          asm_ctx_, replaced_, slots_[idx].voice,
+          slots_[idx].note->start_tick > 0 ? slots_[idx].note->start_tick - 1 : Tick{0});
+      after_[idx] = handoffBasePitch(asm_ctx_, replaced_, slots_[idx].voice,
+                                     slots_[idx].note->start_tick + slots_[idx].note->duration);
+      for (std::size_t neighbor = 0; neighbor < slots_.size(); ++neighbor) {
+        if (!active_[neighbor] || neighbor == idx || slots_[neighbor].voice != slots_[idx].voice)
+          continue;
+        if (slots_[neighbor].note->start_tick + slots_[neighbor].note->duration ==
+            slots_[idx].note->start_tick)
+          previous_slot_[idx] = static_cast<int>(neighbor);
+        if (slots_[neighbor].note->start_tick ==
+            slots_[idx].note->start_tick + slots_[idx].note->duration)
+          next_slot_[idx] = static_cast<int>(neighbor);
+      }
+    }
+  }
+
+  HandoffFaultCounts evaluate(const std::array<int, 4>& pitches) const {
+    HandoffFaultCounts counts;
+    for (std::size_t idx = 1; idx < motion_.size(); ++idx) {
+      const auto previous = soundingAt(motion_[idx - 1], pitches);
+      const auto current = soundingAt(motion_[idx], pitches);
+      for (VoiceId upper = 0; upper < kFugueVoices; ++upper) {
+        for (VoiceId lower = static_cast<VoiceId>(upper + 1); lower < kFugueVoices; ++lower) {
+          const int up_prev = previous[upper];
+          const int up_now = current[upper];
+          const int low_prev = previous[lower];
+          const int low_now = current[lower];
+          if (up_prev < 0 || up_now < 0 || low_prev < 0 || low_now < 0)
+            continue;
+          switch (classifyPerfectMotion(up_prev, up_now, low_prev, low_now)) {
+            case PerfectMotionKind::ParallelFifth:
+            case PerfectMotionKind::ParallelOctave:
+              ++counts.parallel;
+              break;
+            case PerfectMotionKind::HiddenFifth:
+            case PerfectMotionKind::HiddenOctave:
+              ++counts.hidden;
+              break;
+            case PerfectMotionKind::None:
+              break;
+          }
+          if (isAntiParallelPerfectMotion(up_prev, up_now, low_prev, low_now))
+            ++counts.anti_parallel;
+          if (isBattutaMotion(up_prev, up_now, low_prev, low_now)) {
+            ++counts.battuta;
+            if (motion_[idx].tick == seam_)
+              ++counts.seam_battuta;
+          }
+        }
+      }
+    }
+    for (const QuarterSample& sample : quarter_) {
+      const auto current = soundingAt(sample.tick, sample.current, pitches);
+      const auto next = soundingAt(sample.tick + kQuarter, sample.next, pitches);
+      const int unresolved = unresolvedBassFourth(current, next, sample.pedal);
+      counts.bass_fourths += unresolved;
+      if (sample.tick == seam_)
+        counts.seam_bass_fourths = unresolved;
+    }
+    if (seam_ < first_quarter_ || seam_ >= window_end_ || seam_ % kQuarter != 0) {
+      const int unresolved = unresolvedBassFourth(
+          soundingAt(seam_, seam_base_, pitches),
+          soundingAt(seam_ + kQuarter, seam_next_base_, pitches), seam_is_pedal_);
+      counts.seam_bass_fourths = unresolved;
+    }
+    return counts;
+  }
+
+  bool preservesOrderAndConsonance(const std::array<int, 4>& pitches) const {
+    for (const MotionSample& sample : motion_) {
+      const auto before = sample.base;
+      const auto after = soundingAt(sample, pitches);
+      for (VoiceId voice = 0; voice + 1 < kFugueVoices; ++voice) {
+        if (after[voice] >= 0 && after[voice + 1] >= 0 && after[voice] < after[voice + 1])
+          return false;
+      }
+      for (VoiceId upper = 0; upper < kFugueVoices; ++upper) {
+        for (VoiceId lower = static_cast<VoiceId>(upper + 1); lower < kFugueVoices; ++lower) {
+          if (before[upper] >= 0 && before[lower] >= 0 && after[upper] >= 0 && after[lower] >= 0 &&
+              isConsonantPair(before[upper], before[lower]) &&
+              !isConsonantPair(after[upper], after[lower]))
+            return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool melodyIsAdmissible(const std::array<int, 4>& pitches) const {
+    for (std::size_t idx = 0; idx < slots_.size(); ++idx) {
+      if (!active_[idx])
+        continue;
+      const HandoffToneSlot& slot = slots_[idx];
+      int previous = before_[idx];
+      int next = after_[idx];
+      int original_previous = previous;
+      int original_next = next;
+      if (previous_slot_[idx] >= 0) {
+        const std::size_t neighbor = static_cast<std::size_t>(previous_slot_[idx]);
+        previous = pitches[neighbor];
+        original_previous = slots_[neighbor].original;
+      }
+      if (next_slot_[idx] >= 0) {
+        const std::size_t neighbor = static_cast<std::size_t>(next_slot_[idx]);
+        next = pitches[neighbor];
+        original_next = slots_[neighbor].original;
+      }
+      if (previous >= 0) {
+        const int old_interval = std::abs(slot.original - original_previous);
+        const int entry_limit = std::max(7, old_interval);
+        if (std::abs(pitches[idx] - previous) > entry_limit ||
+            (old_interval % 12 != 6 && std::abs(pitches[idx] - previous) % 12 == 6) ||
+            formsHandoffAugmentedSecond(previous, pitches[idx], slot.key))
+          return false;
+      }
+      if (next >= 0) {
+        const int old_interval = std::abs(slot.original - original_next);
+        const int exit_limit = std::max(12, old_interval);
+        const KeyContext next_key =
+            localKeyAt(asm_ctx_.out->harmony, slot.note->start_tick + slot.note->duration);
+        if (std::abs(pitches[idx] - next) > exit_limit ||
+            (old_interval % 12 != 6 && std::abs(pitches[idx] - next) % 12 == 6) ||
+            formsHandoffAugmentedSecond(pitches[idx], next, next_key))
+          return false;
+      }
+    }
+    return true;
+  }
+
+  bool accepts(const HandoffFaultCounts& candidate, const HandoffFaultCounts& original) const {
+    return candidate.parallel <= original.parallel &&
+           candidate.anti_parallel <= original.anti_parallel &&
+           candidate.hidden <= original.hidden && candidate.battuta <= original.battuta &&
+           candidate.bass_fourths <= original.bass_fourths && candidate.seam_battuta == 0 &&
+           candidate.seam_bass_fourths == 0 &&
+           (candidate.battuta < original.battuta || candidate.bass_fourths < original.bass_fourths);
+  }
+
+ private:
+  struct MotionSample {
+    Tick tick = 0;
+    std::array<int, kFugueVoices> base{};
+  };
+  struct QuarterSample {
+    Tick tick = 0;
+    std::array<int, kFugueVoices> current{};
+    std::array<int, kFugueVoices> next{};
+    bool pedal = false;
+  };
+
+  std::array<int, kFugueVoices> basePitches(Tick tick) const {
+    std::array<int, kFugueVoices> pitches{};
+    for (VoiceId voice = 0; voice < kFugueVoices; ++voice)
+      pitches[voice] = handoffBasePitch(asm_ctx_, replaced_, voice, tick);
+    return pitches;
+  }
+
+  std::array<int, kFugueVoices> soundingAt(const MotionSample& sample,
+                                           const std::array<int, 4>& pitches) const {
+    return soundingAt(sample.tick, sample.base, pitches);
+  }
+
+  std::array<int, kFugueVoices> soundingAt(Tick tick, std::array<int, kFugueVoices> base,
+                                           const std::array<int, 4>& pitches) const {
+    for (std::size_t idx = 0; idx < slots_.size(); ++idx) {
+      if (!active_[idx])
+        continue;
+      const HandoffToneSlot& slot = slots_[idx];
+      if (tick < slot.note->start_tick || tick >= slot.note->start_tick + slot.note->duration)
+        continue;
+      int latest = static_cast<int>(idx);
+      for (std::size_t other = idx + 1; other < slots_.size(); ++other) {
+        if (active_[other] && slots_[other].voice == slot.voice &&
+            tick >= slots_[other].note->start_tick &&
+            tick < slots_[other].note->start_tick + slots_[other].note->duration &&
+            slots_[other].note->start_tick >=
+                slots_[static_cast<std::size_t>(latest)].note->start_tick)
+          latest = static_cast<int>(other);
+      }
+      base[slot.voice] = pitches[static_cast<std::size_t>(latest)];
+    }
+    return base;
+  }
+
+  static int unresolvedBassFourth(const std::array<int, kFugueVoices>& current,
+                                  const std::array<int, kFugueVoices>& next, bool pedal) {
+    if (pedal)
+      return 0;
+    int bass = std::numeric_limits<int>::max();
+    int next_bass = std::numeric_limits<int>::max();
+    for (VoiceId voice = 0; voice < kFugueVoices; ++voice) {
+      if (current[voice] >= 0)
+        bass = std::min(bass, current[voice]);
+      if (next[voice] >= 0)
+        next_bass = std::min(next_bass, next[voice]);
+    }
+    if (bass == std::numeric_limits<int>::max() || next_bass != bass)
+      return 0;
+    int unresolved = 0;
+    for (VoiceId voice = 0; voice < kFugueVoices; ++voice) {
+      const int upper = current[voice];
+      if (upper > bass && (upper - bass) % 12 == 5 && next[voice] != upper - 1 &&
+          next[voice] != upper - 2)
+        ++unresolved;
+    }
+    return unresolved;
+  }
+
+  const FugueAssembly& asm_ctx_;
+  const std::vector<PlacedTone>& replaced_;
+  const std::array<HandoffToneSlot, 4>& slots_;
+  std::array<bool, 4> active_;
+  Tick seam_ = 0;
+  Tick window_start_ = 0;
+  Tick window_end_ = 0;
+  Tick first_quarter_ = 0;
+  std::array<int, kFugueVoices> seam_base_{};
+  std::array<int, kFugueVoices> seam_next_base_{};
+  bool seam_is_pedal_ = false;
+  std::array<int, 4> before_{{-1, -1, -1, -1}};
+  std::array<int, 4> after_{{-1, -1, -1, -1}};
+  std::array<int, 4> previous_slot_{{-1, -1, -1, -1}};
+  std::array<int, 4> next_slot_{{-1, -1, -1, -1}};
+  std::vector<MotionSample> motion_;
+  std::vector<QuarterSample> quarter_;
+};
+
+bool hasTargetFault(const HandoffFaultCounts& counts) {
+  return counts.seam_battuta > 0 || counts.seam_bass_fourths > 0;
+}
+
+void setHandoffSlot(HandoffToneSlot* slot, MaterialNote* note, VoiceId voice,
+                    const HarmonicPlan& plan) {
+  slot->note = note;
+  slot->voice = voice;
+  slot->original = static_cast<int>(note->pitch);
+  slot->key = localKeyAt(plan, note->start_tick);
+  slot->candidates = handoffPitchCandidates(plan, voice, *note);
+}
+
+struct IncomingFreeHead {
+  MaterialNote* note = nullptr;
+  VoiceId voice = 0;
+  bool ambiguous = false;
+};
+
+IncomingFreeHead findIncomingFreeHead(Material& material, const VoicePlan& voice_plan, Tick seam,
+                                      VoiceId outgoing_voice, const FigurationSection* bass_section,
+                                      const FigurationSection* outgoing_section) {
+  IncomingFreeHead incoming;
+  for (const Span& span : voice_plan.spans) {
+    if (span.intent != VoiceIntent::CountersubjectCarrier || span.start_tick > seam ||
+        seam >= span.end_tick)
+      continue;
+    for (MaterialNote& note : material.countersubject) {
+      if (note.start_tick != seam || note.duration == 0)
+        continue;
+      if (incoming.note != nullptr && (incoming.note != &note || incoming.voice != span.voice)) {
+        incoming.ambiguous = true;
+        return incoming;
+      }
+      incoming.note = &note;
+      incoming.voice = span.voice;
+    }
+  }
+  if (incoming.note != nullptr || incoming.ambiguous)
+    return incoming;
+  for (FigurationSection& section : material.figuration_sections) {
+    if (&section != outgoing_section && &section != bass_section &&
+        section.voice != outgoing_voice && section.voice != 2 && section.start_tick == seam &&
+        !section.notes.empty() && section.notes.front().start_tick == seam) {
+      if (incoming.note != nullptr && incoming.voice != section.voice) {
+        incoming.ambiguous = true;
+        return incoming;
+      }
+      incoming.note = &section.notes.front();
+      incoming.voice = section.voice;
+    }
+  }
+  return incoming;
+}
+
+std::vector<PlacedTone> relieveFigurationHandoffsTwoSlot(FugueAssembly& asm_ctx,
+                                                         std::vector<PlacedTone> replaced) {
+  Material& material = asm_ctx.out->material;
+  const std::vector<FigurationHandoff> handoffs = findFigurationHandoffs(asm_ctx);
+  const std::vector<Tick> event_ticks = handoffEventTicks(material);
+  constexpr std::array<bool, 4> kTwoSlots = {false, true, false, true};
+  for (const FigurationHandoff& handoff : handoffs) {
+    FigurationSection& outgoing = material.figuration_sections[handoff.outgoing_section];
+    FigurationSection& bass_section = material.figuration_sections[handoff.bass_section];
+    MaterialNote& tail = outgoing.notes.back();
+    MaterialNote& bass_head = bass_section.notes.front();
+    std::array<HandoffToneSlot, 4> slots{};
+    setHandoffSlot(&slots[1], &tail, outgoing.voice, asm_ctx.out->harmony);
+    setHandoffSlot(&slots[3], &bass_head, bass_section.voice, asm_ctx.out->harmony);
+    if (slots[1].candidates.empty() || slots[3].candidates.empty())
+      continue;
+    const std::array<int, 4> original = {-1, slots[1].original, -1, slots[3].original};
+    const HandoffWindow window(asm_ctx, replaced, slots, kTwoSlots, event_ticks, handoff.seam);
+    const HandoffFaultCounts original_faults = window.evaluate(original);
+    if (!hasTargetFault(original_faults))
+      continue;
+
+    bool found = false;
+    int best_displacement = std::numeric_limits<int>::max();
+    std::array<int, 4> best = original;
+    for (int tail_pitch : slots[1].candidates) {
+      for (int bass_pitch : slots[3].candidates) {
+        if (tail_pitch == slots[1].original && bass_pitch == slots[3].original)
+          continue;
+        std::array<int, 4> candidate = original;
+        candidate[1] = tail_pitch;
+        candidate[3] = bass_pitch;
+        const int displacement =
+            std::abs(tail_pitch - original[1]) + std::abs(bass_pitch - original[3]);
+        if (displacement >= best_displacement || !window.melodyIsAdmissible(candidate) ||
+            !window.preservesOrderAndConsonance(candidate))
+          continue;
+        const HandoffFaultCounts faults = window.evaluate(candidate);
+        if (!window.accepts(faults, original_faults))
+          continue;
+        found = true;
+        best_displacement = displacement;
+        best = candidate;
+      }
+    }
+    if (!found)
+      continue;
+    tail.pitch = static_cast<std::uint8_t>(best[1]);
+    bass_head.pitch = static_cast<std::uint8_t>(best[3]);
+    replaced.push_back({tail.start_tick, tail.duration, outgoing.voice, best[1]});
+    replaced.push_back({bass_head.start_tick, bass_head.duration, bass_section.voice, best[3]});
+  }
+  return replaced;
+}
+
+std::vector<PlacedTone> relieveFigurationHandoffsFourSlot(FugueAssembly& asm_ctx,
+                                                          std::vector<PlacedTone> replaced) {
+  Material& material = asm_ctx.out->material;
+  const std::vector<FigurationHandoff> handoffs = findFigurationHandoffs(asm_ctx);
+  const std::vector<Tick> event_ticks = handoffEventTicks(material);
+  constexpr std::array<bool, 4> kFourSlots = {true, true, true, true};
+  for (const FigurationHandoff& handoff : handoffs) {
+    FigurationSection& outgoing = material.figuration_sections[handoff.outgoing_section];
+    FigurationSection& bass_section = material.figuration_sections[handoff.bass_section];
+    if (outgoing.notes.size() < 2)
+      continue;
+    MaterialNote& tail = outgoing.notes.back();
+    MaterialNote& penultimate = outgoing.notes[outgoing.notes.size() - 2];
+    MaterialNote& bass_head = bass_section.notes.front();
+    if (penultimate.start_tick + penultimate.duration != tail.start_tick)
+      continue;
+    const IncomingFreeHead incoming = findIncomingFreeHead(
+        material, asm_ctx.out->voice_plan, handoff.seam, outgoing.voice, &bass_section, &outgoing);
+    if (incoming.note == nullptr || incoming.ambiguous || incoming.voice >= kFugueVoices ||
+        incoming.voice == outgoing.voice || incoming.voice == 2)
+      continue;
+
+    std::array<HandoffToneSlot, 4> slots{};
+    setHandoffSlot(&slots[0], &penultimate, outgoing.voice, asm_ctx.out->harmony);
+    setHandoffSlot(&slots[1], &tail, outgoing.voice, asm_ctx.out->harmony);
+    setHandoffSlot(&slots[2], incoming.note, incoming.voice, asm_ctx.out->harmony);
+    setHandoffSlot(&slots[3], &bass_head, bass_section.voice, asm_ctx.out->harmony);
+    if (std::any_of(slots.begin(), slots.end(),
+                    [](const HandoffToneSlot& slot) { return slot.candidates.empty(); }))
+      continue;
+    const std::array<int, 4> original = {slots[0].original, slots[1].original, slots[2].original,
+                                         slots[3].original};
+    const HandoffWindow window(asm_ctx, replaced, slots, kFourSlots, event_ticks, handoff.seam);
+    const HandoffFaultCounts original_faults = window.evaluate(original);
+    if (!hasTargetFault(original_faults))
+      continue;
+
+    bool found = false;
+    int best_displacement = std::numeric_limits<int>::max();
+    std::array<int, 4> best = original;
+    std::array<int, 4> candidate = original;
+    for (int penultimate_pitch : slots[0].candidates) {
+      candidate[0] = penultimate_pitch;
+      const int first_displacement = std::abs(penultimate_pitch - original[0]);
+      if (first_displacement >= best_displacement)
+        continue;
+      for (int tail_pitch : slots[1].candidates) {
+        candidate[1] = tail_pitch;
+        const int second_displacement = first_displacement + std::abs(tail_pitch - original[1]);
+        if (second_displacement >= best_displacement)
+          continue;
+        for (int inner_pitch : slots[2].candidates) {
+          candidate[2] = inner_pitch;
+          const int third_displacement = second_displacement + std::abs(inner_pitch - original[2]);
+          if (third_displacement >= best_displacement)
+            continue;
+          for (int bass_pitch : slots[3].candidates) {
+            candidate[3] = bass_pitch;
+            const int displacement = third_displacement + std::abs(bass_pitch - original[3]);
+            if (displacement == 0 || displacement >= best_displacement ||
+                !window.melodyIsAdmissible(candidate) ||
+                !window.preservesOrderAndConsonance(candidate))
+              continue;
+            const HandoffFaultCounts faults = window.evaluate(candidate);
+            if (!window.accepts(faults, original_faults))
+              continue;
+            found = true;
+            best_displacement = displacement;
+            best = candidate;
+          }
+        }
+      }
+    }
+    if (!found)
+      continue;
+    for (std::size_t idx = 0; idx < slots.size(); ++idx) {
+      slots[idx].note->pitch = static_cast<std::uint8_t>(best[idx]);
+      replaced.push_back(
+          {slots[idx].note->start_tick, slots[idx].note->duration, slots[idx].voice, best[idx]});
+    }
+  }
+  return replaced;
+}
+
+/// @brief Jointly voice the free tones around a figuration-to-entry handoff.
+///
+/// The free figuration tail and bass head are tried together first, since
+/// moving either alone can exchange a battuta for a standing fourth (or vice
+/// versa); the penultimate tail tone and the other upper voice's head join when
+/// that is not enough. The theme entry itself is never changed.
+std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx,
+                                                  std::vector<PlacedTone> replaced) {
+  replaced = relieveFigurationHandoffsTwoSlot(asm_ctx, replaced);
+  return relieveFigurationHandoffsFourSlot(asm_ctx, replaced);
+}
+
 /// @brief Re-aim the tone an accompaniment span hands over with.
 ///
 /// A span boundary is the one place in this form where two voices can both
@@ -3107,8 +3772,9 @@ HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   SpanId next_id = 0;
   FugueAssembly asm_ctx{&out, &next_id, {}};
   appendFugueSection(asm_ctx, /*first_bar=*/0, static_cast<int>(req.bars), req);
-  relieveFigurationParallels(asm_ctx,
-                             relieveFigurationSeams(asm_ctx, spellFreeLinesInLocalKey(asm_ctx)));
+  relieveFigurationParallels(
+      asm_ctx, relieveFigurationSeams(
+                   asm_ctx, relieveFigurationHandoffs(asm_ctx, spellFreeLinesInLocalKey(asm_ctx))));
   retractUnsupportedSevenths(asm_ctx);
   return out;
 }
@@ -3183,8 +3849,9 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // --- FUGUE (bars prelude_bars .. total-1). Reuse the full fugue assembly at
   //     a bar offset; span ids continue from the prelude (shared next_id). ---
   appendFugueSection(asm_ctx, prelude_bars, fugue_bars, req);
-  relieveFigurationParallels(asm_ctx,
-                             relieveFigurationSeams(asm_ctx, spellFreeLinesInLocalKey(asm_ctx)));
+  relieveFigurationParallels(
+      asm_ctx, relieveFigurationSeams(
+                   asm_ctx, relieveFigurationHandoffs(asm_ctx, spellFreeLinesInLocalKey(asm_ctx))));
   retractUnsupportedSevenths(asm_ctx);
 
   // Keep the concatenated HarmonicPlan chords in tick order.

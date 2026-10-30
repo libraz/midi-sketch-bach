@@ -28,8 +28,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -51,6 +53,7 @@
 #include "composer/validator.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -3058,6 +3061,137 @@ TEST(FormFugueTest, PedalTakesTheRunningFigure) {
     EXPECT_GE(static_cast<double>(bass_running) / bass_notes, kRunningFloor)
         << "seed " << seed << ": the pedal never takes the running figure (" << bass_running
         << " of " << bass_notes << " notes)";
+  }
+}
+
+namespace {
+
+struct HandoffCase {
+  HarnessFixture fixture;
+  ComposeResult score;
+  Tick seam = 0;
+  const MiddleEntryDecl* entry = nullptr;
+  const FigurationSection* outgoing = nullptr;
+  const FigurationSection* incoming_bass = nullptr;
+};
+
+bool buildHandoffCase(FormType form, std::uint32_t seed, std::uint16_t bars, HandoffCase* handoff) {
+  ComposeRequest request;
+  request.form = form;
+  request.seed = seed;
+  request.is_minor = true;
+  request.character = SubjectCharacter::Playful;
+  request.target_bars = bars;
+  if (buildFormFixture(request, &handoff->fixture) != FormDirectorStatus::Ok)
+    return false;
+
+  const Span* first_middle = nullptr;
+  for (const Span& span : handoff->fixture.voice_plan.spans) {
+    if (span.intent == VoiceIntent::MiddleEntryCarrier &&
+        (first_middle == nullptr || span.start_tick < first_middle->start_tick)) {
+      first_middle = &span;
+    }
+  }
+  if (first_middle == nullptr)
+    return false;
+  handoff->seam = first_middle->start_tick;
+
+  for (const MiddleEntryDecl& entry : handoff->fixture.material.middle_entries) {
+    if (entry.voice == first_middle->voice && !entry.notes.empty() &&
+        entry.notes.front().start_tick == handoff->seam) {
+      handoff->entry = &entry;
+      break;
+    }
+  }
+  for (const FigurationSection& section : handoff->fixture.material.figuration_sections) {
+    if (section.notes.empty())
+      continue;
+    if (section.voice == first_middle->voice && section.end_tick == handoff->seam)
+      handoff->outgoing = &section;
+    if (section.voice == 2 && section.start_tick == handoff->seam)
+      handoff->incoming_bass = &section;
+  }
+  if (handoff->entry == nullptr || handoff->outgoing == nullptr ||
+      handoff->incoming_bass == nullptr || handoff->incoming_bass->notes.empty()) {
+    return false;
+  }
+  handoff->score = Composer{}.run(handoff->fixture.material, handoff->fixture.harmony,
+                                  handoff->fixture.voice_plan);
+  return true;
+}
+
+bool hasUnresolvedBassFourthAtHandoff(const HandoffCase& handoff) {
+  const Tick tick = handoff.seam;
+  std::set<VoiceId> voices;
+  for (const NoteEvent& note : handoff.score.notes)
+    voices.insert(note.voice);
+  int bass = std::numeric_limits<int>::max();
+  int next_bass = std::numeric_limits<int>::max();
+  for (VoiceId voice : voices) {
+    const int pitch = latestSoundingPitch(handoff.score.notes, voice, tick);
+    const int next_pitch = latestSoundingPitch(handoff.score.notes, voice, tick + kTicksPerBeat);
+    if (pitch >= 0)
+      bass = std::min(bass, pitch);
+    if (next_pitch >= 0)
+      next_bass = std::min(next_bass, next_pitch);
+  }
+  if (bass == std::numeric_limits<int>::max() || next_bass != bass)
+    return false;
+
+  for (VoiceId voice : voices) {
+    const int upper = latestSoundingPitch(handoff.score.notes, voice, tick);
+    if (upper <= bass || (upper - bass) % 12 != 5)
+      continue;
+    const int next_upper = latestSoundingPitch(handoff.score.notes, voice, tick + kTicksPerBeat);
+    const bool resolves_down = next_upper == upper - 1 || next_upper == upper - 2;
+    if (!resolves_down)
+      return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST(FormFugueHandoffTest, PlayfulMinorFugueAvoidsBattutaAtFirstMiddleEntry) {
+  HandoffCase handoff;
+  ASSERT_TRUE(buildHandoffCase(FormType::Fugue, /*seed=*/5, /*bars=*/44, &handoff));
+  ASSERT_FALSE(handoff.outgoing->notes.empty());
+
+  Tick previous_onset = 0;
+  bool found_previous_onset = false;
+  for (const NoteEvent& note : handoff.score.notes) {
+    if ((note.voice == handoff.entry->voice || note.voice == 2) && note.start_tick < handoff.seam &&
+        (!found_previous_onset || note.start_tick > previous_onset)) {
+      previous_onset = note.start_tick;
+      found_previous_onset = true;
+    }
+  }
+  ASSERT_TRUE(found_previous_onset);
+  const int upper_before =
+      latestSoundingPitch(handoff.score.notes, handoff.entry->voice, previous_onset);
+  const int upper_after =
+      latestSoundingPitch(handoff.score.notes, handoff.entry->voice, handoff.seam);
+  const int lower_before = latestSoundingPitch(handoff.score.notes, /*voice=*/2, previous_onset);
+  const int lower_after = latestSoundingPitch(handoff.score.notes, /*voice=*/2, handoff.seam);
+  ASSERT_GE(upper_before, 0);
+  ASSERT_GE(upper_after, 0);
+  ASSERT_GE(lower_before, 0);
+  ASSERT_GE(lower_after, 0);
+
+  EXPECT_FALSE(isBattutaMotion(upper_before, upper_after, lower_before, lower_after))
+      << "bar " << handoff.seam / kBar << " hands " << upper_before << "→" << upper_after
+      << " against bass " << lower_before << "→" << lower_after;
+}
+
+TEST(FormFugueHandoffTest, PlayfulMinorHandoffDoesNotLeaveAFourthOverTheIncomingBass) {
+  for (const auto& [form, seed, bars] :
+       {std::tuple{FormType::Fugue, std::uint32_t{3}, std::uint16_t{44}},
+        std::tuple{FormType::PreludeAndFugue, std::uint32_t{3}, std::uint16_t{24}},
+        std::tuple{FormType::PreludeAndFugue, std::uint32_t{1}, std::uint16_t{72}}}) {
+    HandoffCase handoff;
+    ASSERT_TRUE(buildHandoffCase(form, seed, bars, &handoff));
+    EXPECT_FALSE(hasUnresolvedBassFourthAtHandoff(handoff))
+        << formTypeToString(form) << " seed " << seed << " bar " << handoff.seam / kBar;
   }
 }
 
