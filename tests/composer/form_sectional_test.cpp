@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -64,12 +65,13 @@ bool hasRule(const ValidationReport& report, const std::string& rule_id) {
 
 // Build a resolved request for a form via the public director path.
 HarnessFixture buildFixture(FormType form, std::uint32_t seed, bool is_minor,
-                            std::uint16_t target_bars, FormDirectorStatus* status_out = nullptr) {
+                            std::uint16_t target_bars, FormDirectorStatus* status_out = nullptr,
+                            SubjectCharacter character = SubjectCharacter::Severe) {
   ComposeRequest req;
   req.form = form;
   req.seed = seed;
   req.is_minor = is_minor;
-  req.character = SubjectCharacter::Severe;  // Severe is admissible for both forms.
+  req.character = character;
   req.target_bars = target_bars;
   HarnessFixture fixture;
   const FormDirectorStatus status = buildFormFixture(req, &fixture);
@@ -83,11 +85,10 @@ HarnessFixture buildFixture(FormType form, std::uint32_t seed, bool is_minor,
 int freeBarsFor(int total) {
   int free_bars = ((total * 3 / 8 + 2) / 4) * 4;
   free_bars = std::max(8, free_bars);
-  if (total - free_bars < 8) {
-    free_bars = total - 8;
-    free_bars = std::max(8, (free_bars / 4) * 4);
-  }
-  return free_bars;
+  // Keep a full four-bar answer plus the two-bar cadence in the fugue tail.
+  // At the 16-bar minimum this caps the preferred 8-bar opening at 6 bars;
+  // longer forms retain their established split.
+  return std::min(free_bars, total - 10);
 }
 
 const std::array<std::uint32_t, 4> kSeeds = {1, 5, 42, 99};
@@ -356,6 +357,214 @@ TEST(FormSectionalTest, ExpositionEntryTranspositionsAreCorrect) {
         EXPECT_GE(answer_pitch, 53) << formName(form) << " answer entered V2 register";
         EXPECT_LE(answer_pitch, 71) << formName(form) << " answer exceeded V1 register";
       }
+    }
+  }
+}
+
+TEST(FormSectionalTest, MinimumTailKeepsTheCompleteCanonicalAnswer) {
+  ASSERT_EQ(freeBarsFor(16), 6);
+  for (FormType form : kForms) {
+    for (bool minor : {false, true}) {
+      // Select one catalog subject that requires a tonal answer and one that
+      // does not in each mode. The answer policy depends on the mode-specific
+      // catalog row, so a seed known to be dominant-headed in major is not
+      // assumed to select the same answer type in minor.
+      struct SubjectSelection {
+        SubjectCharacter character;
+        std::uint32_t seed;
+      };
+      std::array<SubjectSelection, 2> answer_selections{};
+      std::array<bool, 2> found_answer_type{};
+      for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Playful}) {
+        for (std::uint32_t candidate_seed = 0;
+             candidate_seed < 256 && !(found_answer_type[0] && found_answer_type[1]);
+             ++candidate_seed) {
+          const std::uint8_t candidate_slot =
+              detail::subjectIndexFor(character, minor, candidate_seed);
+          const auto& candidate_subject = minor ? tables::kSubjectCatalogMinor[candidate_slot]
+                                                : tables::kSubjectCatalogMajor[candidate_slot];
+          const std::size_t answer_type = shouldUseTonalAnswer(candidate_subject, 0) ? 1u : 0u;
+          if (!found_answer_type[answer_type]) {
+            answer_selections[answer_type] = {character, candidate_seed};
+            found_answer_type[answer_type] = true;
+          }
+        }
+      }
+      ASSERT_TRUE(found_answer_type[0]) << (minor ? "minor" : "major");
+      ASSERT_TRUE(found_answer_type[1]) << (minor ? "minor" : "major");
+
+      for (std::size_t answer_type = 0; answer_type < 2; ++answer_type) {
+        const SubjectCharacter character = answer_selections[answer_type].character;
+        const std::uint32_t seed = answer_selections[answer_type].seed;
+        const bool expect_tonal = answer_type == 1u;
+        const std::uint8_t slot = detail::subjectIndexFor(character, minor, seed);
+        const auto& subject_pattern =
+            minor ? tables::kSubjectCatalogMinor[slot] : tables::kSubjectCatalogMajor[slot];
+        ASSERT_EQ(shouldUseTonalAnswer(subject_pattern, 0), expect_tonal)
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major");
+        FormDirectorStatus status = FormDirectorStatus::UnknownForm;
+        const HarnessFixture fx = buildFixture(form, seed, minor, 16, &status, character);
+        ASSERT_EQ(status, FormDirectorStatus::Ok)
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major");
+        ASSERT_EQ(fx.material.use_tonal_answer, expect_tonal)
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major");
+        ASSERT_EQ(fx.material.canonical_subject_note_count, 16u);
+        ASSERT_EQ(fx.material.imitation_entries.size(), 1u);
+
+        const auto& rhythm = minor ? tables::kSubjectCatalogMinorRhythms[slot]
+                                   : tables::kSubjectCatalogMajorRhythms[slot];
+        const std::vector<MaterialNote>& answer =
+            expect_tonal ? fx.material.tonal_answer : fx.material.answer;
+        ASSERT_EQ(fx.material.subject.size(), 16u)
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major");
+        ASSERT_EQ(answer.size(), 16u)
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major");
+
+        const int subject_offset = static_cast<int>(fx.material.subject.front().pitch) -
+                                   static_cast<int>(subject_pattern.front());
+        EXPECT_EQ(subject_offset % 12, 0) << formName(form) << " seed " << seed;
+        const int real_answer_interval = fx.material.imitation_entries.front().interval_semis;
+        Tick expected_answer_tick = fx.material.subject.front().start_tick + 4 * kBar;
+        for (std::size_t i = 0; i < 16; ++i) {
+          EXPECT_EQ(fx.material.subject[i].pitch,
+                    static_cast<int>(subject_pattern[i]) + subject_offset)
+              << formName(form) << " seed " << seed << " subject note " << i;
+          EXPECT_EQ(fx.material.subject[i].duration, rhythm[i]) << "subject note " << i;
+          EXPECT_EQ(answer[i].start_tick, expected_answer_tick)
+              << formName(form) << " seed " << seed << " answer note " << i;
+          EXPECT_EQ(answer[i].duration, rhythm[i])
+              << formName(form) << " seed " << seed << " answer note " << i;
+          if (!expect_tonal) {
+            EXPECT_EQ(answer[i].pitch,
+                      static_cast<int>(fx.material.subject[i].pitch) + real_answer_interval)
+                << formName(form) << " seed " << seed << " real answer note " << i;
+          }
+          expected_answer_tick += rhythm[i];
+        }
+        EXPECT_EQ(expected_answer_tick - (fx.material.subject.front().start_tick + 4 * kBar),
+                  4 * kBar)
+            << formName(form) << " seed " << seed;
+
+        const ImitationEntry& entry = fx.material.imitation_entries.front();
+        EXPECT_EQ(entry.note_count, 16u) << formName(form) << " seed " << seed;
+        EXPECT_EQ(entry.follower_fragment,
+                  expect_tonal ? MaterialFragment::TonalAnswer : MaterialFragment::Answer)
+            << formName(form) << " seed " << seed;
+
+        const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_TRUE(result.validation.failures.empty())
+            << formName(form) << " seed " << seed << (minor ? " minor" : " major")
+            << " first failure="
+            << (result.validation.failures.empty() ? ""
+                                                   : result.validation.failures.front().rule_id);
+        ASSERT_EQ(result.notes.size(), result.provenance.size());
+
+        std::array<bool, 16> emitted_answer_notes{};
+        std::size_t answer_carrier_notes = 0;
+        for (std::size_t output_index = 0; output_index < result.notes.size(); ++output_index) {
+          const NoteEvent& output_note = result.notes[output_index];
+          const NoteProvenance& provenance = result.provenance[output_index];
+          if (provenance.voice_intent != VoiceIntent::AnswerCarrier ||
+              provenance.source != NoteSource::Material || !provenance.has_authored_note) {
+            continue;
+          }
+          ++answer_carrier_notes;
+          const auto found =
+              std::find_if(answer.begin(), answer.end(), [&](const MaterialNote& note) {
+                return note.start_tick == provenance.authored_start_tick;
+              });
+          ASSERT_NE(found, answer.end())
+              << "unexpected authored answer onset " << provenance.authored_start_tick;
+          const std::size_t answer_index = static_cast<std::size_t>(found - answer.begin());
+          EXPECT_FALSE(emitted_answer_notes[answer_index])
+              << "duplicate answer note " << answer_index;
+          emitted_answer_notes[answer_index] = true;
+          EXPECT_EQ(provenance.authored_duration, answer[answer_index].duration)
+              << "answer provenance duration " << answer_index;
+          EXPECT_EQ(provenance.authored_pitch, answer[answer_index].pitch)
+              << "answer provenance pitch " << answer_index;
+          EXPECT_EQ(output_note.voice, 1u);
+          EXPECT_EQ(output_note.start_tick, answer[answer_index].start_tick);
+          EXPECT_EQ(output_note.duration, answer[answer_index].duration);
+          EXPECT_EQ(output_note.pitch, answer[answer_index].pitch);
+        }
+        EXPECT_EQ(answer_carrier_notes, 16u) << formName(form) << " seed " << seed;
+        EXPECT_TRUE(std::all_of(emitted_answer_notes.begin(), emitted_answer_notes.end(),
+                                [](bool emitted) { return emitted; }))
+            << formName(form) << " seed " << seed << " did not emit all answer notes";
+
+        const Tick cadence_start = static_cast<Tick>(14) * kBar;
+        EXPECT_EQ(expected_answer_tick, cadence_start) << formName(form) << " seed " << seed;
+        const auto answer_span = std::find_if(
+            fx.voice_plan.spans.begin(), fx.voice_plan.spans.end(), [](const Span& span) {
+              return span.voice == 1 && span.intent == VoiceIntent::AnswerCarrier;
+            });
+        ASSERT_NE(answer_span, fx.voice_plan.spans.end());
+        EXPECT_EQ(answer_span->start_tick, static_cast<Tick>(10) * kBar);
+        EXPECT_EQ(answer_span->end_tick, cadence_start);
+        const bool has_one_bar_free_excursion = std::any_of(
+            fx.harmony.modulations.begin(), fx.harmony.modulations.end(), [](const auto& event) {
+              return event.tick == 4 * kBar && event.type == ModulationType::Phrase &&
+                     event.to_tonic_pc == 7;
+            });
+        EXPECT_FALSE(has_one_bar_free_excursion) << formName(form) << " seed " << seed;
+        const bool fullAnswerPivot = std::any_of(
+            fx.harmony.modulations.begin(), fx.harmony.modulations.end(), [](const auto& event) {
+              return event.tick == 10 * kBar && event.type == ModulationType::Pivot &&
+                     event.to_tonic_pc == 7;
+            });
+        EXPECT_TRUE(fullAnswerPivot) << formName(form) << " seed " << seed;
+        const bool returnAfterAnswer = std::any_of(
+            fx.harmony.modulations.begin(), fx.harmony.modulations.end(), [](const auto& event) {
+              return event.tick == 14 * kBar && event.type == ModulationType::Phrase &&
+                     event.to_tonic_pc == 0;
+            });
+        EXPECT_TRUE(returnAfterAnswer) << formName(form) << " seed " << seed;
+        const bool cadence_starts_after_answer = std::any_of(
+            fx.voice_plan.spans.begin(), fx.voice_plan.spans.end(), [&](const Span& span) {
+              return span.intent == VoiceIntent::CodaCarrier && span.start_tick == cadence_start;
+            });
+        EXPECT_TRUE(cadence_starts_after_answer) << formName(form) << " seed " << seed;
+
+        Tick piece_end = 0;
+        for (const NoteEvent& note : result.notes)
+          piece_end = std::max(piece_end, note.start_tick + note.duration);
+        EXPECT_EQ(piece_end, static_cast<Tick>(16) * kBar) << formName(form) << " seed " << seed;
+      }
+    }
+  }
+}
+
+TEST(FormSectionalTest, LastAnswerRhythmMismatchFailsAtTheTail) {
+  for (FormType form : kForms) {
+    for (bool minor : {false, true}) {
+      HarnessFixture fx = buildFixture(form, 42, minor, 16);
+      ASSERT_FALSE(fx.material.use_tonal_answer);
+      ASSERT_EQ(fx.material.imitation_entries.size(), 1u);
+      ASSERT_EQ(fx.material.answer.size(), 16u);
+      ASSERT_EQ(fx.material.imitation_entries.front().note_count, 16u);
+
+      const ComposeResult valid = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_TRUE(valid.validation.failures.empty());
+      ++fx.material.answer.back().duration;
+      EXPECT_EQ(fx.material.answer.size(), 16u);
+
+      const ComposeResult malformed = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_TRUE(hasRule(malformed.validation, "imitation_entry_match"))
+          << formName(form) << (minor ? " minor" : " major");
+    }
+  }
+}
+
+TEST(FormSectionalTest, MinimumAndEstablishedSplitsKeepTheirFreeSectionLengths) {
+  const std::array<std::pair<std::uint16_t, int>, 5> cases = {
+      std::pair<std::uint16_t, int>{16, 6}, {20, 8}, {32, 12}, {64, 24}, {128, 48}};
+  for (FormType form : kForms) {
+    for (const auto& [bars, free_bars] : cases) {
+      const HarnessFixture fx = buildFixture(form, 42, false, bars);
+      ASSERT_EQ(fx.registration_step_ticks.size(), 1u) << formName(form) << " bars " << bars;
+      EXPECT_EQ(fx.registration_step_ticks.front(), static_cast<Tick>(free_bars) * kBar)
+          << formName(form) << " bars " << bars;
     }
   }
 }
@@ -745,6 +954,27 @@ TEST(FormSectionalTest, ToccataArchetypeMatchesSeed) {
         // The director blocks Noble for this form; Severe is always compatible.
         EXPECT_EQ(section.character, SubjectCharacter::Severe);
       }
+    }
+  }
+}
+
+TEST(FormSectionalTest, AllToccataArchetypesValidateInTheSixBarOpening) {
+  const Tick boundary = static_cast<Tick>(freeBarsFor(16)) * kBar;
+  ASSERT_EQ(boundary, 6 * kBar);
+  for (std::uint32_t seed : {1u, 2u, 3u, 4u}) {
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 16);
+    const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    EXPECT_TRUE(result.validation.failures.empty())
+        << "toccata seed " << seed << " archetype " << seed % 4 << " first failure="
+        << (result.validation.failures.empty() ? "" : result.validation.failures.front().rule_id);
+    ASSERT_FALSE(fx.material.toccata_sections.empty()) << "seed " << seed;
+    for (const ToccataSection& section : fx.material.toccata_sections) {
+      EXPECT_LT(section.start_tick, boundary) << "seed " << seed;
+      EXPECT_LE(section.end_tick, boundary) << "seed " << seed;
+    }
+    for (const Span& span : fx.voice_plan.spans) {
+      if (span.intent == VoiceIntent::ToccataCarrier)
+        EXPECT_LE(span.end_tick, boundary) << "seed " << seed;
     }
   }
 }
@@ -1560,12 +1790,13 @@ TEST(FormSectionalTest, FantasiaChordalBlocksAndFreeGesture) {
 // gesture (sixteenths, bar tail silent) stated high then an octave lower, bar 2
 // = the unison-gesture doubling (V0 + V1 sixteenths, V2 silent), bar 3 = the
 // declamatory chord block, and the second window opens with the whole-note
-// fermata breath. The minimal 8-bar section keeps the older two-bar gesture +
-// bar-2 chord block. In every case the final free bar is a chord block, the two
-// bars before it are the V2 walking-pedal solo, and the rest run the figuration.
+// fermata breath. The 8-bar section keeps the older two-bar gesture + bar-2
+// chord block. At the six-bar minimum, bars 3-4 stay running so a pedal solo
+// cannot overwrite the opening. A pedal solo is used only when at least 8 free
+// bars are available; every case ends with a chord block.
 TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
   for (std::uint32_t seed : {4u, 8u, 12u}) {  // seed % 4 == 0 -> Dramaticus.
-    for (std::uint16_t total : {16, 32, 64}) {
+    for (std::uint16_t total : {16, 20, 32, 64}) {
       const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, total);
       const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
       ASSERT_EQ(r.validation.status, ValidationStatus::Ok)
@@ -1573,10 +1804,10 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
           << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 
       const int free_bars = freeBarsFor(total);
-      const int pedal_solo = free_bars - 5;
+      const int pedal_solo = free_bars >= 8 ? free_bars - 5 : -1;
       const bool cascade = free_bars >= 12;
       int flourish = ((free_bars / 4 + 3) / 4) * 4;
-      flourish = std::max(4, std::min(flourish, free_bars - 4));
+      flourish = std::clamp(flourish, 4, std::max(4, free_bars - 4));
       // Per-bar, per-voice notes of the free section.
       std::vector<std::array<std::vector<const NoteEvent*>, 3>> bars(
           static_cast<std::size_t>(free_bars));
@@ -1656,7 +1887,7 @@ TEST(FormSectionalTest, DramaticusFreeSectionCarriesDesignedMaterials) {
                       static_cast<Tick>(kTicksPerBar))
                 << ctx << " voice " << voice;
           }
-        } else if (bar == pedal_solo || bar == pedal_solo + 1) {
+        } else if (pedal_solo >= 0 && (bar == pedal_solo || bar == pedal_solo + 1)) {
           // Pedal solo: V2 walking quarters alone.
           EXPECT_TRUE(by_voice[0].empty()) << ctx;
           EXPECT_TRUE(by_voice[1].empty()) << ctx;
@@ -1790,7 +2021,7 @@ TEST(FormSectionalTest, DramaticusMajorHasNoDim7Sweep) {
 // no dim7 sweep bar and still validates in minor mode.
 TEST(FormSectionalTest, DramaticusShortFormHasNoDim7Sweep) {
   for (std::uint32_t seed : {4u, 8u, 12u}) {
-    const std::uint16_t total = 16;  // free_bars == 8 (< 12): no cascade.
+    const std::uint16_t total = 16;  // free_bars == 6 (< 12): no cascade.
     ASSERT_LT(freeBarsFor(total), 12);
     const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, true, total);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);

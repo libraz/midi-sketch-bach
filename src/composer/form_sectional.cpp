@@ -648,8 +648,9 @@ ArcPoint arcForBar(const ResolvedRequest& req, int bar) {
 
 // ---------------------------------------------------------------------------
 // Split policy. The free opening is ~3/8 of the piece (rounded to a multiple of
-// 4, never below 8 bars); the rest is the fugue (never below 8 bars so a full
-// 3-entry exposition always fits). N = 16 -> 8 + 8.
+// 4, never below 8 bars when space permits). Reserve ten bars for a complete
+// four-bar answer plus the two-bar cadence; N = 16 -> 6 + 10, while longer
+// forms retain their established split.
 // ---------------------------------------------------------------------------
 struct Split {
   int free_bars;
@@ -659,10 +660,7 @@ struct Split {
 Split splitBars(int total) {
   int free_bars = ((total * 3 / 8 + 2) / 4) * 4;  // round (3N/8) to nearest 4.
   free_bars = std::max(8, free_bars);
-  if (total - free_bars < 8) {
-    free_bars = total - 8;
-    free_bars = std::max(8, (free_bars / 4) * 4);
-  }
+  free_bars = std::min(free_bars, total - 10);
   return {free_bars, total - free_bars};
 }
 
@@ -745,7 +743,7 @@ void planSectionalModulations(HarmonicPlan& harmony, int total_bars, int free_ba
   constexpr std::uint8_t kDominantPc = 7;
 
   const int free_return_bar = free_bars - 1;  // the half-cadence bar is home V.
-  if (free_return_bar > kFreeExcursionBar) {
+  if (free_return_bar - kFreeExcursionBar >= 2) {
     harmony.modulations.push_back(
         {barTick(kFreeExcursionBar), 0, kDominantPc, minor, minor, ModulationType::Phrase});
     harmony.modulations.push_back(
@@ -757,10 +755,8 @@ void planSectionalModulations(HarmonicPlan& harmony, int total_bars, int free_ba
     return;
   harmony.modulations.push_back(
       {barTick(answer_bar), 0, kDominantPc, minor, minor, ModulationType::Pivot});
-  // A short sectional form may reach its reserved two-bar home cadence before
-  // the full four-bar answer phrase has elapsed.  Restore the home context at
-  // that cadence boundary instead of leaving the final C cadence interpreted
-  // in the temporary dominant key.
+  // Return to the home key after the full four-bar answer. At the minimum form
+  // length that return coincides with the first reserved cadence bar.
   const int final_cadence_bar = total_bars - 2;
   const int return_bar = std::min(answer_bar + kSubjectBars, final_cadence_bar);
   if (return_bar > answer_bar && return_bar < total_bars) {
@@ -1286,20 +1282,18 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   // because no other voice has entered yet.
 
   // V1 real answer (subject - P4) in the V1 band, entering one entry-window
-  // (4 bars) after the subject. For a short (8-bar) fugue tail the answer is
-  // truncated so it never extends into the reserved cadence bars (the validator
-  // checks only the answer's first note, so a partial answer stays valid).
+  // (4 bars) after the subject. The split reserves enough room for the complete
+  // four-bar answer before the final two cadence bars.
   const int answer_off = octaveOffsetForBand(subj_pat, -5, 1, kBandLo, kBandHi);
   const int answer_first = first_bar + 4;
-  const int answer_last = std::min(first_bar + 7, cadence_start - 1);
+  const int answer_last = first_bar + 7;
   const Tick answer_end = barTick(answer_last + 1);
   const bool use_tonal_answer = shouldUseTonalAnswer(subj_pat, out.harmony.tonic_pc);
   std::vector<MaterialNote> tonal_answer_seed;
   tonal_answer_seed.reserve(kSubjectNotes);
   Tick answer_cursor = barTick(answer_first);
-  for (int note = 0; note < kSubjectNotes && answer_cursor < answer_end; ++note) {
-    const Tick dur =
-        std::min(subj_rhythm[static_cast<std::size_t>(note)], answer_end - answer_cursor);
+  for (int note = 0; note < kSubjectNotes; ++note) {
+    const Tick dur = subj_rhythm[static_cast<std::size_t>(note)];
     const int pitch = static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) - 5 + answer_off;
     const Tick tick = answer_cursor;
     addNote(out.material.answer, tick, dur, pitch);
@@ -1346,12 +1340,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
         use_tonal_answer ? MaterialFragment::TonalAnswer : MaterialFragment::Answer;
     entry.leader_voice = 0;
     entry.follower_voice = 1;
-    const std::size_t available =
-        std::min<std::size_t>(out.material.subject.size(), selected_answer.size());
-    while (entry.note_count < available && out.material.subject[entry.note_count].duration ==
-                                               selected_answer[entry.note_count].duration) {
-      ++entry.note_count;
-    }
+    entry.note_count = kSubjectNotes;
     entry.distance_ticks =
         selected_answer.front().start_tick - out.material.subject.front().start_tick;
     entry.interval_semis = static_cast<int>(selected_answer.front().pitch) -
@@ -1363,7 +1352,7 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     out.material.imitation_entries.push_back(entry);
   }
 
-  int next_free_bar = first_bar + 8;  // first bar after the (partial) exposition.
+  int next_free_bar = first_bar + 8;  // first bar after the dux and comes windows.
   if (full_exposition) {
     // V2 re-entry (subject - P8) in the V2 band (bars 8-11).
     const int third_off = octaveOffsetForBand(subj_pat, 0, 2, kBandLo, kBandHi);
@@ -1775,13 +1764,14 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   switch (archetype) {
     case ToccataArchetype::Dramaticus: {
       // Opening flourish ~1/4 of the section, snapped to a 4-bar grid and kept
-      // in [4, free_bars - 4] so both windows are non-empty. The flourish window
-      // is the section's first 4-bar block; its first bars carry the octave
-      // cascade + doubled statement (single-voice gesture rhetoric), and the
-      // pedal / punctuation enter for the rest of the block. This keeps the solo
-      // rhetoric while holding the piece mono ratio inside the toccata ceiling.
+      // in [4, max(4, free_bars - 4)] so both windows are non-empty, including
+      // the six-bar minimum. The flourish window is the section's first 4-bar
+      // block; its first bars carry the octave cascade + doubled statement
+      // (single-voice gesture rhetoric), and the pedal / punctuation enter for
+      // the rest of the block. This keeps the solo rhetoric while holding the
+      // piece mono ratio inside the toccata ceiling.
       int flourish = ((free_bars / 4 + 3) / 4) * 4;
-      flourish = std::clamp(flourish, 4, free_bars - 4);
+      flourish = std::clamp(flourish, 4, std::max(4, free_bars - 4));
       dramaticus_flourish = flourish;
       windows.push_back({0, flourish - 1});
       windows.push_back({flourish, free_bars - 1});
@@ -1797,7 +1787,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       break;
     case ToccataArchetype::Sectionalis: {
       const int mid = ((free_bars / 2 + 3) / 4) * 4;  // split point on a 4-bar grid.
-      const int split_bar = std::clamp(mid, 4, free_bars - 4);
+      const int split_bar = std::clamp(mid, 4, std::max(4, free_bars - 4));
       windows.push_back({0, split_bar - 1});
       windows.push_back({split_bar, free_bars - 1});
       break;
@@ -1810,9 +1800,9 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   //                 mordent + descending run, the rest of the bar silent --
   //                 the BWV565 dramatic-opening rhetoric); bar 2 and the final
   //                 free bar are declamatory chord blocks (V0 block tones over
-  //                 the homophonic V1+V2 strike); the two bars before the
-  //                 closing block are a pedal solo (V2 walking pedal alone);
-  //                 every other bar runs the scalar-wave figuration.
+  //                 the homophonic V1+V2 strike); when at least 8 free bars are
+  //                 available, the two bars before the close are a pedal solo
+  //                 (V2 walking pedal alone); every other bar runs the wave.
   //   Perpetuus   = continuous figuration with a single closing chord block.
   //   Concertato  = forte/piano echo pairs: even 4-bar windows run sixteenths
   //                 over the full pedal + punctuation texture, odd windows
@@ -1833,8 +1823,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   std::vector<FreeBarKind> bar_kinds(static_cast<std::size_t>(free_bars), FreeBarKind::kWave);
   // The octave-cascade opening (bars 0-3) and the fermata breath fit only when
   // the free section is long enough to keep them clear of the pedal-solo pair
-  // (free_bars - 5, free_bars - 4); the minimal 8-bar section keeps the older
-  // two-bar gesture opening instead.
+  // (free_bars - 5, free_bars - 4); shorter sections keep the two-bar gesture
+  // opening and avoid a pedal solo so it cannot overwrite those gestures.
   const bool dramaticus_cascade = (archetype == ToccataArchetype::Dramaticus) && free_bars >= 12;
   switch (archetype) {
     case ToccataArchetype::Dramaticus: {
@@ -1856,9 +1846,11 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         bar_kinds[2] = FreeBarKind::kChordBlock;
       }
       bar_kinds[static_cast<std::size_t>(free_bars - 1)] = FreeBarKind::kChordBlock;
-      const int pedal_solo = free_bars - 5;  // two bars, ending before the close.
-      bar_kinds[static_cast<std::size_t>(pedal_solo)] = FreeBarKind::kPedalSolo;
-      bar_kinds[static_cast<std::size_t>(pedal_solo + 1)] = FreeBarKind::kPedalSolo;
+      if (free_bars >= 8) {
+        const int pedal_solo = free_bars - 5;  // two bars, ending before the close.
+        bar_kinds[static_cast<std::size_t>(pedal_solo)] = FreeBarKind::kPedalSolo;
+        bar_kinds[static_cast<std::size_t>(pedal_solo + 1)] = FreeBarKind::kPedalSolo;
+      }
       // BWV565 leading-tone diminished-seventh sweep, minor-mode only: the dim7
       // roll answers the fermata breath at the first wave bar after it, and
       // drives into the close at the last wave bar before the closing chord
