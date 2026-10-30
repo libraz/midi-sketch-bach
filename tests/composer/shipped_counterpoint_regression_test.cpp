@@ -116,13 +116,21 @@ struct PerfectMotionCounts {
 class SoundingPitchIndex {
  public:
   explicit SoundingPitchIndex(const std::vector<NoteEvent>& notes) : notes_(notes), by_voice_(256) {
-    for (std::size_t index = 0; index < notes.size(); ++index)
+    boundaries_.reserve(2 * notes.size());
+    for (std::size_t index = 0; index < notes.size(); ++index) {
       by_voice_[notes[index].voice].push_back(index);
+      boundaries_.push_back(notes[index].start_tick);
+      boundaries_.push_back(notes[index].start_tick + notes[index].duration);
+    }
     for (auto& indices : by_voice_) {
       std::stable_sort(indices.begin(), indices.end(), [&](std::size_t left, std::size_t right) {
         return notes_[left].start_tick < notes_[right].start_tick;
       });
+      if (!indices.empty())
+        voices_.push_back(notes_[indices.front()].voice);
     }
+    std::sort(boundaries_.begin(), boundaries_.end());
+    boundaries_.erase(std::unique(boundaries_.begin(), boundaries_.end()), boundaries_.end());
   }
 
   // Returns 0 when the voice rests at this tick.
@@ -149,6 +157,50 @@ class SoundingPitchIndex {
     return note != nullptr ? note->start_tick + note->duration : tick;
   }
 
+  // Read the first actual pitch change, including releases so a rest cannot
+  // disappear between two sampled onsets. Same-pitch ties and reattacks keep
+  // the line continuous; a step through another pitch is not a resolution.
+  bool immediateDownwardResolution(VoiceId voice, Tick tick, Tick through,
+                                   Tick* resolution_tick) const {
+    const std::uint8_t original = pitchAt(voice, tick);
+    if (original == 0 || through < tick)
+      return false;
+    auto boundary = std::upper_bound(boundaries_.begin(), boundaries_.end(), tick);
+    for (; boundary != boundaries_.end() && *boundary <= through; ++boundary) {
+      const std::uint8_t pitch = pitchAt(voice, *boundary);
+      if (pitch == original)
+        continue;
+      if (pitch != 0 && (pitch + 1 == original || pitch + 2 == original)) {
+        *resolution_tick = *boundary;
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  bool lowestPitchHolds(Tick tick, Tick through, std::uint8_t bass) const {
+    if (bass == 0 || through < tick)
+      return false;
+    const auto has_bass = [&](Tick sample) {
+      std::uint8_t lowest = 0;
+      for (VoiceId voice : voices_) {
+        const std::uint8_t pitch = pitchAt(voice, sample);
+        if (pitch != 0 && (lowest == 0 || pitch < lowest))
+          lowest = pitch;
+      }
+      return lowest == bass;
+    };
+    if (!has_bass(tick))
+      return false;
+    auto boundary = std::upper_bound(boundaries_.begin(), boundaries_.end(), tick);
+    for (; boundary != boundaries_.end() && *boundary <= through; ++boundary) {
+      if (!has_bass(*boundary))
+        return false;
+    }
+    return true;
+  }
+
  private:
   const NoteEvent* noteAt(VoiceId voice, Tick tick) const {
     const auto& indices = by_voice_[voice];
@@ -166,6 +218,8 @@ class SoundingPitchIndex {
 
   const std::vector<NoteEvent>& notes_;
   std::vector<std::vector<std::size_t>> by_voice_;
+  std::vector<Tick> boundaries_;
+  std::vector<VoiceId> voices_;
 };
 
 // Counts perfect-interval motion over every voice pair at the union of note
@@ -314,7 +368,6 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
   struct Sample {
     VoiceId voice;
     std::uint8_t pitch;
-    std::uint8_t next_pitch;  // this voice's own pitch one beat later, 0 when it rests
     std::size_t note_index;
   };
   std::vector<Sample> sounding;
@@ -327,7 +380,7 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
         next_bass = next_pitch;
       const std::uint8_t pitch = index.pitchAt(voice, tick);
       if (pitch != 0)
-        sounding.push_back({voice, pitch, next_pitch, index.noteIndexAt(voice, tick)});
+        sounding.push_back({voice, pitch, index.noteIndexAt(voice, tick)});
     }
     if (sounding.size() < 2)
       continue;
@@ -347,9 +400,13 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
         continue;  // the bass steps away: the fourth was passing.
       if (over_pedal)
         continue;  // a fourth standing over a held pedal is licensed.
-      // Only the fourth-bearing voice resolving it counts.
-      const bool resolves = sample.next_pitch != 0 && (sample.next_pitch + 1 == sample.pitch ||
-                                                       sample.next_pitch + 2 == sample.pitch);
+      // The fourth-bearing voice must resolve directly while the bass holds.
+      // A trill can do so before the next beat and return to its upper note
+      // there; the repeated auxiliary does not erase the intervening resolution.
+      Tick resolution_tick = 0;
+      const bool resolves = index.immediateDownwardResolution(
+                                sample.voice, tick, tick + kTicksPerBeat, &resolution_tick) &&
+                            index.lowestPitchHolds(tick, resolution_tick, bass);
       if (!resolves)
         ++counts.unresolved;
     }
@@ -542,6 +599,79 @@ TEST(BassFourthCounter, AResolvingFourthIsLicensed) {
   EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
 }
 
+TEST(BassFourthCounter, SubBeatSemitoneAndWholeToneTrillsResolveTheirFourths) {
+  for (const auto& pitches :
+       {std::array<std::uint8_t, 3>{65, 64, 48}, std::array<std::uint8_t, 3>{72, 70, 43}}) {
+    std::vector<NoteEvent> notes = {makeNote(1, 0, 1440, pitches[2])};
+    for (Tick onset = 0; onset < 960; onset += 120) {
+      const std::uint8_t pitch = (onset / 120) % 2 == 0 ? pitches[0] : pitches[1];
+      notes.push_back(makeNote(0, onset, 120, pitch));
+    }
+    notes.push_back(makeNote(0, 960, 480, pitches[1]));
+    EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+  }
+}
+
+TEST(BassFourthCounter, ResolutionWithinASampledHoldIsLicensed) {
+  // Beat two samples the F sixty ticks before it resolves. The next beat is
+  // another F, but each upper auxiliary has already stepped down to E.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1920, 48),  makeNote(0, 0, 240, 64),    makeNote(0, 240, 300, 65),
+      makeNote(0, 540, 120, 64), makeNote(0, 660, 120, 65),  makeNote(0, 780, 120, 64),
+      makeNote(0, 900, 120, 65), makeNote(0, 1020, 900, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+}
+
+TEST(BassFourthCounter, SamePitchReattacksStayContinuousUntilResolution) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1440, 48),  makeNote(0, 0, 120, 65),   makeNote(0, 120, 120, 65),
+      makeNote(0, 240, 240, 64), makeNote(0, 480, 120, 65), makeNote(0, 600, 120, 65),
+      makeNote(0, 720, 720, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+}
+
+TEST(BassFourthCounter, AnIndirectReturnToTheThirdDoesNotResolveTheFourth) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 120, 65),
+      makeNote(0, 120, 120, 67),
+      makeNote(0, 240, 1200, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 1u);
+}
+
+TEST(BassFourthCounter, ARestBeforeTheThirdDoesNotResolveTheFourth) {
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 120, 65),
+      makeNote(0, 240, 1200, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 1u);
+}
+
+TEST(BassFourthCounter, BassContinuityChecksEverySoundingBoundary) {
+  const std::vector<NoteEvent> continuous = {
+      makeNote(1, 0, 60, 48),
+      makeNote(1, 60, 180, 48),
+      makeNote(0, 0, 120, 65),
+      makeNote(0, 120, 120, 64),
+  };
+  EXPECT_TRUE(SoundingPitchIndex(continuous).lowestPitchHolds(0, 120, 48));
+
+  auto with_gap = continuous;
+  with_gap[1].start_tick = 90;
+  with_gap[1].duration = 150;
+  EXPECT_FALSE(SoundingPitchIndex(with_gap).lowestPitchHolds(0, 120, 48));
+
+  auto with_lower_voice = continuous;
+  with_lower_voice.push_back(makeNote(2, 60, 30, 41));
+  EXPECT_FALSE(SoundingPitchIndex(with_lower_voice).lowestPitchHolds(0, 120, 48));
+
+  EXPECT_FALSE(SoundingPitchIndex({}).lowestPitchHolds(0, 120, 48));
+}
+
 TEST(BassFourthCounter, AFourthTheBassLeavesIsLicensed) {
   // The fourth stands, but the bass steps away under it: a passing vertical.
   const std::vector<NoteEvent> notes = {
@@ -708,6 +838,11 @@ struct FormCeiling {
 // not the form builder writing better counterpoint, which is why the structural
 // column is pinned separately and is the one that may never be closed by
 // decoration.
+//
+// Fourth totals require contiguous, direct resolution by the next beat,
+// including trill subdivisions. Indirect returns and rests do not qualify.
+// Carrier event coverage is checked independently of the motion sample count:
+// ornament eligibility can change the number of sounding decorative attacks.
 //
 // RATCHET: every column is pinned EXACTLY to the count measured from current
 // output, in both directions. The sweep is fully deterministic (fixed seeds,
@@ -1024,7 +1159,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // moved onto the registration peak: battuta 61 -> 62 (one cell).
     // Fourths over a held pedal exempt, resolution read on the fourth's own voice: 502 -> 273
     // (229 pedal-exempt, 48 of them an ornament's upper tone).
-    {FormType::Fugue, 0, 0, 19, 62, 4, 0, 2, 3, 1, 55805, 273},
+    {FormType::Fugue, 0, 0, 18, 59, 4, 0, 2, 3, 1, 55637, 175},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1121,7 +1256,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 8 -> 11, floor 31834 -> 28670; battuta 45 -> 25, anti 3 -> 0, fourths 59 -> 54.
     // Cadential trill on the real landing tone: its upper auxiliary is a fourth over the
     // held dominant on the beat grid, fourths 54 -> 219.
-    {FormType::PreludeAndFugue, 0, 0, 11, 25, 0, 0, 1, 2, 0, 31762, 219},
+    {FormType::PreludeAndFugue, 0, 0, 11, 25, 0, 0, 1, 2, 0, 31500, 110},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1216,7 +1351,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // paid with fourths 5 -> 7 where a neighbour figure turns down from the top.
     // Leading tone in the pre-landing thread and suspension preparation: lowered
     // 7ths over V 8 -> 0, augmented seconds 5 -> 0; battuta 18 -> 20.
-    {FormType::TrioSonata, 0, 0, 116, 20, 4, 0, 5, 2, 1, 35177, 7},
+    {FormType::TrioSonata, 0, 0, 116, 20, 4, 0, 5, 2, 1, 35177, 10},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -1293,7 +1428,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // passing eighths under a seventh (34 -> 8); the suspension's preparation is
     // spelled under V and searched two bars further back: hidden 33 -> 38 (worst
     // cell 2 -> 3), fourths 31 -> 28.
-    {FormType::ChoralePrelude, 0, 0, 38, 17, 0, 0, 3, 2, 0, 17845, 28},
+    {FormType::ChoralePrelude, 0, 0, 38, 17, 0, 0, 3, 2, 0, 17845, 18},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1432,7 +1567,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // V1 punctuation judged a sixteenth back, not a bar: its true parallels against
     // V0 leave (12 in the sectional test sweep), fourths 146 -> 153.
     // Same counter: fourths 153 -> 13 (140 pedal-exempt, 14 an ornament's upper tone).
-    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 29404, 13},
+    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 29316, 14},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1567,7 +1702,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // the composed anti-fifth into that downbeat, anti 5 -> 10; hidden 20 -> 14, fourths
     // 155 -> 180 (the trill's upper auxiliary over the held dominant).
     // Same counter: fourths 180 -> 200, a step by another voice no longer resolves the fourth.
-    {FormType::Passacaglia, 0, 0, 14, 0, 10, 0, 1, 0, 1, 28038, 200},
+    {FormType::Passacaglia, 0, 0, 14, 0, 4, 0, 1, 0, 1, 28038, 126},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1649,7 +1784,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // held dominant on the beat grid, fourths 208 -> 209; hidden 16 -> 14.
     // V1 punctuation judged a sixteenth back: fourths 209 -> 214.
     // Same counter: fourths 214 -> 17 (197 pedal-exempt, 18 an ornament's upper tone).
-    {FormType::FantasiaAndFugue, 0, 0, 14, 3, 16, 0, 2, 1, 1, 30715, 17},
+    {FormType::FantasiaAndFugue, 0, 0, 14, 3, 16, 0, 2, 1, 1, 30627, 20},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -1747,7 +1882,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // floor 148 lower where it now withdraws or holds.
     // Ornament sites follow the cadence landing and the density floor: fourths 49 -> 46.
     // Same counter: fourths 46 -> 48, own-voice resolution only.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18603, 48},
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18603, 12},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -2110,7 +2245,7 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // held dominant on the beat grid, fourths 1949 -> 2615;
     // battuta 287 -> 286, anti 36 -> 32.
     // Same counter: fourths 2615 -> 1776.
-    {FormType::Fugue, 0, 0, 200, 286, 32, 0, 5, 4, 2, 501790, 1776},
+    {FormType::Fugue, 0, 0, 196, 272, 32, 0, 5, 4, 2, 501386, 1241},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2205,7 +2340,7 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // held dominant on the beat grid, fourths 1262 -> 1883;
     // hidden 106 -> 105, anti 10 -> 9.
     // Same counter: fourths 1883 -> 1189.
-    {FormType::PreludeAndFugue, 0, 0, 105, 214, 9, 0, 3, 3, 1, 435519, 1189},
+    {FormType::PreludeAndFugue, 0, 0, 103, 203, 9, 0, 3, 3, 1, 434617, 765},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {
