@@ -84,5 +84,42 @@ class TempoMapTest(unittest.TestCase):
         self.assertGreater(lengths[0], lengths[1])
 
 
+class ListeningOutputGuardTest(unittest.TestCase):
+    def _args(self, out: Path, index_js: Path):
+        import argparse
+
+        from bachlib.phases import PHASE_TAGS
+
+        return argparse.Namespace(
+            phase=next(iter(PHASE_TAGS)),
+            top=1,
+            out=out,
+            cli=Path(sys.executable),
+            bach_mcp_index=index_js,
+            keep_json=False,
+        )
+
+    def test_repository_directory_and_foreign_directory_are_refused(self) -> None:
+        import contextlib
+        import io
+
+        from bachlib.common import REPO_ROOT
+
+        with tempfile.TemporaryDirectory() as tmp:
+            index_js = Path(tmp) / "index.js"
+            index_js.write_text("", encoding="utf-8")
+            foreign = Path(tmp) / "foreign"
+            foreign.mkdir()
+            keep = foreign / "keep.txt"
+            keep.write_text("user data", encoding="utf-8")
+            for target in (REPO_ROOT / "src", REPO_ROOT, foreign):
+                with self.subTest(target=str(target)):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        code = render_json_to_wav.run_listening(self._args(target, index_js))
+                    self.assertEqual(code, 2)
+            self.assertTrue(keep.exists())
+            self.assertTrue((REPO_ROOT / "src").is_dir())
+
+
 if __name__ == "__main__":
     unittest.main()

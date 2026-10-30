@@ -81,10 +81,10 @@ def extract_validator_rules(source: str | None = None) -> set[str]:
     rules: set[str] = set()
     for stmt in re.findall(r"rule_id\s*=\s*(.*?);", src, re.S):
         rules.update(re.findall(r'"([a-z][a-z0-9_]+)"', stmt))
-    # Suspension validation centralizes failure construction in a small helper,
-    # so these rule ids are passed as arguments rather than assigned directly.
+    # Suspension and imitation validation centralize failure construction in
+    # small add*Failure helpers, so those rule ids arrive as the first argument.
     rules.update(
-        re.findall(r'addSuspensionFailure\("([a-z][a-z0-9_]+)"\)', src)
+        re.findall(r'add(?:Suspension|Imitation)Failure\("([a-z][a-z0-9_]+)"', src)
     )
     return rules
 

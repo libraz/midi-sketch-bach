@@ -3,7 +3,9 @@ and the pure gate-combination decision."""
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -15,6 +17,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import bachlib as rpc  # noqa: E402
+from bachlib.common import OUTPUT_DIR_MARKER  # noqa: E402
 from bachlib.closure import (  # noqa: E402
     _check_required_bits,
     prepare_work_dir,
@@ -122,17 +125,17 @@ class ClosureWorkDirectorySafetyTest(unittest.TestCase):
             work_dir = Path(tmp) / "closure"
             prepare_work_dir(work_dir)
             self.assertTrue(work_dir.is_dir())
-            self.assertEqual(list(work_dir.iterdir()), [])
+            self.assertEqual([p.name for p in work_dir.iterdir()], [OUTPUT_DIR_MARKER])
 
     def test_existing_directory_is_reset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             work_dir = Path(tmp) / "closure"
-            work_dir.mkdir()
+            prepare_work_dir(work_dir)
             stale = work_dir / "stale.mid"
             stale.write_bytes(b"old")
             prepare_work_dir(work_dir)
             self.assertFalse(stale.exists())
-            self.assertEqual(list(work_dir.iterdir()), [])
+            self.assertEqual([p.name for p in work_dir.iterdir()], [OUTPUT_DIR_MARKER])
 
     def test_file_target_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,6 +164,53 @@ class ClosureWorkDirectorySafetyTest(unittest.TestCase):
     def test_home_directory_is_always_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unsafe"):
             prepare_work_dir(Path.home())
+
+
+    def test_foreign_non_empty_directory_is_kept(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp) / "closure"
+            work_dir.mkdir()
+            keep = work_dir / "keep.txt"
+            keep.write_text("user data", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not created by this tool"):
+                prepare_work_dir(work_dir)
+            self.assertTrue(keep.exists())
+
+    def test_ancestors_and_repository_sources_are_rejected(self) -> None:
+        targets = [
+            Path.home().parent,
+            REPO_ROOT.parent,
+            REPO_ROOT / "src",
+            REPO_ROOT / "scripts",
+            REPO_ROOT / "build" / ".." / "src",
+            Path("/"),
+        ]
+        for target in targets:
+            with self.subTest(target=str(target)):
+                with self.assertRaisesRegex(ValueError, "unsafe"):
+                    prepare_work_dir(target)
+
+    def test_current_directory_inside_the_repository_is_rejected(self) -> None:
+        previous = os.getcwd()
+        os.chdir(REPO_ROOT)
+        try:
+            with self.assertRaisesRegex(ValueError, "unsafe"):
+                prepare_work_dir(Path("."))
+        finally:
+            os.chdir(previous)
+
+    def test_build_subdirectory_is_reset(self) -> None:
+        build = REPO_ROOT / "build"
+        build.mkdir(exist_ok=True)
+        work_dir = Path(tempfile.mkdtemp(dir=build, prefix="work-dir-test-"))
+        try:
+            work_dir.rmdir()
+            prepare_work_dir(work_dir)
+            (work_dir / "stale.mid").write_bytes(b"old")
+            prepare_work_dir(work_dir)
+            self.assertEqual([p.name for p in work_dir.iterdir()], [OUTPUT_DIR_MARKER])
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 class ExpectedCarrierSequencesTest(unittest.TestCase):

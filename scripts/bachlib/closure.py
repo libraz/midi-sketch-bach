@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -28,6 +27,7 @@ from bachlib.common import (
     heuristic_score,
     model_probability,
     parse_required_rule_bit,
+    prepare_output_dir,
     provenance_rule_counts,
     run as run_command,
     score_generated,
@@ -55,27 +55,12 @@ from bachlib.phases import (
 from bachlib.predictors import structural_check
 
 def prepare_work_dir(work_dir: Path) -> None:
-    """Create or reset a closure work directory.
+    """Create or reset a closure work directory (see prepare_output_dir).
 
-    The filesystem root, the home directory, the repository root and its parent
-    are always rejected, as is a symlink, so a mistyped --work-dir cannot point
-    the reset at a broad target. Any other existing directory is cleared: each
-    run starts from an empty directory so a stale artifact cannot be scored.
+    Each run starts from an empty directory so a stale artifact cannot be
+    scored; only a directory this tool created is ever cleared.
     """
-    resolved = work_dir.resolve()
-    forbidden = {
-        Path("/").resolve(),
-        Path.home().resolve(),
-        REPO_ROOT.resolve(),
-        REPO_ROOT.parent.resolve(),
-    }
-    if resolved in forbidden or work_dir.is_symlink():
-        raise ValueError(f"unsafe closure work directory: {work_dir}")
-    if work_dir.exists():
-        if not work_dir.is_dir():
-            raise ValueError(f"closure work directory is not a directory: {work_dir}")
-        shutil.rmtree(work_dir)
-    work_dir.mkdir(parents=True)
+    prepare_output_dir(work_dir, "closure work directory")
 
 
 def output_paths(work_dir: Path, tag: str, seed: int) -> tuple[Path, Path, Path]:

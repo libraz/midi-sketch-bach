@@ -284,21 +284,33 @@ class PerAxisRoutingTest(unittest.TestCase):
         self.assertFalse(case.axis_results()["compass"])
 
     def test_entry_plan_axis_requires_a_periodicity_free_plan(self) -> None:
+        count = texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES
+        uniform = [12 + 8 * idx for idx in range(count)]
+        varied_bars = uniform[:-1] + [uniform[-1] + 3]
         periodic = self._case(
-            "fugue", middle_entry_bars=[12, 20, 28], entry_intervals=[8, 8],
+            "fugue", middle_entry_bars=uniform, entry_intervals=[8] * (count - 1),
             entry_plan_nonperiodic=False,
         )
         varied = self._case(
-            "fugue", middle_entry_bars=[12, 20, 25], entry_intervals=[8, 5],
+            "fugue", middle_entry_bars=varied_bars,
+            entry_intervals=[8] * (count - 2) + [11],
             entry_plan_nonperiodic=True,
         )
         self.assertFalse(periodic.axis_results()["entry_plan_nonperiodic"])
         self.assertFalse(periodic.passes_all_axes)
         self.assertTrue(varied.axis_results()["entry_plan_nonperiodic"])
 
-    def test_entry_plan_axis_omitted_without_two_spacings(self) -> None:
-        for intervals in ([], [8]):
-            case = self._case("prelude_and_fugue", entry_intervals=intervals)
+    def test_entry_plan_axis_omitted_below_the_variable_schedule_size(self) -> None:
+        count = texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES - 1
+        case = self._case(
+            "fugue", middle_entry_bars=[12 + 8 * idx for idx in range(count)],
+            entry_intervals=[8] * (count - 1), entry_plan_nonperiodic=False,
+        )
+        self.assertNotIn("entry_plan_nonperiodic", case.axis_results())
+
+    def test_entry_plan_axis_omitted_without_entries(self) -> None:
+        for bars in ([], [12]):
+            case = self._case("prelude_and_fugue", middle_entry_bars=bars)
             self.assertNotIn("entry_plan_nonperiodic", case.axis_results())
 
     def test_v2_silence_axis_present_for_fugue_forms(self) -> None:
@@ -793,6 +805,61 @@ class EntryRelativeSilenceTest(unittest.TestCase):
         self.assertEqual(
             texture_gate.compute_entry_relative_silence(notes, provenance, 1, 0.75), 0.0
         )
+
+
+class CliPreflightAndRefusalTest(unittest.TestCase):
+    def _fake_cli(self, directory: Path, stderr: str, code: int) -> Path:
+        script = directory / "fake_cli"
+        script.write_text(f"#!/bin/sh\necho \"{stderr}\" >&2\nexit {code}\n", encoding="utf-8")
+        script.chmod(0o755)
+        return script
+
+    def _args(self, cli: Path, forms: list[str]):
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        texture_gate._add_arguments(parser)
+        return parser.parse_args(
+            ["--cli", str(cli), "--forms", *forms, "--seeds", "1", "--no-model-score"]
+        )
+
+    def test_missing_cli_exits_two_naming_the_binary(self) -> None:
+        import contextlib
+        import io
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            code = texture_gate.run(self._args(Path("/nonexistent/bach_cli"), ["fugue"]))
+        self.assertEqual(code, 2)
+        self.assertIn("/nonexistent/bach_cli", buffer.getvalue())
+
+    def test_documented_refusal_is_listed_and_does_not_fail_the_gate(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(
+                Path(tmp),
+                "Error: character 'playful' is incompatible with form 'chorale_prelude'",
+                3,
+            )
+            case = texture_gate.run_case(cli, "chorale_prelude", 1, Path(tmp), None)
+        self.assertTrue(case.refused)
+        self.assertTrue(case.passes_texture_gate)
+        summary = texture_gate.summarize([case])
+        self.assertTrue(summary["all_passed"])
+        self.assertEqual(summary["refused"], 1)
+        self.assertEqual(summary["passed"], 0)
+        self.assertEqual(summary["refused_cases"], ["chorale_prelude/seed1"])
+
+    def test_generation_crash_still_fails_the_gate(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cli = self._fake_cli(Path(tmp), "Error: composition failed", 3)
+            case = texture_gate.run_case(cli, "fugue", 1, Path(tmp), None)
+        self.assertFalse(case.refused)
+        self.assertFalse(case.passes_texture_gate)
+        self.assertFalse(texture_gate.summarize([case])["all_passed"])
 
 
 if __name__ == "__main__":

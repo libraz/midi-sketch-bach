@@ -18,10 +18,12 @@ REPO_DIR = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from bachlib import texture_gate  # noqa: E402
+from bachlib import ornament_report, texture_gate  # noqa: E402
 
 BASIC_TYPES = (REPO_DIR / "src/core/basic_types.cpp").read_text(encoding="utf-8")
 FORM_DIRECTOR = (REPO_DIR / "src/composer/form_director.cpp").read_text(encoding="utf-8")
+FORM_SECTIONAL = (REPO_DIR / "src/composer/form_sectional.cpp").read_text(encoding="utf-8")
+FORM_FUGUE = (REPO_DIR / "src/composer/form_fugue.cpp").read_text(encoding="utf-8")
 CLI_MAIN = (REPO_DIR / "src/cli_main.cpp").read_text(encoding="utf-8")
 DEMO = (REPO_DIR / "demo/index.html").read_text(encoding="utf-8")
 README_EN = (REPO_DIR / "README.md").read_text(encoding="utf-8")
@@ -54,6 +56,29 @@ def cpp_form_voices() -> dict[str, int]:
     table = FORM_DIRECTOR[FORM_DIRECTOR.index("kFormSpecs") :]
     rows = re.findall(r"\{(\d+),[^}]*\},\s*//\s*(\w+)", table)
     return {_snake(name): int(voices) for voices, name in rows[: len(_form_names())]}
+
+
+def cpp_form_rows() -> dict[str, dict[str, int]]:
+    """Numeric kFormSpecs columns per form: voices, natural bars and meter."""
+    table = FORM_DIRECTOR[FORM_DIRECTOR.index("kFormSpecs") :]
+    rows = re.findall(
+        r"\{(\d+), (\d+), (\d+), (\d+), (\d+), (\d+), (\d+),[^}]*\},\s*//\s*(\w+)", table
+    )
+    return {
+        _snake(name): {
+            "voices": int(voices),
+            "natural": int(natural),
+            "ts_num": int(ts_num),
+            "ts_den": int(ts_den),
+        }
+        for voices, natural, _min, _max, _snap, ts_num, ts_den, name in rows[: len(_form_names())]
+    }
+
+
+def cpp_int_constant(source: str, name: str) -> int:
+    match = re.search(rf"constexpr int {name} = (\d+);", source)
+    assert match is not None, name
+    return int(match.group(1))
 
 
 def cpp_form_instruments() -> dict[str, set[str]]:
@@ -131,6 +156,32 @@ class FormVoiceTableTest(unittest.TestCase):
 
     def test_gate_forms_follow_the_core_form_order(self) -> None:
         self.assertEqual(list(texture_gate.SHIPPED_FORMS), _form_names())
+
+
+class FormShapeTest(unittest.TestCase):
+    def test_parser_sees_every_shipped_form(self) -> None:
+        self.assertEqual(set(cpp_form_rows()), set(_form_names()))
+
+    def test_ornament_bar_length_equals_the_core_meter(self) -> None:
+        for form, row in cpp_form_rows().items():
+            expected = 480 * row["ts_num"] * 4 // row["ts_den"]
+            with self.subTest(form=form):
+                self.assertEqual(ornament_report.ticks_per_bar_for_form(form), expected)
+
+    def test_fantasia_default_bars_equal_the_core_natural_length(self) -> None:
+        natural = cpp_form_rows()["fantasia_and_fugue"]["natural"]
+        self.assertEqual(texture_gate.FANTASIA_DEFAULT_BARS, natural)
+
+    def test_fantasia_dux_bars_equal_the_sectional_subject_length(self) -> None:
+        self.assertEqual(
+            texture_gate.FANTASIA_DUX_BARS, cpp_int_constant(FORM_SECTIONAL, "kSubjectBars")
+        )
+
+    def test_variable_entry_schedule_size_equals_the_fugue_builder(self) -> None:
+        self.assertEqual(
+            texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES,
+            cpp_int_constant(FORM_FUGUE, "kVariableScheduleMinEntries"),
+        )
 
 
 class InstrumentTableTest(unittest.TestCase):

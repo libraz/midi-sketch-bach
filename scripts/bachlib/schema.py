@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Validate generated.json against the bach-mcp schema.
+"""Validate generated.json against the vendored generated.v1 schema.
 
 Minimal Draft 2020-12 subset validator. Only supports the features
-actually used by ``bach-mcp/schema/generated.v1.json``:
+actually used by the vendored ``schema/generated.v1.json``:
 
     - object: type, required, additionalProperties=false, properties
     - array : type, items
@@ -67,6 +67,29 @@ def _matches_type(node: Any, type_name: str) -> bool:
     if type_name == "string":
         return isinstance(node, str)
     return node is None
+
+
+def check_schema(schema: dict[str, Any], path: str = "$") -> None:
+    """Statically walk every subschema and reject keywords or types outside the subset.
+
+    Independent of any validated data, so an unsupported keyword under an optional
+    property is caught even when that property is absent.
+
+    @param schema The schema fragment to inspect.
+    @param path Dotted/indexed schema path used for error messages.
+    @throws UnsupportedSchemaError When any subschema uses a keyword or type outside the subset.
+    """
+    for keyword in schema:
+        if keyword not in SUPPORTED_KEYWORDS and keyword not in ANNOTATION_KEYWORDS:
+            raise UnsupportedSchemaError(f"{path}: unsupported schema keyword '{keyword}'")
+    declared = schema.get("type")
+    for type_name in [declared] if isinstance(declared, str) else list(declared or []):
+        if type_name not in SUPPORTED_TYPES:
+            raise UnsupportedSchemaError(f"{path}: unsupported schema type '{type_name}'")
+    for key, sub_schema in schema.get("properties", {}).items():
+        check_schema(sub_schema, f"{path}.{key}")
+    if isinstance(schema.get("items"), dict):
+        check_schema(schema["items"], f"{path}[]")
 
 
 def validate(node: Any, schema: dict[str, Any], path: str, errors: list[str]) -> None:
@@ -147,7 +170,7 @@ def register(subparsers) -> None:
     """Register the ``validate`` subcommand on a subparsers object."""
     parser = subparsers.add_parser(
         "validate",
-        help="validate generated.v1 JSON against the bach-mcp schema",
+        help="validate generated.v1 JSON against the vendored schema",
         description=__doc__,
     )
     _add_arguments(parser)
@@ -181,6 +204,7 @@ def run(args) -> int:
 
     errors: list[str] = []
     try:
+        check_schema(schema)
         validate(payload, schema, "$", errors)
     except UnsupportedSchemaError as exc:
         print(f"unsupported schema: {exc}", file=sys.stderr)

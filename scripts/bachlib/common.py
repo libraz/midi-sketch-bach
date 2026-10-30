@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,10 @@ from typing import Any
 # bachlib lives one directory deeper than the old top-level scripts modules
 # (scripts/bachlib/common.py), so the repo root is three parents up.
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Written into every output directory the tooling creates; only a directory
+# carrying it (or an empty one) is ever cleared by prepare_output_dir.
+OUTPUT_DIR_MARKER = ".bach-tools-output"
 DEFAULT_CLI = REPO_ROOT / "build" / "bin" / "bach_cli"
 DEFAULT_INDEX_JS = REPO_ROOT.parent / "bach-mcp" / "dist" / "index.js"
 
@@ -265,3 +270,40 @@ def generate_case(
         case.error = f"failed to load provenance JSON: {exc}"
         return case
     return case
+
+
+def prepare_output_dir(path: Path, label: str) -> None:
+    """Create `path` empty, clearing it first only if the tooling made it.
+
+    Refused with ValueError: a symlink, a non-directory, the filesystem root,
+    the home directory, any ancestor of either the home directory or the
+    repository, any location inside the repository other than under build/, and
+    any non-empty directory that does not carry OUTPUT_DIR_MARKER.
+
+    @param path Directory to (re)create.
+    @param label Name used in error messages, e.g. "closure work directory".
+    """
+    resolved = path.resolve()
+    repo = REPO_ROOT.resolve()
+    home = Path.home().resolve()
+    unsafe = (
+        path.is_symlink()
+        or resolved == Path(resolved.anchor)
+        or resolved in (home, repo)
+        or resolved in home.parents
+        or resolved in repo.parents
+        or (repo in resolved.parents and repo / "build" not in (resolved, *resolved.parents))
+    )
+    if unsafe:
+        raise ValueError(f"unsafe {label}: {path}")
+    if path.exists():
+        if not path.is_dir():
+            raise ValueError(f"{label} is not a directory: {path}")
+        if (path / OUTPUT_DIR_MARKER).is_file():
+            shutil.rmtree(path)
+        elif any(path.iterdir()):
+            raise ValueError(
+                f"{label} exists and was not created by this tool: {path}; remove it manually"
+            )
+    path.mkdir(parents=True, exist_ok=True)
+    (path / OUTPUT_DIR_MARKER).touch()

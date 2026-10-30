@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -219,8 +221,13 @@ class FormThresholds:
 
 # Fantasia-and-fugue layout the mono ceiling is derived from: the subject
 # statement that opens the fugue tail, and the default-scale piece length.
+# test_texture_gate_form_table compares both with the C++ definitions.
 FANTASIA_DUX_BARS = 4
 FANTASIA_DEFAULT_BARS = 32
+
+# Middle-entry count at which the fugue builder switches from a uniform entry
+# schedule to corpus-derived spacing (kVariableScheduleMinEntries, form_fugue.cpp).
+VARIABLE_SCHEDULE_MIN_ENTRIES = 8
 
 
 # Texture targets per form. Fugue forms use the historical enforced gate
@@ -436,6 +443,9 @@ class GateCase:
     # does not gate, mirroring the other model axes).
     model_score_v2_length_invariant: float = -1.0
     error: str = ""
+    # True when the CLI declined the form/character pairing as a documented
+    # configuration refusal; such a case is listed, never gated.
+    refused: bool = False
 
     @property
     def thresholds(self) -> FormThresholds:
@@ -578,9 +588,10 @@ class GateCase:
             results["compass"] = (
                 self.compass_violation_count <= thresholds.max_compass_violations
             )
-        # Nonperiodicity is only defined once at least three middle entries
-        # give two spacings to compare.
-        if len(self.entry_intervals or []) >= 2:
+        # The builder keeps a uniform entry schedule until it would place
+        # VARIABLE_SCHEDULE_MIN_ENTRIES middle entries, so nonperiodicity is
+        # only demanded from that size on.
+        if len(self.middle_entry_bars or []) >= VARIABLE_SCHEDULE_MIN_ENTRIES:
             results["entry_plan_nonperiodic"] = self.entry_plan_nonperiodic
         if self.target_bars is not None:
             return results
@@ -622,7 +633,7 @@ class GateCase:
         Informational forms always return True here so they cannot flip the
         exit code; their per-axis detail is still recorded via axis_results.
         """
-        if not self.enforced:
+        if self.refused or not self.enforced:
             return True
         return self.passes_all_axes
 
@@ -1075,6 +1086,14 @@ def model_score_for(
     )
 
 
+# bach_cli reports a documented configuration refusal (form/character or
+# form/instrument pairing) with this stderr line; any other nonzero exit is a
+# generation failure.
+REFUSAL_PATTERN = re.compile(
+    r"^Error: (?:character|instrument) '[^']*' is incompatible with form ", re.MULTILINE
+)
+
+
 def run_case(
     cli: Path,
     form: str,
@@ -1117,6 +1136,7 @@ def run_case(
             generated=False,
             target_bars=target_bars,
             error=completed.stderr.strip(),
+            refused=REFUSAL_PATTERN.search(completed.stderr) is not None,
         )
     generated_json = midi_path.with_suffix(".generated.json")
     if not generated_json.exists():
@@ -1243,16 +1263,20 @@ def summarize(cases: list[GateCase]) -> dict[str, Any]:
     # always return passes_texture_gate == True, so all_passed (and the exit
     # code derived from it) reflects enforced failures alone.
     failing = [case for case in cases if not case.passes_texture_gate]
+    refused = [case for case in cases if case.refused]
+    ran = [case for case in cases if not case.refused]
     scored = [case.model_score for case in cases if case.model_scored]
     forms = sorted({case.form for case in cases})
     return {
         "total": len(cases),
-        "passed": len(cases) - len(failing),
+        "passed": len(cases) - len(failing) - len(refused),
         "failed": len(failing),
+        "refused": len(refused),
+        "refused_cases": [f"{case.form}/seed{case.seed}" for case in refused],
         "all_passed": not failing,
-        "max_v2_silence_ratio": max((case.v2_silence_ratio for case in cases), default=0.0),
+        "max_v2_silence_ratio": max((case.v2_silence_ratio for case in ran), default=0.0),
         "max_repeated_run": max((case.max_repeated_run for case in cases), default=0),
-        "min_avg_active_voices": min((case.avg_active_voices for case in cases), default=0.0),
+        "min_avg_active_voices": min((case.avg_active_voices for case in ran), default=0.0),
         "min_piece_voice_occupancy": min(
             (case.min_piece_voice_occupancy for case in cases if case.generated), default=0.0
         ),
@@ -1346,7 +1370,7 @@ def model_scoring_unavailable(summary: dict[str, Any], no_model_score: bool) -> 
     return (
         not no_model_score
         and ENFORCE_MODEL_SCORE
-        and summary.get("total", 0) > 0
+        and summary.get("total", 0) - summary.get("refused", 0) > 0
         and summary.get("model_scored_cases", 0) == 0
     )
 
@@ -1379,6 +1403,9 @@ def forms_with_incomplete_model_scoring(
 
 def run(args) -> int:
     """Execute the texture-gate sweep described by `args`."""
+    if not (args.cli.is_file() and os.access(args.cli, os.X_OK)):
+        print(f"texture-gate: bach_cli not found or not executable: {args.cli}", file=sys.stderr)
+        return 2
     index_js = None if args.no_model_score else args.index_js
 
     cases: list[GateCase] = []

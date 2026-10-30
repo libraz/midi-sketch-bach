@@ -11,6 +11,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from bachlib import schema  # noqa: E402
+from bachlib.schema import UnsupportedSchemaError  # noqa: E402
 
 
 def check(node, fragment) -> list[str]:
@@ -51,9 +52,18 @@ class UnsupportedKeywordTest(unittest.TestCase):
         import json
 
         doc = json.loads(schema.DEFAULT_SCHEMA.read_text(encoding="utf-8"))
-        errors: list[str] = []
-        schema.validate({}, doc, "$", errors)  # must not raise
-        self.assertTrue(errors)
+        schema.check_schema(doc)  # must not raise
+
+    def test_static_walk_finds_a_keyword_nested_under_items(self) -> None:
+        import copy
+        import json
+
+        doc = copy.deepcopy(
+            json.loads(schema.DEFAULT_SCHEMA.read_text(encoding="utf-8"))
+        )
+        doc["properties"]["notes"]["items"]["properties"]["pitch"]["multipleOf"] = 2
+        with self.assertRaisesRegex(UnsupportedSchemaError, "multipleOf"):
+            schema.check_schema(doc)
 
 
 if __name__ == "__main__":

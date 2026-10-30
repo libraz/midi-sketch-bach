@@ -19,7 +19,6 @@ import argparse
 import json
 import math
 import os
-import shutil
 import sys
 import wave
 from array import array
@@ -32,6 +31,7 @@ from bachlib.common import (
     REPO_ROOT,
     heuristic_score,
     model_probability,
+    prepare_output_dir,
     run,
     score_generated,
 )
@@ -290,11 +290,14 @@ def run_listening(args) -> int:
         return 2
 
     out = args.out
-    if out.exists():
-        shutil.rmtree(out)
+    try:
+        prepare_output_dir(out, "listening output directory")
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
     json_dir = out / "json"
     wav_dir = out / "wav"
-    json_dir.mkdir(parents=True)
+    json_dir.mkdir()
     wav_dir.mkdir()
 
     rows: list[dict[str, Any]] = []
