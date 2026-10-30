@@ -46,7 +46,11 @@ export interface BachConfig {
   instrument?: InstrumentId | InstrumentName;
   /** Duration scale ID (0-3) or name string ("short", "medium", "long", "full"). */
   scale?: DurationScaleId | DurationScaleName;
-  /** Target bar count (overrides scale when > 0). */
+  /**
+   * Target bar count (overrides scale when > 0). Rounded to the form's bar grid
+   * and clamped to the form's minimum and 128; read the resolved length from
+   * `BachInfo.totalBars`.
+   */
   targetBars?: number;
 }
 
@@ -130,8 +134,12 @@ export interface DiagnosticData {
  * One counterpoint rule's tally for a generated piece.
  *
  * Counted before the validator decides how to route a finding, so a rule that
- * never produced a failure is still visible. `total - gated - exempted` is the
- * number of findings recorded as informational. The counts describe
+ * never produced a failure is still visible. Vertical matches inside a
+ * verified declared doubling (for example the toccata unison gesture) are
+ * excluded from every count, so such a rule may have no entry at all.
+ * `total - gated - exempted` is the number of findings recorded as
+ * informational, except that `countersubject_invertible` informational entries
+ * carry no tally and are not part of that difference. The counts describe
  * per-finding routing only: the counterpoint budget fails a piece through a
  * separate rule-level entry in `validation.failures` (no span) and leaves these
  * counts unchanged.
@@ -144,8 +152,8 @@ export interface CounterpointObservation {
    * voice and the harmonic plan), `linear` for one voice's own melodic
    * succession. `unclassified` means the producer has no entry for the rule.
    */
-  geometry: 'linear' | 'vertical' | 'unclassified';
-  /** Times the rule matched, before any routing decision. */
+  geometry: RuleGeometry;
+  /** Times the rule matched outside a declared doubling, before any routing decision. */
   total: number;
   /** Individual findings routed to validation failures. */
   gated: number;
@@ -153,11 +161,71 @@ export interface CounterpointObservation {
   exempted: number;
 }
 
+/** Rule geometry as emitted in the observation and finding records. */
+export type RuleGeometry = 'linear' | 'vertical' | 'unclassified';
+
+/** A soft finding recorded without gating generation. */
+export interface InformationalFinding {
+  /** Owning span id, or null when the finding has no span. */
+  span_id: number | null;
+  rule_id: string;
+  geometry: RuleGeometry;
+  kind: 'StructuralFail' | 'MusicalFail' | 'ConfigFail';
+}
+
+/** Figuration-wave reactive-layer firing counts; all zero when no layer fired. */
+export interface WaveVeto {
+  anchor_parallel_displaced: number;
+  wobble_breaker_fired: number;
+  step_parallel_adjusted: number;
+  step_harsh_adjusted: number;
+  order_clamp_changed: number;
+  window_expanded: number;
+  anchor_fault_held: number;
+  total: number;
+}
+
+/** Optional per-piece analysis blocks; each key is present only when non-empty. */
+export interface GeneratedInfo {
+  subject_features?: Array<{
+    length: number;
+    range_semitones: number;
+    unique_pitch_classes: number;
+    opening_interval: number;
+    unique_intervals: number;
+    max_leap: number;
+  }>;
+  stream_segregation?: Array<{
+    span_id: number | null;
+    detected_stream_count: number;
+    cell_based_stream_count: number;
+    cell_count: number;
+    disagrees_with_cell_counterpoint: boolean;
+    stream_separation_semitones: number;
+    transition_note_indices: number[];
+  }>;
+  texture_metrics?: Array<{
+    max_active_voices: number;
+    avg_active_voices: number;
+    mono_ratio: number;
+    compass_violation_count: number;
+    register_overlap_ratio: number;
+    voices: Array<{
+      voice: number;
+      silence_ratio: number;
+      max_repeated_run: number;
+      min_pitch: number;
+      max_pitch: number;
+    }>;
+  }>;
+}
+
 /** generated.v1 document from a successful generation. */
 export interface GeneratedData {
   schema_version: 'generated.v1';
   ticks_per_beat: number;
   duration_ticks: number;
+  tempos?: Array<{ tick: number; bpm: number }>;
   notes: Array<{
     index: number;
     start_tick: number;
@@ -168,6 +236,11 @@ export interface GeneratedData {
   }>;
   /** Always present; empty when no counterpoint rule matched. */
   counterpoint_observations: CounterpointObservation[];
+  /** Always present; empty when nothing was recorded. */
+  informational_findings: InformationalFinding[];
+  /** Always present; all counters zero when no layer fired. */
+  wave_veto: WaveVeto;
+  info?: GeneratedInfo;
 }
 
 /** provenance.v1 document from a successful generation. */
@@ -199,6 +272,11 @@ export interface ProvenanceNote {
   shadow_winning_pitch?: number;
   shadow_winning_pitch_without_markov?: number;
   /**
+   * The fixed carrier's note as authored, before any ornament pass subdivides
+   * it. Present only for notes that declare one.
+   */
+  authored_note?: { start_tick: number; duration: number; pitch: number };
+  /**
    * Low 64 RuleId bits (bits 0-63) as a base-10 unsigned integer string.
    * Parse with `BigInt()`; JavaScript `number` cannot preserve all RuleId bits.
    */
@@ -206,8 +284,9 @@ export interface ProvenanceNote {
   /**
    * High RuleId lane (bits 64-127) as an unsigned integer. Emitted ONLY when
    * the high lane is nonzero, so notes using no high-lane bit omit the field
-   * entirely (byte-identical to the pre-high-lane output). The first high-lane
-   * bit is CountersubjectInvertible (bit 64).
+   * entirely. The first high-lane bit (bit 64) marks countersubject membership
+   * only; it does not certify invertibility. The invertibility verdict is the
+   * `countersubject_invertible` entry in generated.v1 `informational_findings`.
    */
   satisfied_rules_high?: string;
   rejected_alternatives: number;

@@ -26,7 +26,7 @@ Built on the development insights from [midi-sketch](https://github.com/libraz/m
 | Prelude and Fugue | BWV 532, 548 | 3 |
 | Fugue | Strict 3-voice fugue | 3 |
 | Trio Sonata | BWV 525-530 | 3 |
-| Chorale Prelude | BWV 599-650 (Orgelbüchlein) | 3 |
+| Chorale Prelude | BWV 645 (Schübler) | 3 |
 | Toccata and Fugue | BWV 565 | 3 |
 | Passacaglia | BWV 582 | 3 |
 | Fantasia and Fugue | BWV 537, 542 | 3 |
@@ -102,10 +102,10 @@ make demo   # http://localhost:8080/demo/
 |--------|-------------|---------|
 | `--form FORM` | Composition form | `fugue` |
 | `--key KEY` | Key (e.g. `g_minor`, `D_major`) | `C_major` |
-| `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
+| `--character CH` | `severe`, `playful`, `noble`, `restless` (`chorale_prelude` rejects `playful` and `restless`; `toccata_and_fugue` rejects `noble`) | `severe` |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello` (accepted instruments per form: see below) | form default |
 | `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
-| `--bars N` | Target bar count (overrides `--scale`) | - |
+| `--bars N` | Target bar count (overrides `--scale`); rounded to the form's bar grid and clamped to the form's minimum and 128, so the piece may differ from N (see below) | - |
 | `--bpm N` | Tempo (40-200) | `100` |
 | `--seed N` | Random seed (0 = random) | `0` |
 | `--json` | Output JSON event data | - |
@@ -121,6 +121,18 @@ Accepted instruments per form (any other combination is rejected):
 | `cello_prelude` | `cello` |
 | `chaconne` | `violin` |
 | `goldberg_variations` | `harpsichord`, `piano` |
+
+`--bars` is rounded to the nearest multiple of the form's grid (4 bars; 8 for
+`passacaglia`), then clamped to the form's minimum and the global maximum of 128.
+The CLI prints the resolved count.
+
+| Form | Minimum bars |
+|------|--------------|
+| `fugue` | 20 |
+| `prelude_and_fugue` | 24 |
+| `toccata_and_fugue`, `passacaglia`, `fantasia_and_fugue` | 16 |
+| `goldberg_variations` | 12 |
+| `trio_sonata`, `chorale_prelude`, `cello_prelude`, `chaconne` | 8 |
 
 ## Build
 

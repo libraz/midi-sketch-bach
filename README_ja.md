@@ -26,7 +26,7 @@ J.S.バッハの器楽作品に特化したMIDIジェネレーター。
 | 前奏曲とフーガ | BWV 532, 548 | 3 |
 | フーガ | 厳格な3声フーガ | 3 |
 | トリオ・ソナタ | BWV 525-530 | 3 |
-| コラール前奏曲 | BWV 599-650（オルゲルビュッヒライン） | 3 |
+| コラール前奏曲 | BWV 645（シュープラー・コラール） | 3 |
 | トッカータとフーガ | BWV 565 | 3 |
 | パッサカリア | BWV 582 | 3 |
 | 幻想曲とフーガ | BWV 537, 542 | 3 |
@@ -100,10 +100,10 @@ make demo   # http://localhost:8080/demo/
 |-----------|------|-----------|
 | `--form FORM` | 楽曲形式 | `fugue` |
 | `--key KEY` | 調（例: `g_minor`, `D_major`） | `C_major` |
-| `--character CH` | `severe`, `playful`, `noble`, `restless` | `severe` |
+| `--character CH` | `severe`, `playful`, `noble`, `restless`（`chorale_prelude`は`playful`と`restless`、`toccata_and_fugue`は`noble`を受け付けません） | `severe` |
 | `--instrument INST` | `organ`, `harpsichord`, `piano`, `violin`, `cello`（形式ごとの受理楽器は下表） | 形式の既定 |
 | `--scale SCALE` | `short`, `medium`, `long`, `full` | `short` |
-| `--bars N` | 目標小節数（`--scale`を上書き） | - |
+| `--bars N` | 目標小節数（`--scale`を上書き）。形式ごとの小節単位に丸め、形式の最小値から128の範囲に収めるため、実際の長さはNと異なる場合があります（下記参照） | - |
 | `--bpm N` | テンポ（40-200） | `100` |
 | `--seed N` | 乱数シード（0 = ランダム） | `0` |
 | `--json` | JSONイベントデータ出力 | - |
@@ -119,6 +119,17 @@ make demo   # http://localhost:8080/demo/
 | `cello_prelude` | `cello` |
 | `chaconne` | `violin` |
 | `goldberg_variations` | `harpsichord`, `piano` |
+
+`--bars`は形式ごとの小節単位（4小節、`passacaglia`のみ8小節）の最も近い倍数に丸め、
+形式の最小値から全体の上限128の範囲に収めます。解決後の小節数はCLIが表示します。
+
+| 形式 | 最小小節数 |
+|------|-----------|
+| `fugue` | 20 |
+| `prelude_and_fugue` | 24 |
+| `toccata_and_fugue`, `passacaglia`, `fantasia_and_fugue` | 16 |
+| `goldberg_variations` | 12 |
+| `trio_sonata`, `chorale_prelude`, `cello_prelude`, `chaconne` | 8 |
 
 ## ビルド
 
