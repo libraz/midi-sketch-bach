@@ -724,6 +724,78 @@ TEST(CandidateSearchTest, RejectsLeadingToneWhenResolutionIsOutsideSearchRange) 
   EXPECT_NE(cands.front().pitch, 71u);
 }
 
+TEST(CandidateSearchTest, RejectsLeadingToneAuthorizedOnlyByDistantFixedTonic) {
+  constexpr Tick kStride = kTicksPerBeat / 2;
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, 2 * kStride, 74, 0),
+      makePlaced(4 * kTicksPerBeat, kTicksPerBeat, 72, 1),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 71;
+  ctx.prev_pitch = 70;
+  ctx.pre_prev_pitch = 69;
+  ctx.placed_notes = &placed;
+
+  Span span = makeComposeSpan(0, 2 * kTicksPerBeat, 1);
+  span.subdivision = Subdivision::Eighth;
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCDominant(), Material{}, ctx);
+  ASSERT_FALSE(cands.empty());
+  ASSERT_EQ(cands.front().start_tick, 0u);
+  EXPECT_NE(cands.front().pitch, 71u)
+      << "a fixed tonic at tick 1920 cannot prove a resolution at tick 240";
+}
+
+TEST(CandidateSearchTest, AcceptsLeadingToneWithImmediateFixedTonic) {
+  constexpr Tick kStride = kTicksPerBeat / 2;
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, kStride, 74, 0),
+      makePlaced(kStride, kStride, 76, 0),
+      makePlaced(kStride, kStride, 72, 1),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 71;
+  ctx.prev_pitch = 70;
+  ctx.pre_prev_pitch = 69;
+  ctx.placed_notes = &placed;
+
+  Span span = makeComposeSpan(0, kStride, 1);
+  span.subdivision = Subdivision::Eighth;
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCDominant(), Material{}, ctx);
+  ASSERT_EQ(cands.size(), 1u);
+  EXPECT_EQ(cands.front().pitch, 71u);
+}
+
+TEST(CandidateSearchTest, RejectsLeadingToneWithImmediateFixedNonTonicDespiteLaterTonic) {
+  constexpr Tick kStride = kTicksPerBeat / 2;
+  std::vector<NoteEvent> placed = {
+      makePlaced(0, 2 * kStride, 74, 0),
+      makePlaced(kStride, kStride, 73, 1),
+      makePlaced(4 * kTicksPerBeat, kTicksPerBeat, 72, 1),
+  };
+
+  CandidateContext ctx;
+  ctx.voice_center = 71;
+  ctx.prev_pitch = 70;
+  ctx.pre_prev_pitch = 69;
+  ctx.placed_notes = &placed;
+
+  Span span = makeComposeSpan(0, 2 * kTicksPerBeat, 1);
+  span.subdivision = Subdivision::Eighth;
+
+  CandidateSearch search;
+  const auto cands = search.enumerate(span, singleCDominant(), Material{}, ctx);
+  ASSERT_FALSE(cands.empty());
+  ASSERT_EQ(cands.front().start_tick, 0u);
+  EXPECT_NE(cands.front().pitch, 71u)
+      << "an immediate C-sharp cannot be replaced by a distant tonic resolution";
+}
+
 TEST(CandidateSearchTest, MaterialResolutionCarriesLeadingToneBit) {
   Material material;
   MaterialNote leading;

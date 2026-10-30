@@ -607,13 +607,6 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
           if (fixed_next != 0) {
             has_resolution =
                 resolvesLeadingTone(static_cast<std::uint8_t>(p), fixed_next, harmonic_plan, t);
-          } else {
-            const std::uint8_t future_fixed =
-                nextSameVoiceStartingAfter(*placed_index, span.voice, t_next);
-            if (future_fixed != 0) {
-              has_resolution =
-                  resolvesLeadingTone(static_cast<std::uint8_t>(p), future_fixed, harmonic_plan, t);
-            }
           }
         }
         const CadenceCell* immediate_cadence_cell = cadenceCellAt(material, t_next);

@@ -153,6 +153,24 @@ TEST(ComposerNctTest, FugueCompleteHasNoValidatorFailuresSeed1) {
       << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
 }
 
+TEST(ComposerNctTest, FugueCompleteSeed9ResolvesLeadingToneWithoutSilentCounterline) {
+  const ComposeResult r = runPhase(HarnessPhase::FugueComplete, /*seed=*/9);
+  EXPECT_TRUE(r.validation.failures.empty())
+      << "seed 9 produced " << r.validation.failures.size() << " failure(s); first="
+      << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+
+  const Tick counterline_start = 3 * kTicksPerBar;
+  const Tick counterline_end = 4 * kTicksPerBar;
+  int counterline_notes = 0;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 1 && note.start_tick >= counterline_start &&
+        note.start_tick < counterline_end) {
+      ++counterline_notes;
+    }
+  }
+  EXPECT_GT(counterline_notes, 0) << "seed 9 left the V1 exposition counterline silent";
+}
+
 // Regression guard (counterline saturation): the V1 exposition
 // counterline (Compose, bars 0-3 and 8-11) sits beneath a subject that climbs
 // to G5/A5. Before the per-span voice_center override the default alto center
