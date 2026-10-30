@@ -6,7 +6,10 @@
 #include <cstdint>
 #include <set>
 
+#include "composer/character_profile.h"
 #include "composer/figuration.h"
+#include "composer/form_director.h"
+#include "composer/harness_fixture.h"
 #include "composer/minor_material.h"
 
 namespace bach::composer {
@@ -74,16 +77,61 @@ void expectSubjectInvariants(const std::array<std::array<std::uint8_t, 16>, N>& 
       EXPECT_GT(rhythm[pos], 0) << "row " << row << " pos " << pos;
       total += static_cast<int>(rhythm[pos]);
     }
-    if (row < 5) {
-      // The shipped rhythm rows deliberately vary around the nominal 4-bar
-      // span (15..17 beats); pin that envelope.
-      EXPECT_GE(total, 15 * kTicksPerBeat) << "row " << row;
-      EXPECT_LE(total, 17 * kTicksPerBeat) << "row " << row;
-    } else {
-      // Synthesized entries are sampled to exactly four 4/4 bars.
-      EXPECT_EQ(total, kSubjectTicks) << "row " << row;
-    }
+    EXPECT_LE(total, kSubjectTicks) << "row " << row;
+    EXPECT_EQ(total, row == 3 ? 15 * kTicksPerBeat : kSubjectTicks) << "row " << row;
     EXPECT_GE(rhythm[15], 2 * kTicksPerBeat) << "row " << row;
+  }
+}
+
+ComposeRequest requestForSubjectRow(FormType form, bool minor, std::size_t target_row) {
+  ComposeRequest request;
+  request.form = form;
+  request.is_minor = minor;
+  request.target_bars = 32;
+  for (int character = 0; character < 4; ++character) {
+    for (std::uint32_t seed = 0; seed < 4u * kSubjectCatalogMajor.size(); seed += 4) {
+      const auto candidate = static_cast<SubjectCharacter>(character);
+      if (detail::subjectIndexFor(candidate, minor, seed) == target_row) {
+        request.character = candidate;
+        request.seed = seed;
+        return request;
+      }
+    }
+  }
+  return request;
+}
+
+template <std::size_t N>
+void expectProductionSubjectFitsFourBars(FormType form, bool minor,
+                                         const std::array<std::array<Tick, 16>, N>& rhythms,
+                                         const char* mode_name) {
+  for (std::size_t row = 0; row < 5; ++row) {
+    const ComposeRequest request = requestForSubjectRow(form, minor, row);
+    ASSERT_EQ(detail::subjectIndexFor(request.character, minor, request.seed), row)
+        << mode_name << " row " << row;
+    HarnessFixture fixture;
+    ASSERT_EQ(buildFormFixture(request, &fixture), FormDirectorStatus::Ok)
+        << mode_name << " row " << row;
+    ASSERT_GE(fixture.material.subject.size(), 16u) << mode_name << " row " << row;
+    ASSERT_FALSE(fixture.material.answer.empty()) << mode_name << " row " << row;
+
+    const Tick subject_start = fixture.material.subject.front().start_tick;
+    Tick cursor = subject_start;
+    for (std::size_t note = 0; note < 16; ++note) {
+      EXPECT_EQ(fixture.material.subject[note].start_tick, cursor)
+          << mode_name << " row " << row << " note " << note;
+      EXPECT_EQ(fixture.material.subject[note].duration, rhythms[row][note])
+          << mode_name << " row " << row << " note " << note;
+      cursor += fixture.material.subject[note].duration;
+    }
+
+    const Tick answer_start = subject_start + kSubjectTicks;
+    const Tick closing_rest = row == 3 ? kTicksPerBeat : 0;
+    EXPECT_EQ(cursor + closing_rest, answer_start) << mode_name << " row " << row;
+    EXPECT_LE(cursor, answer_start) << mode_name << " row " << row;
+    EXPECT_EQ(fixture.material.answer.front().start_tick, answer_start)
+        << mode_name << " row " << row << " answer must stay on the four-bar boundary";
+    EXPECT_EQ(answer_start - cursor, closing_rest) << mode_name << " row " << row;
   }
 }
 
@@ -115,6 +163,20 @@ TEST(SubjectCatalog, MajorEntriesHoldSubjectInvariants) {
 TEST(SubjectCatalog, MinorEntriesHoldSubjectInvariants) {
   expectSubjectInvariants(kSubjectCatalogMinor, kSubjectCatalogMinorRhythms,
                           /*minor=*/true, /*body_low=*/70, /*body_high=*/82);
+}
+
+TEST(SubjectCatalog, FugueProductionSubjectsFitInsideTheAnswerBoundary) {
+  expectProductionSubjectFitsFourBars(FormType::Fugue, /*minor=*/false, kSubjectCatalogMajorRhythms,
+                                      "major");
+  expectProductionSubjectFitsFourBars(FormType::Fugue, /*minor=*/true, kSubjectCatalogMinorRhythms,
+                                      "minor");
+}
+
+TEST(SubjectCatalog, PreludeAndFugueProductionSubjectsFitInsideTheAnswerBoundary) {
+  expectProductionSubjectFitsFourBars(FormType::PreludeAndFugue, /*minor=*/false,
+                                      kSubjectCatalogMajorRhythms, "major");
+  expectProductionSubjectFitsFourBars(FormType::PreludeAndFugue, /*minor=*/true,
+                                      kSubjectCatalogMinorRhythms, "minor");
 }
 
 template <std::size_t N>

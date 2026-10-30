@@ -62,9 +62,9 @@ inline constexpr std::array<std::array<std::uint8_t, 16>, 5> kFugueCompleteSubje
 }};
 
 // Fugue subject rhythm profiles. Each row has the same 16 pitch positions as
-// kFugueCompleteSubjects, but durations now define the 4-bar subject span. The rows
-// deliberately mix eighths, quarters, dotted quarters, halves, and one
-// sixteenth figure while summing to exactly four 4/4 bars.
+// kFugueCompleteSubjects, with durations fitting inside a 4-bar subject window.
+// The profiles mix eighths, quarters, dotted quarters, halves, and one sixteenth
+// figure; one deliberately ends after 15 beats, leaving a quarter-note rest.
 inline constexpr std::array<std::array<Tick, 16>, 5> kFugueCompleteSubjectRhythms = {{
     {kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
@@ -73,7 +73,7 @@ inline constexpr std::array<std::array<Tick, 16>, 5> kFugueCompleteSubjectRhythm
     {kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, 2 * kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
-     4 * kTicksPerBeat},
+     3 * kTicksPerBeat},
     {kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat,
      kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat / 2,
      kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, 2 * kTicksPerBeat},
@@ -83,7 +83,7 @@ inline constexpr std::array<std::array<Tick, 16>, 5> kFugueCompleteSubjectRhythm
      4 * kTicksPerBeat},
     {3 * kTicksPerBeat / 2, kTicksPerBeat / 2, kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
      kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat / 2, kTicksPerBeat / 2,
-     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, 4 * kTicksPerBeat},
+     kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, kTicksPerBeat, 3 * kTicksPerBeat},
 }};
 
 struct ChordSpec {
