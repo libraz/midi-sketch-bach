@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/basic_types.h"
+#include "midi/midi_reader.h"
 #include "midi/midi_writer.h"
 
 namespace bach {
@@ -94,6 +95,32 @@ TEST(MidiCcWriteTest, CcEventsAreEmitted) {
   const uint8_t status = static_cast<uint8_t>(0xB0 | 2);  // channel 2
   EXPECT_TRUE(containsMessage(bytes, status, 7, 75)) << "CC#7 missing";
   EXPECT_TRUE(containsMessage(bytes, status, 11, 75)) << "CC#11 missing";
+}
+
+TEST(MidiCcWriteTest, CcOnlyTrackIsWrittenWithoutDummyNote) {
+  Track track;
+  track.channel = 2;
+  track.program = 19;
+  track.name = "CC only";
+  track.cc_events.push_back({0, 7, 75});
+
+  MidiWriter writer;
+  ASSERT_EQ(writer.build({track}, {{0, 120}}, Key::C), MidiWriterStatus::Ok);
+  const auto bytes = writer.toBytes();
+
+  MidiReader reader;
+  ASSERT_TRUE(reader.read(bytes)) << reader.getError();
+  const ParsedMidi& parsed = reader.getParsedMidi();
+  ASSERT_EQ(parsed.format, 1);
+  ASSERT_EQ(parsed.num_tracks, 2);
+  const ParsedTrack* content_track = parsed.getTrack("CC only");
+  ASSERT_NE(content_track, nullptr);
+  EXPECT_EQ(content_track->channel, 2);
+  EXPECT_TRUE(content_track->notes.empty());
+
+  // MidiReader validates the SMF but does not expose controller messages in
+  // ParsedTrack, so check the encoded channel message in the parsed file bytes.
+  EXPECT_TRUE(containsMessage(bytes, static_cast<uint8_t>(0xB0 | 2), 7, 75));
 }
 
 TEST(MidiCcWriteTest, CcStatusUsesTrackChannel) {

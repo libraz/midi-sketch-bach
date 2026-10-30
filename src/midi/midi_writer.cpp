@@ -120,7 +120,7 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
   // Count non-empty tracks, plus one for the metadata track.
   uint16_t num_content_tracks = 0;
   for (const auto& track : tracks) {
-    if (!track.notes.empty() || !track.events.empty()) {
+    if (!track.notes.empty() || !track.events.empty() || !track.cc_events.empty()) {
       ++num_content_tracks;
     }
   }
@@ -130,7 +130,7 @@ MidiWriterStatus MidiWriter::build(const std::vector<Track>& tracks,
   writeMetadataTrack(tempo_events, time_sig_events, key_signature, metadata);
 
   for (const auto& track : tracks) {
-    if (!track.notes.empty() || !track.events.empty()) {
+    if (!track.notes.empty() || !track.events.empty() || !track.cc_events.empty()) {
       writeTrack(track, key_signature.tonic, output_octave_shift);
     }
   }
