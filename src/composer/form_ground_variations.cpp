@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -79,161 +80,27 @@ constexpr int kPassV0CenterLift = 12;
 constexpr int kChaconneCycleBars = 4;
 constexpr int kPassacagliaCycleBars = 8;
 
-// A ground bass is recognised by its pitch sequence and by the metric positions
-// those pitches fall on, so a returning statement can be re-articulated without
-// ceasing to be the same ground. Every treatment below keeps each bar's
-// structural tone on the bar head at its own pitch and subdivides only the span
-// it fills: no tone moves, none is added, none is dropped. Attack counts rise
-// down the list and the statements take them in that order, so the ground is
-// announced whole and is progressively broken up as the variations accumulate
-// over it -- the diminution the form is named for, heard in the bass.
-enum class GroundArticulation {
-  kSustained,       // one dotted half: the ground as first stated.
-  kUpperNeighbour,  // the tone leaves the bar through the scale step above.
-  kLowerNeighbour,  // the tone leaves the bar through the scale step below.
-  kNeighbourTurn,   // the tone turns above and back before the ground steps on.
-};
-
-// The treatments a decorated statement draws from, in rising order of
-// subdivision, so successive decorations grow rather than repeat.
-constexpr GroundArticulation kGroundGrowth[3] = {GroundArticulation::kUpperNeighbour,
-                                                 GroundArticulation::kLowerNeighbour,
-                                                 GroundArticulation::kNeighbourTurn};
-
-// Statements that open the piece with the ground exactly as written. The theme
-// has to be established by repetition before a variant of it can be heard AS a
-// variant; one statement is an announcement, not an establishment.
-constexpr int kPlainOpeningStatements = 2;
-
-// One statement in this many carries a decoration. The rest are plain.
-constexpr int kStatementsPerDecoration = 3;
-
-/**
- * @brief The articulation a ground statement takes.
- *
- * The plain statement is this form's norm and a decorated one is an event
- * against it, not the other way round. The variations are heard as variations
- * because the bass under them keeps coming back the same; a ground that never
- * returns to its own surface leaves them nothing to be measured against, which
- * is the one thing this form cannot give up.
- *
- * So the opening statements are plain, one statement in three after them takes
- * a decoration, and the closing statement is plain whatever the count -- the
- * piece ends on the tune it began with. A short piece whose statements are all
- * opening or closing therefore states the ground plainly throughout, which is
- * the right reading of a ground heard only three times.
- *
- * @param cycle Statement index in [0, cycle_count).
- * @param cycle_count Statements the piece contains.
- */
-GroundArticulation groundArticulationFor(int cycle, int cycle_count) {
-  if (cycle < kPlainOpeningStatements || cycle + 1 >= cycle_count)
-    return GroundArticulation::kSustained;
-  const int since_opening = cycle - kPlainOpeningStatements;
-  if (since_opening % kStatementsPerDecoration != kStatementsPerDecoration - 1)
-    return GroundArticulation::kSustained;
-  const int decoration_index = since_opening / kStatementsPerDecoration;
-  return kGroundGrowth[static_cast<std::size_t>(decoration_index % 3)];
-}
-
-/**
- * @brief Emit one bar of the ground under one articulation.
- * @param out Receives the bar's notes, appended in time order.
- * @param bar_start Tick of the bar head.
- * @param pitch The bar's structural tone.
- * @param articulation The treatment this statement takes.
- * @param mode Diatonic mode the decorating tone is drawn from.
- * @note The decorating tone is one diatonic scale degree from the structural
- *       tone and the bar returns to that tone before the ground steps on, so
- *       every interval the bar adds is a step and the skeleton still sounds on
- *       the bar head and on the beat the ground leaves from.
- */
-void appendGroundBar(std::vector<MaterialNote>& out, Tick bar_start, std::uint8_t pitch,
-                     GroundArticulation articulation, detail::Mode mode) {
-  const auto emit = [&](Tick offset, Tick duration, int tone) {
-    MaterialNote gnote;
-    gnote.start_tick = bar_start + offset;
-    gnote.duration = duration;
-    gnote.pitch = static_cast<std::uint8_t>(tone);
-    out.push_back(gnote);
-  };
-  const int tone = static_cast<int>(pitch);
-  const int above = detail::scaleUp(tone, 1, mode);
-  const int below = detail::scaleDown(tone, 1, mode);
-  // Every decorating tone falls inside the last beat. The structural tone holds
-  // every beat onset of the bar, which is where this form judges its verticals:
-  // the decoration is the ornamental approach to the ground's next step, not a
-  // tone the harmony has to account for.
-  constexpr Tick kDecorationStart = 2 * kTicksPerBeat + kTicksPerBeat / 2;
-  constexpr Tick kEighth = kTicksPerBeat / 2;
-  switch (articulation) {
-    case GroundArticulation::kUpperNeighbour:
-      emit(0, kDecorationStart, tone);
-      emit(kDecorationStart, kEighth, above);
-      break;
-    case GroundArticulation::kLowerNeighbour:
-      emit(0, kDecorationStart, tone);
-      emit(kDecorationStart, kEighth, below);
-      break;
-    case GroundArticulation::kNeighbourTurn:
-      emit(0, kDecorationStart, tone);
-      emit(kDecorationStart, kEighth / 2, above);
-      emit(kDecorationStart + kEighth / 2, kEighth / 2, tone);
-      break;
-    case GroundArticulation::kSustained:
-    default:
-      emit(0, kTicksPerBar34, tone);
-      break;
-  }
-}
-
 /**
  * @brief Emit the ground bass for every statement of the piece.
  *
- * The material carries the whole line rather than one cycle for the replay
- * branch to tile, because consecutive statements no longer share an
- * articulation. The caller declares the emitted length as the replay period, so
- * the period-tiled replay lays the line down exactly once.
+ * Every bar holds its structural tone for the whole bar, so each statement
+ * repeats the declared events exactly. The material carries the full line, and
+ * the caller declares its cycle length separately for ground analysis; the
+ * replay branch emits this material once.
  *
  * @param out Receives the ground, appended in time order.
  * @param total_bars Bars in the piece.
  * @param cycle_bars Bars per ground statement.
  * @param ground_pitch The cycle-relative structural tones, one per bar.
- * @param sustained_from_cycle First statement left sustained in the material.
- *        The passacaglia hands its late statements to the replay branch's own
- *        restatement device and stops decorating here; a form without that
- *        device passes the statement count so every statement is treated here.
- * @param statement_count Statements the PIECE contains, which is not always the
- *        number treated here: the opening and closing statements are plain, and
- *        which statement closes the piece is a fact about the piece rather than
- *        about the window this call covers.
- * @param sounding_bars Bars the ground carrier actually sounds for. Its last bar
- *        stays sustained: the ground hands over to whatever follows -- for the
- *        chaconne an authored cadential coda -- on a plain structural tone.
- * @param mode Diatonic mode the decorating tones are drawn from.
  */
 void appendGroundStatements(std::vector<MaterialNote>& out, int total_bars, int cycle_bars,
-                            const std::vector<std::uint8_t>& ground_pitch, int sustained_from_cycle,
-                            int statement_count, int sounding_bars, detail::Mode mode) {
-  const auto pitchAtBar = [&](int bar) {
-    return ground_pitch[static_cast<std::size_t>(bar % cycle_bars)];
-  };
+                            const std::vector<std::uint8_t>& ground_pitch) {
   for (int bar = 0; bar < total_bars; ++bar) {
-    const int cycle = bar / cycle_bars;
-    GroundArticulation articulation = cycle >= sustained_from_cycle
-                                          ? GroundArticulation::kSustained
-                                          : groundArticulationFor(cycle, statement_count);
-    // A bar whose successor restates the same tone stays held: the decoration
-    // closes by returning to the structural tone, so decorating this bar would
-    // put that tone against its own restatement across the bar line as a
-    // unison. The tone is held instead -- the phrase-end hold before the
-    // relaunch.
-    if (bar + 1 < total_bars && pitchAtBar(bar + 1) == pitchAtBar(bar))
-      articulation = GroundArticulation::kSustained;
-    if (bar + 1 >= sounding_bars)
-      articulation = GroundArticulation::kSustained;
-    appendGroundBar(out, static_cast<Tick>(bar) * kTicksPerBar34, pitchAtBar(bar), articulation,
-                    mode);
+    MaterialNote gnote;
+    gnote.start_tick = static_cast<Tick>(bar) * kTicksPerBar34;
+    gnote.duration = kTicksPerBar34;
+    gnote.pitch = ground_pitch[static_cast<std::size_t>(bar % cycle_bars)];
+    out.push_back(gnote);
   }
 }
 
@@ -1531,28 +1398,14 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
 
   auto bar_tick = [](int bar) { return static_cast<Tick>(bar) * kTicksPerBar34; };
 
-  // --- V2 ground bass: identical pitches to the 2-voice form, statement by
-  // statement under the growth articulations; only the voice assignment (set on
-  // the span below) moves to V2. ---
-  //
-  // Late-cycle rhythmic intensification (design value): from the final third
-  // of the cycles on, the ground restates each bar as repeated same-pitch
-  // quarters (the BWV582-style martellato) instead of one dotted half. That
-  // restatement is the replay branch's, so those statements stay sustained in
-  // the material and only the earlier ones are articulated here. The pitches
-  // never change either way, so the bar-head skeleton stays immutable. At least
-  // one unsplit statement always opens the piece (cycles >= 2 guard).
-  const int split_cycle = cycles >= 2 ? cycles - (cycles + 2) / 3 : cycles;
+  // --- V2 ground bass: the seed-selected eight-bar pitch sequence repeats
+  // exactly, one sustained note per bar. Only its voice assignment moves to V2. ---
   std::vector<MaterialNote>& ground = out.material.passacaglia_ground;
-  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, split_cycle, cycles,
-                         total_bars, mode);
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch);
   out.material.passacaglia_ground_period = static_cast<Tick>(total_bars) * kTicksPerBar34;
   out.material.passacaglia_ground_cycle = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
-  // The realized ground, read at beat grain: what the voices written over it
-  // are vetted against once a statement is decorated inside the bar.
+  // The repeated sustained tones are the bass reference for every beat.
   const std::vector<std::uint8_t> ground_beats = groundBeatTones(ground, 0, total_bars);
-  if (cycles >= 2)
-    out.material.passacaglia_ground_split_from = static_cast<Tick>(split_cycle) * period;
 
   // --- HarmonicPlan: one chord per bar; the final bar resolves to the tonic. ---
   out.harmony.tonic_pc = 0;
@@ -2093,18 +1946,16 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     out.registration_step_ticks.push_back(static_cast<Tick>(mid_wave_idx) * period);
   }
 
-  // --- V1 ground bass: the structural tone on every bar head, statement by
-  // statement under the growth articulations. The declared period is the whole
-  // line, so the replay branch lays it down once instead of tiling one cycle. ---
+  // --- V1 ground bass: the seed-selected four-bar pitch line repeats exactly,
+  // one sustained note per bar before the separately declared terminal coda. ---
   std::vector<MaterialNote>& ground = out.material.ground_bass;
-  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch, cycles, cycles,
-                         total_bars - 2, mode);
+  appendGroundStatements(ground, total_bars, cycle_bars, ground_pitch);
   const Tick ground_line_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
   const Tick ground_cycle_ticks = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
   out.material.ground_bass_period = ground_line_ticks;
   out.material.ground_bass_cycle = ground_cycle_ticks;
-  // The realized ground, read at beat grain: what the variation blocks are
-  // vetted against once a statement is decorated inside the bar.
+  // The sustained ground tones provide the bass reference for every beat; the
+  // final two bars are emitted by the authored CodaCarrier below.
   const std::vector<std::uint8_t> ground_beats = groundBeatTones(ground, 0, total_bars);
 
   // --- HarmonicPlan: one chord per bar over every cycle. The final bar of the
@@ -2787,6 +2638,21 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
         *onset_tick = best;
       return pitch;
     };
+    const auto upperOnsetAfter = [&](Tick tick, Tick* onset_tick) {
+      int pitch = -1;
+      Tick earliest = std::numeric_limits<Tick>::max();
+      for (const auto& variation : out.material.passacaglia_variations) {
+        for (const MaterialNote& note : variation.notes) {
+          if (note.start_tick > tick && note.start_tick < earliest) {
+            earliest = note.start_tick;
+            pitch = static_cast<int>(note.pitch);
+          }
+        }
+      }
+      if (onset_tick != nullptr && pitch >= 0)
+        *onset_tick = earliest;
+      return pitch;
+    };
     const auto counterOnsetBefore = [&](Tick tick) {
       int pitch = -1;
       Tick best = 0;
@@ -2803,9 +2669,9 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     const int bass_prep = groundPitchAt(preparation_tick);
     const int bass_sus = groundPitchAt(suspension_tick);
     const int bass_res = groundPitchAt(resolution_tick);
-    const int upper_prep = upperPitchAt(preparation_tick);
+    const int original_upper_prep = upperPitchAt(preparation_tick);
     const int original_upper_sus = upperPitchAt(suspension_tick);
-    const int upper_res = upperPitchAt(resolution_tick);
+    const int original_upper_res = upperPitchAt(resolution_tick);
     const int previous_upper_head = upperPitchAt(suspension_tick - kTicksPerBar34);
     const int previous_ground = groundPitchAt(suspension_tick - kTicksPerBar34);
     // The bar the suspension resolves into is read for the same reason its
@@ -2877,12 +2743,116 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     static constexpr Pass kInteriorPasses[] = {{true, true, 0}, {false, true, 0}};
     static constexpr Pass kClosingPasses[] = {
         {true, true, 0}, {true, false, 0}, {false, true, 0}, {false, false, 1}};
-    const Pass* passes = closing_cadence ? kClosingPasses : kInteriorPasses;
-    const int pass_count = closing_cadence ? 4 : 2;
-    for (int pass = 0; pass < pass_count && !installed; ++pass) {
-      const bool refuse_anti = passes[pass].refuse_anti;
-      const bool refuse_battuta = passes[pass].refuse_battuta;
-      const int strict_pass = passes[pass].strict_pass;
+    struct Attempt {
+      int preparation_pitch;
+      int landing_offset;
+      Pass pass;
+      bool clean_joint;
+    };
+    const auto hasSingleBeatTone = [&](Tick tick) {
+      int overlapping = 0;
+      bool covers_beat = false;
+      for (const PassacagliaVariation& variation : out.material.passacaglia_variations) {
+        for (const MaterialNote& note : variation.notes) {
+          const Tick note_end = note.start_tick + note.duration;
+          if (note.start_tick < tick + kTicksPerBeat && note_end > tick) {
+            ++overlapping;
+            covers_beat = note.start_tick == tick && note_end == tick + kTicksPerBeat;
+          }
+        }
+      }
+      return overlapping == 1 && covers_beat;
+    };
+    const bool canJointlyRevoice = closing_cadence && hasSingleBeatTone(preparation_tick) &&
+                                   hasSingleBeatTone(suspension_tick);
+    std::vector<int> preparation_pitches{original_upper_prep};
+    if (canJointlyRevoice) {
+      const int preparation_third = preparation_chord.minor ? 3 : 4;
+      const std::array<int, 4> preparation_pcs = {
+          preparation_chord.root_pc, (preparation_chord.root_pc + preparation_third) % 12,
+          (preparation_chord.root_pc + 7) % 12,
+          detail::chordSeventhPc(
+              detail::ChordSpec{preparation_chord.root_pc, preparation_chord.minor, true})};
+      const int preparation_tones = preparation_chord.seventh ? 4 : 3;
+      for (int displacement = 1; displacement <= 12; ++displacement) {
+        for (int direction : {1, -1}) {
+          const int candidate = original_upper_prep + direction * displacement;
+          if (candidate < 60 || candidate > organ_range::kManualHigh)
+            continue;
+          const int pitch_class = ((candidate % 12) + 12) % 12;
+          bool chord_tone = false;
+          for (int tone = 0; tone < preparation_tones; ++tone)
+            chord_tone |= pitch_class == preparation_pcs[static_cast<std::size_t>(tone)];
+          if (chord_tone)
+            preparation_pitches.push_back(candidate);
+        }
+      }
+    }
+
+    const Tick piece_end = static_cast<Tick>(req.bars) * kTicksPerBar34;
+    const int original_final = [&]() {
+      for (const PassacagliaVariation& variation : out.material.passacaglia_variations) {
+        if (variation.end_tick == piece_end)
+          return soundingMaterialPitch(variation.notes, piece_end - kTicksPerBar34);
+      }
+      return -1;
+    }();
+    const int trill_reach = ((original_upper_res % 12) + 12) % 12 == 2 ? 2 : 1;
+    std::vector<Attempt> attempts;
+    if (closing_cadence) {
+      static constexpr int kLandingOffsets[] = {0, -12, 12};
+      if (canJointlyRevoice) {
+        for (const int preparation_pitch : preparation_pitches) {
+          for (const int landing_offset : kLandingOffsets) {
+            const int landing = original_upper_res + landing_offset;
+            const int final_tone = original_final + landing_offset;
+            const int trill_upper = landing + trill_reach;
+            if (landing < 60 || landing > organ_range::kManualHigh || final_tone < 60 ||
+                final_tone > organ_range::kManualHigh || trill_upper > organ_range::kManualHigh)
+              continue;
+            attempts.push_back({preparation_pitch, landing_offset, kClosingPasses[0], true});
+          }
+        }
+      }
+      // Preserve the former relaxed closing choices after every clean joint
+      // voicing has been tried with the authored preparation and landing.
+      for (std::size_t pass = 0; pass < sizeof(kClosingPasses) / sizeof(kClosingPasses[0]); ++pass)
+        attempts.push_back({original_upper_prep, 0, kClosingPasses[pass], false});
+    } else {
+      for (const Pass& pass : kInteriorPasses)
+        attempts.push_back({original_upper_prep, 0, pass, false});
+    }
+
+    const auto lowerPitchAt = [&](Tick tick) {
+      int lower = groundPitchAt(tick);
+      for (const TrioVoiceLine& line : out.material.trio_voices) {
+        const int pitch = soundingMaterialPitch(line.notes, tick);
+        lower = std::max(lower, pitch);
+      }
+      for (const CodaDecl& coda : out.material.coda_extensions) {
+        const int pitch = soundingMaterialPitch(coda.notes, tick);
+        lower = std::max(lower, pitch);
+      }
+      return lower;
+    };
+
+    for (const Attempt& attempt : attempts) {
+      if (installed)
+        break;
+      const int upper_prep = attempt.preparation_pitch;
+      const int upper_res = original_upper_res + attempt.landing_offset;
+      const bool refuse_anti = attempt.pass.refuse_anti;
+      const bool refuse_battuta = attempt.pass.refuse_battuta;
+      const int strict_pass = attempt.pass.strict_pass;
+      const int candidate_prior_upper =
+          attempt.clean_joint && prior_upper_onset == preparation_tick ? upper_prep : prior_upper;
+      const int candidate_next_upper_head = attempt.clean_joint && next_upper_head >= 0
+                                                ? next_upper_head + attempt.landing_offset
+                                                : next_upper_head;
+      Tick preceding_prep_onset = 0;
+      const int preceding_prep_upper = upperOnsetBefore(preparation_tick, &preceding_prep_onset);
+      const int preceding_prep_ground =
+          preceding_prep_upper >= 0 ? groundPitchAt(preceding_prep_onset) : -1;
       for (int distance = 0; distance <= 12 && !installed; ++distance) {
         for (int direction : {1, -1}) {
           if (distance == 0 && direction < 0)
@@ -2892,11 +2862,18 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
           if (upper_sus < 60 || upper_sus > organ_range::kManualHigh ||
               (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
             continue;
+          if (attempt.clean_joint && preceding_prep_upper >= 0 && preceding_prep_ground >= 0 &&
+              (formsPerfectParallel(preceding_prep_upper, upper_prep, preceding_prep_ground,
+                                    bass_prep) ||
+               formsAntiParallelPerfect(preceding_prep_upper, upper_prep, preceding_prep_ground,
+                                        bass_prep) ||
+               formsBattuta(preceding_prep_upper, upper_prep, preceding_prep_ground, bass_prep)))
+            continue;
           if (previous_upper_head >= 0 && previous_ground >= 0 &&
               formsPerfectParallel(previous_upper_head, upper_sus, previous_ground, bass_sus))
             continue;
-          if (prior_upper >= 0 && prior_upper_ground >= 0 &&
-              formsPerfectParallel(prior_upper, upper_sus, prior_upper_ground, bass_sus))
+          if (candidate_prior_upper >= 0 && prior_upper_ground >= 0 &&
+              formsPerfectParallel(candidate_prior_upper, upper_sus, prior_upper_ground, bass_sus))
             continue;
           // Held to the first pass only, like the strict check further down. An
           // interior cycle never reaches the second pass and so always honours
@@ -2904,8 +2881,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
           // which is the same trade the second pass already makes against the
           // far more expensive true parallel. A closing cadence with no accented
           // dissonance at all is the worse outcome.
-          if (strict_pass == 0 && next_upper_head >= 0 && next_ground >= 0 &&
-              formsPerfectParallel(upper_sus, next_upper_head, bass_sus, next_ground))
+          if (strict_pass == 0 && candidate_next_upper_head >= 0 && next_ground >= 0 &&
+              formsPerfectParallel(upper_sus, candidate_next_upper_head, bass_sus, next_ground))
             continue;
           // The same three motions can arrive on a unison the contrary way as
           // readily as they can approach a perfect interval in similar motion,
@@ -2922,31 +2899,82 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                      formsAntiParallelPerfect(upper_from, upper_to, bass_from, bass_to)));
           };
           if (contraryFault(previous_upper_head, upper_sus, previous_ground, bass_sus) ||
-              contraryFault(prior_upper, upper_sus, prior_upper_ground, bass_sus) ||
-              (next_upper_head >= 0 && next_ground >= 0 &&
-               contraryFault(upper_sus, next_upper_head, bass_sus, next_ground)))
+              contraryFault(candidate_prior_upper, upper_sus, prior_upper_ground, bass_sus) ||
+              (candidate_next_upper_head >= 0 && next_ground >= 0 &&
+               contraryFault(upper_sus, candidate_next_upper_head, bass_sus, next_ground)))
             continue;
           bool creates_augmented_second = false;
           if (req.mode == detail::Mode::Minor) {
             const auto formsAugmentedSecond = [&](int a, int b) {
               return detail::isAugmentedSecondClass(a, b, 0, req.mode);
             };
+            if (attempt.clean_joint && preceding_prep_upper >= 0 &&
+                formsAugmentedSecond(preceding_prep_upper, upper_prep))
+              creates_augmented_second = true;
             for (const auto& variation : out.material.passacaglia_variations) {
               for (std::size_t i = 0; i < variation.notes.size(); ++i) {
                 const MaterialNote& note = variation.notes[i];
                 if (note.start_tick > suspension_tick ||
                     suspension_tick >= note.start_tick + note.duration)
                   continue;
-                creates_augmented_second =
-                    (i > 0 && formsAugmentedSecond(variation.notes[i - 1].pitch, upper_sus)) ||
-                    (i + 1 < variation.notes.size() &&
-                     formsAugmentedSecond(upper_sus, variation.notes[i + 1].pitch));
+                int melody_previous = i > 0 ? variation.notes[i - 1].pitch : -1;
+                int melody_next =
+                    i + 1 < variation.notes.size() ? variation.notes[i + 1].pitch : -1;
+                if (attempt.clean_joint && i > 0 &&
+                    variation.notes[i - 1].start_tick == preparation_tick)
+                  melody_previous = upper_prep;
+                if (attempt.clean_joint && melody_next >= 0 &&
+                    variation.notes[i + 1].start_tick >= resolution_tick)
+                  melody_next += attempt.landing_offset;
+                creates_augmented_second |=
+                    (melody_previous >= 0 && formsAugmentedSecond(melody_previous, upper_sus)) ||
+                    (melody_next >= 0 && formsAugmentedSecond(upper_sus, melody_next));
               }
             }
           }
           if (creates_augmented_second)
             continue;
-          const int ceiling = std::min({upper_prep, upper_sus, upper_res, upper_window_min}) - 1;
+          const int next_upper_onset = upperOnsetAfter(resolution_tick, nullptr);
+          const int shifted_next_upper =
+              next_upper_onset < 0 ? -1 : next_upper_onset + attempt.landing_offset;
+          const int trill_upper = upper_res + trill_reach;
+          const int final_upper = original_final + attempt.landing_offset;
+          int candidate_window_min = upper_window_min;
+          if (attempt.clean_joint) {
+            std::vector<Tick> sample_ticks{preparation_tick, suspension_tick, resolution_tick};
+            for (const PassacagliaVariation& variation : out.material.passacaglia_variations) {
+              for (const MaterialNote& note : variation.notes) {
+                if (preparation_tick <= note.start_tick &&
+                    note.start_tick < resolution_tick + kTicksPerBeat)
+                  sample_ticks.push_back(note.start_tick);
+              }
+            }
+            candidate_window_min = organ_range::kManualHigh;
+            for (const Tick sample : sample_ticks) {
+              int pitch = upperPitchAt(sample);
+              if (sample == preparation_tick)
+                pitch = upper_prep;
+              else if (sample == suspension_tick)
+                pitch = upper_sus;
+              else if (sample >= resolution_tick && pitch >= 0)
+                pitch += attempt.landing_offset;
+              if (pitch >= 0)
+                candidate_window_min = std::min(candidate_window_min, pitch);
+            }
+          }
+          if (attempt.clean_joint &&
+              ((preceding_prep_upper >= 0 && std::abs(upper_prep - preceding_prep_upper) > 7) ||
+               std::abs(upper_sus - upper_prep) > 7 || std::abs(upper_res - upper_sus) > 7 ||
+               (shifted_next_upper >= 0 && std::abs(shifted_next_upper - upper_res) > 7) ||
+               std::abs(trill_upper - upper_sus) > 7 ||
+               upper_prep <= lowerPitchAt(preparation_tick) ||
+               upper_sus <= lowerPitchAt(suspension_tick) ||
+               upper_res <= lowerPitchAt(resolution_tick) ||
+               trill_upper <= lowerPitchAt(resolution_tick) ||
+               final_upper <= lowerPitchAt(piece_end - kTicksPerBar34)))
+            continue;
+          const int ceiling =
+              std::min({upper_prep, upper_sus, upper_res, candidate_window_min}) - 1;
           for (SuspensionType type :
                {SuspensionType::Sus4_3, SuspensionType::Sus7_6, SuspensionType::Sus9_8}) {
             SuspensionPattern suspension;
@@ -2981,40 +3009,83 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                 (strictAgainst(counterOnsetBefore(preparation_tick), suspension.preparation_pitch,
                                upperOnsetBefore(preparation_tick, nullptr), upper_prep) ||
                  strictAgainst(suspension.preparation_pitch, suspension.suspension_pitch,
-                               upperOnsetBefore(suspension_tick, nullptr), upper_sus) ||
+                               candidate_prior_upper, upper_sus) ||
                  strictAgainst(suspension.suspension_pitch, suspension.resolution_pitch,
                                upper_res_prev, upper_res))) {
               continue;
             }
+            if (attempt.clean_joint &&
+                (upper_prep <= suspension.preparation_pitch ||
+                 upper_sus <= suspension.suspension_pitch ||
+                 upper_res <= suspension.resolution_pitch || upper_prep <= bass_prep ||
+                 upper_sus <= bass_sus || upper_res <= bass_res || trill_upper <= bass_res ||
+                 final_upper <= groundPitchAt(piece_end - kTicksPerBar34)))
+              continue;
+            installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+            if (!installed)
+              continue;
             for (auto& variation : out.material.passacaglia_variations) {
               std::vector<MaterialNote> rewritten;
               rewritten.reserve(variation.notes.size() + 2);
               for (const MaterialNote& note : variation.notes) {
                 const Tick note_end = note.start_tick + note.duration;
-                if (note.start_tick > suspension_tick || suspension_tick >= note_end) {
-                  rewritten.push_back(note);
+                if (!attempt.clean_joint) {
+                  if (note.start_tick > suspension_tick || suspension_tick >= note_end) {
+                    rewritten.push_back(note);
+                    continue;
+                  }
+                  if (note.start_tick < suspension_tick) {
+                    MaterialNote before = note;
+                    before.duration = suspension_tick - note.start_tick;
+                    rewritten.push_back(before);
+                  }
+                  MaterialNote accented = note;
+                  accented.start_tick = suspension_tick;
+                  accented.duration = std::min(note_end, resolution_tick) - suspension_tick;
+                  accented.pitch = static_cast<std::uint8_t>(upper_sus);
+                  rewritten.push_back(accented);
+                  if (note_end > resolution_tick) {
+                    MaterialNote after = note;
+                    after.start_tick = resolution_tick;
+                    after.duration = note_end - resolution_tick;
+                    rewritten.push_back(after);
+                  }
                   continue;
                 }
-                if (note.start_tick < suspension_tick) {
-                  MaterialNote before = note;
-                  before.duration = suspension_tick - note.start_tick;
-                  rewritten.push_back(before);
+                std::array<Tick, 5> cuts = {note.start_tick, note_end, note_end, note_end,
+                                            note_end};
+                std::size_t cut_count = 2;
+                for (const Tick boundary : {preparation_tick, suspension_tick, resolution_tick}) {
+                  if (note.start_tick < boundary && boundary < note_end)
+                    cuts[cut_count++] = boundary;
                 }
-                MaterialNote accented = note;
-                accented.start_tick = suspension_tick;
-                accented.duration = std::min(note_end, resolution_tick) - suspension_tick;
-                accented.pitch = static_cast<std::uint8_t>(upper_sus);
-                rewritten.push_back(accented);
-                if (note_end > resolution_tick) {
-                  MaterialNote after = note;
-                  after.start_tick = resolution_tick;
-                  after.duration = note_end - resolution_tick;
-                  rewritten.push_back(after);
+                if (cut_count > 2) {
+                  std::sort(cuts.begin(), cuts.begin() + static_cast<std::ptrdiff_t>(cut_count));
+                  cut_count = static_cast<std::size_t>(
+                      std::unique(cuts.begin(),
+                                  cuts.begin() + static_cast<std::ptrdiff_t>(cut_count)) -
+                      cuts.begin());
+                }
+                for (std::size_t segment = 0; segment + 1 < cut_count; ++segment) {
+                  MaterialNote part = note;
+                  part.start_tick = cuts[segment];
+                  part.duration = cuts[segment + 1] - cuts[segment];
+                  const Tick midpoint = part.start_tick + part.duration / 2;
+                  if (attempt.clean_joint && midpoint >= preparation_tick &&
+                      midpoint < suspension_tick && note.start_tick <= preparation_tick &&
+                      preparation_tick < note_end)
+                    part.pitch = static_cast<std::uint8_t>(upper_prep);
+                  else if (midpoint >= suspension_tick && midpoint < resolution_tick &&
+                           note.start_tick <= suspension_tick && suspension_tick < note_end)
+                    part.pitch = static_cast<std::uint8_t>(upper_sus);
+                  else if (attempt.clean_joint && midpoint >= resolution_tick)
+                    part.pitch = static_cast<std::uint8_t>(static_cast<int>(note.pitch) +
+                                                           attempt.landing_offset);
+                  rewritten.push_back(part);
                 }
               }
               variation.notes.swap(rewritten);
             }
-            installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
             break;
           }
           if (installed)

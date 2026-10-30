@@ -9,8 +9,8 @@
 // bars {natural, 2x natural, 128}:
 //   1. buildFormFixture -> Composer::run validates Ok (no failures).
 //   2. Determinism: identical request -> byte-identical notes.
-//   3. Ground immutability: the per-bar ground pitch skeleton repeats exactly
-//      every ground period (late cycles may subdivide a bar rhythmically).
+//   3. Ground immutability: the canonical ground events repeat each cycle;
+//      Chaconne's declared terminal coda is checked separately.
 //   4. Bar math is 1440 ticks (last note end ~= bars * 1440).
 //   5. Climax block lands at the arc climax (~80%) and stamps ClimaxPlaced.
 //   6. Density rises toward the climax (V0 note count per cycle).
@@ -23,6 +23,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <tuple>
 #include <vector>
 
 #include "composer/chord_voicing.h"
@@ -148,6 +149,129 @@ TEST(GroundVariationPassacaglia, ValidatesOkAcrossSeedsModesLengths) {
   expectValidatesOk(FormType::Passacaglia);
 }
 
+TEST(GroundVariationPassacaglia, ClosingSuspensionKeepsItsUpperLineConjunct) {
+  const std::array<Case, 4> cases = {{{FormType::Passacaglia, 42, false, 24},
+                                      {FormType::Passacaglia, 1, false, 24},
+                                      {FormType::Passacaglia, 1, true, 24},
+                                      {FormType::Passacaglia, 42, false, 8}}};
+  for (const Case& test_case : cases) {
+    const HarnessFixture fx =
+        build(test_case.form, test_case.seed, test_case.is_minor, test_case.target_bars);
+    const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(result.validation.status, ValidationStatus::Ok)
+        << "seed " << test_case.seed << " minor " << test_case.is_minor << " bars "
+        << test_case.target_bars;
+    ASSERT_EQ(result.notes.size(), result.provenance.size());
+
+    const Tick suspension_tick =
+        static_cast<Tick>(resolvedBars(test_case.form, test_case.target_bars) - 2) * kTicksPerBar34;
+    const Tick preparation_tick = suspension_tick - kTicksPerBeat;
+    const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+    ASSERT_TRUE(
+        std::any_of(fx.material.suspension_patterns.begin(), fx.material.suspension_patterns.end(),
+                    [suspension_tick](const SuspensionPattern& pattern) {
+                      return pattern.voice == 1 && pattern.suspension_tick == suspension_tick &&
+                             pattern.preparation_pitch == pattern.suspension_pitch;
+                    }))
+        << "the closing dissonance must retain a prepared suspension";
+
+    auto material_pitch_at = [&](Tick tick) {
+      int pitch = -1;
+      Tick latest = 0;
+      for (const PassacagliaVariation& variation : fx.material.passacaglia_variations) {
+        for (const MaterialNote& note : variation.notes) {
+          if (note.start_tick <= tick && tick < note.start_tick + note.duration &&
+              (pitch < 0 || note.start_tick >= latest)) {
+            latest = note.start_tick;
+            pitch = note.pitch;
+          }
+        }
+      }
+      return pitch;
+    };
+    const int upper_preparation = material_pitch_at(preparation_tick);
+    const int upper_suspension = material_pitch_at(suspension_tick);
+    const int upper_resolution = material_pitch_at(resolution_tick);
+    ASSERT_GE(upper_preparation, 0);
+    ASSERT_GE(upper_suspension, 0);
+    ASSERT_GE(upper_resolution, 0);
+    const bool eligible_cadence = !test_case.is_minor && test_case.target_bars == 24;
+    if (eligible_cadence) {
+      EXPECT_LE(std::abs(upper_suspension - upper_preparation), 7)
+          << "the approach to the final suspension should stay within a fifth";
+      EXPECT_LE(std::abs(upper_resolution - upper_suspension), 7)
+          << "the suspension's resolution should stay within a fifth";
+    }
+
+    const Tick ground_period = fx.material.passacaglia_ground_cycle;
+    ASSERT_GT(ground_period, 0u);
+    const int ground_preparation =
+        soundingMaterialPitch(fx.material.passacaglia_ground, preparation_tick % ground_period);
+    const int ground_suspension =
+        soundingMaterialPitch(fx.material.passacaglia_ground, suspension_tick % ground_period);
+    ASSERT_GE(ground_preparation, 0);
+    ASSERT_GE(ground_suspension, 0);
+    if (eligible_cadence) {
+      EXPECT_FALSE(formsAntiParallelPerfect(upper_preparation, upper_suspension, ground_preparation,
+                                            ground_suspension))
+          << "the final upper approach should not exchange one perfect interval for another";
+    }
+
+    auto result_pitch_at = [&](VoiceId voice, Tick tick) {
+      int pitch = -1;
+      Tick latest = 0;
+      for (const NoteEvent& note : result.notes) {
+        if (note.voice == voice && note.start_tick <= tick &&
+            tick < note.start_tick + note.duration && (pitch < 0 || note.start_tick >= latest)) {
+          latest = note.start_tick;
+          pitch = note.pitch;
+        }
+      }
+      return pitch;
+    };
+    EXPECT_EQ(result_pitch_at(groundVoice(test_case.form), preparation_tick), ground_preparation);
+    EXPECT_EQ(result_pitch_at(groundVoice(test_case.form), suspension_tick), ground_suspension)
+        << "the closing voicing must preserve the ground at the cadence";
+  }
+}
+
+TEST(GroundVariationPassacaglia, MinimumLengthPreservesTheRunningSixteenthFigure) {
+  const HarnessFixture fx = build(FormType::Passacaglia, 42, false, 8);
+  const Tick figure_start = 41 * kTicksPerBeat;
+  constexpr std::array<std::uint8_t, 8> kFigure = {67, 69, 71, 72, 77, 76, 77, 79};
+  constexpr Tick kSixteenth = kTicksPerBeat / 4;
+  std::array<std::uint8_t, kFigure.size()> found{};
+  std::size_t count = 0;
+  for (const PassacagliaVariation& variation : fx.material.passacaglia_variations) {
+    for (const MaterialNote& note : variation.notes) {
+      if (figure_start <= note.start_tick && note.start_tick < figure_start + kTicksPerBeat * 2) {
+        ASSERT_LT(count, found.size());
+        EXPECT_EQ(note.start_tick, figure_start + static_cast<Tick>(count) * kSixteenth);
+        found[count++] = note.pitch;
+      }
+    }
+  }
+  ASSERT_EQ(count, found.size());
+  EXPECT_EQ(found, kFigure);
+}
+
+TEST(GroundVariationPassacaglia, UnavailableSuspensionDoesNotRewriteTheUpperVoice) {
+  const HarnessFixture fx = build(FormType::Passacaglia, 42, false, 8);
+  const Tick suspension_tick = 6 * kTicksPerBar34;
+  ASSERT_FALSE(std::any_of(
+      fx.material.suspension_patterns.begin(), fx.material.suspension_patterns.end(),
+      [](const SuspensionPattern& pattern) { return pattern.suspension_tick == suspension_tick; }));
+  // The middle voice rests through the first cycle, so its unavailable
+  // suspension must leave the variation's original bar-head tone intact.
+  for (const PassacagliaVariation& variation : fx.material.passacaglia_variations) {
+    if (variation.start_tick <= suspension_tick && suspension_tick < variation.end_tick) {
+      EXPECT_EQ(soundingMaterialPitch(variation.notes, suspension_tick), 71);
+      return;
+    }
+  }
+  FAIL() << "missing upper variation at the interior cadence";
+}
+
 // --- Registration terraces (fixture metadata only, never a note) ------------
 
 TEST(GroundVariationPassacaglia, LongFormDeclaresRegistrationTerraces) {
@@ -212,12 +336,9 @@ void expectGroundImmutable(FormType form, int cycle_bars) {
   for (const Case& c : casesFor(form)) {
     const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
     const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    // Bar-head pitch skeleton of the ground voice. A late cycle may restate a
-    // bar as repeated same-pitch quarters (rhythm-only intensification) and a
-    // decorated statement approaches the ground's next step through a
-    // neighbour inside the bar's last beat, so the invariant is the per-bar
-    // skeleton, with every ground note inside a bar either holding its bar-head
-    // pitch or standing one diatonic step from it.
+    // Check the bar-head pitch skeleton here. Chaconne's exact event stream up
+    // to its declared coda is checked by GroundEventsRepeatExactlyUntilDeclaredCoda;
+    // the final two bars are handled by the coda assertions below.
     const VoiceId gv = groundVoice(c.form);
     std::vector<int> head(static_cast<std::size_t>(resolvedBars(c.form, c.target_bars)), -1);
     for (const auto& n : r.notes) {
@@ -256,6 +377,171 @@ TEST(GroundVariationChaconne, GroundRepeatsEveryPeriod) {
 
 TEST(GroundVariationPassacaglia, GroundRepeatsEveryPeriod) {
   expectGroundImmutable(FormType::Passacaglia, 8);
+}
+
+using GroundEvent = std::tuple<Tick, Tick, std::uint8_t>;
+
+std::vector<GroundEvent> materialGroundCycle(const std::vector<MaterialNote>& notes,
+                                             Tick cycle_start, Tick cycle_ticks) {
+  std::vector<GroundEvent> events;
+  const Tick cycle_end = cycle_start + cycle_ticks;
+  for (const MaterialNote& note : notes) {
+    if (cycle_start <= note.start_tick && note.start_tick < cycle_end)
+      events.emplace_back(note.start_tick - cycle_start, note.duration, note.pitch);
+  }
+  std::sort(events.begin(), events.end());
+  return events;
+}
+
+TEST(GroundVariationPassacaglia, GroundEventsRepeatExactlyAcrossCycles) {
+  constexpr std::array<std::uint32_t, 4> kSeeds = {1u, 2u, 5u, 42u};
+  constexpr std::array<std::uint16_t, 3> kTargetBars = {8u, 24u, 72u};
+  const Tick cycle_ticks = 8 * kTicksPerBar34;
+  for (const std::uint32_t seed : kSeeds) {
+    for (const bool minor : {false, true}) {
+      const std::size_t variant = seed % detail::kGroundVariantCount;
+      const auto& pitches = minor ? detail::kPassacagliaGroundsMinor[variant]
+                                  : detail::kPassacagliaGroundsMajor[variant];
+      std::vector<GroundEvent> expected;
+      for (std::size_t bar = 0; bar < pitches.size(); ++bar)
+        expected.emplace_back(static_cast<Tick>(bar) * kTicksPerBar34, kTicksPerBar34,
+                              pitches[bar]);
+
+      for (const std::uint16_t target_bars : kTargetBars) {
+        const HarnessFixture fx = build(FormType::Passacaglia, seed, minor, target_bars);
+        const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_EQ(result.validation.status, ValidationStatus::Ok)
+            << "seed " << seed << " minor " << minor << " bars " << target_bars;
+        ASSERT_EQ(result.notes.size(), result.provenance.size());
+        const std::size_t total_bars = resolvedBars(FormType::Passacaglia, target_bars);
+        ASSERT_EQ(total_bars % 8u, 0u);
+        const Tick total_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
+        EXPECT_EQ(fx.material.passacaglia_ground_period, total_ticks);
+        EXPECT_EQ(fx.material.passacaglia_ground_cycle, cycle_ticks);
+        EXPECT_EQ(fx.material.passacaglia_ground_split_from, 0u);
+        EXPECT_EQ(fx.material.passacaglia_ground.size(), total_bars)
+            << "material must contain exactly one event per bar";
+        EXPECT_EQ(std::count_if(result.notes.begin(), result.notes.end(),
+                                [](const NoteEvent& note) { return note.voice == 2; }),
+                  total_bars)
+            << "the emitted ground must contain exactly one event per bar";
+
+        for (std::size_t cycle = 0; cycle < total_bars / 8; ++cycle) {
+          const Tick cycle_start = static_cast<Tick>(cycle) * cycle_ticks;
+          const std::vector<GroundEvent> material_events =
+              materialGroundCycle(fx.material.passacaglia_ground, cycle_start, cycle_ticks);
+          EXPECT_EQ(material_events, expected)
+              << "material seed " << seed << " minor " << minor << " cycle " << cycle;
+
+          std::vector<GroundEvent> emitted_events;
+          for (std::size_t index = 0; index < result.notes.size(); ++index) {
+            const NoteEvent& note = result.notes[index];
+            if (note.voice != 2 || note.start_tick < cycle_start ||
+                note.start_tick >= cycle_start + cycle_ticks)
+              continue;
+            emitted_events.emplace_back(note.start_tick - cycle_start, note.duration, note.pitch);
+            EXPECT_EQ(result.provenance[index].source, NoteSource::Material);
+            EXPECT_EQ(result.provenance[index].voice_intent, VoiceIntent::PassacagliaGround);
+            EXPECT_EQ(result.provenance[index].span_id, 0u);
+            EXPECT_TRUE((result.provenance[index].satisfied_rules &
+                         ruleBitMask(RuleBit::PassacagliaGroundReplayed))
+                            .any());
+          }
+          std::sort(emitted_events.begin(), emitted_events.end());
+          EXPECT_EQ(emitted_events, expected)
+              << "emitted seed " << seed << " minor " << minor << " cycle " << cycle;
+        }
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, GroundEventsRepeatExactlyUntilDeclaredCoda) {
+  constexpr std::array<std::uint32_t, 4> kSeeds = {1u, 2u, 5u, 42u};
+  constexpr std::array<std::uint16_t, 5> kTargetBars = {8u, 16u, 48u, 64u, 128u};
+  constexpr Tick kCycleTicks = 4 * kTicksPerBar34;
+
+  for (const std::uint32_t seed : kSeeds) {
+    const std::size_t variant = detail::groundVariantIndex(seed);
+    for (const bool minor : {false, true}) {
+      const auto& pitches =
+          minor ? detail::kChaconneGroundsMinor[variant] : detail::kChaconneGroundsMajor[variant];
+      for (const std::uint16_t target_bars : kTargetBars) {
+        const HarnessFixture fx = build(FormType::Chaconne, seed, minor, target_bars);
+        const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_EQ(result.validation.status, ValidationStatus::Ok)
+            << "seed " << seed << " minor " << minor << " bars " << target_bars;
+        ASSERT_EQ(result.notes.size(), result.provenance.size());
+
+        const std::size_t total_bars = resolvedBars(FormType::Chaconne, target_bars);
+        const Tick total_ticks = static_cast<Tick>(total_bars) * kTicksPerBar34;
+        EXPECT_EQ(fx.material.ground_bass_period, total_ticks);
+        EXPECT_EQ(fx.material.ground_bass_cycle, kCycleTicks);
+        ASSERT_EQ(fx.material.coda_extensions.size(), 1u);
+        const CodaDecl& coda = fx.material.coda_extensions.front();
+        ASSERT_EQ(coda.voice, 2u);
+        ASSERT_FALSE(coda.notes.empty());
+        Tick coda_start = coda.notes.front().start_tick;
+        for (const MaterialNote& note : coda.notes)
+          coda_start = std::min(coda_start, note.start_tick);
+        EXPECT_EQ(coda_start, total_ticks - 2 * kTicksPerBar34)
+            << "the declared coda occupies the final two bars";
+        ASSERT_EQ((total_bars - 2) % 4u, 2u)
+            << "the ground-bearing portion ends partway through its final cycle";
+
+        const Span* ground_span = nullptr;
+        const Span* coda_span = nullptr;
+        for (const Span& span : fx.voice_plan.spans) {
+          if (span.voice != 2)
+            continue;
+          if (span.intent == VoiceIntent::GroundCarrier)
+            ground_span = &span;
+          else if (span.intent == VoiceIntent::CodaCarrier)
+            coda_span = &span;
+        }
+        ASSERT_NE(ground_span, nullptr);
+        ASSERT_NE(coda_span, nullptr);
+        EXPECT_EQ(ground_span->start_tick, 0u);
+        EXPECT_EQ(ground_span->end_tick, coda_start);
+        EXPECT_EQ(coda_span->start_tick, coda_start);
+        EXPECT_EQ(coda_span->end_tick, total_ticks);
+
+        std::vector<GroundEvent> expected;
+        for (std::size_t bar = 0; bar < total_bars; ++bar) {
+          const Tick onset = static_cast<Tick>(bar) * kTicksPerBar34;
+          if (onset >= coda_start)
+            continue;
+          expected.emplace_back(onset, kTicksPerBar34, pitches[bar % pitches.size()]);
+        }
+
+        std::vector<GroundEvent> material_events;
+        for (const MaterialNote& note : fx.material.ground_bass) {
+          if (note.start_tick < coda_start)
+            material_events.emplace_back(note.start_tick, note.duration, note.pitch);
+        }
+        std::sort(material_events.begin(), material_events.end());
+        EXPECT_EQ(material_events, expected)
+            << "material seed " << seed << " minor " << minor << " bars " << target_bars;
+
+        std::vector<GroundEvent> emitted_events;
+        for (std::size_t index = 0; index < result.notes.size(); ++index) {
+          const NoteEvent& note = result.notes[index];
+          if (note.voice != 2 || note.start_tick >= coda_start)
+            continue;
+          emitted_events.emplace_back(note.start_tick, note.duration, note.pitch);
+          EXPECT_EQ(result.provenance[index].source, NoteSource::Material);
+          EXPECT_EQ(result.provenance[index].voice_intent, VoiceIntent::GroundCarrier);
+          EXPECT_EQ(result.provenance[index].span_id, ground_span->id);
+          EXPECT_TRUE(
+              (result.provenance[index].satisfied_rules & ruleBitMask(RuleBit::GroundBassReplayed))
+                  .any());
+        }
+        std::sort(emitted_events.begin(), emitted_events.end());
+        EXPECT_EQ(emitted_events, expected)
+            << "emitted seed " << seed << " minor " << minor << " bars " << target_bars;
+      }
+    }
+  }
 }
 
 TEST(GroundVariationChaconne, TerminalCadenceResolvesGroundToTonic) {
@@ -1100,75 +1386,6 @@ TEST(GroundVariationPassacaglia, VariationCyclesAlternatePatterns) {
   }
 }
 
-TEST(GroundVariationPassacaglia, GroundIntensifiesRhythmicallyInLateCycles) {
-  // From the final third of the cycles on, the ground (V2) restates each bar as
-  // three same-pitch quarters instead of one dotted half; earlier cycles keep
-  // the long notes, and the bar-head pitch skeleton never changes. The piece's
-  // final bar stays one unsplit dotted half (the bass joins the held close),
-  // and so does a bar whose successor restates the same pitch and hammers
-  // (the cycle seam's tonic return) -- hammering both sides of the seam would
-  // chain six same-pitch quarters, past the corpus repeated-note envelope.
-  for (std::uint32_t seed : {1u, 2u, 3u}) {
-    const HarnessFixture fx = build(FormType::Passacaglia, seed, /*minor=*/true, /*bars=*/48);
-    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
-
-    const int cycles = 48 / 8;
-    const Tick period = 8 * kTicksPerBar34;
-    const Tick split_from = fx.material.passacaglia_ground_split_from;
-    ASSERT_GT(split_from, 0);
-    EXPECT_EQ(split_from, static_cast<Tick>(cycles - (cycles + 2) / 3) * period);
-
-    // Collect V2 (ground) notes per bar.
-    std::vector<std::vector<const NoteEvent*>> bars(48);
-    for (const auto& n : r.notes) {
-      if (n.voice != 2)
-        continue;
-      const std::size_t bar = static_cast<std::size_t>(n.start_tick / kTicksPerBar34);
-      if (bar < bars.size())
-        bars[bar].push_back(&n);
-    }
-    for (std::size_t bar = 0; bar < bars.size(); ++bar) {
-      ASSERT_FALSE(bars[bar].empty()) << "seed " << seed << " bar " << bar;
-      const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar34;
-      // The material carries the whole ground line, one bar-head tone per bar,
-      // because consecutive statements no longer share a treatment.
-      const auto skeletonAt = [&](Tick tick) {
-        std::uint8_t pitch = 0;
-        for (const MaterialNote& mn : fx.material.passacaglia_ground) {
-          if (mn.start_tick == tick)
-            return mn.pitch;
-        }
-        return pitch;
-      };
-      const std::uint8_t skeleton = skeletonAt(bar_tick);
-      const std::uint8_t next_skeleton = skeletonAt(bar_tick + kTicksPerBar34);
-      const bool successor_hammers =
-          bar + 2 < bars.size() &&  // the successor is not the unsplit final bar
-          static_cast<Tick>(bar + 1) * kTicksPerBar34 >= split_from;
-      const bool sustained_seam = successor_hammers && next_skeleton == skeleton;
-      if (bar_tick < split_from || bar + 1 == bars.size() || sustained_seam) {
-        // Early cycles -- the final bar, whose ground joins the held closing
-        // chord, and the same-pitch seam into a hammering successor -- state the
-        // structural tone as one long note. A statement the diminution decorates
-        // approaches the ground's next step through a neighbour inside the bar's
-        // last beat, so the tone still holds every beat onset of the bar.
-        EXPECT_LE(bars[bar].size(), 3u) << "seed " << seed << " bar " << bar;
-        EXPECT_GE(bars[bar][0]->duration, 2 * kTicksPerBeat) << "seed " << seed << " bar " << bar;
-      } else {
-        // Late cycles: three same-pitch quarters (martellato).
-        EXPECT_EQ(bars[bar].size(), 3u) << "seed " << seed << " bar " << bar;
-        for (const NoteEvent* n : bars[bar]) {
-          EXPECT_EQ(n->duration, kTicksPerBeat);
-          EXPECT_EQ(n->pitch, skeleton) << "pitch must never change";
-        }
-      }
-      EXPECT_EQ(bars[bar][0]->pitch, skeleton)
-          << "seed " << seed << " bar " << bar << ": bar-head skeleton altered";
-    }
-  }
-}
-
 TEST(GroundVariationPassacaglia, PatternedCyclesStayAboveCounterFigurationBand) {
   // The center-anchored patterns (sawtooth / figura corta) are lifted an octave
   // so V0 never dips into the V1 counter-figuration band (C3-B3 + shift); a dip
@@ -1183,14 +1400,10 @@ TEST(GroundVariationPassacaglia, PatternedCyclesStayAboveCounterFigurationBand) 
   }
 }
 
-// The late-cycle martellato restates each ground bar as repeated same-pitch
-// quarters, and the ground's last bar carries the same pitch as the next
-// cycle's first bar (the BWV582-style tonic return). With two or more
-// adjacent split cycles the seam chained SIX same-pitch quarters -- past the
-// corpus repeated-note envelope (max run 4) -- so the seam-side note now
-// stays a sustained long note. The ground's same-pitch run must stay inside
-// the envelope at a length with several split cycles, for every seed-variant
-// ground and both modes.
+// The seed-selected eight-bar ground pitch line repeats exactly, with one
+// sustained event per bar. Adjacent equal pitches, including at cycle seams,
+// must stay within the corpus repeated-note envelope (max run 4) for every
+// seed-variant ground and both modes.
 TEST(GroundVariationPassacaglia, GroundSplitSeamStaysInRepeatedRunEnvelope) {
   for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u, 6u}) {
     for (bool minor : {false, true}) {
