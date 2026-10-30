@@ -369,7 +369,7 @@ void bach_destroy(BachHandle handle) {
 // ============================================================================
 
 BachError bach_generate_from_json(BachHandle handle, const char* json, size_t length) {
-  if (!handle || !json) {
+  if (!handle) {
     return BACH_ERROR_INVALID_PARAM;
   }
 
@@ -381,6 +381,10 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
   instance->generated_json.clear();
   instance->provenance_json.clear();
   instance->diagnostic_json.clear();
+
+  if (!json) {
+    return BACH_ERROR_INVALID_PARAM;
+  }
 
   try {
     // 1. Parse + validate the JSON config.

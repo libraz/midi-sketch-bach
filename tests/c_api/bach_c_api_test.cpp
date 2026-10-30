@@ -190,6 +190,48 @@ TEST(BachCApiTest, FailedRegenerationClearsThePublicResultSnapshot) {
   EXPECT_EQ(bach_get_info_json(owner.get()), nullptr);
 }
 
+TEST(BachCApiTest, NullJsonClearsSuccessfulSnapshotAndHandleRemainsUsable) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+  ASSERT_EQ(generate(owner.get(), validConfig(501)), BACH_OK);
+
+  BachMidiData* midi = bach_get_midi(owner.get());
+  ASSERT_NE(midi, nullptr);
+  EXPECT_GT(midi->size, 0u);
+  bach_free_midi(midi);
+  BachEventData* events = bach_get_events(owner.get());
+  ASSERT_NE(events, nullptr);
+  bach_free_events(events);
+  BachEventData* generated = bach_get_generated(owner.get());
+  ASSERT_NE(generated, nullptr);
+  bach_free_events(generated);
+  BachEventData* provenance = bach_get_provenance(owner.get());
+  ASSERT_NE(provenance, nullptr);
+  bach_free_events(provenance);
+  ASSERT_NE(bach_get_info(owner.get()), nullptr);
+  BachEventData* info_json = bach_get_info_json(owner.get());
+  ASSERT_NE(info_json, nullptr);
+  bach_free_events(info_json);
+
+  EXPECT_EQ(bach_generate_from_json(owner.get(), nullptr, 0), BACH_ERROR_INVALID_PARAM);
+  EXPECT_EQ(bach_get_midi(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_events(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_generated(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_provenance(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info_json(owner.get()), nullptr);
+
+  ASSERT_EQ(generate(owner.get(), validConfig(502)), BACH_OK);
+  midi = bach_get_midi(owner.get());
+  ASSERT_NE(midi, nullptr);
+  bach_free_midi(midi);
+  EXPECT_NE(takeJson(bach_get_events(owner.get())), "");
+  EXPECT_NE(takeJson(bach_get_generated(owner.get())), "");
+  EXPECT_NE(takeJson(bach_get_provenance(owner.get())), "");
+  ASSERT_NE(bach_get_info(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_info(owner.get())->seed_used, 502u);
+}
+
 TEST(BachCApiTest, ExposesGeneratedAndProvenanceJsonAfterSuccessfulGeneration) {
   BachHandleOwner owner;
   ASSERT_NE(owner.get(), nullptr);
