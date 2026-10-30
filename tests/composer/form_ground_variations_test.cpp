@@ -7,7 +7,9 @@
 //
 // For both forms, across seeds {1,5,42,99} x modes {Major,Minor} x
 // bars {natural, 2x natural, 128}:
-//   1. buildFormFixture -> Composer::run validates Ok (no failures).
+//   1. buildFormFixture -> Composer::run validates Ok (no failures), and the
+//      decorated, placed array passes the product's FinalScore gate, for every
+//      character.
 //   2. Determinism: identical request -> byte-identical notes.
 //   3. Ground immutability: the canonical ground events repeat each cycle;
 //      Chaconne's declared terminal coda is checked separately.
@@ -31,11 +33,15 @@
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/provenance.h"
+#include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
+#include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
@@ -46,12 +52,19 @@ constexpr RuleIdMask bit(RuleBit b) {
   return ruleBitMask(b);
 }
 
+// Every character the ground forms admit; the builder reads it (the figuration
+// density tier), so a sweep over one character covers one quarter of the notes.
+constexpr std::array<SubjectCharacter, 4> kCharacters = {
+    {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+     SubjectCharacter::Restless}};
+
 // Build a fixture for a ground-variation form, asserting the director succeeds.
-HarnessFixture build(FormType form, std::uint32_t seed, bool is_minor, std::uint16_t target_bars) {
+HarnessFixture build(FormType form, std::uint32_t seed, bool is_minor, std::uint16_t target_bars,
+                     SubjectCharacter character = SubjectCharacter::Severe) {
   ComposeRequest req;
   req.form = form;
   req.is_minor = is_minor;
-  req.character = SubjectCharacter::Severe;
+  req.character = character;
   req.target_bars = target_bars;
   req.seed = seed;
   HarnessFixture fx;
@@ -126,23 +139,54 @@ std::vector<std::uint8_t> groundPitches(const ComposeResult& r, VoiceId ground_v
 
 // --- 1. Validation Ok for every case ---------------------------------------
 
-void expectValidatesOk(FormType form) {
-  for (const Case& c : casesFor(form)) {
-    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
-    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-    EXPECT_TRUE(r.validation.failures.empty())
-        << "form " << static_cast<int>(form) << " seed " << c.seed << " minor " << c.is_minor
-        << " bars " << c.target_bars << " first failure="
-        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
-    EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
-    // Both ground forms realise their harmony in three voices.
-    EXPECT_EQ(fx.voice_plan.num_voices, 3);
-    ASSERT_FALSE(r.notes.empty());
+ComposeRequest requestFor(const Case& c, SubjectCharacter character) {
+  ComposeRequest req;
+  req.form = c.form;
+  req.is_minor = c.is_minor;
+  req.character = character;
+  req.target_bars = c.target_bars;
+  req.seed = c.seed;
+  return req;
+}
+
+// Generation scope plus the gate the product ships behind, for every character.
+void expectValidatesOk(FormType form, std::vector<Case> cases) {
+  for (const Case& c : cases) {
+    for (SubjectCharacter character : kCharacters) {
+      const test::ProductGateResult gate = test::runProductGate(requestFor(c, character));
+      ASSERT_TRUE(gate.built);
+      const ComposeResult& r = gate.composed;
+      EXPECT_TRUE(r.validation.failures.empty())
+          << "form " << static_cast<int>(form) << " character " << static_cast<int>(character)
+          << " seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+          << " first failure="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      EXPECT_EQ(r.validation.status, ValidationStatus::Ok);
+      EXPECT_TRUE(gate.placed);
+      EXPECT_TRUE(gate.failures.empty())
+          << "form " << static_cast<int>(form) << " character " << static_cast<int>(character)
+          << " seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+          << " shipped failure=" << (gate.failures.empty() ? "" : gate.failures.front().rule_id);
+      // Both ground forms realise their harmony in three voices.
+      EXPECT_EQ(gate.fixture.voice_plan.num_voices, 3);
+      ASSERT_FALSE(r.notes.empty());
+    }
   }
+}
+
+void expectValidatesOk(FormType form) {
+  expectValidatesOk(form, casesFor(form));
 }
 
 TEST(GroundVariationChaconne, ValidatesOkAcrossSeedsModesLengths) {
   expectValidatesOk(FormType::Chaconne);
+}
+
+// The middle voice's cadential approach tone holds until the final bar, so it
+// must stay under every variation tone over that sustain; the descending run
+// of these requests used to cross it.
+TEST(GroundVariationChaconne, CadentialApproachStaysUnderTheVariationRun) {
+  expectValidatesOk(FormType::Chaconne, {{FormType::Chaconne, 3, true, 128}});
 }
 
 TEST(GroundVariationPassacaglia, ValidatesOkAcrossSeedsModesLengths) {
@@ -1091,6 +1135,47 @@ TEST(GroundVariationPassacaglia, CounterFigurationOffBeatsAreJudgedAgainstMoving
                              "with a concurrently moving voice";
 }
 
+// The closing suspension resolves onto a tone of the declared chord it resolves
+// under (the dominant), and neither it nor its dissonance spells the leading
+// tone against the minor third with V0 -- in both modes, every character and
+// every length the director resolves.
+TEST(GroundVariationPassacaglia, ClosingSuspensionResolvesToADominantChordTone) {
+  for (bool minor : {false, true}) {
+    for (SubjectCharacter character : kCharacters) {
+      for (std::uint16_t bars : {24, 54, 72, 96, 128}) {
+        for (std::uint32_t seed = 1; seed <= 4; ++seed) {
+          const HarnessFixture fx = build(FormType::Passacaglia, seed, minor, bars, character);
+          const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          Tick end = 0;
+          for (const NoteEvent& note : r.notes)
+            end = std::max(end, note.start_tick + note.duration);
+          const Tick resolution_tick = end - 2 * kTicksPerBar34 + kTicksPerBeat;
+          const detail::PcMask chord = rule_helpers::chordPcsAt(fx.harmony, resolution_tick);
+          for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+            const NoteEvent& note = r.notes[idx];
+            if (r.provenance[idx].voice_intent != VoiceIntent::SuspensionCarrier ||
+                note.start_tick != resolution_tick)
+              continue;
+            EXPECT_NE(chord & (1u << (note.pitch % 12)), 0u)
+                << "minor " << minor << " character " << static_cast<int>(character) << " bars "
+                << bars << " seed " << seed << " resolution " << static_cast<int>(note.pitch);
+            for (const NoteEvent& other : r.notes) {
+              if (other.voice != 0 || other.start_tick >= resolution_tick + kTicksPerBeat ||
+                  other.start_tick + other.duration <= resolution_tick)
+                continue;
+              const int pcs[2] = {note.pitch % 12, other.pitch % 12};
+              EXPECT_FALSE((pcs[0] == interval::kMajor7th && pcs[1] == interval::kMinor3rd) ||
+                           (pcs[1] == interval::kMajor7th && pcs[0] == interval::kMinor3rd))
+                  << "minor " << minor << " character " << static_cast<int>(character) << " bars "
+                  << bars << " seed " << seed << " tick " << other.start_tick;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // The octave gate is closed for this form, so the shipped surface must carry no
 // true parallel octave anywhere -- not only at the bar heads the test above
 // samples. Walk every voice pair over the union of onsets, which is the reading
@@ -1100,8 +1185,11 @@ TEST(GroundVariationPassacaglia, CounterFigurationOffBeatsAreJudgedAgainstMoving
 // shipped ratchet is what tracks them.
 TEST(GroundVariationPassacaglia, ShippedTextureIsFreeOfParallelOctaves) {
   for (const Case& c : casesFor(FormType::Passacaglia)) {
-    const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars);
-    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    const test::ProductGateResult gate =
+        test::runProductGate(requestFor(c, SubjectCharacter::Severe));
+    ASSERT_TRUE(gate.built);
+    const HarnessFixture& fx = gate.fixture;
+    const ComposeResult& r = gate.shipped;
     std::vector<Tick> onsets;
     for (const NoteEvent& note : r.notes)
       onsets.push_back(note.start_tick);
@@ -1130,7 +1218,7 @@ TEST(GroundVariationPassacaglia, ShippedTextureIsFreeOfParallelOctaves) {
             continue;
           }
           if (upper_prev >= 0 && lower_prev >= 0 && std::abs(upper_now - lower_now) % 12 == 0) {
-            EXPECT_FALSE(formsStrictPerfectParallel(upper_prev, upper_now, lower_prev, lower_now))
+            EXPECT_FALSE(isStrictParallelPerfect(upper_prev, upper_now, lower_prev, lower_now))
                 << "seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
                 << " tick " << tick << " v" << static_cast<int>(upper) << "/v"
                 << static_cast<int>(lower);

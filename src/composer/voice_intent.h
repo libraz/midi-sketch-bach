@@ -14,15 +14,7 @@ enum RuleBit : std::uint8_t;
 
 // Musical role assigned to a voice over a time span.
 //
-// Values mirror the legacy bach::VoiceIntent enum (src/fugue/thematic_plan.h),
-// but this header is declared independently so the composer subsystem does
-// NOT include the legacy thematic_plan header. The legacy header also
-// declares ThematicProtectionLevel and ViolationBudget, concepts the composer
-// subsystem intentionally does not adopt. Pulling thematic_plan.h would
-// reintroduce that vocabulary into the composer's translation units.
-//
-// Boundary enforced by ci/check_composer_isolation.sh (forbidden include
-// pattern "#include \"fugue/thematic_plan").
+// The composer's own role enum; it depends on no other subsystem's header.
 enum class VoiceIntent : std::uint8_t {
   // Voice carrying the protected subject material. Pitches and durations
   // are inputs to candidate search, not search outputs.
@@ -193,7 +185,7 @@ enum class VoiceIntent : std::uint8_t {
   // PassacagliaVariation replays one upper-voice variation block over one ground
   // cycle. CandidateSearch stamps PassacagliaGroundReplayed on the ground notes
   // and VariationApplied on every variation note (OR ClimaxPlaced when the
-  // variation block is flagged is_climax — the dynamic / registral peak placed
+  // variation block is flagged is_climax — the densest design block, placed
   // mid- and end-piece). The ground is immutable: its cycle-folded
   // pitches are checked by the Validator's passacaglia_ground_immutable rule.
   PassacagliaGround = 26,

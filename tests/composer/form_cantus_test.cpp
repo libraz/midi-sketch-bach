@@ -4,8 +4,8 @@
 // Both builders honour ResolvedRequest length / mode / character / arc and
 // derive all material from (seed, indices) only. These tests cover, across the
 // seeds {1,5,42,99} x modes {Major,Minor} x bars {natural, 2x, 128} matrix:
-//   * end-to-end validation (the full Composer runs cleanly), and determinism
-//     (the same request yields byte-identical notes),
+//   * end-to-end validation behind the product gate for every admissible
+//     character, and determinism (the same request yields byte-identical notes),
 // plus the per-form structural contracts:
 //   Chorale: a whole-note CF tone per bar on V1 downbeats matching the
 //     immutable skeleton; the final CF tone is the tonic; phrase cadence degrees
@@ -35,6 +35,7 @@
 #include "composer/minor_material.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
@@ -64,7 +65,7 @@ std::array<std::uint16_t, 3> sweepBars(FormType form) {
 }
 
 // Only Severe / Noble are admissible for the chorale prelude; pick a per-mode
-// admissible character so the sweep exercises both characters.
+// admissible character for the structural tests below.
 SubjectCharacter choraleCharacter(bool minor) {
   return minor ? SubjectCharacter::Noble : SubjectCharacter::Severe;
 }
@@ -73,40 +74,49 @@ constexpr std::array<std::uint32_t, 4> kSeeds = {{1, 5, 42, 99}};
 
 // --- Shared: validation + determinism across the full matrix ----------------
 
-TEST(FormCantusMatrix, ChoraleValidatesCleanAcrossMatrix) {
+// Judged behind the gate the product ships behind -- decoration, compass
+// placement, FinalScore validation and the counterpoint budget -- because
+// Generation-scope validation exempts the carrier-only vertical findings that
+// make the product refuse a request.
+void expectShipsCleanAcrossMatrix(FormType form, const std::vector<SubjectCharacter>& characters,
+                                  const std::vector<std::uint32_t>& seeds) {
   for (bool minor : {false, true}) {
-    for (std::uint32_t seed : kSeeds) {
-      for (std::uint16_t bars : sweepBars(FormType::ChoralePrelude)) {
-        const HarnessFixture fx =
-            build(FormType::ChoralePrelude, minor, choraleCharacter(minor), bars, seed);
-        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
-            << "minor=" << minor << " seed=" << seed << " bars=" << bars;
-        EXPECT_TRUE(r.validation.failures.empty())
-            << "minor=" << minor << " seed=" << seed << " bars=" << bars << " first="
-            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
-        EXPECT_FALSE(r.notes.empty());
+    for (SubjectCharacter character : characters) {
+      for (std::uint32_t seed : seeds) {
+        for (std::uint16_t bars : sweepBars(form)) {
+          ComposeRequest req;
+          req.form = form;
+          req.is_minor = minor;
+          req.character = character;
+          req.target_bars = bars;
+          req.seed = seed;
+          const test::ProductGateResult gate = test::runProductGate(req);
+          ASSERT_TRUE(gate.built);
+          EXPECT_TRUE(gate.placed);
+          EXPECT_TRUE(gate.failures.empty())
+              << "minor=" << minor << " character=" << static_cast<int>(character)
+              << " seed=" << seed << " bars=" << bars
+              << " first=" << (gate.failures.empty() ? "" : gate.failures.front().rule_id);
+          EXPECT_FALSE(gate.shipped.notes.empty());
+        }
       }
     }
   }
 }
 
+TEST(FormCantusMatrix, ChoraleValidatesCleanAcrossMatrix) {
+  // Seed 2 is the severe 128-bar case whose walking bass used to keep a true
+  // parallel fifth into a bar head.
+  expectShipsCleanAcrossMatrix(FormType::ChoralePrelude,
+                               {SubjectCharacter::Severe, SubjectCharacter::Noble},
+                               {1, 2, 5, 42, 99});
+}
+
 TEST(FormCantusMatrix, GoldbergValidatesCleanAcrossMatrix) {
-  for (bool minor : {false, true}) {
-    for (std::uint32_t seed : kSeeds) {
-      for (std::uint16_t bars : sweepBars(FormType::GoldbergVariations)) {
-        const HarnessFixture fx =
-            build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, bars, seed);
-        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
-            << "minor=" << minor << " seed=" << seed << " bars=" << bars;
-        EXPECT_TRUE(r.validation.failures.empty())
-            << "minor=" << minor << " seed=" << seed << " bars=" << bars << " first="
-            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
-        EXPECT_FALSE(r.notes.empty());
-      }
-    }
-  }
+  expectShipsCleanAcrossMatrix(FormType::GoldbergVariations,
+                               {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                SubjectCharacter::Noble, SubjectCharacter::Restless},
+                               {kSeeds.begin(), kSeeds.end()});
 }
 
 // Determinism: the same request rebuilds byte-identical notes (pitch, tick,

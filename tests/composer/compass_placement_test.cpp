@@ -4,13 +4,20 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
+#include "application/composition_service.h"
 #include "composer/composer.h"
+#include "composer/counterpoint_budget.h"
+#include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
+#include "composer/harness_fixture.h"
 #include "composer/material.h"
+#include "composer/ornament_pass.h"
 #include "composer/provenance.h"
+#include "composer/validator.h"
 #include "core/basic_types.h"
 #include "core/instrument_program.h"
 #include "core/pitch_utils.h"
@@ -130,17 +137,103 @@ TEST(CompassPlacementTest, RejectedPlacementLeavesTheScoreAsComposed) {
     EXPECT_EQ(result.notes[idx].pitch, before.notes[idx].pitch);
 }
 
-TEST(CompassPlacementTest, PreferredCompassNeverMovesNotes) {
-  ComposeResult result = wideScore();
-  ASSERT_FALSE(pitchRangeFor(InstrumentType::Harpsichord).hard_limit);
+// A three-voice chaconne-shaped score spanning 36-92 (56 semitones): it fits the
+// violin compass 36-96 in C, but in G neither +7 (43-99) nor -5 (31-87) does.
+ComposeResult violinScore() {
+  ComposeResult result;
+  const std::uint8_t upper[2][4] = {{72, 74, 76, 77}, {86, 88, 90, 92}};
+  for (int bar = 0; bar < 2; ++bar) {
+    for (int beat = 0; beat < 4; ++beat) {
+      addNote(&result, static_cast<Tick>(bar) * kTicksPerBar + beat * kTicksPerBeat, kTicksPerBeat,
+              upper[bar][beat], 0);
+    }
+    addNote(&result, static_cast<Tick>(bar) * kTicksPerBar, kTicksPerBar, 60, 1);
+    addNote(&result, static_cast<Tick>(bar) * kTicksPerBar, kTicksPerBar, 36, 2);
+  }
+  return result;
+}
+
+// The violin's compass is a preferred range rather than a hard limit, and it is
+// placed by the same mechanism: where no whole-octave displacement fits, the bar
+// holding the outside notes moves an octave inward.
+TEST(CompassPlacementTest, PreferredCompassIsPlacedLikeAHardOne) {
+  ASSERT_FALSE(pitchRangeFor(InstrumentType::Violin).hard_limit);
+  ComposeResult result = violinScore();
+  const auto placement = placeInOutputCompass(&result, Material{}, HarmonicPlan{}, Key::G,
+                                              InstrumentType::Violin, kTicksPerBar, kAcceptAll);
+  ASSERT_TRUE(placement.has_value());
+  EXPECT_GT(placement->displaced_notes, 0u);
+  const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Violin);
+  for (const NoteEvent& note : result.notes) {
+    const int sounding =
+        static_cast<int>(note.pitch) + keyTranspositionSemitones(Key::G) + placement->octave_shift;
+    EXPECT_GE(sounding, static_cast<int>(range.low));
+    EXPECT_LE(sounding, static_cast<int>(range.high));
+  }
+}
+
+// The same score in a key where a whole-octave displacement fits is left as
+// composed, at the displacement the writer would have chosen anyway.
+TEST(CompassPlacementTest, PreferredCompassLeavesAFittingScoreUntouched) {
+  ComposeResult result = violinScore();
   const ComposeResult before = result;
-  const auto placement =
-      placeInOutputCompass(&result, Material{}, HarmonicPlan{}, Key::D, InstrumentType::Harpsichord,
-                           kTicksPerBar, kAcceptAll);
+  const auto placement = placeInOutputCompass(&result, Material{}, HarmonicPlan{}, Key::C,
+                                              InstrumentType::Violin, kTicksPerBar, kAcceptAll);
   ASSERT_TRUE(placement.has_value());
   EXPECT_EQ(placement->displaced_notes, 0u);
+  EXPECT_EQ(placement->octave_shift,
+            selectOutputOctaveShift(before.notes, Key::C, InstrumentType::Violin).value());
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx)
     EXPECT_EQ(result.notes[idx].pitch, before.notes[idx].pitch);
+}
+
+// The chaconne spans 56 semitones at 128 bars, which no whole octave fits
+// inside the violin compass in G, D or F minor; every note of the placed piece
+// must still sound inside it.
+TEST(CompassPlacementTest, ChaconneSoundsInsideTheViolinCompassInEveryKey) {
+  const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Violin);
+  for (Key key : {Key::C, Key::G, Key::D, Key::F}) {
+    for (std::uint32_t seed : {1u, 2u, 4u}) {
+      ComposeRequest request;
+      request.form = FormType::Chaconne;
+      request.is_minor = key != Key::C;
+      request.character = SubjectCharacter::Noble;
+      request.target_bars = 128;
+      request.seed = seed;
+      HarnessFixture fixture;
+      ASSERT_EQ(buildFormFixture(request, &fixture), FormDirectorStatus::Ok);
+      ComposeResult result = Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+      std::uint32_t total = 0;
+      for (const NoteEvent& note : result.notes)
+        total = std::max(total, note.start_tick + note.duration);
+      OrnamentParams ornament;
+      ornament.character = request.character;
+      ornament.instrument = InstrumentType::Violin;
+      ornament.mode = request.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+      ornament.seed = seed;
+      ornament.bpm = application::kDefaultBpm;
+      resolveFixtureOrnamentContext(fixture, request.form, total, &ornament);
+      applyOrnamentPass(result, ornament);
+      const auto placement = placeInOutputCompass(
+          &result, fixture.material, fixture.harmony, key, InstrumentType::Violin,
+          fixture.harmony.ticksPerBar(), [&](const ComposeResult& placed) {
+            ValidationReport report =
+                Validator{}.validate(placed.notes, placed.provenance, fixture.harmony,
+                                     fixture.material, ValidationScope::FinalScore);
+            applyCounterpointBudget(request.form, &report);
+            return report.failures.empty();
+          });
+      ASSERT_TRUE(placement.has_value());
+      for (const NoteEvent& note : result.notes) {
+        const int sounding =
+            static_cast<int>(note.pitch) + keyTranspositionSemitones(key) + placement->octave_shift;
+        EXPECT_GE(sounding, static_cast<int>(range.low))
+            << "key " << static_cast<int>(key) << " seed " << seed;
+        EXPECT_LE(sounding, static_cast<int>(range.high))
+            << "key " << static_cast<int>(key) << " seed " << seed;
+      }
+    }
+  }
 }
 
 }  // namespace

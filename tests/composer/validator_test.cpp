@@ -1797,6 +1797,64 @@ TEST(ValidatorTest, FourThreeDeclarationWithMismatchedResolutionFailsClosed) {
   EXPECT_TRUE(hasRule(r, "suspension_preparation"));
 }
 
+namespace {
+
+// ii (D, `prep_quality`) for bar 0, V (G) for bar 1, in C major.
+HarmonicPlan twoToFive(ChordQuality prep_quality) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = false;
+  ChordEvent two;
+  two.start_tick = 0;
+  two.root_pc = 2;
+  two.quality = prep_quality;
+  plan.chords.push_back(two);
+  ChordEvent five;
+  five.start_tick = kTicksPerBar;
+  five.root_pc = 7;
+  five.quality = ChordQuality::Major;
+  plan.chords.push_back(five);
+  return plan;
+}
+
+// A 4-3 over G2 whose fourth is prepared on beat 4 of the ii bar over D3.
+ValidationReport validateIiFourThree(int prepared, ChordQuality prep_quality) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
+  std::vector<NoteEvent> notes = {
+      makeNote(prep_tick, kTicksPerBeat, static_cast<std::uint8_t>(prepared), 0),
+      makeNote(suspension_tick, kTicksPerBeat, static_cast<std::uint8_t>(prepared), 0),
+      makeNote(resolution_tick, kTicksPerBeat, static_cast<std::uint8_t>(prepared - 1), 0),
+      makeNote(0, kTicksPerBar, 50, 1),                // D3 under the ii bar
+      makeNote(suspension_tick, kTicksPerBar, 43, 1),  // G2 under V
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  Material material;
+  material.suspension_patterns.push_back({SuspensionType::Sus4_3, prep_tick, suspension_tick,
+                                          resolution_tick, static_cast<std::uint8_t>(prepared),
+                                          static_cast<std::uint8_t>(prepared),
+                                          static_cast<std::uint8_t>(prepared - 1), 0});
+  return Validator{}.validate(notes, prov, twoToFive(prep_quality), material);
+}
+
+}  // namespace
+
+// C5 over D3 is a minor seventh, dissonant over the bass, but it is the seventh
+// of the declared ii7: the prepared seventh the ii7 - V 4-3 cadence rests on.
+TEST(ValidatorTest, SuspensionPreparedAsTheDeclaredChordSeventhIsAccepted) {
+  EXPECT_FALSE(hasRule(validateIiFourThree(72, ChordQuality::Minor7), "suspension_preparation"));
+}
+
+// The same C5 under a plain ii triad has no declared seventh to be, and a
+// dissonant tone that belongs to no declared chord is refused whatever the
+// chord: the exception is the declared seventh and nothing else.
+TEST(ValidatorTest, DissonantPreparationOutsideTheDeclaredSeventhStillFails) {
+  EXPECT_TRUE(hasRule(validateIiFourThree(72, ChordQuality::Minor), "suspension_preparation"));
+  // E5 over D3 is a ninth, and E is no tone of D F A C.
+  EXPECT_TRUE(hasRule(validateIiFourThree(76, ChordQuality::Minor7), "suspension_preparation"));
+}
+
 TEST(ValidatorTest, DeclaredCadentialSixFourAllowsFourthResolvingToDominantThird) {
   HarmonicPlan plan = cMajorWhole();
   ChordEvent dominant;
@@ -3625,13 +3683,97 @@ TEST(ValidatorTest, CountersubjectInvertibleReportsStrongBeatPerfectFifth) {
   for (const auto& f : r.informational) {
     if (f.rule_id == "countersubject_invertible") {
       EXPECT_EQ(f.kind, FailKind::MusicalFail);
-      // A whole-piece observation: no span, outside the finding recorder.
-      EXPECT_EQ(f.span_id, kInvalidSpanId);
+      // Located at the countersubject note; outside the finding recorder, so no tally.
+      EXPECT_EQ(f.span_id, 0u);
     }
   }
   for (const auto& observation : r.observations)
     EXPECT_NE(observation.rule_id, "countersubject_invertible");
-  EXPECT_EQ(counterpointRuleGeometry("countersubject_invertible"), RuleGeometry::Unclassified);
+  EXPECT_EQ(counterpointRuleGeometry("countersubject_invertible"), RuleGeometry::Vertical);
+}
+
+TEST(ValidatorTest, CountersubjectInvertibleIgnoresFreeFigurationSharingAVoice) {
+  // Voice 0 carries the countersubject in bar 0 and free figuration in bar 1; voice 1 carries
+  // the subject in bar 0 and free figuration in bar 1. The perfect fifth in bar 1 is between
+  // two free-figuration notes, so no countersubject/subject pair forms it.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 64, 0),
+      makeNote(kTicksPerBar, kTicksPerBar, 67, 0),
+      makeNote(0, kTicksPerBar, 60, 1),
+      makeNote(kTicksPerBar, kTicksPerBar, 60, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::SequentialCounterline),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::SequentialCounterline),
+  };
+  prov[0].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_FALSE(hasInformational(r, "countersubject_invertible"));
+}
+
+TEST(ValidatorTest, CountersubjectInvertibleReadsMiddleEntrySubjectStatements) {
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBar, 67, 0),
+      makeNote(0, kTicksPerBar, 60, 1),
+  };
+  std::vector<NoteProvenance> prov = {
+      makeProvIntent(0, NoteSource::Material, VoiceIntent::CountersubjectCarrier),
+      makeProvIntent(1, NoteSource::Material, VoiceIntent::MiddleEntryCarrier),
+  };
+  prov[0].satisfied_rules |= ruleBitMask(RuleBit::CountersubjectInvertible);
+
+  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole());
+  EXPECT_TRUE(hasInformational(r, "countersubject_invertible"));
+}
+
+TEST(CompassCountTest, JudgesSoundingPitchesAgainstTheInstrumentRange) {
+  // 90 is inside the violin and harpsichord range {36, 96} but above the organ's 84.
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 40, 0),
+      makeNote(0, kTicksPerBeat, 60, 0),
+      makeNote(0, kTicksPerBeat, 90, 0),
+  };
+  EXPECT_EQ(countCompassViolations(notes, InstrumentType::Violin), 0);
+  EXPECT_EQ(countCompassViolations(notes, InstrumentType::Harpsichord), 0);
+  EXPECT_EQ(countCompassViolations(notes, InstrumentType::Organ), 1);
+  // A +7 sounding shift moves 90 past the violin ceiling.
+  EXPECT_EQ(countCompassViolations(notes, InstrumentType::Violin, 7), 1);
+  // Composed-frame texture metrics keep judging the organ compass.
+  EXPECT_EQ(computeTextureMetrics(notes).compass_violation_count, 1);
+}
+
+TEST(SpanIdFormatTest, BudgetFailureCarriesTheLocatedSpanOrRendersAsAbsent) {
+  ValidationReport report;
+  RuleObservation observation;
+  observation.rule_id = "parallel_fifth";
+  observation.total = 1;
+  report.observations.push_back(observation);
+
+  // No located finding: the failure has no span and must not print the raw sentinel.
+  applyCounterpointBudget(FormType::ChoralePrelude, &report);
+  ASSERT_EQ(report.failures.size(), 1u);
+  EXPECT_EQ(report.failures[0].span_id, kInvalidSpanId);
+  EXPECT_EQ(formatSpanId(report.failures[0].span_id), "no span");
+
+  // A recorded finding of the same rule locates the promoted failure.
+  report.failures.clear();
+  ValidationFailure finding;
+  finding.span_id = 5;
+  finding.rule_id = "parallel_fifth";
+  report.informational.push_back(finding);
+  applyCounterpointBudget(FormType::ChoralePrelude, &report);
+  ASSERT_EQ(report.failures.size(), 1u);
+  EXPECT_EQ(report.failures[0].span_id, 5u);
+  EXPECT_EQ(formatSpanId(report.failures[0].span_id), "span 5");
+}
+
+TEST(SpanIdFormatTest, SentinelRendersAsAbsentNeverAsANumber) {
+  EXPECT_EQ(formatSpanId(kInvalidSpanId), "no span");
+  EXPECT_EQ(formatSpanId(7), "span 7");
+  EXPECT_EQ(formatSpanId(kInvalidSpanId).find("4294967295"), std::string::npos);
 }
 
 TEST(ValidatorTest, CountersubjectInvertibleInertWithoutBit) {
@@ -3951,7 +4093,8 @@ TEST(CounterpointBudgetTest, BudgetFailureLeavesTheFindingTallyUntouched) {
 
   ASSERT_EQ(report.failures.size(), 1u);
   EXPECT_EQ(report.failures[0].rule_id, "parallel_fifth");
-  EXPECT_EQ(report.failures[0].span_id, kInvalidSpanId);
+  // The promoted failure is located at the first recorded finding of the rule.
+  EXPECT_EQ(report.failures[0].span_id, 3u);
   const RuleObservation& tally = report.observations[0];
   EXPECT_EQ(tally.gated, 0);
   EXPECT_EQ(tally.exempted, 0);

@@ -14,6 +14,7 @@
 #include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
 #include "composer/span.h"
@@ -489,7 +490,7 @@ std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
         // weakest of all. Pooled, a candidate that trades a battuta for a hidden
         // reads as no change, and the design takes whichever the enumeration
         // reached first.
-        if (formsStrictPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
+        if (isStrictParallelPerfect(prev[above], curr[above], prev[below], curr[below]))
           ++score[1];
         else if (formsPerfectParallel(prev[above], curr[above], prev[below], curr[below]))
           ++score[4];
@@ -876,6 +877,16 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
   return chosen;
 }
 
+// The kind a variation block is written as. A set too short for the da capo
+// ends on its last variation, which carries the closing cadence over the coda
+// bass; an imitative block cannot take it, because its comes would have to
+// follow the dux into the cadence bar. That block is a free variation.
+GoldbergVariationKind blockVariationKind(int blk, int num_blocks, int da_capo_block) {
+  if (blk == num_blocks - 1 && da_capo_block < 0)
+    return GoldbergVariationKind::Figuration;
+  return goldbergVariationKind(static_cast<std::size_t>(blk - 1));
+}
+
 // Whether the middle voice steps aside for this variation block.
 //
 // A variation set breathes, so the third voice is not a wall. It withdraws for
@@ -887,8 +898,7 @@ bool innerVoiceWithdraws(int blk, int num_blocks, int da_capo_block) {
   const int next = blk + 1;
   if (next >= num_blocks || next == da_capo_block)
     return false;
-  return goldbergVariationKind(static_cast<std::size_t>(next - 1)) !=
-         GoldbergVariationKind::Figuration;
+  return blockVariationKind(next, num_blocks, da_capo_block) != GoldbergVariationKind::Figuration;
 }
 
 // Whether a pitch belongs to the dominant triad (G, B, D in the C-tonic frame).
@@ -1086,7 +1096,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     const std::size_t variation_number = variation_index + 1;  // 1-based (1..K).
     const int cycle = cycle_count > 0 ? (blk * cycle_count) / num_blocks : 0;
     const ArcPoint point = req.arc(static_cast<std::size_t>(cycle));
-    const GoldbergVariationKind kind = goldbergVariationKind(variation_index);
+    const GoldbergVariationKind kind = blockVariationKind(blk, num_blocks, da_capo_block);
     // A free variation is filled unless it is the block that thins out before an
     // imitative one. Settled before the block is written and read afterwards,
     // because the middle voice answers to the figuration as finally laid out --

@@ -24,25 +24,15 @@
 #include <cstdio>
 #include <vector>
 
-#include "composer/composer.h"
 #include "composer/figuration_palette.h"
-#include "composer/form_director.h"
-#include "composer/harness_fixture.h"
 #include "composer/provenance.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
 
-constexpr std::array<SubjectCharacter, 4> kCharacters = {{
-    SubjectCharacter::Severe,
-    SubjectCharacter::Playful,
-    SubjectCharacter::Noble,
-    SubjectCharacter::Restless,
-}};
-
-constexpr std::uint32_t kFirstSeed = 1;
 constexpr std::uint32_t kSeedCount = 8;
 
 // The two forms whose figuration runs against theme entries. The other eight
@@ -140,21 +130,15 @@ TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTextu
   // accepts. It must open a bar (the only onset the rule constrains) and it must
   // be consonant with every other voice sounding at that onset -- otherwise the
   // exemption traded a parallel for a clash, which is not a trade worth making.
+  test::ShippedSurface slice;
+  slice.forms.assign(kFiguratedForms.begin(), kFiguratedForms.end());
+  slice.lengths = test::LengthAxis::Natural;
+  slice.seed_count = kSeedCount;
   std::size_t relaxed_notes = 0;
-  for (FormType form : kFiguratedForms) {
-    for (SubjectCharacter character : kCharacters) {
-      for (std::uint32_t offset = 0; offset < kSeedCount; ++offset) {
-        ComposeRequest request;
-        request.form = form;
-        request.character = character;
-        request.seed = kFirstSeed + offset;
-        request.is_minor = (offset % 2) == 1;
-
-        HarnessFixture fixture;
-        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
-          continue;
-        const ComposeResult result =
-            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
+  test::sweepShippedCells(
+      slice, [&](const test::ShippedCell& cell, const test::ProductGateResult& gate) {
+        SCOPED_TRACE(test::cellName(cell));
+        const ComposeResult& result = gate.composed;
         ASSERT_EQ(result.notes.size(), result.provenance.size());
 
         for (std::size_t index = 0; index < result.notes.size(); ++index) {
@@ -173,9 +157,7 @@ TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTextu
                 << note.start_tick << " is dissonant against " << static_cast<int>(other.pitch);
           }
         }
-      }
-    }
-  }
+      });
   // Emitted on every run so the current measurement is visible when the ceiling
   // below is tightened.
   std::printf("[figuration] relaxed anchors shipped: %zu\n", relaxed_notes);
@@ -188,19 +170,9 @@ TEST(FigurationAnchorRelaxation, RelaxedAnchorsShipConsonantAgainstTheWholeTextu
   // may offer its seventh has one more way not to be exhausted, so the bar heads
   // that used to escape found that tone instead.
   //
-  // Two bar heads across the whole sweep reach it again, and what put them there
-  // is the bass declining to leave a fourth above itself. That takes the chord's
-  // fifth out of the running at the onsets where the root and third are already
-  // parallel-tied, which is exactly the exhaustion this escape exists for -- and
-  // an escape that is unreachable in shipped output is a mechanism nobody can
-  // show works. Both firings are on a bar downbeat and consonant against every
-  // voice sounding under them, which the assertions above check separately, so
-  // the count is what rose and not the conditions.
-  //
-  // Spelling minor degrees 6 and 7 under the chord (detail::spellScale) moves
-  // the lines these bar heads are chosen against: 2 -> 6, every one still
-  // checked consonant above.
-  EXPECT_LE(relaxed_notes, 6u) << "the escape fired on the shipped surface more often than the "
+  // Measured 0 over both modes at every seed; the escape's reachability is proved on
+  // the mechanism by OpensWhenEveryChordToneInBandIsBlocked.
+  EXPECT_EQ(relaxed_notes, 0u) << "the escape fired on the shipped surface more often than the "
                                   "ratchet allows, where the anchor selector should be finding a "
                                   "chord tone";
 }

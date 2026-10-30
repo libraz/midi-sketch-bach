@@ -622,5 +622,89 @@ TEST(GoldbergCanon, MinimumSizeHasNoCanonAndGracefulDegrade) {
   }
 }
 
+// Below the da capo threshold the last variation carries the closing cadence
+// over the coda bass. An imitative block cannot take it -- its comes would have
+// to follow the dux into the cadence bar -- so a set whose third variation is
+// also its last ends on a free variation, and every length that snaps to 16
+// bars composes clean.
+TEST(GoldbergCanon, SetWithoutDaCapoEndsOnAFreeVariation) {
+  for (bool minor : {false, true}) {
+    for (std::uint16_t bars : {14, 15, 16, 17}) {
+      for (std::uint32_t seed = 1; seed <= 5; ++seed) {
+        for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Playful,
+                                           SubjectCharacter::Noble, SubjectCharacter::Restless}) {
+          ComposeRequest req;
+          req.form = FormType::GoldbergVariations;
+          req.is_minor = minor;
+          req.character = character;
+          req.target_bars = bars;
+          req.seed = seed;
+          HarnessFixture fx;
+          ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+          const auto& blocks = fx.material.goldberg_variations;
+          ASSERT_EQ(blocks.size(), 4u);
+          // The last block's middle voice holds harmony at no more than two
+          // tones to the bar; a canon follower would state six.
+          const Tick approach = blockStart(4) - kTicksPerBar - kTicksPerBeat;
+          std::map<Tick, int> inner_per_bar;
+          for (const auto& note : fx.material.goldberg_inner_voice) {
+            if (note.start_tick >= blockStart(3) && note.start_tick != approach)
+              ++inner_per_bar[note.start_tick / kTicksPerBar];
+          }
+          for (const auto& [bar, count] : inner_per_bar) {
+            EXPECT_LE(count, 2) << "minor=" << minor << " bars " << bars << " seed " << seed
+                                << " bar " << bar << " states a canon follower in the last block";
+          }
+          const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          EXPECT_TRUE(r.validation.failures.empty())
+              << "minor=" << minor << " bars " << bars << " seed " << seed << " first="
+              << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+        }
+      }
+    }
+  }
+}
+
+// Where the third variation is not the last, it stays a strict canon: at 20
+// bars the comes is the dux delayed one bar in every note it states.
+TEST(GoldbergCanon, CanonBeforeAFinalFreeVariationKeepsItsComes) {
+  for (bool minor : {false, true}) {
+    const detail::Mode mode = minor ? detail::Mode::Minor : detail::Mode::Major;
+    const HarnessFixture fx = build(minor, 20, 1);
+    ASSERT_EQ(fx.material.goldberg_variations.size(), 5u);
+    const auto& dux = fx.material.goldberg_variations[3].notes;  // Unison canon: V0 leads.
+    std::vector<MaterialNote> comes;
+    for (const auto& note : fx.material.goldberg_inner_voice) {
+      if (note.start_tick >= blockStart(3) && note.start_tick < blockStart(4))
+        comes.push_back(note);
+    }
+    ASSERT_EQ(dux.size(), 24u);
+    ASSERT_EQ(comes.size(), 18u);
+    for (std::size_t idx = 0; idx < comes.size(); ++idx) {
+      EXPECT_EQ(comes[idx].start_tick, dux[idx].start_tick + kTicksPerBar) << "note " << idx;
+      EXPECT_EQ(comes[idx].duration, dux[idx].duration) << "note " << idx;
+      EXPECT_EQ(detail::diatonicLetter(dux[idx].pitch, 0, mode) -
+                    detail::diatonicLetter(comes[idx].pitch, 0, mode),
+                14)
+          << "minor=" << minor << " note " << idx << " unison canon two octaves below";
+    }
+  }
+}
+
+// The variation in the last slot before the cadence or the da capo runs its
+// figuration over the aria bass's arpeggio; at every length the relief leaves
+// no true parallel there, so these requests compose instead of being refused.
+TEST(GoldbergCanon, LastVariationBeforeTheCloseComposesClean) {
+  for (std::uint16_t bars : {12, 28, 100}) {
+    for (std::uint32_t seed : {1u, 3u}) {
+      const HarnessFixture fx = build(/*minor=*/true, bars, seed);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      EXPECT_TRUE(r.validation.failures.empty())
+          << "bars " << bars << " seed " << seed << " first="
+          << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace bach::composer

@@ -16,6 +16,7 @@
 #include "composer/renderer.h"
 #include "composer/validator.h"
 #include "core/instrument_program.h"
+#include "core/pitch_utils.h"
 #include "core/rng_util.h"
 #include "midi/midi_writer.h"
 #include "midi/velocity_curve.h"
@@ -281,6 +282,13 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   // After the wholesale assignment above and the budget pass, and before every
   // emitGeneratedJson call that carries `final_validation`.
   out->final_validation.wave_veto = composer::waveVetoStats();
+  // The figure is only meaningful against the compass the output is placed in, which is
+  // judged on sounding pitches: key transposition plus the output octave displacement.
+  for (auto& metrics : out->final_validation.texture_metrics) {
+    metrics.compass_violation_count = composer::countCompassViolations(
+        out->composition.notes, out->instrument,
+        keyTranspositionSemitones(effective.key.tonic) + out->output_octave_shift);
+  }
   if (out->final_validation.status != composer::ValidationStatus::Ok) {
     out->generated_json =
         composer::emitGeneratedJson(out->composition.notes, out->final_validation);

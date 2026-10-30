@@ -11,18 +11,53 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include "composer/counterpoint_budget.h"
 #include "composer/form_director.h"
 #include "composer/harness_fixture.h"
 #include "composer/ornament_pass.h"
+#include "composer/product_gate_test_util.h"
 #include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 #include "midi/midi_reader.h"
 
 namespace bach::application {
 namespace {
+
+namespace surface = composer::test;
+
+// Composes a request and holds it to everything the product ships behind:
+// status Ok, no final-validation failure, and no match of a rule the form's
+// counterpoint budget closes. Returns whether the request shipped clean.
+bool expectShipsClean(const CompositionRequest& request) {
+  CompositionProduct product;
+  const CompositionStatus status = compose(request, &product);
+  EXPECT_EQ(status, CompositionStatus::Ok);
+  if (status != CompositionStatus::Ok)
+    return false;
+  EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
+  EXPECT_TRUE(product.final_validation.failures.empty())
+      << "first failure: "
+      << (product.final_validation.failures.empty()
+              ? std::string()
+              : product.final_validation.failures.front().rule_id);
+  bool closed_rule_matched = false;
+  for (const composer::RuleObservation& observed : product.final_validation.observations) {
+    if (observed.total > 0 && composer::counterpointRuleIsClosed(request.form, observed.rule_id)) {
+      closed_rule_matched = true;
+      ADD_FAILURE() << "closed rule " << observed.rule_id << " matched " << observed.total
+                    << " time(s)";
+    }
+  }
+  EXPECT_TRUE(product.diagnostic_json.empty());
+  EXPECT_FALSE(product.midi_bytes.empty());
+  return product.final_validation.status == composer::ValidationStatus::Ok &&
+         product.final_validation.failures.empty() && !closed_rule_matched &&
+         !product.midi_bytes.empty();
+}
 
 CompositionRequest fugueRequest(std::uint32_t seed) {
   CompositionRequest request;
@@ -259,22 +294,25 @@ TEST(CompositionServiceTest, FreeCounterpointRejectsFormsWithoutASecondaryTarget
 // do with what it is checking, so it asserts the form is reachable at every
 // seed and that the search's own notes reach the score at some seed.
 TEST(CompositionServiceTest, FreeCounterpointGeneratesPassacagliaCounterline) {
+  surface::ShippedSurface slice;
+  slice.forms = {FormType::Passacaglia};
+  slice.characters = {SubjectCharacter::Severe};
+  slice.modes = {false};
+  slice.lengths = surface::LengthAxis::Natural;
+  slice.seed_count = 6;
   bool saw_composed_counterline = false;
-  for (std::uint32_t seed : {1u, 2u, 3u, 4u, 5u, 6u}) {
-    CompositionRequest request;
-    request.form = FormType::Passacaglia;
-    request.character = SubjectCharacter::Severe;
-    request.seed = seed;
-    request.bpm = 100;
+  for (const surface::ShippedCell& cell : surface::shippedRequestCells(slice)) {
+    SCOPED_TRACE(surface::cellName(cell));
+    CompositionRequest request = surface::compositionRequestFor(cell);
     request.enable_free_counterpoint = true;
     CompositionProduct product;
     const CompositionStatus status = compose(request, &product);
-    ASSERT_NE(status, CompositionStatus::FreeCounterpointUnavailable) << "seed=" << seed;
+    ASSERT_NE(status, CompositionStatus::FreeCounterpointUnavailable);
     if (status != CompositionStatus::Ok)
       continue;
-    EXPECT_FALSE(product.midi_bytes.empty()) << "seed=" << seed;
-    EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok) << "seed=" << seed;
-    EXPECT_TRUE(product.final_validation.failures.empty()) << "seed=" << seed;
+    EXPECT_FALSE(product.midi_bytes.empty());
+    EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
+    EXPECT_TRUE(product.final_validation.failures.empty());
     saw_composed_counterline =
         saw_composed_counterline ||
         std::any_of(product.composition.provenance.begin(), product.composition.provenance.end(),
@@ -333,74 +371,132 @@ TEST(CompositionServiceTest, FinalScoreGateAcceptsEveryShippedForm) {
   }
 }
 
-// The seed axis alternates the mode rather than doubling in length. Mode is a
-// semantic axis -- it selects different material and reaches validator rules the
-// major surface never does -- while the seed is a decorrelation axis, so half
-// the seeds in each mode covers more of what ships than all of them in one.
-//
-// One case per form rather than one case over all of them. The sweep is the
-// suite's longest-running check by a wide margin and every cell of it is
-// independent, so a form per case lets the runner spread them over cores
-// instead of walking the whole product on one. The set of cells is unchanged.
-class ShippedFormSweep : public ::testing::TestWithParam<FormType> {};
-
-TEST_P(ShippedFormSweep, FinalScoreGateAcceptsEveryConfiguration) {
-  constexpr SubjectCharacter characters[] = {
-      SubjectCharacter::Severe,
-      SubjectCharacter::Playful,
-      SubjectCharacter::Noble,
-      SubjectCharacter::Restless,
-  };
-  constexpr DurationScale scales[] = {
-      DurationScale::Short,
-      DurationScale::Medium,
-      DurationScale::Long,
-      DurationScale::Full,
-  };
-  const FormType form = GetParam();
-  for (SubjectCharacter character : characters) {
-    if (!composer::isFormCharacterCompatible(form, character)) {
-      continue;
-    }
-    for (DurationScale scale : scales) {
-      for (std::uint32_t seed = 1; seed <= 20; ++seed) {
-        SCOPED_TRACE(formTypeToString(form));
-        SCOPED_TRACE(subjectCharacterToString(character));
-        SCOPED_TRACE(durationScaleToString(scale));
-        SCOPED_TRACE(seed);
-        const bool minor = (seed % 2) == 0;
-        SCOPED_TRACE(minor ? "minor" : "major");
-        CompositionRequest request;
-        request.form = form;
-        request.character = character;
-        request.key = minor ? KeySignature{Key::G, true} : KeySignature{Key::C, false};
-        request.scale = scale;
-        request.seed = seed;
-        request.bpm = 100;
-        CompositionProduct product;
-        ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
-        EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
-        EXPECT_TRUE(product.final_validation.failures.empty())
-            << "first failure: "
-            << (product.final_validation.failures.empty()
-                    ? std::string()
-                    : product.final_validation.failures.front().rule_id);
-        EXPECT_TRUE(product.diagnostic_json.empty());
-        EXPECT_FALSE(product.midi_bytes.empty());
+// The enumerator is the only place a shipped-surface sweep may leave a cell out,
+// so what it leaves out is pinned here: exactly the pairs the director refuses as
+// IncompatibleCharacter, every remaining pair, both modes, every scale length plus
+// the longest request, contiguous seeds, and every output key in each row.
+TEST(ShippedRequestCells, CoverEveryCompatibleRequestAndNothingElse) {
+  std::size_t compatible_pairs = 0;
+  for (FormType form : surface::kShippedForms) {
+    for (SubjectCharacter character : surface::kAllCharacters) {
+      composer::ComposeRequest request;
+      request.form = form;
+      request.character = character;
+      request.seed = 1;
+      composer::HarnessFixture fixture;
+      if (composer::isFormCharacterCompatible(form, character)) {
+        ++compatible_pairs;
+        continue;
       }
+      EXPECT_EQ(composer::buildFormFixture(request, &fixture),
+                composer::FormDirectorStatus::IncompatibleCharacter)
+          << formTypeToString(form) << " x " << subjectCharacterToString(character);
     }
   }
+  EXPECT_EQ(compatible_pairs, surface::kCompatiblePairCount);
+
+  const surface::ShippedSurface whole;
+  const std::vector<surface::ShippedCell> cells = surface::shippedRequestCells(whole);
+  std::size_t expected = 0;
+  for (FormType form : surface::kShippedForms) {
+    const std::vector<std::uint16_t> lengths =
+        surface::shippedLengths(form, surface::LengthAxis::Shipped);
+    EXPECT_EQ(lengths.back(), composer::formSpec(form).max_bars) << formTypeToString(form);
+    for (DurationScale scale :
+         {DurationScale::Short, DurationScale::Medium, DurationScale::Long, DurationScale::Full}) {
+      EXPECT_TRUE(
+          std::count(lengths.begin(), lengths.end(), composer::resolveBars(form, scale, 0)) == 1)
+          << formTypeToString(form) << " " << durationScaleToString(scale);
+    }
+    std::size_t characters = 0;
+    for (SubjectCharacter character : surface::kAllCharacters)
+      characters += composer::isFormCharacterCompatible(form, character) ? 1 : 0;
+    expected += characters * whole.modes.size() * lengths.size() * whole.seed_count;
+  }
+  EXPECT_EQ(cells.size(), expected);
+
+  std::map<std::string, std::set<Key>> tonics_per_row;
+  for (const surface::ShippedCell& cell : cells) {
+    EXPECT_TRUE(composer::isFormCharacterCompatible(cell.request.form, cell.request.character));
+    EXPECT_GE(cell.request.seed, whole.first_seed);
+    EXPECT_LT(cell.request.seed, whole.first_seed + whole.seed_count);
+    const std::string row = std::string(formTypeToString(cell.request.form)) + " " +
+                            subjectCharacterToString(cell.request.character) + " " +
+                            std::to_string(cell.request.is_minor) + " " +
+                            std::to_string(cell.request.target_bars);
+    tonics_per_row[row].insert(cell.tonic);
+  }
+  for (const auto& [row, tonics] : tonics_per_row)
+    EXPECT_EQ(tonics.size(), 12u) << row;
 }
 
-INSTANTIATE_TEST_SUITE_P(EveryShippedForm, ShippedFormSweep,
-                         ::testing::Values(FormType::Fugue, FormType::PreludeAndFugue,
-                                           FormType::TrioSonata, FormType::ChoralePrelude,
-                                           FormType::ToccataAndFugue, FormType::Passacaglia,
-                                           FormType::FantasiaAndFugue, FormType::CelloPrelude,
-                                           FormType::Chaconne, FormType::GoldbergVariations),
-                         [](const ::testing::TestParamInfo<FormType>& info) {
-                           return std::string(formTypeToString(info.param));
+// Every compatible cell of the shipped surface ships clean: both modes against
+// every seed, every length the scales resolve to plus the longest request
+// (`--bars 128`), and the output key rotating through all twelve tonics. Mode is
+// a semantic axis -- it selects different material and reaches validator rules
+// the major surface never does -- so it is swept in full rather than tied to the
+// seed. The key only places the output, which is why it rotates instead.
+//
+// One case per form and mode: the sweep is the suite's longest-running check
+// and every cell is independent, so the runner can spread the cases over cores.
+class ShippedFormSweep : public ::testing::TestWithParam<std::tuple<FormType, bool>> {};
+
+TEST_P(ShippedFormSweep, FinalScoreGateAcceptsEveryConfiguration) {
+  surface::ShippedSurface slice;
+  slice.forms = {std::get<0>(GetParam())};
+  slice.modes = {std::get<1>(GetParam())};
+  const std::vector<surface::ShippedCell> cells = surface::shippedRequestCells(slice);
+  ASSERT_FALSE(cells.empty());
+  std::size_t shipped = 0;
+  for (const surface::ShippedCell& cell : cells) {
+    SCOPED_TRACE(surface::cellName(cell));
+    shipped += expectShipsClean(surface::compositionRequestFor(cell)) ? 1 : 0;
+  }
+  EXPECT_EQ(shipped, cells.size());
+}
+
+INSTANTIATE_TEST_SUITE_P(EveryShippedFormAndMode, ShippedFormSweep,
+                         ::testing::Combine(::testing::ValuesIn(surface::kShippedForms),
+                                            ::testing::Bool()),
+                         [](const ::testing::TestParamInfo<std::tuple<FormType, bool>>& info) {
+                           return std::string(formTypeToString(std::get<0>(info.param))) +
+                                  (std::get<1>(info.param) ? "_minor" : "_major");
                          });
+
+// Longest requests that once failed final validation: the chorale prelude's
+// walking bass kept a parallel fifth into a bar head in every key, and the
+// restless chaconne crossed two voices in G and D minor.
+TEST(CompositionServiceTest, LongestRequestsThatOnceFailedShipClean) {
+  struct Case {
+    FormType form;
+    SubjectCharacter character;
+    KeySignature key;
+    std::uint32_t seed;
+  };
+  const Case cases[] = {
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::C, false}, 2},
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::F, false}, 2},
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::G, true}, 2},
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::D, true}, 2},
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::C, false}, 26},
+      {FormType::ChoralePrelude, SubjectCharacter::Severe, {Key::G, true}, 26},
+      {FormType::Chaconne, SubjectCharacter::Restless, {Key::G, true}, 3},
+      {FormType::Chaconne, SubjectCharacter::Restless, {Key::D, true}, 3},
+      {FormType::Chaconne, SubjectCharacter::Restless, {Key::G, true}, 33},
+      {FormType::Chaconne, SubjectCharacter::Restless, {Key::D, true}, 33},
+  };
+  for (const Case& entry : cases) {
+    CompositionRequest request;
+    request.form = entry.form;
+    request.character = entry.character;
+    request.key = entry.key;
+    request.target_bars = 128;
+    request.seed = entry.seed;
+    SCOPED_TRACE(std::string(formTypeToString(entry.form)) + " " + keyToString(entry.key.tonic) +
+                 (entry.key.is_minor ? " minor" : " major"));
+    expectShipsClean(request);
+  }
+}
 
 TEST(CompositionServiceTest, NonKeyboardInstrumentUsesPhraseVelocityCurve) {
   CompositionRequest request;
@@ -599,40 +695,45 @@ TEST(CompositionServiceTest, CharacterChangesTheRegistration) {
 // The registration peak stands at least a bar after the develop step, and the
 // ornament pass's climax window opens on that same tick.
 TEST(CompositionServiceTest, RegistrationPeakFollowsDevelopAndMatchesOrnamentClimax) {
-  for (const FormType form : {FormType::Fugue, FormType::Passacaglia}) {
-    for (const std::uint32_t seed : {1u, 2u}) {
-      CompositionRequest request = fugueRequest(seed);
-      request.form = form;
-      CompositionProduct product;
-      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
-      ASSERT_FALSE(product.composition.tracks.empty());
+  surface::ShippedSurface slice;
+  slice.forms = {FormType::Fugue, FormType::Passacaglia};
+  slice.characters = {SubjectCharacter::Severe};
+  slice.modes = {true};
+  slice.lengths = surface::LengthAxis::Natural;
+  slice.seed_count = 2;
+  for (const surface::ShippedCell& cell : surface::shippedRequestCells(slice)) {
+    const FormType form = cell.request.form;
+    const std::uint32_t seed = cell.request.seed;
+    const CompositionRequest request = surface::compositionRequestFor(cell);
+    CompositionProduct product;
+    ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+    ASSERT_FALSE(product.composition.tracks.empty());
 
-      Tick peak_tick = 0;
-      std::uint8_t peak_value = 0;
-      for (const auto& event : product.composition.tracks.front().cc_events) {
-        if (event.controller == 7 && event.value > peak_value) {
-          peak_value = event.value;
-          peak_tick = event.tick;
-        }
+    Tick peak_tick = 0;
+    std::uint8_t peak_value = 0;
+    for (const auto& event : product.composition.tracks.front().cc_events) {
+      if (event.controller == 7 && event.value > peak_value) {
+        peak_value = event.value;
+        peak_tick = event.tick;
       }
-      const Tick ticks_per_bar = kTicksPerBeat * composer::formSpec(form).ts_numerator;
-      const Tick develop_tick = product.total_ticks / 2;
-      EXPECT_GE(peak_tick, develop_tick + ticks_per_bar)
-          << formTypeToString(form) << " seed " << seed;
-
-      composer::ComposeRequest compose_request;
-      compose_request.form = form;
-      compose_request.is_minor = request.key.is_minor;
-      compose_request.character = request.character;
-      compose_request.target_bars = product.resolved_bars;
-      compose_request.seed = product.seed;
-      composer::HarnessFixture fixture;
-      ASSERT_EQ(composer::buildFormFixture(compose_request, &fixture),
-                composer::FormDirectorStatus::Ok);
-      composer::OrnamentParams params;
-      composer::resolveFixtureOrnamentContext(fixture, form, product.total_ticks, &params);
-      EXPECT_EQ(params.climax_start_tick, peak_tick) << formTypeToString(form) << " seed " << seed;
     }
+    const Tick ticks_per_bar = kTicksPerBeat * composer::formSpec(form).ts_numerator;
+    const Tick develop_tick = product.total_ticks / 2;
+    EXPECT_GE(peak_tick, develop_tick + ticks_per_bar)
+        << formTypeToString(form) << " seed " << seed;
+
+    composer::ComposeRequest compose_request;
+    compose_request.form = form;
+    compose_request.is_minor = request.key.is_minor;
+    compose_request.character = request.character;
+    compose_request.target_bars = product.resolved_bars;
+    compose_request.seed = product.seed;
+    composer::HarnessFixture fixture;
+    ASSERT_EQ(composer::buildFormFixture(compose_request, &fixture),
+              composer::FormDirectorStatus::Ok);
+    composer::OrnamentParams params;
+    composer::resolveFixtureOrnamentContext(fixture, form, product.total_ticks, &params);
+    EXPECT_EQ(params.climax_start_tick, peak_tick) << formTypeToString(form) << " seed " << seed;
   }
 }
 
@@ -676,39 +777,38 @@ TEST(CompositionServiceTest, ContrastingSectionAddsFugueTempoChange) {
 }
 
 TEST(CompositionServiceTest, FinalRitardandoStepsScaleTheTempoInForce) {
-  for (const FormType form : {FormType::ToccataAndFugue, FormType::PreludeAndFugue}) {
-    for (const std::uint32_t seed : {1u, 2u}) {
-      CompositionRequest request;
-      request.form = form;
-      request.character = SubjectCharacter::Severe;
-      request.scale = DurationScale::Short;
-      request.seed = seed;
-      request.bpm = 100;
-      CompositionProduct product;
-      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+  surface::ShippedSurface slice;
+  slice.forms = {FormType::ToccataAndFugue, FormType::PreludeAndFugue};
+  slice.characters = {SubjectCharacter::Severe};
+  slice.modes = {false};
+  slice.lengths = surface::LengthAxis::Natural;
+  slice.seed_count = 2;
+  for (const surface::ShippedCell& cell : surface::shippedRequestCells(slice)) {
+    const FormType form = cell.request.form;
+    const std::uint32_t seed = cell.request.seed;
+    CompositionProduct product;
+    ASSERT_EQ(compose(surface::compositionRequestFor(cell), &product), CompositionStatus::Ok);
 
-      const composer::FormSpec& spec = composer::formSpec(form);
-      const Tick ticks_per_bar = kTicksPerBeat * spec.ts_numerator;
-      ASSERT_GT(product.total_ticks, 2 * ticks_per_bar);
-      const Tick start = product.total_ticks - 2 * ticks_per_bar;
+    const composer::FormSpec& spec = composer::formSpec(form);
+    const Tick ticks_per_bar = kTicksPerBeat * spec.ts_numerator;
+    ASSERT_GT(product.total_ticks, 2 * ticks_per_bar);
+    const Tick start = product.total_ticks - 2 * ticks_per_bar;
 
-      std::uint16_t in_force = 0;
-      std::uint16_t first_step = 0;
-      for (const TempoEvent& event : product.tempo_events) {
-        if (event.tick < start) {
-          in_force = event.bpm;
-        } else if (event.tick == start) {
-          first_step = event.bpm;
-        }
+    std::uint16_t in_force = 0;
+    std::uint16_t first_step = 0;
+    for (const TempoEvent& event : product.tempo_events) {
+      if (event.tick < start) {
+        in_force = event.bpm;
+      } else if (event.tick == start) {
+        first_step = event.bpm;
       }
-      ASSERT_GT(in_force, 0u);
-      ASSERT_GT(first_step, 0u);
-      const int percent =
-          product.performance_profile.final_ritardando == composer::RitardandoStyle::Gentle ? 98
-                                                                                            : 94;
-      EXPECT_EQ(first_step, static_cast<std::uint16_t>(in_force * percent / 100))
-          << "form " << static_cast<int>(form) << " seed " << seed;
     }
+    ASSERT_GT(in_force, 0u);
+    ASSERT_GT(first_step, 0u);
+    const int percent =
+        product.performance_profile.final_ritardando == composer::RitardandoStyle::Gentle ? 98 : 94;
+    EXPECT_EQ(first_step, static_cast<std::uint16_t>(in_force * percent / 100))
+        << "form " << static_cast<int>(form) << " seed " << seed;
   }
 }
 
@@ -891,44 +991,30 @@ int compassExcess(const CompositionProduct& product) {
   return excess;
 }
 
-TEST(CompositionServiceTest, ChaconneInGMinorAtFullLengthShipsOnEverySeed) {
+TEST(CompositionServiceTest, ChaconneInGMinorAtMaximumLengthShipsOnEverySeed) {
   // The score comes within a few semitones of the violin output compass, so
   // whether a whole octave can absorb the key transposition depends on the key.
-  // These seeds have no fitting octave in G minor and must still ship, placed
-  // at the displacement that leaves the least outside the compass.
-  bool needed_nearest_placement = false;
-  constexpr std::uint32_t seeds[] = {2, 4, 5, 8, 10, 11};
-  constexpr SubjectCharacter characters[] = {
-      SubjectCharacter::Severe,
-      SubjectCharacter::Playful,
-      SubjectCharacter::Noble,
-      SubjectCharacter::Restless,
-  };
-  for (SubjectCharacter character : characters) {
-    if (!composer::isFormCharacterCompatible(FormType::Chaconne, character)) {
-      continue;
-    }
-    for (std::uint32_t seed : seeds) {
-      SCOPED_TRACE(subjectCharacterToString(character));
-      SCOPED_TRACE(seed);
-      CompositionRequest request;
-      request.form = FormType::Chaconne;
-      request.key = {Key::G, true};
-      request.character = character;
-      request.target_bars = 128;
-      request.seed = seed;
-      request.bpm = 100;
-      CompositionProduct product;
-      ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
-      EXPECT_EQ(product.status, CompositionStatus::Ok);
-      EXPECT_FALSE(product.midi_bytes.empty());
-      EXPECT_FALSE(product.composition.notes.empty());
-      needed_nearest_placement = needed_nearest_placement || compassExcess(product) > 0;
-    }
+  // Seeds with no fitting octave in G minor must still ship, placed bar by bar
+  // inside the compass.
+  surface::ShippedSurface slice;
+  slice.forms = {FormType::Chaconne};
+  slice.modes = {true};
+  slice.lengths = surface::LengthAxis::Longest;
+  const std::vector<surface::ShippedCell> cells = surface::shippedRequestCells(slice);
+  ASSERT_FALSE(cells.empty());
+  std::size_t shipped = 0;
+  for (surface::ShippedCell cell : cells) {
+    cell.tonic = Key::G;
+    SCOPED_TRACE(surface::cellName(cell));
+    CompositionProduct product;
+    ASSERT_EQ(compose(surface::compositionRequestFor(cell), &product), CompositionStatus::Ok);
+    EXPECT_EQ(product.resolved_bars, 128);
+    EXPECT_FALSE(product.midi_bytes.empty());
+    EXPECT_FALSE(product.composition.notes.empty());
+    EXPECT_EQ(compassExcess(product), 0);
+    ++shipped;
   }
-  // At least one of these placements sits outside the compass, which is the
-  // shape that used to be refused outright instead of shipped.
-  EXPECT_TRUE(needed_nearest_placement);
+  EXPECT_EQ(shipped, cells.size());
 }
 
 // Pitch classes sounding at `tick`, optionally restricted to one voice.
@@ -948,62 +1034,51 @@ std::set<int> sonorityAt(const std::vector<NoteEvent>& notes, Tick tick, int voi
 // chord from that beat on, and the final sonority is the declared tonic triad
 // with its third.
 TEST(CompositionServiceTest, GoldbergEndsOnTheDeclaredResolvedTonicTriad) {
-  for (DurationScale scale : {DurationScale::Short, DurationScale::Medium}) {
-    for (bool minor : {false, true}) {
-      for (std::uint32_t seed = 1; seed <= 12; ++seed) {
-        SCOPED_TRACE(minor ? "minor" : "major");
-        SCOPED_TRACE(seed);
-        SCOPED_TRACE(static_cast<int>(scale));
-        CompositionRequest request;
-        request.form = FormType::GoldbergVariations;
-        request.scale = scale;
-        request.key = {Key::C, minor};
-        request.seed = seed;
-        CompositionProduct product;
-        ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
+  surface::ShippedSurface slice;
+  slice.forms = {FormType::GoldbergVariations};
+  slice.characters = {SubjectCharacter::Severe};
+  slice.seed_count = 12;
+  const std::vector<surface::ShippedCell> cells = surface::shippedRequestCells(slice);
+  ASSERT_FALSE(cells.empty());
+  for (const surface::ShippedCell& cell : cells) {
+    SCOPED_TRACE(surface::cellName(cell));
+    CompositionProduct product;
+    ASSERT_EQ(compose(surface::compositionRequestFor(cell), &product), CompositionStatus::Ok);
 
-        composer::ComposeRequest plan_request;
-        plan_request.form = FormType::GoldbergVariations;
-        plan_request.is_minor = minor;
-        plan_request.target_bars = product.resolved_bars;
-        plan_request.seed = seed;
-        composer::HarnessFixture fixture;
-        ASSERT_EQ(composer::buildFormFixture(plan_request, &fixture),
-                  composer::FormDirectorStatus::Ok);
-        const composer::ChordEvent& final_chord = fixture.harmony.chords.back();
-        ASSERT_EQ(final_chord.root_pc, 0);
-        const int third = final_chord.quality == composer::ChordQuality::Minor ? 3 : 4;
-        const std::set<int> tonic_triad = {0, third, 7};
+    composer::HarnessFixture fixture;
+    ASSERT_EQ(composer::buildFormFixture(cell.request, &fixture), composer::FormDirectorStatus::Ok);
+    const composer::ChordEvent& final_chord = fixture.harmony.chords.back();
+    ASSERT_EQ(final_chord.root_pc, 0);
+    const int third = final_chord.quality == composer::ChordQuality::Minor ? 3 : 4;
+    const std::set<int> tonic_triad = {0, third, 7};
 
-        const std::vector<NoteEvent>& notes = product.composition.notes;
-        Tick end = 0;
-        for (const NoteEvent& note : notes)
-          end = std::max<Tick>(end, note.start_tick + note.duration);
-        const Tick final_bar = end - kTicksPerBar;
-        const Tick approach = final_bar - kTicksPerBeat;
-        ASSERT_EQ(final_chord.start_tick, final_bar);
+    const std::vector<NoteEvent>& notes = product.composition.notes;
+    Tick end = 0;
+    for (const NoteEvent& note : notes)
+      end = std::max<Tick>(end, note.start_tick + note.duration);
+    const Tick final_bar = end - kTicksPerBar;
+    const Tick approach = final_bar - kTicksPerBeat;
+    ASSERT_EQ(final_chord.start_tick, final_bar);
 
-        const std::set<int> last = sonorityAt(notes, end - 1);
-        EXPECT_TRUE(last.count(third)) << "the final sonority has no tonic third";
-        for (int pcl : last)
-          EXPECT_TRUE(tonic_triad.count(pcl)) << "pc " << pcl << " held over the final tonic";
-        // Read across the beat: a cadential trill on the leading tone opens on
-        // its upper auxiliary.
-        EXPECT_TRUE(std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
-          return note.pitch % 12 == 11 && note.start_tick < final_bar &&
-                 note.start_tick + note.duration > approach;
-        })) << "no leading tone on the approach";
+    const std::set<int> last = sonorityAt(notes, end - 1);
+    EXPECT_TRUE(last.count(third)) << "the final sonority has no tonic third";
+    for (int pcl : last)
+      EXPECT_TRUE(tonic_triad.count(pcl)) << "pc " << pcl << " held over the final tonic";
+    // Read across the beat: a cadential trill on the leading tone opens on
+    // its upper auxiliary.
+    EXPECT_TRUE(std::any_of(notes.begin(), notes.end(), [&](const NoteEvent& note) {
+      return note.pitch % 12 == 11 && note.start_tick < final_bar &&
+             note.start_tick + note.duration > approach;
+    })) << "no leading tone on the approach";
 
-        for (const NoteEvent& note : notes) {
-          if (note.voice != 1 || note.start_tick + note.duration <= approach)
-            continue;
-          const int pcl = note.pitch % 12;
-          if (note.start_tick < final_bar)
-            EXPECT_TRUE(pcl == 7 || pcl == 11 || pcl == 2 || pcl == 5) << "middle voice " << pcl;
-          else
-            EXPECT_TRUE(tonic_triad.count(pcl)) << "middle voice " << pcl;
-        }
-      }
+    for (const NoteEvent& note : notes) {
+      if (note.voice != 1 || note.start_tick + note.duration <= approach)
+        continue;
+      const int pcl = note.pitch % 12;
+      if (note.start_tick < final_bar)
+        EXPECT_TRUE(pcl == 7 || pcl == 11 || pcl == 2 || pcl == 5) << "middle voice " << pcl;
+      else
+        EXPECT_TRUE(tonic_triad.count(pcl)) << "middle voice " << pcl;
     }
   }
 }

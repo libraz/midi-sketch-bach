@@ -9,10 +9,8 @@
 
 namespace bach::composer {
 
-// Composer-local chord-tone arithmetic. Mirrors the contract previously
-// owned by `harmony::ChordVoicer` but stays inside the composer
-// namespace so the engine has no link-time dependency on the legacy
-// harmony tree.
+// Composer-local chord-tone arithmetic, kept inside the composer namespace so
+// the engine has no link-time dependency on the harmony tree.
 //
 // Three- and higher-voice textures need three primitives that the basic
 // two-voice path does not surface:

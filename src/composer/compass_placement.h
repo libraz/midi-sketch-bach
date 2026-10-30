@@ -22,9 +22,10 @@ namespace bach::composer {
 // apply without applying it: notes stay in the composed frame, and only an
 // octave is ever added to or removed from them.
 //
-// A displacement that fits the whole score moves nothing. Otherwise, for an
-// instrument whose compass is a hard limit (pitchRangeFor), the bar holding a
-// note outside the compass is moved an octave inward in that voice, together
+// A displacement that fits the whole score moves nothing. Otherwise, for every
+// instrument (the compass is pitchRangeFor's, hard limit or preferred range
+// alike), the bar holding a note outside the compass is moved an octave inward
+// in that voice, together
 // with the neighbouring voices it would otherwise cross and any voice doubling
 // it, so the intervals inside the moved group and the register order against
 // the rest of the texture are kept. Notes a declaration pins to an absolute

@@ -58,20 +58,11 @@ const char* bachNoteSourceToString(BachNoteSource source);
 /// @brief Protection level for collision resolution.
 /// Determines how aggressively the resolver may modify a note's pitch.
 /// Simplified to two effective levels: Immutable (no pitch change) and
-/// Flexible (full cascade). Legacy aliases are retained for backward
-/// compatibility but resolve to one of these two levels.
+/// Flexible (full cascade).
 enum class ProtectionLevel : uint8_t {
   Immutable = 0,  ///< No pitch change allowed (subject, answer, pedal, cantus, ground bass).
   Flexible = 1    ///< Full cascade (free counterpoint, episodes, ornaments).
 };
-
-/// Backward-compatible aliases (all map to Immutable).
-/// Existing code using these names continues to compile unchanged.
-/// @{
-constexpr ProtectionLevel kProtectionArchitectural = ProtectionLevel::Immutable;
-constexpr ProtectionLevel kProtectionSemiImmutable = ProtectionLevel::Immutable;
-constexpr ProtectionLevel kProtectionStructural = ProtectionLevel::Immutable;
-/// @}
 
 /// @brief Get the protection level for a given note source.
 /// @param source The note source enum value.

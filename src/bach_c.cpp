@@ -2,8 +2,7 @@
 //
 // This entry point drives the composer subsystem (the WASM product path).
 // bach_c.cpp sits OUTSIDE the composer isolation boundary, so it may include
-// both composer headers and legacy helpers (key/form string utilities); the
-// isolation contract only forbids composer -> legacy includes, not the reverse.
+// composer headers alongside the core key/form string utilities.
 
 #include "bach_c.h"
 
@@ -65,6 +64,9 @@ struct BachInstance {
   uint16_t total_bars = 0;
   uint8_t track_count = 0;
   bool has_result = false;
+  // True once a request got past seed resolution, including a failed generation, so the
+  // resolved seed stays readable for reproducing the failure.
+  bool has_info = false;
   BachInfo info = {};
 };
 
@@ -375,6 +377,7 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
 
   auto* instance = static_cast<BachInstance*>(handle);
   instance->has_result = false;
+  instance->has_info = false;
   instance->info = {};
   instance->midi_bytes.clear();
   instance->events_json.clear();
@@ -412,6 +415,15 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
     bach::application::CompositionProduct product;
     const auto product_status = bach::application::compose(product_request, &product);
     instance->diagnostic_json = product.diagnostic_json;
+    if (product_status == bach::application::CompositionStatus::GenerationFailed ||
+        product_status == bach::application::CompositionStatus::FinalValidationFailed ||
+        product_status == bach::application::CompositionStatus::MidiFailed) {
+      // A failed auto-seeded request reports its resolved seed so it can be replayed.
+      instance->seed_used = product.seed;
+      instance->info.seed_used = product.seed;
+      instance->info.bpm = product.bpm;
+      instance->has_info = true;
+    }
     if (product_status == bach::application::CompositionStatus::IncompatibleCharacter) {
       return BACH_ERROR_INCOMPATIBLE_CHARACTER_FORM;
     }
@@ -442,12 +454,15 @@ BachError bach_generate_from_json(BachHandle handle, const char* json, size_t le
     instance->info.track_count = instance->track_count;
     instance->info.seed_used = instance->seed_used;
     instance->has_result = true;
+    instance->has_info = true;
     return BACH_OK;
   } catch (...) {
-    // Never allow a C++ exception to cross the C/WASM ABI boundary.  Clear
-    // the public snapshot as well, so a failed regeneration cannot expose a
+    // Native builds: never let a C++ exception cross the C ABI boundary. The WASM build has
+    // exception catching disabled, so a throw there aborts the module before reaching this
+    // handler. Clear the public snapshot as well, so a failed regeneration cannot expose a
     // stale successful result.
     instance->has_result = false;
+    instance->has_info = false;
     instance->info = {};
     instance->midi_bytes.clear();
     instance->events_json.clear();
@@ -540,7 +555,7 @@ const BachInfo* bach_get_info(BachHandle handle) {
   if (!handle)
     return nullptr;
   auto* instance = static_cast<BachInstance*>(handle);
-  if (!instance->has_result)
+  if (!instance->has_info)
     return nullptr;
   return &instance->info;
 }

@@ -51,9 +51,10 @@ struct CliOptions {
   bool composer_mode = false;
   bool composer_phase_product_option = false;
   bach::composer::HarnessPhase composer_phase = bach::composer::HarnessPhase::FugueExposition3v;
-  // Opt-in: route accompanimental inner-voice spans through the scored
-  // candidate search instead of replaying their designed counter-line. A
-  // measurement knob (off by default); see ComposeRequest::enable_free_counterpoint.
+  // Opt-in: route the Passacaglia secondary counterline (V1) through the scored
+  // candidate search instead of replaying its designed material; other forms
+  // report FreeCounterpointUnavailable. A measurement knob (off by default); see
+  // ComposeRequest::enable_free_counterpoint.
   bool free_counterpoint = false;
 };
 
@@ -235,11 +236,14 @@ void printUsage() {
   std::printf("  --key KEY        Key (e.g. g_minor, C_major, d_minor, F_major)\n");
   std::printf("  --form FORM      Form type\n");
   std::printf("  --character CH   Subject character: severe, playful, noble, restless\n");
+  std::printf("                   (chorale_prelude rejects playful/restless; toccata_and_fugue\n");
+  std::printf("                   rejects noble)\n");
   std::printf("  --instrument INS Instrument: organ, harpsichord, piano, violin, cello\n");
   std::printf("  --bpm N          BPM (40-200; 0 or omitted = default 100)\n");
   std::printf("  --scale SCALE    Duration scale: short, medium, long, full\n");
   std::printf("                   Default: short for every form\n");
-  std::printf("  --bars N         Target bar count (overrides --scale)\n");
+  std::printf("  --bars N         Target bar count (overrides --scale); snapped to the form's\n");
+  std::printf("                   bar grid and clamped to [form minimum, 128]\n");
   std::printf(
       "  --free-counterpoint  Experimental: generate the Passacaglia secondary\n"
       "                   counter-line via the scored candidate search instead of\n"
@@ -503,7 +507,7 @@ std::string deriveSuffixedJsonPath(const std::string& output, const char* suffix
 
 int runComposerMode(const CliOptions& opts) {
   // Composer mode: harness fixture catalog drives Material / HarmonicPlan /
-  // VoicePlan. Output goes through the same MidiWriter as the legacy path so
+  // VoicePlan. Output goes through the same MidiWriter as the default mode so
   // BPM / key transposition / file write are uniform.
   const auto layout = bach::composer::phaseSpec(opts.composer_phase);
   const char* phase_name = harnessPhaseToString(opts.composer_phase);
@@ -558,8 +562,8 @@ int runComposerMode(const CliOptions& opts) {
     std::fprintf(stderr, "Composer validation failed: %zu rule violations\n",
                  result.validation.failures.size());
     for (const auto& f : result.validation.failures) {
-      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
-                   static_cast<unsigned>(f.span_id));
+      std::fprintf(stderr, "  - %s (%s)\n", f.rule_id.c_str(),
+                   bach::composer::formatSpanId(f.span_id).c_str());
     }
     if (opts.json_output) {
       dump_json();
@@ -675,9 +679,10 @@ int runDefaultMode(const CliOptions& opts) {
                              : product.final_validation;
     std::fprintf(stderr, "Error: composer validation failed: %zu rule violations\n",
                  report.failures.size());
+    std::fprintf(stderr, "Seed: %u%s\n", product.seed, opts.seed == 0 ? " (auto)" : "");
     for (const auto& f : report.failures) {
-      std::fprintf(stderr, "  - %s (span %u)\n", f.rule_id.c_str(),
-                   static_cast<unsigned>(f.span_id));
+      std::fprintf(stderr, "  - %s (%s)\n", f.rule_id.c_str(),
+                   bach::composer::formatSpanId(f.span_id).c_str());
     }
     if (opts.generated_json_output && !product.diagnostic_json.empty()) {
       const std::string diagnostic_path = deriveSuffixedJsonPath(opts.output, ".diagnostic.json");

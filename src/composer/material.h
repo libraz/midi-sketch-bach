@@ -416,7 +416,7 @@ struct ToccataSection {
 
 // Organ Passacaglia. An 8-bar immutable ground bass
 // repeated under variations of rising density; one or more
-// variation blocks are flagged is_climax (the registral peak). Like the
+// variation blocks are flagged is_climax (the densest design block). Like the
 // chaconne arch but with an 8-bar period and a climax marker.
 struct PassacagliaVariation {
   VoiceId voice = 0;

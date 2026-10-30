@@ -16,6 +16,7 @@
 #include "composer/rule_helpers.h"
 #include "composer/stream_segregation.h"
 #include "composer/voice_onset_index.h"
+#include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 
 namespace bach::composer {
@@ -65,6 +66,7 @@ constexpr RuleGeometryEntry kRuleGeometryTable[] = {
     {"augmented_melodic", RuleGeometry::Linear},
     {"battuta", RuleGeometry::Vertical},
     {"consecutive_leaps", RuleGeometry::Linear},
+    {"countersubject_invertible", RuleGeometry::Vertical},
     {"cross_relation", RuleGeometry::Vertical},
     {"diminished_melodic", RuleGeometry::Linear},
     {"doubling_no_leading_tone", RuleGeometry::Vertical},
@@ -332,6 +334,19 @@ RuleGeometry counterpointRuleGeometry(const std::string& rule_id) {
   return RuleGeometry::Unclassified;
 }
 
+int countCompassViolations(const std::vector<NoteEvent>& notes, InstrumentType instrument,
+                           int sounding_shift) {
+  const InstrumentPitchRange range = pitchRangeFor(instrument);
+  int count = 0;
+  for (const auto& note : notes) {
+    const int pitch = static_cast<int>(note.pitch) + sounding_shift;
+    if (pitch < range.low || pitch > range.high) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   TextureMetrics metrics;
   if (notes.empty()) {
@@ -347,13 +362,9 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
     if (std::find(voices.begin(), voices.end(), note.voice) == voices.end()) {
       voices.push_back(note.voice);
     }
-    // Broad organ compass, pedal C1 through manual C6, read in the composed
-    // frame: the design contract every builder writes inside. The transposed
-    // output is held inside it by output placement.
-    if (note.pitch < organ_range::kPedalLow || note.pitch > organ_range::kManualHigh) {
-      ++metrics.compass_violation_count;
-    }
   }
+  // Organ compass in the composed frame: the design contract every builder writes inside.
+  metrics.compass_violation_count = countCompassViolations(notes, InstrumentType::Organ);
   std::sort(voices.begin(), voices.end());
   std::sort(boundaries.begin(), boundaries.end());
   boundaries.erase(std::unique(boundaries.begin(), boundaries.end()), boundaries.end());
@@ -1509,7 +1520,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   }
 
   // Suspension checks. Each declaration must describe a real prepared
-  // dissonance: consonant preparation, equal-or-longer preparation duration,
+  // dissonance: consonant preparation (or the declared chord's seventh),
+  // equal-or-longer preparation duration,
   // stronger metrical placement for the suspension, the type-specific
   // dissonance/resolution intervals, and a step in the prescribed direction.
   for (const auto& sp : material.suspension_patterns) {
@@ -1532,8 +1544,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     const bool ordered =
         sp.preparation_tick < sp.suspension_tick && sp.suspension_tick < sp.resolution_tick;
 
-    // Preparation: must be consonant against the lowest sounding voice at
-    // the preparation tick and repeat the same pitch into the suspension.
+    // Preparation: must be consonant against the lowest sounding voice at the
+    // preparation tick (or be the declared chord's seventh) and repeat the same
+    // pitch into the suspension.
     const auto lowestOtherPitch = [&](Tick at) -> std::uint8_t {
       std::uint8_t lowest = 0;
       for (VoiceId other : voices) {
@@ -1545,6 +1558,22 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
       return lowest;
     };
+    // The one dissonant preparation admitted: the seventh of the chord the plan
+    // declares at the preparation onset (ii7 preparing the 4-3 over V). Any
+    // other dissonant preparation still fails.
+    const auto isDeclaredChordSeventh = [&](std::uint8_t pitch, Tick at) {
+      const ChordEvent* chord = rule_helpers::chordAt(harmonic_plan, at);
+      if (chord == nullptr)
+        return false;
+      const int pc = pitch % 12;
+      for (const std::uint8_t triad_pc : rule_helpers::triadPitchClasses(*chord)) {
+        if (triad_pc == pc)
+          return false;
+      }
+      // chordPcsAt may spell a minor triad's fifth diminished; that is not a seventh.
+      return pc != (chord->root_pc + 6) % 12 &&
+             (rule_helpers::chordPcsAt(harmonic_plan, at) & detail::pcBit(pc)) != 0;
+    };
     bool prep_ok = ordered && prep_actual != 0 && prep_actual == sp.preparation_pitch &&
                    sus_actual == sp.suspension_pitch && res_actual == sp.resolution_pitch &&
                    prep_actual == sus_actual;
@@ -1555,7 +1584,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       else if (sp.type == SuspensionType::Sus2_3)
         prep_ok = rule_helpers::isConsonantAboveBass(other_pitch, prep_actual);
       else
-        prep_ok = rule_helpers::isConsonantAboveBass(prep_actual, other_pitch);
+        prep_ok = rule_helpers::isConsonantAboveBass(prep_actual, other_pitch) ||
+                  isDeclaredChordSeventh(prep_actual, sp.preparation_tick);
     }
     if (!prep_ok)
       addSuspensionFailure("suspension_preparation");

@@ -140,8 +140,8 @@ TEST(ChaconneArchTest, GroundCarrierTilesGroundBassAcrossPeriods) {
 }
 
 // Two adjacent variations of different density: VariationRoleApplied on every
-// note, TextureDensityShift on the first note of each (var 0 always shifts; var
-// 1 shifts because its density differs from var 0).
+// note, TextureDensityShift only on the first note of var 1 (var 0 has no
+// preceding variation; var 1 differs in density from var 0).
 TEST(ChaconneArchTest, VariationCarrierStampsRoleAndDensityShiftOnDensityChange) {
   Material material;
   VariationDecl v0;
@@ -175,8 +175,8 @@ TEST(ChaconneArchTest, VariationCarrierStampsRoleAndDensityShiftOnDensityChange)
   ASSERT_EQ(c0.size(), 2u);
   for (const auto& c : c0)
     EXPECT_NE(c.satisfied_rules & bit(RuleBit::VariationRoleApplied), 0u);
-  // var 0 (index 0) always shifts; only its first note.
-  EXPECT_NE(c0[0].satisfied_rules & bit(RuleBit::TextureDensityShift), 0u);
+  // var 0 has no preceding variation to differ from.
+  EXPECT_EQ(c0[0].satisfied_rules & bit(RuleBit::TextureDensityShift), 0u);
   EXPECT_EQ(c0[1].satisfied_rules & bit(RuleBit::TextureDensityShift), 0u);
 
   // Enumerate var 1 (its window).

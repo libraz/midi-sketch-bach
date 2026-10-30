@@ -197,17 +197,20 @@ TEST(FormSectionalTest, FreeCloseAndAnswerEntryDeclareFunctionalHarmony) {
         return it == fx.harmony.chords.end() ? nullptr : &*it;
       };
       const ChordEvent* free_close = chord_at_bar(free_bars - 1);
-      const ChordEvent* secondary = chord_at_bar(answer_bar - 2);
-      const ChordEvent* target = chord_at_bar(answer_bar - 1);
       ASSERT_NE(free_close, nullptr);
-      ASSERT_NE(secondary, nullptr);
-      ASSERT_NE(target, nullptr);
       EXPECT_EQ(free_close->root_pc % 12, 7);
-      EXPECT_EQ(secondary->root_pc % 12, 2);
-      EXPECT_EQ(secondary->quality, ChordQuality::Major);
-      EXPECT_TRUE(secondary->has_secondary_of);
-      EXPECT_EQ(secondary->secondary_of, RomanNumeral::V);
-      EXPECT_EQ(target->root_pc % 12, 7);
+      // The answer follows the solo subject directly, so no related-key
+      // approach is written over the subject's bars: they keep the home key.
+      for (int bar = free_bars; bar < answer_bar; ++bar) {
+        const ChordEvent* chord = chord_at_bar(bar);
+        ASSERT_NE(chord, nullptr);
+        EXPECT_FALSE(chord->has_secondary_of)
+            << formTypeToString(form) << (minor ? " minor" : " major") << " subject bar "
+            << bar - free_bars;
+        EXPECT_FALSE(chord->root_pc % 12 == 2 && chord->quality == ChordQuality::Major)
+            << formTypeToString(form) << (minor ? " minor" : " major") << " subject bar "
+            << bar - free_bars << " carries V/V";
+      }
 
       const Tick half_tick = static_cast<Tick>(free_bars - 1) * kBar;
       EXPECT_TRUE(std::any_of(
@@ -2059,6 +2062,33 @@ TEST(FormSectionalTest, ToccataDim7SweepValidatesAcrossSeedsBothModes) {
             << "toccata seed " << seed << (minor ? " minor" : " major") << " total " << total
             << " first failure="
             << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      }
+    }
+  }
+}
+
+// The fantasia's free section never thins to a single sounding voice: a Free
+// section's opening gesture runs and falls silent, and the middle voice answers
+// under its tail rather than leaving the pedal alone. Sampled at the sixteenth
+// over every rotation of the section styles.
+TEST(FormSectionalTest, FantasiaFreeSectionNeverSoundsOneVoiceAlone) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+      for (std::uint16_t bars : {std::uint16_t{32}, std::uint16_t{64}}) {
+        const HarnessFixture fx = buildFixture(FormType::FantasiaAndFugue, seed, minor, bars);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_TRUE(r.validation.failures.empty())
+            << "seed " << seed << " first=" << r.validation.failures.front().rule_id;
+        const Tick free_end = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+        for (Tick tick = 0; tick < free_end; tick += kTicksPerBeat / 4) {
+          std::set<VoiceId> sounding;
+          for (const NoteEvent& note : r.notes) {
+            if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+              sounding.insert(note.voice);
+          }
+          EXPECT_GE(sounding.size(), 2u) << (minor ? "minor" : "major") << " seed " << seed
+                                         << " bars " << bars << " tick " << tick;
+        }
       }
     }
   }

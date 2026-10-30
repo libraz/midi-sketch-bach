@@ -18,6 +18,7 @@ set(BACH_COMPOSER_SOURCES
   candidate_search.cpp
   free_counterpoint_search.cpp
   texture_helpers.cpp
+  material_pair_guard.cpp
   rule_helpers.cpp
   stream_segregation.cpp
   nct_detector.cpp

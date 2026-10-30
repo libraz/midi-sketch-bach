@@ -559,7 +559,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       if (var.start_tick > span.start_tick || var.end_tick < span.end_tick)
         continue;
       const bool density_shift =
-          (var_idx == 0) || (material.variations[var_idx - 1].density_level != var.density_level);
+          var_idx > 0 && material.variations[var_idx - 1].density_level != var.density_level;
       bool first = span.start_tick == var.start_tick;
       for (const auto& mnote : var.notes) {
         if (mnote.start_tick >= span.end_tick)
@@ -801,7 +801,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
     // span.start_tick/end_tick to the variation's window). Each note is source =
     // Material, score = 1.0 (baseline bits via emitMaterialNote) plus
     // VariationApplied. When the variation block is flagged is_climax (the
-    // dynamic / registral peak), every note additionally carries ClimaxPlaced so
+    // densest design block), every note additionally carries ClimaxPlaced so
     // the provenance records the climax shipped. Same shape as the
     // VariationCarrier branch with the climax flag replacing the density-shift
     // logic.

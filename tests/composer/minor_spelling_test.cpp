@@ -16,14 +16,10 @@
 #include <cstdlib>
 #include <vector>
 
-#include "application/composition_service.h"
-#include "composer/composer.h"
 #include "composer/figuration.h"
-#include "composer/form_director.h"
-#include "composer/harness_fixture.h"
-#include "composer/ornament_pass.h"
 #include "composer/rule_helpers.h"
 #include "core/basic_types.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
@@ -143,13 +139,6 @@ TEST(SpellScale, AugmentedSecondIsReadByLetterInEitherOctave) {
 }
 
 // --- Shipped-form sweep ------------------------------------------------------
-
-constexpr std::array<SubjectCharacter, 4> kCharacters = {{
-    SubjectCharacter::Severe,
-    SubjectCharacter::Playful,
-    SubjectCharacter::Noble,
-    SubjectCharacter::Restless,
-}};
 
 constexpr std::uint32_t kSeedCount = 6;
 
@@ -292,13 +281,6 @@ SpellingCounts countSpelling(const std::vector<NoteEvent>& notes, const Harmonic
   return counts;
 }
 
-std::uint32_t lastTick(const std::vector<NoteEvent>& notes) {
-  std::uint32_t last = 0;
-  for (const NoteEvent& note : notes)
-    last = std::max(last, note.start_tick + note.duration);
-  return last;
-}
-
 // Per-form ceilings over every character x seeds 1-6 in minor at the natural
 // length: the four spelling faults on the composed array, and the ornament
 // fault on the decorated one. RATCHET: measured counts, only ever lowered.
@@ -334,32 +316,18 @@ constexpr std::array<SpellingCeiling, 10> kSpellingCeilings = {{
 
 TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
   for (const SpellingCeiling& ceiling : kSpellingCeilings) {
+    test::ShippedSurface slice;
+    slice.forms = {ceiling.form};
+    slice.modes = {true};
+    slice.lengths = test::LengthAxis::Natural;
+    slice.seed_count = kSeedCount;
     SpellingCounts structural_total;
     SpellingCounts shipped_total;
-    for (SubjectCharacter character : kCharacters) {
-      for (std::uint32_t seed = 1; seed <= kSeedCount; ++seed) {
-        ComposeRequest request;
-        request.form = ceiling.form;
-        request.character = character;
-        request.seed = seed;
-        request.is_minor = true;
-        HarnessFixture fixture;
-        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
-          continue;
-        ComposeResult result =
-            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-        structural_total.add(countSpelling(result.notes, fixture.harmony));
-        OrnamentParams ornament;
-        ornament.character = character;
-        ornament.instrument = defaultInstrumentForForm(ceiling.form);
-        ornament.mode = Mode::Minor;
-        ornament.seed = seed;
-        ornament.bpm = application::kDefaultBpm;
-        resolveFixtureOrnamentContext(fixture, ceiling.form, lastTick(result.notes), &ornament);
-        applyOrnamentPass(result, ornament);
-        shipped_total.add(countSpelling(result.notes, fixture.harmony));
-      }
-    }
+    test::sweepShippedCells(
+        slice, [&](const test::ShippedCell&, const test::ProductGateResult& gate) {
+          structural_total.add(countSpelling(gate.composed.notes, gate.fixture.harmony));
+          shipped_total.add(countSpelling(gate.shipped.notes, gate.fixture.harmony));
+        });
     std::printf(
         "[minor-spelling] %-20s b7/V=%zu step=%zu aug2=%zu xrel=%zu | shipped b7/V=%zu "
         "orn=%zu\n",
@@ -383,81 +351,63 @@ TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
 // chromatic semitone through it. RATCHET: the augmented seconds left are the
 // pedal's leading tone into a deceptive root where no other tone in reach
 // clears a perfect-motion fault, and the middle manual's beat into that bar.
+// The 48- and 128-bar requests joined the sweep as a change of measurement: 17 -> 56.
 TEST(MinorSpellingSweep, TrioSonataKeepsTheLeadingToneAtEveryLength) {
+  test::ShippedSurface slice;
+  slice.forms = {FormType::TrioSonata};
+  slice.modes = {true};
+  slice.seed_count = 10;
   SpellingCounts total;
-  for (SubjectCharacter character : kCharacters) {
-    for (std::uint16_t bars : {std::uint16_t{0}, std::uint16_t{32}, std::uint16_t{64}}) {
-      for (std::uint32_t seed = 1; seed <= 10; ++seed) {
-        ComposeRequest request;
-        request.form = FormType::TrioSonata;
-        request.character = character;
-        request.seed = seed;
-        request.is_minor = true;
-        request.target_bars = bars;
-        HarnessFixture fixture;
-        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
-          continue;
-        const ComposeResult result =
-            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-        total.add(countSpelling(result.notes, fixture.harmony));
-      }
-    }
-  }
+  test::sweepShippedCells(slice,
+                          [&](const test::ShippedCell&, const test::ProductGateResult& gate) {
+                            total.add(countSpelling(gate.composed.notes, gate.fixture.harmony));
+                          });
   std::printf("[minor-spelling] trio lengths b7/V=%zu step=%zu aug2=%zu xrel=%zu\n",
               total.lowered_seventh_over_dominant, total.same_letter_step_over_dominant,
               total.augmented_second_over_dominant, total.false_relation_over_dominant);
   EXPECT_EQ(total.lowered_seventh_over_dominant, 0u);
   EXPECT_EQ(total.same_letter_step_over_dominant, 0u);
-  EXPECT_LE(total.augmented_second_over_dominant, 17u);
+  EXPECT_LE(total.augmented_second_over_dominant, 56u);
 }
 
 // The passacaglia's closing dominant: whatever the suspension and the seam
 // branch choose, an upper voice sounds the leading tone over the last dominant
 // before the final bar, in both modes.
 TEST(MinorSpellingSweep, PassacagliaClosingDominantSoundsTheLeadingTone) {
-  for (bool is_minor : {false, true}) {
-    for (SubjectCharacter character : kCharacters) {
-      for (std::uint32_t seed = 1; seed <= kSeedCount; ++seed) {
-        ComposeRequest request;
-        request.form = FormType::Passacaglia;
-        request.character = character;
-        request.seed = seed;
-        request.is_minor = is_minor;
-        HarnessFixture fixture;
-        if (buildFormFixture(request, &fixture) != FormDirectorStatus::Ok)
-          continue;
-        const ComposeResult result =
-            Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
-        const HarmonicPlan& plan = fixture.harmony;
-        ASSERT_FALSE(plan.chords.empty());
-        // The last dominant span that ends before the final chord.
-        Tick span_start = 0;
-        Tick span_end = 0;
-        for (std::size_t idx = 0; idx + 1 < plan.chords.size(); ++idx) {
-          const ChordEvent& chord = plan.chords[idx];
-          const bool dominant =
-              chord.root_pc % 12 == 7 &&
-              (chord.quality == ChordQuality::Major || chord.quality == ChordQuality::Dominant7);
-          if (dominant) {
-            span_start = chord.start_tick;
-            span_end = plan.chords[idx + 1].start_tick;
-          }
-        }
-        ASSERT_LT(span_start, span_end) << "seed " << seed;
-        VoiceId lowest = 0;
-        for (const NoteEvent& note : result.notes)
-          lowest = std::max(lowest, note.voice);
-        bool leading_tone = false;
-        for (const NoteEvent& note : result.notes) {
-          leading_tone = leading_tone || (note.voice != lowest && note.pitch % 12 == 11 &&
-                                          note.start_tick < span_end &&
-                                          note.start_tick + note.duration > span_start);
-        }
-        EXPECT_TRUE(leading_tone) << (is_minor ? "minor" : "major") << " "
-                                  << subjectCharacterToString(character) << " seed " << seed;
+  test::ShippedSurface slice;
+  slice.forms = {FormType::Passacaglia};
+  slice.lengths = test::LengthAxis::Natural;
+  slice.seed_count = kSeedCount;
+  test::sweepShippedCells(slice, [&](const test::ShippedCell& cell,
+                                     const test::ProductGateResult& gate) {
+    SCOPED_TRACE(test::cellName(cell));
+    const ComposeResult& result = gate.composed;
+    const HarmonicPlan& plan = gate.fixture.harmony;
+    ASSERT_FALSE(plan.chords.empty());
+    // The last dominant span that ends before the final chord.
+    Tick span_start = 0;
+    Tick span_end = 0;
+    for (std::size_t idx = 0; idx + 1 < plan.chords.size(); ++idx) {
+      const ChordEvent& chord = plan.chords[idx];
+      const bool dominant = chord.root_pc % 12 == 7 && (chord.quality == ChordQuality::Major ||
+                                                        chord.quality == ChordQuality::Dominant7);
+      if (dominant) {
+        span_start = chord.start_tick;
+        span_end = plan.chords[idx + 1].start_tick;
       }
     }
-  }
+    ASSERT_LT(span_start, span_end);
+    VoiceId lowest = 0;
+    for (const NoteEvent& note : result.notes)
+      lowest = std::max(lowest, note.voice);
+    bool leading_tone = false;
+    for (const NoteEvent& note : result.notes) {
+      leading_tone = leading_tone ||
+                     (note.voice != lowest && note.pitch % 12 == 11 && note.start_tick < span_end &&
+                      note.start_tick + note.duration > span_start);
+    }
+    EXPECT_TRUE(leading_tone);
+  });
 }
 
 }  // namespace

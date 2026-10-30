@@ -17,13 +17,13 @@ struct ComposeRequest {
   SubjectCharacter character = SubjectCharacter::Severe;
   std::uint16_t target_bars = 0;  // 0 = use the form's natural length
   std::uint32_t seed = 0;
-  // Opt-in: route accompanimental secondary-voice spans (TrioVoiceCarrier)
-  // through the scored free-counterpoint candidate search instead of replaying
-  // their designed material verbatim. Off by default so every form's output
-  // stays the deterministic carrier-assembly result; on, the inner voice is
-  // generated per-span by CandidateSearch (corpus-Gaussian + chord-tone
-  // scoring). A measurement knob, not a quality default -- the carrier path
-  // wins on score unless explicitly shown otherwise.
+  // Opt-in: route the Passacaglia secondary counterline (V1, a TrioVoiceCarrier
+  // span) through the scored free-counterpoint candidate search instead of
+  // replaying its designed material verbatim. Every other form reports
+  // FreeCounterpointUnavailable. Off by default so every form's output stays the
+  // deterministic carrier-assembly result; on, that voice is generated per-span
+  // by CandidateSearch (corpus-Gaussian + chord-tone scoring). A measurement knob, not a quality
+  // default -- the carrier path wins on score unless explicitly shown otherwise.
   bool enable_free_counterpoint = false;
 };
 
@@ -83,6 +83,9 @@ bool isFormCharacterCompatible(FormType form, SubjectCharacter character);
  *                    entirely. Snapping and clamping still apply.
  * @return The resolved bar count: scaled (or overridden), rounded to the
  *         nearest snap_bars multiple, then clamped to [min_bars, max_bars].
+ *         Every surface passes target_bars through here, so a requested length
+ *         outside the form's grid or limits is not honoured as given. Without
+ *         an override the four scales resolve to strictly increasing lengths.
  */
 std::uint16_t resolveBars(FormType form, DurationScale scale, std::uint16_t target_bars);
 

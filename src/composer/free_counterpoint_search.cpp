@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "composer/material_pair_guard.h"
 #include "composer/melodic_tables.h"
 #include "composer/rule_helpers.h"
 
@@ -333,6 +334,9 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       }
       if (strong && !is_triad)
         continue;  // strong-beat consonance rule
+      // A Picardy close raises the third; the minor third may not sound under it.
+      if (chord.is_picardy && pc == (chord.root_pc + 3) % 12)
+        continue;
       if (strict_harmonic_support && !is_triad)
         continue;
       if (strict_harmonic_support &&
@@ -341,14 +345,12 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
       }
 
       // Vertical rule: reject candidate that crosses any already-placed
-      // voice (lower voice index must stay above higher voice index).
+      // voice (lower voice index must stay above higher voice index), at its
+      // onset and at every later onset of another voice while it sounds.
       if (context.placed_notes != nullptr &&
-          createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(p), t)) {
-        continue;
-      }
-      if (strict_harmonic_support && context.placed_notes != nullptr &&
-          createsVoiceCrossingDuring(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
-                                     stride)) {
+          (createsVoiceCrossing(*placed_index, span.voice, static_cast<std::uint8_t>(p), t) ||
+           createsVoiceCrossingDuring(*placed_index, span.voice, static_cast<std::uint8_t>(p), t,
+                                      stride))) {
         continue;
       }
 
@@ -473,6 +475,25 @@ std::vector<Candidate> composeFreeSpan(const Span& span, const HarmonicPlan& har
                                               static_cast<std::uint8_t>(p), t, parallel_prev_pitch,
                                               parallel_prev_tick)) {
         continue;
+      }
+      // Seam into a placed tone of this voice right after the span: the last
+      // search tone is that tone's union-onset predecessor, so the pair it forms
+      // there is judged now, while another candidate can still be taken.
+      if (context.placed_notes != nullptr && t + stride >= span.end_tick &&
+          placed_index->pitchAt(span.voice, span.end_tick) != 0) {
+        const int seam_next = placed_index->pitchAt(span.voice, span.end_tick);
+        bool seam_parallel = false;
+        for (const VoiceId other : placed_index->activeVoices()) {
+          if (other == span.voice)
+            continue;
+          const int other_prev = placed_index->pitchAt(other, span.end_tick - 1);
+          const int other_curr = placed_index->pitchAt(other, span.end_tick);
+          seam_parallel =
+              seam_parallel || (other_prev != 0 && other_curr != 0 &&
+                                isStrictParallelPerfect(p, seam_next, other_prev, other_curr));
+        }
+        if (seam_parallel)
+          continue;
       }
       // Both of the following reach their perfect interval by CONTRARY motion,
       // so none of the parallel checks above can see either. They follow the

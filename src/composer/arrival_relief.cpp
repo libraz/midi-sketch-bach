@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "composer/bar_material.h"
+#include "composer/material_pair_guard.h"
 #include "composer/rule_helpers.h"
 
 namespace bach::composer {
@@ -50,7 +51,7 @@ struct ReliefBounds {
 // the fault formed arriving here and may not raise the one formed leaving.
 void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t arrival_idx,
                            const ThemeToneRegistry& registry, VoiceId voice, VoiceId num_voices,
-                           const ReliefBounds& bounds,
+                           const ReliefBounds& bounds, const ReliefBounds& loose,
                            const std::vector<ConcurrentMotion>& into_arrival, int approach,
                            int original_rank) {
   MaterialNote& note = *line[arrival_idx];
@@ -87,9 +88,14 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
   // fault than the perfect interval being repaired. The bound is the same one
   // the way-in re-aim uses -- an octave, or whatever the design already spanned
   // if that is wider, so a line is never asked to close a gap it wrote itself.
-  const int entry_ceiling = std::max(bounds.line.max_leap, std::abs(original - approach));
-  const int exit_ceiling_leap =
-      next_pitch < 0 ? 0 : std::max(bounds.line.max_leap, std::abs(original - next_pitch));
+  const auto entry_ceiling = [&](const ReliefBounds& pass) {
+    return std::max(pass.line.max_leap, std::abs(original - approach));
+  };
+  const auto exit_ceiling_leap = [&](const ReliefBounds& pass) {
+    return next_pitch < 0 ? 0 : std::max(pass.line.max_leap, std::abs(original - next_pitch));
+  };
+  const bool original_strict =
+      worstPairFault(approach, original, into_arrival) == PairFault::kStrict;
 
   // A replacement that takes a neighbour's pitch the displaced tone did not
   // already share lengthens a static run, so it is tried only after the window
@@ -98,34 +104,52 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
     return (cand == approach && original != approach) ||
            (next_pitch >= 0 && cand == next_pitch && original != next_pitch);
   };
-  for (int accept = 0; accept < original_rank; ++accept) {
-    for (const bool allow_flatten : {false, true}) {
-      for (int dist = 1; dist <= displacement; ++dist) {
-        for (const int sgn : {-1, 1}) {
-          const int cand = original + sgn * dist;
-          if (!bounds.admits(cand, note.start_tick, at_arrival) ||
-              (!allow_flatten && flattens(cand)) || std::abs(cand - approach) > entry_ceiling ||
-              (next_pitch >= 0 && std::abs(cand - next_pitch) > exit_ceiling_leap)) {
-            continue;
-          }
-          bool admissible = true;
-          for (const ConcurrentMotion& motion : at_arrival) {
-            // A lower voice index sounds higher.
-            if (motion.voice < voice ? cand >= motion.curr : cand <= motion.curr) {
-              admissible = false;
-              break;
+  // The same pass order as the way-in re-aim: the consonance the replacement
+  // inherits, and then the line's band, give way only for a true parallel, which
+  // a passing dissonance or a tone outside the band costs less than.
+  struct Pass {
+    const ReliefBounds* bounds;
+    bool allow_dissonance;
+  };
+  const Pass passes[] = {{&bounds, false}, {&bounds, true}, {&loose, false}, {&loose, true}};
+  for (const Pass& pass : passes) {
+    if (pass.bounds == &loose && !original_strict)
+      continue;
+    if (pass.allow_dissonance && (!original_strict || !original_consonant))
+      continue;
+    for (int accept = 0; accept < original_rank; ++accept) {
+      for (const bool allow_flatten : {false, true}) {
+        for (int dist = 1; dist <= displacement; ++dist) {
+          for (const int sgn : {-1, 1}) {
+            const int cand = original + sgn * dist;
+            if (!pass.bounds->admits(cand, note.start_tick, at_arrival) ||
+                (!allow_flatten && flattens(cand)) ||
+                std::abs(cand - approach) > entry_ceiling(*pass.bounds) ||
+                (next_pitch >= 0 &&
+                 std::abs(cand - next_pitch) > exit_ceiling_leap(*pass.bounds))) {
+              continue;
             }
-            if (original_consonant && !isConsonantPair(cand, motion.curr)) {
-              admissible = false;
-              break;
+            bool admissible = true;
+            for (const ConcurrentMotion& motion : at_arrival) {
+              // A lower voice index sounds higher.
+              if (motion.voice < voice ? cand >= motion.curr : cand <= motion.curr) {
+                admissible = false;
+                break;
+              }
+              if (original_consonant && !pass.allow_dissonance &&
+                  !isConsonantPair(cand, motion.curr)) {
+                admissible = false;
+                break;
+              }
             }
+            if (!admissible || perfectFaultRank(approach, cand, into_arrival) > accept)
+              continue;
+            if (next_pitch >= 0 &&
+                perfectFaultRank(cand, next_pitch, out_of_arrival) > exit_ceiling)
+              continue;
+            note.pitch = static_cast<std::uint8_t>(cand);
+            return;
           }
-          if (!admissible || perfectFaultRank(approach, cand, into_arrival) > accept)
-            continue;
-          if (next_pitch >= 0 && perfectFaultRank(cand, next_pitch, out_of_arrival) > exit_ceiling)
-            continue;
-          note.pitch = static_cast<std::uint8_t>(cand);
-          return;
         }
       }
     }
@@ -207,8 +231,8 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
       // dissolves the register order nor worsens the motion out of the beat.
       if (head % kTicksPerBar == 0)
         continue;
-      relieveRunningArrival(line, arrival_idx, registry, voice, num_voices, bounds, into_head,
-                            original, original_rank);
+      relieveRunningArrival(line, arrival_idx, registry, voice, num_voices, bounds, loose,
+                            into_head, original, original_rank);
       continue;
     }
 

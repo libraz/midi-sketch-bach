@@ -2,6 +2,7 @@
 #define BACH_COMPOSER_SPAN_H
 
 #include <cstdint>
+#include <string>
 
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -18,6 +19,12 @@ namespace bach::composer {
 using SpanId = std::uint32_t;
 
 inline constexpr SpanId kInvalidSpanId = static_cast<SpanId>(-1);
+
+/// @brief Render a span id for human-readable output.
+/// @return "no span" for kInvalidSpanId (diagnostic JSON writes null), else "span <id>".
+inline std::string formatSpanId(SpanId span_id) {
+  return span_id == kInvalidSpanId ? std::string("no span") : "span " + std::to_string(span_id);
+}
 
 // Note-placement granularity inside a Span. Quarter (one note per beat)
 // is the default and matches the basic 2-voice texture.

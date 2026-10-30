@@ -291,7 +291,7 @@ std::optional<CompassPlacement> placeInOutputCompass(
   CompassPlacement placement;
   placement.octave_shift = *nearest;
   const InstrumentPitchRange range = pitchRangeFor(instrument);
-  if (!range.hard_limit || result->notes.empty())
+  if (result->notes.empty())
     return placement;
 
   const int key_shift = keyTranspositionSemitones(key);

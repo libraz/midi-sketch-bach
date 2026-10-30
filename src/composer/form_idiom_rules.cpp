@@ -21,8 +21,7 @@ using rule_helpers::activeChord;
 using rule_helpers::isStructuralAccent;
 
 // Organ Toccata. Self-contained (character, archetype) compatibility
-// predicate for the toccata_archetype_compatible rule. This does NOT reuse the
-// legacy isCharacterFormCompatible (which keys off the legacy FormType). The
+// predicate for the toccata_archetype_compatible rule. The
 // only forbidden pair is Noble x Dramaticus: the Dramaticus archetype is the
 // prototypical dramatic toccata (BWV565-style free, virtuosic opening),
 // antithetical to the dignified Noble affect (the Noble character must not
@@ -587,6 +586,7 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
       // rule_helpers predicate so the implicit lines of the solo arpeggio are
       // held to the same melodic standard as the Organ Compose voices.
       bool implicit_ok = true;
+      SpanId implicit_span = kInvalidSpanId;
       for (const std::vector<std::uint8_t>* stream : {&bass_stream, &top_stream}) {
         for (std::size_t cell = 1; cell < cell_count; ++cell) {
           const Tick from_tick = notes[flow_indices[(cell - 1) * g]].start_tick;
@@ -594,6 +594,7 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
           if (rule_helpers::isForbiddenMelodicLeap((*stream)[cell - 1], (*stream)[cell],
                                                    harmonic_plan, from_tick, to_tick)) {
             implicit_ok = false;
+            implicit_span = provenance[flow_indices[cell * g]].span_id;
             break;
           }
         }
@@ -602,6 +603,7 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
       }
       if (!implicit_ok) {
         ValidationFailure failure;
+        failure.span_id = implicit_span;
         failure.rule_id = "implicit_voice_counterpoint";
         failure.kind = FailKind::MusicalFail;
         report.failures.push_back(failure);
@@ -804,6 +806,7 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   // (fixtures that declare no figuration sections).
   {
     bool figuration_inconsistent = false;
+    SpanId inconsistent_span = kInvalidSpanId;
     for (std::size_t i = 0; i < notes.size() && !figuration_inconsistent; ++i) {
       if (!hasRuleBit(provenance, i, RuleBit::FigurationCommitted))
         continue;
@@ -827,11 +830,14 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
             static_cast<std::uint8_t>((chord.root_pc + seventhOffset(chord.quality)) % 12);
         is_chord_tone = (pc == seventh_pc);
       }
-      if (!is_chord_tone)
+      if (!is_chord_tone) {
         figuration_inconsistent = true;
+        inconsistent_span = provenance[i].span_id;
+      }
     }
     if (figuration_inconsistent) {
       ValidationFailure failure;
+      failure.span_id = inconsistent_span;
       failure.rule_id = "figuration_harmonic_consistency";
       failure.kind = FailKind::MusicalFail;
       report.failures.push_back(failure);
@@ -1128,50 +1134,81 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   // invertible (double) counterpoint at the octave must work both above and
   // below the subject. Under octave inversion a perfect fifth
   // becomes a perfect fourth (a dissonance against the bass), so a perfect fifth
-  // on a strong beat between the countersubject and the subject/answer it sounds
-  // against is not strictly invertible at the octave. This rule operates ONLY on
-  // notes carrying the CountersubjectInvertible bit (the first high-lane RuleBit).
-  // It identifies the countersubject voice(s) from those notes and the
-  // subject/answer voice(s) from notes whose provenance voice_intent is
-  // SubjectCarrier or AnswerCarrier, then walks every strong-beat tick where a
-  // countersubject voice and a subject/answer voice both sound. If the vertical
-  // interval reduces to a perfect fifth (|interval| % 12 == 7) at any such tick,
-  // the pair is not invertible at the octave.
+  // on a strong beat between the countersubject and the subject statement it
+  // sounds against is not strictly invertible at the octave. The pair is read
+  // note by note from provenance: one side is a note carrying the
+  // CountersubjectInvertible bit, the other a note whose voice_intent is
+  // SubjectCarrier, AnswerCarrier, MiddleEntryCarrier or StrettoCarrier. Free
+  // figuration that merely shares a voice with either side is never paired.
   //
   // This is reported INFORMATIONALLY (report.informational), not as a gating
   // failure: free-style fugue countersubjects in the existing corpus routinely
   // place consonant fifths against the subject on strong beats (strict
   // invertibility is a design constraint of double-counterpoint countersubjects,
   // not of every countersubject), so a hard or soft FAILURE here would penalize
-  // established pieces. The observation is recorded for provenance/audit; it
-  // never sets status or empties-failures. It is pushed directly rather than
-  // through the counterpoint-finding recorder, so it carries no span, no rule
-  // geometry and no observation tally. Inert when no CountersubjectInvertible
-  // note or no overlapping subject/answer voice exists (most fixtures declare no
-  // countersubject). Deterministic and pure; reads pitches through the shared
-  // onset index the invertible_at_octave rule uses.
+  // established pieces. It never sets status or empties-failures, and it is
+  // pushed directly rather than through the counterpoint-finding recorder, so it
+  // carries the countersubject note's span but no observation tally. Inert when
+  // no CountersubjectInvertible note or no subject statement exists (most
+  // fixtures declare no countersubject). Deterministic and pure.
   {
-    std::vector<VoiceId> cs_voices;
-    std::vector<VoiceId> sa_voices;
+    struct SoundingRange {
+      Tick start;
+      Tick end;
+      std::uint8_t pitch;
+      SpanId span_id;
+    };
+    // Per voice, in note order (which is onset order within a voice).
+    std::vector<std::pair<VoiceId, std::vector<SoundingRange>>> cs_lines;
+    std::vector<std::pair<VoiceId, std::vector<SoundingRange>>> sa_lines;
+    const auto lineFor = [](std::vector<std::pair<VoiceId, std::vector<SoundingRange>>>& lines,
+                            VoiceId voice) -> std::vector<SoundingRange>& {
+      for (auto& line : lines) {
+        if (line.first == voice)
+          return line.second;
+      }
+      lines.emplace_back(voice, std::vector<SoundingRange>{});
+      return lines.back().second;
+    };
     Tick cs_first = std::numeric_limits<Tick>::max();
     Tick cs_last = 0;
-    bool has_cs = false;
     for (std::size_t i = 0; i < notes.size(); ++i) {
       if (i >= provenance.size())
         continue;
+      const SoundingRange range{notes[i].start_tick, notes[i].start_tick + notes[i].duration,
+                                notes[i].pitch, provenance[i].span_id};
       if (hasRuleBit(provenance, i, RuleBit::CountersubjectInvertible)) {
-        if (std::find(cs_voices.begin(), cs_voices.end(), notes[i].voice) == cs_voices.end())
-          cs_voices.push_back(notes[i].voice);
-        cs_first = std::min(cs_first, notes[i].start_tick);
-        cs_last = std::max(cs_last, notes[i].start_tick + notes[i].duration);
-        has_cs = true;
+        lineFor(cs_lines, notes[i].voice).push_back(range);
+        cs_first = std::min(cs_first, range.start);
+        cs_last = std::max(cs_last, range.end);
       } else if (provenance[i].voice_intent == VoiceIntent::SubjectCarrier ||
-                 provenance[i].voice_intent == VoiceIntent::AnswerCarrier) {
-        if (std::find(sa_voices.begin(), sa_voices.end(), notes[i].voice) == sa_voices.end())
-          sa_voices.push_back(notes[i].voice);
+                 provenance[i].voice_intent == VoiceIntent::AnswerCarrier ||
+                 provenance[i].voice_intent == VoiceIntent::MiddleEntryCarrier ||
+                 provenance[i].voice_intent == VoiceIntent::StrettoCarrier) {
+        lineFor(sa_lines, notes[i].voice).push_back(range);
       }
     }
-    if (has_cs && !cs_voices.empty() && !sa_voices.empty()) {
+    if (!cs_lines.empty() && !sa_lines.empty()) {
+      for (auto* lines : {&cs_lines, &sa_lines}) {
+        for (auto& line : *lines) {
+          std::stable_sort(line.second.begin(), line.second.end(),
+                           [](const SoundingRange& lhs, const SoundingRange& rhs) {
+                             return lhs.start < rhs.start;
+                           });
+        }
+      }
+      // The flagged note of a line sounding at `tick`, if any.
+      const auto soundingAt = [](const std::vector<SoundingRange>& line,
+                                 Tick tick) -> const SoundingRange* {
+        auto iter = std::upper_bound(
+            line.begin(), line.end(), tick,
+            [](Tick value, const SoundingRange& range) { return value < range.start; });
+        if (iter == line.begin())
+          return nullptr;
+        --iter;
+        // Same-voice notes do not overlap, so only the latest earlier onset can still sound.
+        return tick < iter->end ? &*iter : nullptr;
+      };
       // Distinct strong-beat onset ticks inside the countersubject's span; the
       // pair only needs checking where the countersubject actually sounds.
       std::vector<Tick> ticks;
@@ -1187,32 +1224,36 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
       ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
 
       bool non_invertible = false;
+      SpanId found_span = kInvalidSpanId;
       for (Tick t : ticks) {
-        if (non_invertible)
-          break;
-        for (VoiceId cs : cs_voices) {
-          const std::uint8_t cs_pitch = onset_index.pitchAt(cs, t);
-          if (cs_pitch == 0)
+        for (const auto& cs_line : cs_lines) {
+          const SoundingRange* cs_note = soundingAt(cs_line.second, t);
+          if (cs_note == nullptr)
             continue;
-          for (VoiceId sa : sa_voices) {
-            if (sa == cs)
+          for (const auto& sa_line : sa_lines) {
+            if (sa_line.first == cs_line.first)
               continue;
-            const std::uint8_t sa_pitch = onset_index.pitchAt(sa, t);
-            if (sa_pitch == 0)
+            const SoundingRange* sa_note = soundingAt(sa_line.second, t);
+            if (sa_note == nullptr)
               continue;
-            const int interval = static_cast<int>(cs_pitch) - static_cast<int>(sa_pitch);
+            const int interval =
+                static_cast<int>(cs_note->pitch) - static_cast<int>(sa_note->pitch);
             // A perfect fifth (and its compound forms) inverts to a fourth.
             if (isPerfectFifth(interval)) {
               non_invertible = true;
+              found_span = cs_note->span_id;
               break;
             }
           }
           if (non_invertible)
             break;
         }
+        if (non_invertible)
+          break;
       }
       if (non_invertible) {
         ValidationFailure observation;
+        observation.span_id = found_span;
         observation.rule_id = "countersubject_invertible";
         observation.kind = FailKind::MusicalFail;
         report.informational.push_back(observation);

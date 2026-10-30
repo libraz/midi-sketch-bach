@@ -72,8 +72,9 @@ constexpr IntentDescriptor kIntentTable[] = {
     // GroundCarrier (21): every note carries GroundBassReplayed.
     {"GroundCarrier", true, ReplayKind::kVerbatimVector, GroundBassReplayed, true},
     // VariationCarrier (22): every note carries VariationRoleApplied (the
-    // TextureDensityShift bit is stamped on a variation's first note in the
-    // replay branch, not encoded here).
+    // TextureDensityShift bit is stamped on the first note of a variation whose
+    // density differs from the preceding variation, in the replay branch, not
+    // encoded here).
     {"VariationCarrier", true, ReplayKind::kVerbatimVector, VariationRoleApplied, true},
     // FigurationCarrier (23): every note carries FigurationCommitted (the
     // CadenzaApplied / PedalPreparation bits are OR-ed per-section in the

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
 #include "core/pitch_utils.h"
@@ -153,7 +154,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
                            detail::Mode mode, SuspensionPattern* pattern,
                            const detail::ChordSpec* resolution_chord,
-                           const detail::ChordSpec* preparation_chord) {
+                           const detail::ChordSpec* preparation_chord,
+                           bool allow_prepared_seventh) {
   if (pattern == nullptr || type == SuspensionType::Sus2_3 || preparation_tick >= suspension_tick ||
       suspension_tick >= resolution_tick || bass_at_preparation == 0 || bass_at_suspension == 0 ||
       bass_at_resolution == 0 || upper_at_preparation == 0 || upper_at_suspension == 0 ||
@@ -166,8 +168,13 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
     if (!detail::inScale(suspended, mode, resolution_chord) ||
         (preparation_chord != nullptr && !detail::inScale(suspended, mode, preparation_chord)))
       continue;
-    if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(suspended),
-                                            bass_at_preparation))
+    const bool prepared_seventh =
+        allow_prepared_seventh && preparation_chord != nullptr &&
+        ((suspended % 12) + 12) % 12 ==
+            detail::chordSeventhPc(
+                detail::ChordSpec{preparation_chord->root_pc, preparation_chord->minor, true});
+    if (!prepared_seventh && !rule_helpers::isConsonantAboveBass(
+                                 static_cast<std::uint8_t>(suspended), bass_at_preparation))
       continue;
     if (!isConsonantPair(suspended, upper_at_preparation) ||
         !isConsonantPair(suspended, upper_at_suspension))
@@ -243,6 +250,18 @@ int ThemeToneRegistry::onsetPitchBefore(VoiceId voice, Tick tick) const {
     }
   }
   return pitch;
+}
+
+void ThemeToneRegistry::pitchRangeDuring(VoiceId voice, Tick start, Tick end, int& out_lowest,
+                                         int& out_highest) const {
+  out_lowest = -1;
+  out_highest = -1;
+  for (const ThemeTone& tone : tones_) {
+    if (tone.voice != voice || tone.tick >= end || tone.tick + tone.duration <= start)
+      continue;
+    out_lowest = out_lowest < 0 ? tone.pitch : std::min(out_lowest, tone.pitch);
+    out_highest = std::max(out_highest, tone.pitch);
+  }
 }
 
 void ThemeToneRegistry::concurrentThemePitches(Tick tick, VoiceId voice,
@@ -409,13 +428,11 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
   // this voice sounds a sixteenth before the span, the motion the pass could
   // never see becomes the first one it judges.
   int previous_emitted = -1;
-  Tick previous_tick = 0;
   constexpr Tick kSeamLookback = kTicksPerBeat / 4;  // one sixteenth.
   if (start >= kSeamLookback) {
     const int seam_pitch = registry.soundingPitchInVoice(voice, start - kSeamLookback);
     if (seam_pitch >= 0) {
       previous_emitted = seam_pitch;
-      previous_tick = start - kSeamLookback;
     }
   }
   // Realization-time repair, and the only place in this function that reads the
@@ -434,19 +451,24 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
   auto refineAgainstEmitted = [&](int proposed, Tick tick) {
     if (previous_emitted < 0)
       return proposed;
+    // The other voices are read at the union onset just before this one, not at
+    // this line's own previous attack: under a held counter tone the entry may
+    // move several times, and only its last tone is paired with the arrival.
     std::vector<ConcurrentMotion> motions;
-    registry.concurrentMotions(previous_tick, tick, voice, /*num_voices=*/3, motions);
+    unionOnsetMotions(registry, tick, voice, /*num_voices=*/3, motions);
     const auto fault_rank = [&](int candidate) {
-      int rank = 0;
-      for (const ConcurrentMotion& motion : motions) {
-        if (formsStrictPerfectParallel(previous_emitted, candidate, motion.prev, motion.curr))
-          rank = std::max(rank, 3);
-        else if (formsAntiParallelPerfect(previous_emitted, candidate, motion.prev, motion.curr))
-          rank = std::max(rank, 2);
-        else if (formsBattuta(previous_emitted, candidate, motion.prev, motion.curr))
-          rank = std::max(rank, 1);
+      switch (worstPairFault(previous_emitted, candidate, motions)) {
+        case PairFault::kStrict:
+          return 3;
+        case PairFault::kAntiParallel:
+          return 2;
+        case PairFault::kBattuta:
+          return 1;
+        case PairFault::kHidden:
+        case PairFault::kNone:
+          break;
       }
-      return rank;
+      return 0;
     };
     const int proposed_rank = fault_rank(proposed);
     if (proposed_rank == 0)
@@ -471,7 +493,20 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
         }
       }
     }
-    return proposed;
+    if (proposed_rank < 3)
+      return proposed;
+    // No consonant repair exists for a true parallel: a passing dissonance or
+    // holding the previous tone is the smaller fault.
+    MaterialPairChooser chooser(previous_emitted, motions);
+    chooser.offer(proposed, 0);
+    for (int degrees = 1; degrees <= 4; ++degrees) {
+      for (int candidate : {walk_at(proposed, degrees, tick), walk_at(proposed, -degrees, tick)}) {
+        if (candidate >= band_lo && candidate <= band_hi)
+          chooser.offer(candidate, (consonant_here(candidate) ? 0 : 8) + degrees);
+      }
+    }
+    chooser.offer(previous_emitted, consonant_here(previous_emitted) ? 5 : 13);
+    return chooser.best();
   };
 
   for (std::size_t index = 0; index < anchors.size(); ++index) {
@@ -483,7 +518,6 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
       destination.push_back({anchor.tick, anchor.duration, static_cast<std::uint8_t>(pitch)});
       registry.record(anchor.tick, voice, pitch, anchor.duration);
       previous_emitted = pitch;
-      previous_tick = anchor.tick;
       continue;
     }
 
@@ -534,18 +568,12 @@ void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId
       destination.push_back({tick, sixteenth, static_cast<std::uint8_t>(pitch)});
       registry.record(tick, voice, pitch, sixteenth);
       previous_emitted = pitch;
-      previous_tick = tick;
     }
   }
 }
 
 bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
-  if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
-    return false;  // need both voices' two onsets to judge motion.
-  }
-  if (cand >= other_curr)
-    return isParallelPerfectMotion(line_prev, cand, other_prev, other_curr);
-  return isParallelPerfectMotion(other_prev, other_curr, line_prev, cand);
+  return isStrictParallelPerfect(line_prev, cand, other_prev, other_curr);
 }
 
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
@@ -1170,9 +1198,15 @@ bool closeMiddleVoiceOnCadence(std::vector<MaterialNote>& notes,
   // between them, so the leading tone is the tone the chord is still missing.
   // Under the variation's closing tone as well, so the closing third is not
   // reached by a leap down from above it.
+  // The approach tone holds until the final bar, so it must stay under every
+  // variation tone sounding over that sustain, not only the one it starts under.
   static constexpr int kDominantPcs[3] = {11, 2, 7};
-  const int approach_ceiling =
+  int approach_ceiling =
       std::min(variation_approach >= 0 ? variation_approach : 127, variation_final);
+  for (const MaterialNote& note : final_variation) {
+    if (note.start_tick < final_bar_tick && note.start_tick + note.duration > approach_tick)
+      approach_ceiling = std::min(approach_ceiling, static_cast<int>(note.pitch));
+  }
   const int approach_pitch =
       pick(kDominantPcs, coda_dominant, approach_ceiling, previous, {variation_approach},
            variation_prev, variation_approach, coda_support, coda_dominant);

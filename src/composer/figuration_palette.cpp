@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdlib>
 
+#include "composer/material_pair_guard.h"
 #include "composer/texture_helpers.h"
 
 namespace bach::composer {
@@ -1552,6 +1553,29 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
             } else if (down >= order_floor && down != from) {
               next = down;
             }
+          }
+        }
+        // Last resort for a true parallel the escape, the clash relief and the
+        // order clamp left standing, judged at the union onset the validator
+        // pairs: any in-window tone, a passing clash or holding the previous
+        // tone included, is the smaller fault.
+        {
+          std::vector<ConcurrentMotion> union_motions;
+          unionOnsetMotions(registry, tick, static_cast<VoiceId>(voice), num_voices, union_motions);
+          if (worstPairFault(from, next, union_motions) == PairFault::kStrict) {
+            const int window_lo = std::max(order_floor, band_lo);
+            const int window_hi = std::min(order_ceiling, band_hi);
+            MaterialPairChooser chooser(from, union_motions);
+            for (int cand = next - 7; cand <= next + 7; ++cand) {
+              if (cand >= window_lo && cand <= window_hi && cand != from &&
+                  detail::inScale(cand, mode, &chord)) {
+                chooser.offer(cand, std::abs(cand - next) + (wave_is_harsh(cand) ? 16 : 0));
+              }
+            }
+            if (from >= window_lo && from <= window_hi)
+              chooser.offer(from, 8 + (wave_is_harsh(from) ? 16 : 0));
+            if (chooser.best() >= 0 && chooser.bestFault() != PairFault::kStrict)
+              next = chooser.best();
           }
         }
         // Commit the running direction the chosen step actually moved.

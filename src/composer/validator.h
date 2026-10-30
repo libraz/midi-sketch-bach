@@ -71,11 +71,26 @@ RuleGeometry counterpointRuleGeometry(const std::string& rule_id);
  * Used by the Validator while validating and by the ornament post-pass to
  * refresh the embedded metrics after note expansion, so the metrics carried in
  * the report always describe the note list actually emitted downstream.
+ * `compass_violation_count` is judged against the organ compass in the composed
+ * frame, the design contract of the harness fixtures; the application layer
+ * replaces it with the piece instrument's count in the sounding frame.
  *
  * @param notes The notes to measure (any voice set; empty yields zero metrics).
  * @return Aggregate and per-voice texture metrics for `notes`.
  */
 TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes);
+
+/**
+ * @brief Count notes whose sounding pitch lies outside an instrument's declared compass.
+ *
+ * @param notes The notes to judge.
+ * @param instrument Instrument whose pitchRangeFor() range is the compass.
+ * @param sounding_shift Semitones added to each pitch to reach the sounding frame (key
+ *        transposition plus output octave displacement); 0 judges the composed frame.
+ * @return Number of notes below the compass floor or above its ceiling.
+ */
+int countCompassViolations(const std::vector<NoteEvent>& notes, InstrumentType instrument,
+                           int sounding_shift = 0);
 
 }  // namespace bach::composer
 

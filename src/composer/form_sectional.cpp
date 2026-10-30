@@ -10,6 +10,7 @@
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
+#include "composer/form_fugue.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
@@ -205,12 +206,14 @@ struct FreeLayerPlan {
   bool pedal = false;
   bool punctuate = false;
   bool homophonic = false;
-  bool fermata = false;  // whole-note V0+V1+V2 homophonic strike (the metered breath).
+  bool fermata = false;      // whole-note V0+V1+V2 homophonic strike (the metered breath).
+  bool answer_tail = false;  // V1 tone under the silent tail of a V0 gesture.
+  bool held_punct = false;   // V1 head punctuation held for half the bar.
 };
 
-// Register band for the free-section V1 punctuation and V2 pedal layers. These
-// reuse the fugue-tail bands (V1 = [56,71], V2 = [40,55]) so the whole piece
-// keeps one consistent per-voice register order; the consonantChordTone order
+// Register band for the free-section V1 punctuation and V2 pedal layers. Their
+// bands overlap the fugue-tail bands (V1 = [53,71], V2 = [33,52]) and keep the
+// same per-voice register order across the whole piece; the consonantChordTone order
 // window additionally clamps each pick below the concurrent V0 figuration.
 constexpr int kFreeV1Lo = 56;
 constexpr int kFreeV1Hi = 71;
@@ -519,7 +522,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   int v1_prev = -1;
   for (int bar = 0; bar < free_bars; ++bar) {
     const FreeLayerPlan& want = layout[static_cast<std::size_t>(bar)];
-    if (!want.punctuate && !want.homophonic && !want.fermata)
+    if (!want.punctuate && !want.homophonic && !want.fermata && !want.answer_tail &&
+        !want.held_punct)
       continue;
     if (punct_first < 0)
       punct_first = bar;
@@ -527,6 +531,27 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     const ChordSpec& chord = plan[static_cast<std::size_t>(bar)];
     const Tick bar_start = barTick(bar);
     const int centre = (kFreeV1Lo + kFreeV1Hi) / 2;
+    if (want.answer_tail) {
+      // The gesture's run leaves the rest of the bar to the pedal alone; the
+      // middle voice answers from where the run stops, so the rest is the top
+      // voice's and the texture does not thin to one line.
+      Tick tail = bar_start;
+      for (const MaterialNote& note : v0_notes) {
+        if (note.start_tick >= bar_start && note.start_tick < bar_start + kTicksPerBar)
+          tail = std::max(tail, note.start_tick + note.duration);
+      }
+      if (tail >= bar_start + kTicksPerBar)
+        continue;
+      registry.concurrentThemePitches(tail, /*voice=*/1, theme_pitches);
+      registry.concurrentMotions(tail - kSixteenth, tail, /*voice=*/1, /*num_voices=*/3, motions);
+      const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
+                                           theme_pitches, v1_prev, motions, mode,
+                                           /*downbeat=*/true);
+      v1_prev = pitch;
+      addNote(punct_section.notes, tail, bar_start + kTicksPerBar - tail, pitch);
+      registry.record(tail, /*voice=*/1, pitch, bar_start + kTicksPerBar - tail);
+      continue;
+    }
     registry.concurrentThemePitches(bar_start, /*voice=*/1, theme_pitches);
     registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/1,
                                /*num_voices=*/3, motions);
@@ -539,8 +564,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // (longer to lift V1 occupancy, shorter for a lighter accompaniment).
     // Either way the bar's tail is left to the V0 figuration alone (a breathing,
     // non-saturated accompaniment).
-    const Tick dur =
-        want.fermata ? kTicksPerBar : (want.homophonic ? kTicksPerBeat * 2 : v1_punct_dur);
+    const Tick dur = want.fermata
+                         ? kTicksPerBar
+                         : (want.homophonic || want.held_punct ? kTicksPerBeat * 2 : v1_punct_dur);
     addNote(punct_section.notes, bar_start, dur, pitch);
     registry.record(bar_start, /*voice=*/1, pitch, dur);
   }
@@ -664,33 +690,45 @@ Split splitBars(int total) {
   return {free_bars, total - free_bars};
 }
 
+// Whether the answer is prepared by V/V -> V in the two bars before it. Those
+// bars belong to the solo subject, which opens the exposition (at least the dux
+// and comes windows), so the shared rule refuses the approach.
+bool sectionalAnswerTakesApproach(int free_bars) {
+  const int answer_bar = free_bars + kSubjectBars;
+  const int exposition_end_bar = free_bars + 2 * kSubjectBars;
+  return relatedKeyApproachClearsExposition(answer_bar, exposition_end_bar);
+}
+
 // Give the free-section close and the answer entry a real tonal function.
-// The final free bar is a half cadence on V.  Two bars before the answer's
-// dominant-key pivot, V/V resolves to V; the answer then inhabits that shared
-// V chord for four bars before the third, home-key subject entry restores I.
+// The final free bar is a half cadence on V. The answer then inhabits the
+// shared V chord for four bars before the third, home-key subject entry
+// restores I.
 void prepareSectionalFugueHarmony(std::vector<ChordSpec>& plan, int free_bars, Mode mode) {
   if (free_bars <= 0 || static_cast<std::size_t>(free_bars) > plan.size())
     return;
   plan[static_cast<std::size_t>(free_bars - 1)] = ChordSpec{7, false};
   const int answer_bar = free_bars + kSubjectBars;
-  if (answer_bar >= 2 && static_cast<std::size_t>(answer_bar) < plan.size()) {
+  if (answer_bar < kRelatedKeyApproachBars || static_cast<std::size_t>(answer_bar) >= plan.size())
+    return;
+  if (sectionalAnswerTakesApproach(free_bars)) {
     plan[static_cast<std::size_t>(answer_bar - 2)] = ChordSpec{2, false};  // V/V.
     plan[static_cast<std::size_t>(answer_bar - 1)] =
         ChordSpec{7, mode == Mode::Minor};  // V (major) / v (minor target).
-    // In major, V itself is a shared C/G chord. In harmonic minor, v contains
-    // the target key's Bb but the home scale's B-natural, so use home i =
-    // target iv as the actual common chord, then establish local v one bar
-    // later under the answer.
-    plan[static_cast<std::size_t>(answer_bar)] =
-        mode == Mode::Minor ? ChordSpec{0, true} : ChordSpec{7, false};
-    if (mode == Mode::Minor && static_cast<std::size_t>(answer_bar + 1) < plan.size())
-      plan[static_cast<std::size_t>(answer_bar + 1)] = ChordSpec{7, true};
   }
+  // In major, V itself is a shared C/G chord. In harmonic minor, v contains
+  // the target key's Bb but the home scale's B-natural, so use home i =
+  // target iv as the actual common chord, then establish local v one bar
+  // later under the answer.
+  plan[static_cast<std::size_t>(answer_bar)] =
+      mode == Mode::Minor ? ChordSpec{0, true} : ChordSpec{7, false};
+  if (mode == Mode::Minor && static_cast<std::size_t>(answer_bar + 1) < plan.size())
+    plan[static_cast<std::size_t>(answer_bar + 1)] = ChordSpec{7, true};
 }
 
 void annotateSectionalPivotChords(HarnessFixture& out, int free_bars) {
   const int answer_bar = free_bars + kSubjectBars;
-  if (answer_bar < 2 || static_cast<std::size_t>(answer_bar) >= out.harmony.chords.size())
+  if (!sectionalAnswerTakesApproach(free_bars) || answer_bar < kRelatedKeyApproachBars ||
+      static_cast<std::size_t>(answer_bar) >= out.harmony.chords.size())
     return;
   ChordEvent& secondary = out.harmony.chords[static_cast<std::size_t>(answer_bar - 2)];
   secondary.degree = RomanNumeral::V;
@@ -730,7 +768,7 @@ constexpr int kFreeExcursionBar = 4;
 /// fugue tail's answer then inhabits the same dominant until the development
 /// restores home for the final cadence. The free-section boundaries are phrase
 /// modulations -- the section break itself carries them -- while the answer's is
-/// the pivot the V/V -> V approach below it already prepares.
+/// a pivot on the chord both keys share.
 ///
 /// @param harmony Plan receiving the home key and the modulation boundaries.
 /// @param total_bars Piece length in bars.
@@ -1317,8 +1355,9 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
     }
   }
   pushSpan(asm_ctx, 1, answer_first, answer_last, VoiceIntent::AnswerCarrier);
-  // V0 countersubject over the answer: fixed recurring counterline instead of
-  // free figuration for the comes entry.
+  // V0 countersubject over the answer: a reactive scored line instead of free
+  // figuration for the comes entry; the tail does not restate it at the third
+  // entry.
   append_countersubject_from(use_tonal_answer ? out.material.tonal_answer : out.material.answer, 0,
                              barTick(answer_first), answer_end);
   pushSpan(asm_ctx, 0, answer_first, answer_last, VoiceIntent::CountersubjectCarrier);
@@ -2235,7 +2274,10 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   // Per-section-style accompaniment matrix. The added layers STRENGTHEN the
   // density contrast section_contrast_required measures (the rule samples only
   // V0's FantasiaSectionContrast notes, so the layers never weaken it):
-  //   Free    -> V2 pedal only (sparse, improvisatory).
+  //   Free    -> V2 pedal + a held V1 half note per bar, which the gesture bar
+  //              takes under its silent tail instead (the sparse quarter-note
+  //              line over the pedal alone would thin the texture to two
+  //              voices for a whole section).
   //   Fugal   -> V2 pedal + V1 head punctuation.
   //   Toccata -> V2 pedal + V1 head punctuation.
   //   Chordal -> V1 + V2 strike together (half-note homophony, declamatory).
@@ -2292,13 +2334,16 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode, base,
                          base + kWaveSpan);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
+        lp.answer_tail = true;
         prev_pitch = -1;
         continue;
       }
       appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                           sp.notes_per_beat, base, base + kWaveSpan, fig_offset, prev_pitch);
       bendIntoLocalKeys(section.notes, before, out.harmony, plan);
-      if (sp.style == FantasiaStyle::Fugal || sp.style == FantasiaStyle::Toccata) {
+      if (sp.style == FantasiaStyle::Free) {
+        lp.held_punct = true;
+      } else if (sp.style == FantasiaStyle::Fugal || sp.style == FantasiaStyle::Toccata) {
         lp.punctuate = true;  // V1 head punctuation on top of the pedal.
       }
     }

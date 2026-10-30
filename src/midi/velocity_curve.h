@@ -13,8 +13,8 @@ namespace bach {
 /// @brief Compute a phrase-aware velocity for a note based on metric position.
 ///
 /// Applies beat emphasis and phrase shaping for non-organ instruments.
-/// Organ always uses fixed velocity (80) -- call this only for violin,
-/// cello, guitar, harpsichord, and piano.
+/// Organ and harpsichord keep their input velocity -- call this only for violin,
+/// cello, guitar, and piano.
 ///
 /// Beat emphasis:
 ///   - 4/4: downbeat +10, beat 3 +5, other beats -5
@@ -39,7 +39,8 @@ uint8_t computeVelocity(Tick tick, const std::vector<Tick>& cadence_ticks,
 
 /// @brief Apply velocity curves to all notes in a track.
 ///
-/// Only modifies notes for non-organ instruments. Organ notes are left at 80.
+/// Only modifies notes for instruments other than organ and harpsichord; those keep their
+/// input velocity.
 /// A phrase starts at tick 0 and at each cadence tick; only the first bar of a phrase
 /// receives the phrase-start accent.
 ///

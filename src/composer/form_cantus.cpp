@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -15,6 +16,7 @@
 #include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
 #include "composer/span.h"
@@ -464,14 +466,9 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
           for (const auto& [from, to, lines] :
                {std::tuple{prev_pitch, cand, &motions}, std::tuple{cand, landing, &fwd_motions}}) {
             for (const ConcurrentMotion& motion : *lines) {
-              if (formsStrictPerfectParallel(from, to, motion.prev, motion.curr))
-                classes |= 8u;
-              else if (formsPerfectParallel(from, to, motion.prev, motion.curr))
-                classes |= 4u;
-              else if (formsAntiParallelPerfect(from, to, motion.prev, motion.curr))
-                classes |= 2u;
-              else if (formsBattuta(from, to, motion.prev, motion.curr))
-                classes |= 1u;
+              const PairFault fault = classifyPairFault(from, to, motion.prev, motion.curr);
+              if (fault != PairFault::kNone)
+                classes |= 1u << (static_cast<unsigned>(fault) - 1u);
             }
           }
           return classes;
@@ -482,15 +479,18 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
         // idiomatically, and the ascending distance order means it is only ever
         // used once every smaller displacement has been refused.
         const unsigned standing = faultClasses(pitch);
+        constexpr unsigned kStrictClass = 1u << (static_cast<unsigned>(PairFault::kStrict) - 1u);
+        auto approachable = [&](int cand) {
+          return cand >= kBassBandLo && cand <= kBassBandHi && detail::inScale(cand, mode, &spec) &&
+                 bassCarriesUnder(cand, theme_pitches);
+        };
+        bool placed = false;
         if (standing != 0) {
-          for (int dist = 1; dist <= 7; ++dist) {
-            bool placed = false;
+          for (int dist = 1; dist <= 7 && !placed; ++dist) {
             for (const int sgn : {-1, 1}) {
               const int cand = pitch + sgn * dist;
-              if (cand < kBassBandLo || cand > kBassBandHi || !detail::inScale(cand, mode, &spec) ||
-                  !bassCarriesUnder(cand, theme_pitches)) {
+              if (!approachable(cand))
                 continue;
-              }
               // Strictly fewer faults, and never a class the standing tone did
               // not already form: the displacement can only empty columns, so
               // no fault this guard removes reappears as another.
@@ -501,9 +501,39 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                 break;
               }
             }
-            if (placed)
-              break;
           }
+        }
+        // A true parallel is the one column that may not survive for want of a
+        // subset or of a consonance: any strict-free in-scale tone under the
+        // uppers replaces it, a passing dissonance on this weak beat being the
+        // smaller fault. Fewest dissonant uppers first, then the mildest
+        // remaining classes, then the nearest.
+        if (!placed && (standing & kStrictClass) != 0u) {
+          int best = -1;
+          std::pair<int, unsigned> best_key{0, 0u};
+          for (int dist = 1; dist <= 7; ++dist) {
+            for (const int sgn : {-1, 1}) {
+              const int cand = pitch + sgn * dist;
+              if (cand < kBassBandLo || cand > kBassBandHi || !detail::inScale(cand, mode, &spec))
+                continue;
+              int dissonant = 0;
+              bool under = true;
+              for (int upper : theme_pitches) {
+                under = under && cand < upper;
+                if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(upper),
+                                                        static_cast<std::uint8_t>(cand)))
+                  ++dissonant;
+              }
+              const unsigned candidate = faultClasses(cand);
+              const std::pair<int, unsigned> key{dissonant, candidate};
+              if (under && (candidate & kStrictClass) == 0u && (best < 0 || key < best_key)) {
+                best = cand;
+                best_key = key;
+              }
+            }
+          }
+          if (best >= 0)
+            pitch = best;
         }
       }
 
@@ -547,9 +577,9 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                                into_beat);
     registry.concurrentMotions(next_tick - kSixteenth, next_tick, /*voice=*/2, /*num_voices=*/3,
                                out_of_beat);
-    if (perfectFaultRank(before, fill, into_beat) > perfectFaultRank(before, standing, into_beat))
+    if (worstPairFault(before, fill, into_beat) > worstPairFault(before, standing, into_beat))
       continue;
-    if (perfectFaultRank(fill, after, out_of_beat) > perfectFaultRank(standing, after, out_of_beat))
+    if (worstPairFault(fill, after, out_of_beat) > worstPairFault(standing, after, out_of_beat))
       continue;
     out_notes[idx].pitch = static_cast<std::uint8_t>(fill);
   }

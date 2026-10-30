@@ -84,7 +84,8 @@ void bach_destroy(BachHandle handle);
 /// @brief Generate a Bach composition from a JSON config string.
 ///
 /// Drives the composer subsystem (the WASM product path). Internal generation
-/// runs in C; transposition to the requested key happens only at MIDI output.
+/// runs in C major. Compass placement reads the requested key, so generated.v1 pitches can
+/// differ between minor keys; the MIDI output adds one constant transposition to them.
 ///
 /// JSON fields:
 ///   form: string ("fugue", "prelude_and_fugue", ...) or number (0-9).
@@ -100,7 +101,9 @@ void bach_destroy(BachHandle handle);
 ///   bpm: number. 0 or absent => default 100. Otherwise must be in [40, 200],
 ///         else BACH_ERROR_INVALID_BPM.
 ///   seed: number. 0 or absent => a random non-zero seed is generated; the
-///         resolved value is reported via BachInfo::seed_used.
+///         resolved value is reported via BachInfo::seed_used, also after a
+///         BACH_ERROR_GENERATION_FAILED so the request can be replayed. (bach_get_info
+///         then carries only seed_used, bpm and zeroed totals.)
 ///   character: exact name returned by bach_character_name() ("severe",
 ///         "playful", "noble", "restless") or number (0-3). Default "severe".
 ///         Unknown name / out-of-range number => BACH_ERROR_INVALID_CHARACTER.
@@ -178,15 +181,16 @@ BachEventData* bach_get_diagnostic(BachHandle handle);
 /// @param handle Bach handle
 /// @return Per-handle snapshot valid until the next generation on that handle
 ///         or bach_destroy(); nullptr for an invalid handle or before a
-///         successful generation. Calls for distinct
+///         generation that got past seed resolution (a generation that failed
+///         validation still reports seed_used and bpm). Calls for distinct
 ///         handles do not share storage. Concurrent access to the same handle
 ///         requires caller synchronization. Do not free the returned pointer.
 const BachInfo* bach_get_info(BachHandle handle);
 
 /// @brief Get generation info as a layout-independent JSON object.
 /// @param handle Bach handle.
-/// @return A camelCase BachInfo JSON object, or nullptr before a successful
-///         generation. Free with bach_free_events().
+/// @return A camelCase BachInfo JSON object, or nullptr in the cases where
+///         bach_get_info() returns nullptr. Free with bach_free_events().
 BachEventData* bach_get_info_json(BachHandle handle);
 
 // ============================================================================

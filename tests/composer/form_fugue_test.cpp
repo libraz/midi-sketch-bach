@@ -3195,4 +3195,154 @@ TEST(FormFugueHandoffTest, PlayfulMinorHandoffDoesNotLeaveAFourthOverTheIncoming
   }
 }
 
+// --- Development entries and the exposition / coda boundaries --------------
+
+namespace {
+
+// The first bar of the fugue section: its V0 exposition subject span.
+Tick fugueSectionStart(const HarnessFixture& fx) {
+  Tick start = std::numeric_limits<Tick>::max();
+  for (const Span& span : fx.voice_plan.spans) {
+    if (span.intent == VoiceIntent::SubjectCarrier && span.voice == 0)
+      start = std::min(start, span.start_tick);
+  }
+  return start;
+}
+
+const ChordEvent* chordAt(const HarmonicPlan& plan, Tick tick) {
+  for (const ChordEvent& chord : plan.chords) {
+    if (chord.start_tick == tick)
+      return &chord;
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+// The first middle entry follows the exposition directly, with no episode in
+// front of it, so no related-key approach may be written over the exposition's
+// closing bars: the third entry there affirms the home key exactly as the
+// subject's own bars do.
+TEST(FormFugueBoundaryTest, NoRelatedKeyApproachOverTheExposition) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed : kSeeds) {
+        for (std::uint16_t bars : {std::uint16_t{44}, std::uint16_t{72}, std::uint16_t{128}}) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const Tick expo_start = fugueSectionStart(fx);
+          ASSERT_NE(expo_start, std::numeric_limits<Tick>::max());
+          const Tick expo_end = expo_start + 12 * kBar;
+          for (const ChordEvent& chord : fx.harmony.chords) {
+            if (chord.start_tick < expo_start || chord.start_tick >= expo_end)
+              continue;
+            EXPECT_FALSE(chord.has_secondary_of)
+                << formTypeToString(form) << (minor ? " minor" : " major") << " seed " << seed
+                << " bars " << bars << " bar " << chord.start_tick / kBar;
+          }
+          for (int local = 0; local < 4; ++local) {
+            const ChordEvent* subject_bar = chordAt(fx.harmony, expo_start + local * kBar);
+            const ChordEvent* third_entry_bar =
+                chordAt(fx.harmony, expo_start + (8 + local) * kBar);
+            ASSERT_NE(subject_bar, nullptr);
+            ASSERT_NE(third_entry_bar, nullptr);
+            EXPECT_EQ(third_entry_bar->root_pc, subject_bar->root_pc)
+                << formTypeToString(form) << (minor ? " minor" : " major") << " seed " << seed
+                << " bars " << bars << " third-entry bar " << local;
+          }
+        }
+      }
+    }
+  }
+}
+
+// The dominant-pedal entry is spelled in the dominant key in major, so it
+// declares that key over its window like every other spelled station, while the
+// pedal harmony underneath stays the V / I6/4 alternation.
+TEST(FormFugueBoundaryTest, PedalCycleEntryDeclaresItsKeyArea) {
+  int checked = 0;
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (std::uint32_t seed : kSeeds) {
+      const HarnessFixture fx = buildFixture(form, seed, /*is_minor=*/false, 128);
+      for (const PedalPointDecl& pedal : fx.material.pedal_points) {
+        bool entry_on_v0 = false;
+        for (const Span& span : fx.voice_plan.spans) {
+          entry_on_v0 = entry_on_v0 || (span.intent == VoiceIntent::MiddleEntryCarrier &&
+                                        span.voice == 0 && span.start_tick == pedal.start_tick);
+        }
+        if (!entry_on_v0)
+          continue;
+        ++checked;
+        bool pivot = false;
+        bool restored = false;
+        for (const ModulationEvent& modulation : fx.harmony.modulations) {
+          pivot = pivot || (modulation.tick == pedal.start_tick && modulation.to_tonic_pc == 7 &&
+                            !modulation.to_is_minor && modulation.type == ModulationType::Pivot);
+          restored = restored || (modulation.tick == pedal.start_tick + 4 * kBar &&
+                                  modulation.from_tonic_pc == 7 && modulation.to_tonic_pc == 0);
+        }
+        EXPECT_TRUE(pivot) << formTypeToString(form) << " seed " << seed;
+        EXPECT_TRUE(restored) << formTypeToString(form) << " seed " << seed;
+        const std::array<std::uint8_t, 4> pedal_roots = {7, 0, 7, 0};
+        for (int local = 0; local < 4; ++local) {
+          const ChordEvent* chord = chordAt(fx.harmony, pedal.start_tick + local * kBar);
+          ASSERT_NE(chord, nullptr);
+          EXPECT_EQ(chord->root_pc, pedal_roots[static_cast<std::size_t>(local)])
+              << formTypeToString(form) << " seed " << seed << " pedal bar " << local;
+        }
+      }
+    }
+  }
+  EXPECT_GT(checked, 0);
+}
+
+// The coda's final entry states the subject head at doubled values, so it is a
+// subject variant: replayed from subject_variants under the augmented intent,
+// every note stamped SubjectVariantApplied, and nothing left on plain
+// SubjectCarrier inside the coda.
+TEST(FormFugueBoundaryTest, CodaAugmentedHeadIsDeclaredAsAnAugmentation) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (bool minor : {false, true}) {
+      const HarnessFixture fx = buildFixture(form, 1, minor, 128);
+      const Tick coda_start = (128 - 4) * kBar;
+      int augmented_spans = 0;
+      for (const Span& span : fx.voice_plan.spans) {
+        if (span.start_tick < coda_start)
+          continue;
+        EXPECT_NE(span.intent, VoiceIntent::SubjectCarrier) << formTypeToString(form);
+        if (span.intent == VoiceIntent::SubjectCarrierAugmented)
+          ++augmented_spans;
+      }
+      EXPECT_EQ(augmented_spans, 1) << formTypeToString(form);
+      ASSERT_EQ(fx.material.subject_variants.size(), 1u);
+      const SubjectVariantDecl& head = fx.material.subject_variants.front();
+      EXPECT_EQ(head.voice, 0);
+      EXPECT_EQ(head.transform,
+                static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Augment));
+      ASSERT_FALSE(head.notes.empty());
+      for (std::size_t idx = 0; idx < head.notes.size(); ++idx) {
+        EXPECT_GE(head.notes[idx].start_tick, coda_start);
+        if (idx + 1 < head.notes.size()) {
+          EXPECT_EQ(head.notes[idx].duration, 2 * fx.material.subject[idx].duration)
+              << formTypeToString(form) << " head note " << idx;
+        }
+      }
+      for (const MaterialNote& note : fx.material.subject)
+        EXPECT_LT(note.start_tick, coda_start) << formTypeToString(form);
+
+      const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      int stamped = 0;
+      for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
+        if (result.notes[idx].voice != 0 || result.notes[idx].start_tick < coda_start ||
+            result.provenance[idx].voice_intent != VoiceIntent::SubjectCarrierAugmented) {
+          continue;
+        }
+        EXPECT_TRUE(result.provenance[idx].satisfied_rules &
+                    ruleBitMask(RuleBit::SubjectVariantApplied));
+        ++stamped;
+      }
+      EXPECT_EQ(stamped, static_cast<int>(head.notes.size())) << formTypeToString(form);
+    }
+  }
+}
+
 }  // namespace bach::composer

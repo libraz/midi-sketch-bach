@@ -470,4 +470,23 @@ TEST(BachCApiTest, EveryReturnableErrorCodeHasItsOwnMessage) {
   EXPECT_NE(std::string(bach_error_string(BACH_ERROR_INVALID_KEY)).find("name"), std::string::npos);
 }
 
+TEST(BachCApiTest, InfoKeepsTheResolvedSeedAfterAFailedGeneration) {
+  BachHandleOwner owner;
+  ASSERT_NE(owner.get(), nullptr);
+  const BachError status =
+      generate(owner.get(),
+               "{\"form\":\"chorale_prelude\",\"character\":\"severe\",\"target_bars\":128,"
+               "\"seed\":2}");
+  if (status == BACH_OK) {
+    return;  // The request composes; the failure path is covered when it does not.
+  }
+  ASSERT_EQ(status, BACH_ERROR_GENERATION_FAILED);
+  const BachInfo* info = bach_get_info(owner.get());
+  ASSERT_NE(info, nullptr);
+  EXPECT_EQ(info->seed_used, 2u);
+  EXPECT_EQ(bach_get_midi(owner.get()), nullptr);
+  EXPECT_EQ(bach_get_generated(owner.get()), nullptr);
+  EXPECT_NE(takeJson(bach_get_info_json(owner.get())).find("\"seedUsed\":2"), std::string::npos);
+}
+
 }  // namespace

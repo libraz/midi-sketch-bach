@@ -1,3 +1,5 @@
+#include "composer/form_fugue.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -12,6 +14,7 @@
 #include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
 #include "composer/material.h"
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
@@ -650,6 +653,17 @@ bool isTonicizedStation(std::uint8_t key_pc, Mode mode) {
   return key_pc == 7 || key_pc == 9 || key_pc == 5;
 }
 
+/// @brief Whether a development entry takes the V/X -> X approach in the two
+/// bars before it: a tonicized station, not the pedal cycle, whose approach bars
+/// clear the exposition (an entry that follows the exposition directly has no
+/// episode in front of it).
+bool takesRelatedKeyApproach(const DevelopmentWindow& window, int cycle, int pedal_cycle, Mode mode,
+                             int exposition_bars) {
+  return window.has_entry && cycle != pedal_cycle &&
+         isTonicizedStation(middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode), mode) &&
+         relatedKeyApproachClearsExposition(window.entry_start, exposition_bars);
+}
+
 RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
   if (mode == Mode::Minor) {
     return key_pc == 5 ? RomanNumeral::IV : RomanNumeral::V;
@@ -961,12 +975,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // dominant gives the approach genuine directional harmonic force.
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
-    if (!window.has_entry || cycle == pedal_cycle || !isTonicizedStation(key_pc, mode) ||
-        window.entry_start < 2) {
+    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars)) {
       continue;
     }
-    plan[static_cast<std::size_t>(window.entry_start - 2)] =
+    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+    plan[static_cast<std::size_t>(window.entry_start - kRelatedKeyApproachBars)] =
         ChordSpec{static_cast<std::uint8_t>((key_pc + 7) % 12), false};
     plan[static_cast<std::size_t>(window.entry_start - 1)] =
         ChordSpec{key_pc, isRelatedKeyMinor(key_pc, mode)};
@@ -997,8 +1010,23 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     if (!isTonicizedStation(middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode), mode))
       continue;
     triad_only_bars.push_back(window.entry_start);
-    if (window.entry_start >= 2)
-      triad_only_bars.push_back(window.entry_start - 2);
+    if (takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars))
+      triad_only_bars.push_back(window.entry_start - kRelatedKeyApproachBars);
+  }
+  // Inside a declared key area a seventh the local scale does not own would
+  // contradict the entry spelled there (the dominant pedal's G7 against a
+  // G-major subject's F-sharp), so those bars keep the triad.
+  for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
+    const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
+    if (!window.has_entry)
+      continue;
+    const KeyContext station = stationRealization(carryVoiceFor(cycle, pedal_cycle), mode).key;
+    for (int local = 0; local < kSubjectBars && window.entry_start + local < bars; ++local) {
+      const ChordSpec& chord = plan[static_cast<std::size_t>(window.entry_start + local)];
+      if (!rule_helpers::isDiatonicPc(static_cast<std::uint8_t>(detail::chordSeventhPc(chord)),
+                                      station.tonic_pc, station.is_minor))
+        triad_only_bars.push_back(window.entry_start + local);
+    }
   }
   markDominantSevenths(plan, triad_only_bars, mode, /*cyclic=*/false);
   emitHarmony(out, plan, mode, first_bar);
@@ -1006,12 +1034,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
-    if (!window.has_entry || cycle == pedal_cycle || !isTonicizedStation(key_pc, mode) ||
-        window.entry_start < 2) {
+    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars)) {
       continue;
     }
-    const Tick secondary_tick = barTick(first_bar + window.entry_start - 2);
+    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+    const Tick secondary_tick = barTick(first_bar + window.entry_start - kRelatedKeyApproachBars);
     const Tick target_tick = secondary_tick + kTicksPerBar;
     for (ChordEvent& chord : out.harmony.chords) {
       if (chord.start_tick == secondary_tick) {
@@ -1062,9 +1089,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // select local-scale auxiliaries without leaking the tonicization into the
   // following episode. A station stated inside the home collection is no key
   // area: declaring one would name a key the entry's own pitches contradict.
+  // The pedal cycle's entry is spelled in its station's key like any other, so
+  // it declares the key too; only its harmony is the dominant prolongation.
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-    if (!window.has_entry || cycle == pedal_cycle) {
+    if (!window.has_entry) {
       continue;
     }
     const KeyContext station = stationRealization(carryVoiceFor(cycle, pedal_cycle), mode).key;
@@ -1604,9 +1633,19 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     // cadence lands on this span's final bar, so its second half closes on a
     // held mid-bar anchor -- the strong-beat top note the ornament pass needs
     // for the mandatory section-cadence trill (the running eighth wave carries
-    // no such note otherwise).
-    addFigurationSpan(asm_ctx, 0, first_bar + 8, first_bar + 11, plan, first_bar, mode, 2,
-                      fig_offset, /*is_pedal_prep=*/false, /*cadential_close_last_bar=*/true);
+    // no such note otherwise). The Noble character runs the entry's first three
+    // bars in sixteenths, the busier figuration it also takes over a chorale
+    // cantus, so a subject two characters share is not accompanied identically;
+    // the closing bar keeps the eighth wave into its held cadence anchor.
+    if (detail::characterProfile(req.character).prefer_dotted) {
+      addFigurationSpan(asm_ctx, 0, first_bar + 8, first_bar + 10, plan, first_bar, mode, 4,
+                        fig_offset);
+      addFigurationSpan(asm_ctx, 0, first_bar + 11, first_bar + 11, plan, first_bar, mode, 2,
+                        fig_offset, /*is_pedal_prep=*/false, /*cadential_close_last_bar=*/true);
+    } else {
+      addFigurationSpan(asm_ctx, 0, first_bar + 8, first_bar + 11, plan, first_bar, mode, 2,
+                        fig_offset, /*is_pedal_prep=*/false, /*cadential_close_last_bar=*/true);
+    }
   }
 
   // === DEVELOPMENT ==========================================================
@@ -2327,6 +2366,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // the exposition first sounded it. Two bars of doubled values reach the head
   // only, which is what makes the close weighty rather than hurried.
   constexpr Tick kCodaAugmentation = 2;
+  SubjectVariantDecl coda_head;
+  coda_head.voice = 0;
+  coda_head.transform = static_cast<std::uint8_t>(motif_ops::EpisodeMotifTransform::Augment);
   for (int note = 0; note < kSubjectNotes && coda_cursor < coda_subject_end; ++note) {
     const Tick full = subj_rhythm[static_cast<std::size_t>(note)] * kCodaAugmentation;
     const Tick dur = std::min(full, coda_subject_end - coda_cursor);
@@ -2335,11 +2377,12 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     // subject head and stay consonant / parallel-free against it.
     const int pitch =
         std::clamp(static_cast<int>(subj_pat[static_cast<std::size_t>(note)]) + v0_off, 0, 127);
-    addNote(out.material.subject, coda_cursor, dur, pitch);
+    addNote(coda_head.notes, coda_cursor, dur, pitch);
     asm_ctx.theme_tones.record(coda_cursor, 0, pitch, dur);
     coda_cursor += full;
   }
-  pushSpan(asm_ctx, 0, coda_start, coda_start + 1, VoiceIntent::SubjectCarrier);
+  out.material.subject_variants.push_back(std::move(coda_head));
+  pushSpan(asm_ctx, 0, coda_start, coda_start + 1, VoiceIntent::SubjectCarrierAugmented);
   // V1 alto support keeps the three-voice texture through the final entry; placed
   // after the V0 record and before the V2 bass so each lower line anchors against
   // everything already sounding above it.
@@ -2418,8 +2461,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // the G bass and with every beat of the V0 approach run); the final bar
   // holds the third of the closing tonic triad -- E, or Eb in minor unless
   // the seed elects the Picardy lift. is_pedal_prep exempts the held tones
-  // from the figuration downbeat chord-tone check (the per-bar plan is not
-  // pinned to V -> I here; the cadence voicing is a design value).
+  // from the figuration downbeat chord-tone check: the per-bar plan already
+  // pins these bars to V -> I, and the held voicing is a design value.
   {
     int inner_dominant = kBandLo[1];
     while (inner_dominant % 12 != 7) {
@@ -2570,6 +2613,11 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
     }
     for (const StrettoDecl& stretto : out.material.stretto_entries) {
       if (!fits(stretto.follower_notes)) {
+        return false;
+      }
+    }
+    for (const SubjectVariantDecl& variant : out.material.subject_variants) {
+      if (!fits(variant.notes)) {
         return false;
       }
     }
@@ -2792,6 +2840,134 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
     respell_line(out.material.countersubject, 0, /*voice_from_span=*/true);
   }
   return respelled;
+}
+
+/// @brief Keep the free figuration off the other inflection of a degree a theme
+///        statement is sounding.
+///
+/// In minor the sixth and seventh degrees each have two spellings, and the
+/// figuration chooses its own from the bar's chord while the statement above or
+/// below it keeps the one it was written with. Where both sound together the
+/// two spellings strike as a false relation. The figuration tone takes the
+/// statement's spelling, or else the nearest tone of the bar's chord that is
+/// clear of it; a candidate that would leap by an augmented second or a tritone,
+/// cross a voice, form a strict parallel or leave a bar's opening tone off the
+/// chord is not taken.
+///
+/// @param asm_ctx Assembly whose figuration is re-spelled in place.
+/// @param replaced Tones already moved after their span was built.
+/// @return Every tone moved so far, this pass's included.
+std::vector<PlacedTone> agreeWithThemeInflections(FugueAssembly& asm_ctx,
+                                                  std::vector<PlacedTone> replaced) {
+  HarnessFixture& out = *asm_ctx.out;
+  const HarmonicPlan& plan = out.harmony;
+  struct ThemeTone {
+    Tick start;
+    Tick end;
+    int pitch;
+  };
+  std::vector<ThemeTone> theme;
+  const auto collect = [&](const std::vector<MaterialNote>& notes) {
+    for (const MaterialNote& note : notes)
+      theme.push_back({note.start_tick, note.start_tick + note.duration, note.pitch});
+  };
+  collect(out.material.subject);
+  collect(out.material.use_tonal_answer ? out.material.tonal_answer : out.material.answer);
+  for (const MiddleEntryDecl& entry : out.material.middle_entries)
+    collect(entry.notes);
+  for (const StrettoDecl& stretto : out.material.stretto_entries)
+    collect(stretto.follower_notes);
+  for (const SubjectVariantDecl& variant : out.material.subject_variants)
+    collect(variant.notes);
+
+  // The two spellings of the minor sixth and seventh degrees.
+  const auto inflected_pair = [](int left, int right, const KeyContext& key) {
+    if (!key.is_minor)
+      return false;
+    const int lo = std::min((left - key.tonic_pc + 120) % 12, (right - key.tonic_pc + 120) % 12);
+    const int hi = std::max((left - key.tonic_pc + 120) % 12, (right - key.tonic_pc + 120) % 12);
+    return (lo == 8 && hi == 9) || (lo == 10 && hi == 11);
+  };
+  const auto clashing_theme = [&](int pitch, Tick start, Tick end, const KeyContext& key) {
+    for (const ThemeTone& tone : theme) {
+      if (tone.start < end && start < tone.end && inflected_pair(pitch, tone.pitch, key))
+        return tone.pitch;
+    }
+    return -1;
+  };
+  const auto sounding = [&](VoiceId voice, Tick tick) {
+    for (auto moved = replaced.rbegin(); moved != replaced.rend(); ++moved) {
+      if (moved->voice == voice && tick >= moved->start && tick < moved->start + moved->duration)
+        return moved->pitch;
+    }
+    return asm_ctx.theme_tones.soundingPitchInVoice(voice, tick);
+  };
+
+  for (FigurationSection& section : out.material.figuration_sections) {
+    const VoiceId voice = section.voice;
+    for (MaterialNote& note : section.notes) {
+      const Tick start = note.start_tick;
+      const Tick end = note.start_tick + note.duration;
+      const KeyContext key = rule_helpers::keyAt(plan, start);
+      const int pitch = static_cast<int>(note.pitch);
+      const int theme_pitch = clashing_theme(pitch, start, end, key);
+      if (theme_pitch < 0 || start == 0)
+        continue;
+      const int prev = sounding(voice, start - 1);
+      const int next = sounding(voice, end);
+      std::vector<ConcurrentMotion> motions;
+      for (VoiceId other = 0; other < kFugueVoices; ++other) {
+        if (other != voice)
+          motions.push_back({other, sounding(other, start - 1), sounding(other, start)});
+      }
+      std::vector<int> candidates;
+      // The statement's own spelling, at the octave of the displaced tone.
+      candidates.push_back(pitch + ((theme_pitch - pitch) % 12 + 12) % 12 -
+                           (((theme_pitch - pitch) % 12 + 12) % 12 > 6 ? 12 : 0));
+      const detail::PcMask chord_pcs = rule_helpers::chordPcsAt(plan, start);
+      for (int dist = 1; dist <= 4; ++dist) {
+        for (const int cand : {pitch - dist, pitch + dist}) {
+          if (chord_pcs & detail::pcBit(((cand % 12) + 12) % 12))
+            candidates.push_back(cand);
+        }
+      }
+      MaterialPairChooser chooser(prev, motions);
+      for (std::size_t rank = 0; rank < candidates.size(); ++rank) {
+        const int cand = candidates[rank];
+        if (cand < kBandLo[voice] || cand > kBandHi[voice] || cand == prev || cand == next ||
+            clashing_theme(cand, start, end, key) >= 0)
+          continue;
+        // A bar's opening tone is its harmonic anchor and stays a chord tone.
+        if (start % kTicksPerBar == 0 && !(chord_pcs & detail::pcBit(((cand % 12) + 12) % 12)))
+          continue;
+        bool melodic_fault = false;
+        for (const int neighbour : {prev, next}) {
+          if (neighbour < 0)
+            continue;
+          melodic_fault = melodic_fault || std::abs(cand - neighbour) % 12 == 6 ||
+                          detail::isAugmentedSecondClass(neighbour, cand, key.tonic_pc,
+                                                         key.is_minor ? Mode::Minor : Mode::Major);
+        }
+        bool departs_parallel = false;
+        for (VoiceId other = 0; other < kFugueVoices && next >= 0; ++other) {
+          if (other != voice)
+            departs_parallel =
+                departs_parallel ||
+                isStrictParallelPerfect(cand, next, sounding(other, end - 1), sounding(other, end));
+        }
+        if (melodic_fault || departs_parallel)
+          continue;
+        chooser.offer(
+            cand, static_cast<int>(rank),
+            crossesSoundingVoices(asm_ctx.theme_tones, voice, kFugueVoices, cand, start, end));
+      }
+      if (chooser.best() < 0 || chooser.bestCrosses() || chooser.bestFault() == PairFault::kStrict)
+        continue;
+      note.pitch = static_cast<std::uint8_t>(chooser.best());
+      replaced.push_back(PlacedTone{start, note.duration, voice, chooser.best()});
+    }
+  }
+  return replaced;
 }
 
 /// A figuration section that hands its voice to a theme entry at `seam`, paired
@@ -3766,6 +3942,10 @@ void retractUnsupportedSevenths(FugueAssembly& asm_ctx) {
 
 }  // namespace
 
+bool relatedKeyApproachClearsExposition(int entry_bar, int exposition_end_bar) {
+  return entry_bar - kRelatedKeyApproachBars >= exposition_end_bar;
+}
+
 HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   HarnessFixture out;
   out.voice_plan.num_voices = 3;
@@ -3774,7 +3954,9 @@ HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   appendFugueSection(asm_ctx, /*first_bar=*/0, static_cast<int>(req.bars), req);
   relieveFigurationParallels(
       asm_ctx, relieveFigurationSeams(
-                   asm_ctx, relieveFigurationHandoffs(asm_ctx, spellFreeLinesInLocalKey(asm_ctx))));
+                   asm_ctx, relieveFigurationHandoffs(
+                                asm_ctx, agreeWithThemeInflections(
+                                             asm_ctx, spellFreeLinesInLocalKey(asm_ctx)))));
   retractUnsupportedSevenths(asm_ctx);
   return out;
 }
@@ -3803,7 +3985,8 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // --- PRELUDE (bars 0 .. prelude_bars-1). V0 + V1 per-beat chord-tone-
   //     anchored sawtooth figuration (the proven WTC-pair construction: every
   //     beat restarts on a chord tone so the on-beat verticals stay consonant);
-  //     V2 silent. Harmony cycles the diatonic pattern with 4-bar cadences. ---
+  //     V2 adds quarter-note pedal-register support. Harmony cycles the
+  //     diatonic pattern with 4-bar cadences. ---
   std::vector<ChordSpec> prelude_plan = buildRepeatingChordPlan(prelude_bars, mode, harm_idx);
   // No related-key approach interrupts the prelude's repeating pattern, so every
   // fifth-fall in it is a plain dominant and no bar has to be held back to a
@@ -3851,7 +4034,9 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   appendFugueSection(asm_ctx, prelude_bars, fugue_bars, req);
   relieveFigurationParallels(
       asm_ctx, relieveFigurationSeams(
-                   asm_ctx, relieveFigurationHandoffs(asm_ctx, spellFreeLinesInLocalKey(asm_ctx))));
+                   asm_ctx, relieveFigurationHandoffs(
+                                asm_ctx, agreeWithThemeInflections(
+                                             asm_ctx, spellFreeLinesInLocalKey(asm_ctx)))));
   retractUnsupportedSevenths(asm_ctx);
 
   // Keep the concatenated HarmonicPlan chords in tick order.

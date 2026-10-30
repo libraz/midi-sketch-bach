@@ -24,6 +24,14 @@ int runCli(const std::string& args) {
   return WIFEXITED(raw) ? WEXITSTATUS(raw) : -1;
 }
 
+/// Runs bach_cli with @p args, storing stderr in @p stderr_path; returns the exit status or -1.
+int runCliCapturingStderr(const std::string& args, const std::string& stderr_path) {
+  const std::string command =
+      std::string("\"") + BACH_CLI_PATH + "\" " + args + " >/dev/null 2>\"" + stderr_path + "\"";
+  const int raw = std::system(command.c_str());
+  return WIFEXITED(raw) ? WEXITSTATUS(raw) : -1;
+}
+
 std::string readFile(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
@@ -31,6 +39,7 @@ std::string readFile(const std::string& path) {
 
 constexpr int kExitUsage = 2;
 constexpr int kExitOutput = 4;
+constexpr int kExitGeneration = 3;
 
 }  // namespace
 
@@ -115,4 +124,20 @@ TEST(CliOptionsTest, SidecarWriteFailureExitsWithOutputError) {
 
   EXPECT_EQ(runCli("--seed 405 --json --generated-json -o " + midi), 0);
   fs::remove_all(dir, ec);
+}
+
+TEST(CliOptionsTest, FailureOutputNeverPrintsTheInvalidSpanSentinel) {
+  // Whether or not this request is rejected, a rejection must name the seed and
+  // render a span-less rule failure as absent rather than as the raw sentinel.
+  const std::string out_path = "/tmp/bach-cli-opt-fail.mid";
+  const std::string err_path = "/tmp/bach-cli-opt-fail.err";
+  const int status = runCliCapturingStderr(
+      "--form chorale_prelude --character severe --seed 2 --bars 128 -o " + out_path, err_path);
+  const std::string err = readFile(err_path);
+  EXPECT_EQ(err.find("4294967295"), std::string::npos) << err;
+  if (status == kExitGeneration) {
+    EXPECT_NE(err.find("Seed: 2"), std::string::npos) << err;
+  }
+  std::remove(out_path.c_str());
+  std::remove(err_path.c_str());
 }

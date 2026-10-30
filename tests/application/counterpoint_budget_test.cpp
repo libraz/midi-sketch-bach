@@ -4,14 +4,11 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "application/composition_service.h"
-#include "composer/form_director.h"
 #include "composer/validation.h"
 #include "composer/validator.h"
 #include "core/basic_types.h"
@@ -31,13 +28,6 @@ constexpr FormType kShippedForms[] = {
     FormType::CelloPrelude,
     FormType::Chaconne,
     FormType::GoldbergVariations,
-};
-
-constexpr SubjectCharacter kCharacters[] = {
-    SubjectCharacter::Severe,
-    SubjectCharacter::Playful,
-    SubjectCharacter::Noble,
-    SubjectCharacter::Restless,
 };
 
 // Every counterpoint rule that relates two voices sounding together, sorted by
@@ -366,109 +356,6 @@ TEST(CounterpointBudgetTest, ASettledRowGatesExactlyLikeAnOutstandingOne) {
 
 TEST(CounterpointBudgetTest, NullReportIsANoOp) {
   composer::applyCounterpointBudget(FormType::Fugue, nullptr);
-}
-
-// ---------------------------------------------------------------------------
-// The gate over the shipped request surface
-// ---------------------------------------------------------------------------
-
-// One request variation applied to a form/character pair.
-struct RequestVariation {
-  bool minor = false;
-  DurationScale scale = DurationScale::Short;
-  std::uint16_t target_bars = 0;
-  std::uint32_t seed = 1;
-};
-
-std::vector<RequestVariation> requestVariations() {
-  constexpr bool modes[] = {false, true};
-  constexpr std::uint32_t seeds[] = {1, 3, 7};
-  std::vector<RequestVariation> variations;
-  for (bool minor : modes) {
-    for (int length = 0; length < 3; ++length) {
-      for (std::uint32_t seed : seeds) {
-        RequestVariation variation;
-        variation.minor = minor;
-        variation.seed = seed;
-        if (length == 0) {
-          variation.scale = DurationScale::Short;
-        } else if (length == 1) {
-          variation.scale = DurationScale::Full;
-        } else {
-          // target_bars overrides the scale, so the scale carried here is inert.
-          variation.scale = DurationScale::Short;
-          variation.target_bars = 128;
-        }
-        variations.push_back(variation);
-      }
-    }
-  }
-  return variations;
-}
-
-CompositionRequest buildRequest(FormType form, SubjectCharacter character,
-                                const RequestVariation& variation) {
-  CompositionRequest request;
-  request.form = form;
-  request.character = character;
-  request.key = {variation.minor ? Key::G : Key::C, variation.minor};
-  request.scale = variation.scale;
-  request.target_bars = variation.target_bars;
-  request.seed = variation.seed;
-  request.bpm = 100;
-  return request;
-}
-
-void expectComposesClean(const CompositionRequest& request) {
-  SCOPED_TRACE(formTypeToString(request.form));
-  SCOPED_TRACE(subjectCharacterToString(request.character));
-  SCOPED_TRACE(keyToString(request.key.tonic));
-  SCOPED_TRACE(request.key.is_minor ? "minor" : "major");
-  SCOPED_TRACE(durationScaleToString(request.scale));
-  SCOPED_TRACE(request.target_bars);
-  SCOPED_TRACE(request.seed);
-  CompositionProduct product;
-  ASSERT_EQ(compose(request, &product), CompositionStatus::Ok);
-  EXPECT_TRUE(product.final_validation.failures.empty())
-      << "first failure: "
-      << (product.final_validation.failures.empty()
-              ? std::string()
-              : product.final_validation.failures.front().rule_id);
-  EXPECT_EQ(product.final_validation.status, composer::ValidationStatus::Ok);
-  EXPECT_FALSE(product.midi_bytes.empty());
-}
-
-TEST(CounterpointBudgetTest, GateIsOutputNeutralOverTheShippedRequestSurface) {
-  const std::vector<RequestVariation> variations = requestVariations();
-  ASSERT_EQ(variations.size(), 18u);
-  std::vector<bool> variation_used(variations.size(), false);
-
-  std::size_t rotation = 0;
-  for (FormType form : kShippedForms) {
-    for (SubjectCharacter character : kCharacters) {
-      if (!composer::isFormCharacterCompatible(form, character)) {
-        continue;
-      }
-      const std::size_t index = rotation % variations.size();
-      variation_used[index] = true;
-      ++rotation;
-      expectComposesClean(buildRequest(form, character, variations[index]));
-
-      // The configuration that exposed rules a narrower sample reported as
-      // closed: minor mode at the maximum bar count on the first seed.
-      RequestVariation exposing;
-      exposing.minor = true;
-      exposing.scale = DurationScale::Short;
-      exposing.target_bars = 128;
-      exposing.seed = 1;
-      expectComposesClean(buildRequest(form, character, exposing));
-    }
-  }
-
-  EXPECT_EQ(rotation, 37u) << "the compatible form/character cross changed size";
-  for (std::size_t idx = 0; idx < variation_used.size(); ++idx) {
-    EXPECT_TRUE(variation_used[idx]) << "request variation " << idx << " was never exercised";
-  }
 }
 
 }  // namespace

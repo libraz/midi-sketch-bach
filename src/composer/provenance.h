@@ -288,8 +288,8 @@ enum RuleBit : std::uint8_t {
   // PassacagliaGroundReplayed: a note of the immutable 8-bar passacaglia ground
   //   (negative counterpart: passacaglia_ground_immutable).
   // VariationApplied: a note of a passacaglia variation block.
-  // ClimaxPlaced: a note of a variation block flagged is_climax (the dynamic /
-  //   registral peak placed mid- and end-piece).
+  // ClimaxPlaced: a note of a variation block flagged is_climax (the densest
+  //   design block, placed mid- and end-piece).
   PassacagliaGroundReplayed = 59,
   VariationApplied = 60,
   ClimaxPlaced = 61,

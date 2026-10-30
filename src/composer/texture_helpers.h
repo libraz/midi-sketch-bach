@@ -164,6 +164,8 @@ bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr);
 /// @param other_prev The already-placed voice's previous pitch (-1 = silent).
 /// @param other_curr The already-placed voice's current pitch (-1 = silent).
 /// @return True when the motion forms a true parallel perfect.
+/// @note Forwards to isStrictParallelPerfect (material_pair_guard.h), the one
+///       definition of the strict test.
 bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int other_curr);
 
 /// @brief Motion of one already-placed voice across two consecutive onsets.
@@ -212,6 +214,16 @@ class ThemeToneRegistry {
   /// parallel is heard note to note across a rest, so a guard reads this as the
   /// other voice's "from" tone.
   int onsetPitchBefore(VoiceId voice, Tick tick) const;
+
+  /// @brief Lowest and highest pitch `voice` sounds anywhere in [start, end).
+  ///
+  /// @param voice Voice to scan.
+  /// @param start Window start (inclusive).
+  /// @param end Window end (exclusive).
+  /// @param out_lowest Receives the lowest sounding pitch, or -1 when silent.
+  /// @param out_highest Receives the highest sounding pitch, or -1 when silent.
+  void pitchRangeDuring(VoiceId voice, Tick start, Tick end, int& out_lowest,
+                        int& out_highest) const;
 
   /// @brief Collect concurrent theme-tone pitches at `tick` excluding `voice`.
   ///
@@ -293,6 +305,11 @@ int soundingMaterialPitch(const std::vector<MaterialNote>& notes, Tick tick);
 /// `preparation_chord` too, so it never sounds the lowered 7th over a major
 /// dominant. Returns false when the supplied bass motion and band admit no
 /// valid pattern.
+///
+/// @param allow_prepared_seventh Also admit a preparation that is the seventh
+///        of `preparation_chord` rather than a consonance over its bass -- the
+///        ii7 - V 4-3, whose fourth is prepared as the seventh of ii. The caller
+///        must declare that seventh in the harmonic plan.
 bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick suspension_tick,
                            Tick resolution_tick, VoiceId voice, std::uint8_t bass_at_preparation,
                            std::uint8_t bass_at_suspension, std::uint8_t bass_at_resolution,
@@ -300,7 +317,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
                            std::uint8_t upper_at_resolution, int band_lo, int band_hi,
                            detail::Mode mode, SuspensionPattern* pattern,
                            const detail::ChordSpec* resolution_chord,
-                           const detail::ChordSpec* preparation_chord);
+                           const detail::ChordSpec* preparation_chord,
+                           bool allow_prepared_seventh = false);
 
 /// @brief Pick the band chord tone that is consonant and parallel-free.
 ///
@@ -423,7 +441,8 @@ void appendCadentialLanding(std::vector<MaterialNote>& line, Tick penult_bar_sta
 /// approach beat (a note held into it is cut there) and states the cadence
 /// itself: a dominant tone, leading tone first, then the tone completing the
 /// closing triad, third first. Both are taken under the variation (the approach
-/// under its closing tone too) and over the bass, ranked rather than filtered: a true parallel
+/// under every variation tone over its sustain and under the closing tone too)
+/// and over the bass, ranked rather than filtered: a true parallel
 /// outranks a clash with the variation, which outranks a hidden perfect, which outranks doubling a
 /// tone the variation sounds or leaping a tritone, which outranks a less characteristic chord tone,
 /// which outranks distance from the tone just sounded. Pitches are in the C-tonic frame.

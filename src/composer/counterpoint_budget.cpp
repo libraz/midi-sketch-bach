@@ -270,7 +270,13 @@ void applyCounterpointBudget(FormType form, ValidationReport* report) {
       continue;
     }
     ValidationFailure failure;
-    failure.span_id = kInvalidSpanId;
+    // Locate the failure at the first recorded finding of the rule when one exists.
+    for (const ValidationFailure& finding : report->informational) {
+      if (finding.rule_id == observation.rule_id) {
+        failure.span_id = finding.span_id;
+        break;
+      }
+    }
     failure.rule_id = observation.rule_id;
     failure.kind = FailKind::MusicalFail;
     report->failures.push_back(failure);

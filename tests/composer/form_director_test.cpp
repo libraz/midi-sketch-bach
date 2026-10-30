@@ -155,8 +155,8 @@ TEST(FormDirectorResolveBars, ScaleMultipliersApplyThenSnapAndClamp) {
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Short, 0), 44);
   // Medium 2x -> 88.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Medium, 0), 88);
-  // Long 3x -> 132 -> clamps to 128.
-  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Long, 0), 128);
+  // Long 3x -> 132 -> clamps to 128, then yields one snap step so it stays below Full.
+  EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Long, 0), 124);
   // Full 4x -> 176 -> clamps to 128.
   EXPECT_EQ(resolveBars(FormType::Fugue, DurationScale::Full, 0), 128);
   EXPECT_EQ(resolveBars(FormType::GoldbergVariations, DurationScale::Full, 0), 128);
@@ -213,6 +213,20 @@ TEST(FormDirectorResolveBars, ScalesBelowFullDoNotSnapOntoTheCap) {
             << "form " << static_cast<int>(form) << " raw=" << raw;
       }
     }
+  }
+}
+
+TEST(FormDirectorResolveBars, ScalesResolveToStrictlyIncreasingLengths) {
+  for (FormType form : kAllForms) {
+    std::uint16_t previous = 0;
+    for (DurationScale scale :
+         {DurationScale::Short, DurationScale::Medium, DurationScale::Long, DurationScale::Full}) {
+      const std::uint16_t resolved = resolveBars(form, scale, 0);
+      EXPECT_GT(resolved, previous)
+          << "form " << static_cast<int>(form) << " scale " << static_cast<int>(scale);
+      previous = resolved;
+    }
+    EXPECT_LE(previous, 128) << "form " << static_cast<int>(form);
   }
 }
 

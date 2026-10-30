@@ -246,6 +246,15 @@ std::uint16_t resolveBars(FormType form, DurationScale scale, std::uint16_t targ
   if (snapped > hi) {
     snapped = hi;
   }
+  // Scales stay distinct at the cap: a scale whose raw length reaches the cap
+  // together with the next one yields to one snap step below it.
+  if (target_bars == 0 && scale != DurationScale::Full) {
+    const std::uint32_t longer =
+        resolveBars(form, static_cast<DurationScale>(static_cast<std::size_t>(scale) + 1), 0);
+    if (snapped >= longer && longer > spec.snap_bars) {
+      snapped = longer - (spec.snap_bars == 0 ? 1 : spec.snap_bars);
+    }
+  }
   return static_cast<std::uint16_t>(snapped);
 }
 

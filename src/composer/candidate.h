@@ -14,8 +14,7 @@ namespace bach::composer {
 // commits the top candidate or, if every candidate fails Validator's
 // hard constraints, declares the span unsolvable and triggers retry.
 //
-// Candidates are pure data. No backreferences to legacy state; no
-// CollisionResolver coupling.
+// Candidates are pure data with no backreferences to engine state.
 struct Candidate {
   Tick start_tick = 0;
   Tick duration = 0;

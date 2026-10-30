@@ -13,6 +13,7 @@
 #include "composer/form_builders.h"
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
+#include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
 #include "composer/span.h"
@@ -1430,9 +1431,9 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
   }
   stampPicardyClose(out.harmony, mode, req.seed);
   if (total_bars >= 2) {
-    // The immutable passacaglia ground approaches the final tonic on D, the
-    // fifth of the dominant.  Spell that real sonority as V4/3 (second
-    // inversion) rather than pretending the bass is a root-position G.
+    // The approach bar is the dominant seventh. One ground variant reaches the
+    // final tonic from D, the fifth of the dominant, and is spelled V4/3 (second
+    // inversion); the others reach it from G and stay in root position.
     ChordEvent& approach = out.harmony.chords[static_cast<std::size_t>(total_bars - 2)];
     approach.root_pc = 7;
     approach.quality = ChordQuality::Dominant7;
@@ -1443,11 +1444,10 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
     approach.function = HarmonicFunction::D;
     approach.has_degree = true;
   }
-  // The immutable ground's final dominant bass is D (the fifth of V), and the
-  // upper variation is free to approach the tonic from scale degree 2.  This
-  // is therefore an inverted/upper-voice IAC, not a root-position PAC.  Author
-  // the cadence explicitly so the director does not infer Perfect merely from
-  // the V-to-I harmonic roots.
+  // Whatever the ground's final dominant bass (D or G), the upper variation is
+  // free to approach the tonic from scale degree 2, so the close is authored as
+  // an imperfect authentic cadence rather than inferred as Perfect from the
+  // V-to-I harmonic roots.
   out.harmony.cadences.push_back({bar_tick(total_bars - 1), CadenceType::ImperfectAuthentic});
 
   // --- Terraced growth schedule (period-count derived). ---
@@ -2712,6 +2712,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     const std::array<int, 3> chord_pcs = {suspension_chord.root_pc,
                                           (suspension_chord.root_pc + chord_third) % 12,
                                           (suspension_chord.root_pc + 7) % 12};
+    const detail::PcMask suspension_chord_pcs =
+        rule_helpers::chordPcsAt(out.harmony, suspension_tick);
     bool installed = false;
     // The V0 tone under the suspension is searched over a full octave, not just
     // the fifth around the figuration's own landing: the suspended dissonance
@@ -2720,17 +2722,12 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     // near octave cannot. Ascending distance keeps the figuration's own tone
     // first, so a cadence that already works is left alone.
     //
-    // The whole search runs twice at the closing cadence. The first pass also
-    // demands that the pattern's own three tones form no true parallel with the
-    // figuration; the second drops that demand, because some cadences admit no
-    // parallel-free suspension at all and the form's closing dissonance is worth
-    // more than the fault it carries.
-    //
-    // That trade is the closing gesture's alone. An interior cycle cadence has
-    // no comparable claim -- it is one of several identical closes rather than
-    // the one the piece ends on -- and buying its dissonance with a true
-    // parallel would be paying a cardinal fault for an ornament the cycle can
-    // simply go without. Those bars take the figure only when it is clean.
+    // The pattern's own three tones never form a true parallel with the
+    // figuration: a close that admits no parallel-free suspension goes without
+    // one. The closing cadence's last pass relaxes only the departure into the
+    // next bar head, where it may spend a hidden perfect to keep its dissonance;
+    // an interior cycle cadence is one of several identical closes and takes the
+    // figure only when it is clean.
     const bool closing_cadence = sus_bar == static_cast<int>(req.bars) - 2;
     // Leading passes also refuse the anti-parallel, the firmer of the two
     // contrary-motion faults: first with the battuta, then -- at the close --
@@ -2748,6 +2745,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
       int landing_offset;
       Pass pass;
       bool clean_joint;
+      bool require_leading_tone = false;
     };
     const auto hasSingleBeatTone = [&](Tick tick) {
       int overlapping = 0;
@@ -2822,6 +2820,66 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
       for (const Pass& pass : kInteriorPasses)
         attempts.push_back({original_upper_prep, 0, pass, false});
     }
+    // The closing dominant must sound its leading tone above the bass, so the
+    // close first offers every attempt only a pattern that keeps one there, and
+    // only then the same attempts without that demand -- within each strictness
+    // level, so a pass that tolerates a true parallel still comes last.
+    if (closing_cadence) {
+      const std::size_t plain_count = attempts.size();
+      for (std::size_t idx = 0; idx < plain_count; ++idx) {
+        attempts.push_back(attempts[idx]);
+        attempts[idx].require_leading_tone = true;
+      }
+      std::stable_sort(attempts.begin(), attempts.end(),
+                       [](const Attempt& lhs, const Attempt& rhs) {
+                         if (lhs.pass.strict_pass != rhs.pass.strict_pass)
+                           return lhs.pass.strict_pass < rhs.pass.strict_pass;
+                         return lhs.require_leading_tone && !rhs.require_leading_tone;
+                       });
+    }
+    // The one test the closing suspension passes: the resolution is a tone of
+    // the declared chord it resolves under, neither dissonant tone nor
+    // resolution spells an augmented or diminished interval (leading tone
+    // against the minor third) with V0, and -- when asked -- a non-bass voice
+    // sounds the leading tone over the closing dominant. An interior cycle
+    // cadence resolves into the next statement of the ground rather than the
+    // final tonic, and keeps the prepared 7-6 the minor grounds allow there.
+    const detail::PcMask resolution_chord_pcs =
+        rule_helpers::chordPcsAt(out.harmony, resolution_tick);
+    const Tick dominant_end = suspension_tick + kTicksPerBar34;
+    const auto closingSuspensionFits = [&](const SuspensionPattern& suspension, int upper_sus,
+                                           const Attempt& attempt) {
+      if (!closing_cadence)
+        return true;
+      const auto pc_of = [](int pitch) { return ((pitch % 12) + 12) % 12; };
+      // C-tonic frame: the leading tone is the major seventh above the tonic.
+      const auto leading = [&](int pitch) { return pc_of(pitch) == interval::kMajor7th; };
+      const auto misspelled = [&](int lhs, int rhs) {
+        return (leading(lhs) && pc_of(rhs) == interval::kMinor3rd) ||
+               (leading(rhs) && pc_of(lhs) == interval::kMinor3rd);
+      };
+      if (resolution_chord_pcs != 0 &&
+          (resolution_chord_pcs & (1u << pc_of(suspension.resolution_pitch))) == 0u)
+        return false;
+      if (misspelled(suspension.suspension_pitch, upper_sus))
+        return false;
+      bool heard = leading(suspension.suspension_pitch) || leading(suspension.resolution_pitch) ||
+                   leading(upper_sus);
+      for (const PassacagliaVariation& variation : out.material.passacaglia_variations) {
+        for (const MaterialNote& note : variation.notes) {
+          const Tick note_end = note.start_tick + note.duration;
+          if (note_end <= resolution_tick || note.start_tick >= dominant_end)
+            continue;
+          const int shifted =
+              static_cast<int>(note.pitch) + (attempt.clean_joint ? attempt.landing_offset : 0);
+          if (note.start_tick < resolution_tick + kTicksPerBeat &&
+              misspelled(suspension.resolution_pitch, shifted))
+            return false;
+          heard = heard || leading(shifted);
+        }
+      }
+      return heard || !attempt.require_leading_tone;
+    };
 
     const auto lowerPitchAt = [&](Tick tick) {
       int lower = groundPitchAt(tick);
@@ -2859,8 +2917,12 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             continue;
           const int upper_sus = original_upper_sus + direction * distance;
           const int pc = ((upper_sus % 12) + 12) % 12;
-          if (upper_sus < 60 || upper_sus > organ_range::kManualHigh ||
-              (pc != chord_pcs[0] && pc != chord_pcs[1] && pc != chord_pcs[2]))
+          // The close sits over the declared closing dominant, whose bass may be
+          // its fifth; an interior cadence reads the cycle plan's own bar chord.
+          const bool chord_tone =
+              closing_cadence ? (suspension_chord_pcs & detail::pcBit(pc)) != 0
+                              : (pc == chord_pcs[0] || pc == chord_pcs[1] || pc == chord_pcs[2]);
+          if (upper_sus < 60 || upper_sus > organ_range::kManualHigh || !chord_tone)
             continue;
           if (attempt.clean_joint && preceding_prep_upper >= 0 && preceding_prep_ground >= 0 &&
               (formsPerfectParallel(preceding_prep_upper, upper_prep, preceding_prep_ground,
@@ -2875,14 +2937,15 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
           if (candidate_prior_upper >= 0 && prior_upper_ground >= 0 &&
               formsPerfectParallel(candidate_prior_upper, upper_sus, prior_upper_ground, bass_sus))
             continue;
-          // Held to the first pass only, like the strict check further down. An
-          // interior cycle never reaches the second pass and so always honours
-          // it; the close may spend a hidden perfect to keep its dissonance,
-          // which is the same trade the second pass already makes against the
-          // far more expensive true parallel. A closing cadence with no accented
-          // dissonance at all is the worse outcome.
-          if (strict_pass == 0 && candidate_next_upper_head >= 0 && next_ground >= 0 &&
-              formsPerfectParallel(upper_sus, candidate_next_upper_head, bass_sus, next_ground))
+          // The hidden perfect is refused on the first pass only. An interior
+          // cycle never reaches the second pass and so always honours it; the
+          // close may spend a hidden perfect to keep its dissonance, but never a
+          // true parallel.
+          if (candidate_next_upper_head >= 0 && next_ground >= 0 &&
+              (strict_pass == 0 ? formsPerfectParallel(upper_sus, candidate_next_upper_head,
+                                                       bass_sus, next_ground)
+                                : isStrictParallelPerfect(upper_sus, candidate_next_upper_head,
+                                                          bass_sus, next_ground)))
             continue;
           // The same three motions can arrive on a unison the contrary way as
           // readily as they can approach a perfect interval in similar motion,
@@ -2985,7 +3048,23 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                     static_cast<std::uint8_t>(upper_prep), static_cast<std::uint8_t>(upper_sus),
                     static_cast<std::uint8_t>(upper_res),
                     /*band_lo=*/std::max({bass_prep, bass_sus, bass_res}) + 1, ceiling, req.mode,
-                    &suspension, &suspension_spec, &preparation_spec))
+                    &suspension, &suspension_spec, &preparation_spec,
+                    /*allow_prepared_seventh=*/closing_cadence))
+              continue;
+            // A preparation dissonant over its bass is the seventh of ii; it is
+            // admitted only where the plan's chord there can declare it.
+            ChordEvent* preparation_event = nullptr;
+            for (ChordEvent& event : out.harmony.chords) {
+              if (event.start_tick <= preparation_tick)
+                preparation_event = &event;
+            }
+            const bool prepared_seventh = !rule_helpers::isConsonantAboveBass(
+                suspension.preparation_pitch, static_cast<std::uint8_t>(bass_prep));
+            if (prepared_seventh && (preparation_event == nullptr ||
+                                     preparation_event->root_pc != preparation_spec.root_pc ||
+                                     preparation_event->quality == ChordQuality::Augmented ||
+                                     preparation_event->quality == ChordQuality::Major7 ||
+                                     preparation_event->quality == ChordQuality::Diminished7))
               continue;
             // The suspension's own three tones are a voice, and nothing has judged
             // them: the test above only asks whether relocating V0 to `upper_sus`
@@ -2996,7 +3075,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             // parallel.
             const auto strictAgainst = [](int line_prev, int cand, int other_prev, int other_curr) {
               return line_prev >= 0 && cand >= 0 && other_prev >= 0 && other_curr >= 0 &&
-                     formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr);
+                     isStrictParallelPerfect(line_prev, cand, other_prev, other_curr);
             };
             // The rewrite replaces only the V0 note that CONTAINS the suspension;
             // a figuration running faster than the pattern keeps its own onsets
@@ -3005,13 +3084,12 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             Tick res_onset = 0;
             const int res_onset_pitch = upperOnsetBefore(resolution_tick, &res_onset);
             const int upper_res_prev = res_onset > suspension_tick ? res_onset_pitch : upper_sus;
-            if (strict_pass == 0 &&
-                (strictAgainst(counterOnsetBefore(preparation_tick), suspension.preparation_pitch,
-                               upperOnsetBefore(preparation_tick, nullptr), upper_prep) ||
-                 strictAgainst(suspension.preparation_pitch, suspension.suspension_pitch,
-                               candidate_prior_upper, upper_sus) ||
-                 strictAgainst(suspension.suspension_pitch, suspension.resolution_pitch,
-                               upper_res_prev, upper_res))) {
+            if (strictAgainst(counterOnsetBefore(preparation_tick), suspension.preparation_pitch,
+                              upperOnsetBefore(preparation_tick, nullptr), upper_prep) ||
+                strictAgainst(suspension.preparation_pitch, suspension.suspension_pitch,
+                              candidate_prior_upper, upper_sus) ||
+                strictAgainst(suspension.suspension_pitch, suspension.resolution_pitch,
+                              upper_res_prev, upper_res)) {
               continue;
             }
             if (attempt.clean_joint &&
@@ -3021,9 +3099,26 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                  upper_sus <= bass_sus || upper_res <= bass_res || trill_upper <= bass_res ||
                  final_upper <= groundPitchAt(piece_end - kTicksPerBar34)))
               continue;
+            if (!closingSuspensionFits(suspension, upper_sus, attempt))
+              continue;
             installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
             if (!installed)
               continue;
+            if (prepared_seventh) {
+              switch (preparation_event->quality) {
+                case ChordQuality::Major:
+                  preparation_event->quality = ChordQuality::Dominant7;
+                  break;
+                case ChordQuality::Minor:
+                  preparation_event->quality = ChordQuality::Minor7;
+                  break;
+                case ChordQuality::Diminished:
+                  preparation_event->quality = ChordQuality::HalfDiminished7;
+                  break;
+                default:
+                  break;
+              }
+            }
             for (auto& variation : out.material.passacaglia_variations) {
               std::vector<MaterialNote> rewritten;
               rewritten.reserve(variation.notes.size() + 2);
