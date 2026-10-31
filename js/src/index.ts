@@ -43,6 +43,8 @@ export type {
   FormId,
   FormName,
   GeneratedData,
+  GeneratedInfo,
+  InformationalFinding,
   InstrumentId,
   InstrumentName,
   KeyId,
@@ -52,5 +54,7 @@ export type {
   PresetInfo,
   ProvenanceData,
   ProvenanceNote,
+  RuleGeometry,
   TrackData,
+  WaveVeto,
 } from './types';
