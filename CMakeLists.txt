@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(midi-sketch-bach
-  VERSION 0.6.0
+  VERSION 0.7.0
   DESCRIPTION "Bach Instrumental MIDI Generator"
   LANGUAGES CXX
 )
