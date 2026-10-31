@@ -1019,8 +1019,8 @@ TEST(CandidateSearchTest, EpisodeIntentInvertReflectsAroundPivot) {
 
   const auto cands = search.enumerate(span, singleCMajor(), material, ctx);
   ASSERT_EQ(cands.size(), 2u);
-  // Invert: 64 → 2*60-64 = 56 (Ab3), 67 → 2*60-67 = 53 (F3).
-  EXPECT_EQ(cands[0].pitch, 56);
+  // Invert about C4 in C major, degree for degree: E4 -> A3, G4 -> F3.
+  EXPECT_EQ(cands[0].pitch, 57);
   EXPECT_EQ(cands[1].pitch, 53);
   EXPECT_NE(cands[0].satisfied_rules & (ruleBitMask(RuleBit::EpisodeMotifSourced)), 0u);
 }
@@ -1288,9 +1288,9 @@ TEST(CandidateSearchTest, EpisodeIntentSkipsFragmentForWrongVoice) {
   EXPECT_TRUE(cands.empty());
 }
 
-// FortspinnungSpan replay: a SequenceTemplate emits one step's notes
-// transposed by step_offset semitones. DescendingFifths = -7 per step;
-// 2-pitch seed {72, 74}, 3 steps → flat output length = 6 notes.
+// FortspinnungSpan replay: a SequenceTemplate emits the seed and each later
+// step moved by scale degrees of the key. DescendingFifths = -4 degrees per
+// step; 2-pitch seed {72, 74}, 3 steps → flat output length = 6 notes.
 TEST(CandidateSearchTest, FortspinnungSpanReplaysDescendingFifths) {
   CandidateSearch search;
   CandidateContext ctx;
@@ -1313,10 +1313,10 @@ TEST(CandidateSearchTest, FortspinnungSpanReplaysDescendingFifths) {
   ASSERT_EQ(cands.size(), 6u);
   EXPECT_EQ(cands[0].pitch, 72);
   EXPECT_EQ(cands[1].pitch, 74);
-  EXPECT_EQ(cands[2].pitch, 65);  // 72 - 7
-  EXPECT_EQ(cands[3].pitch, 67);  // 74 - 7
-  EXPECT_EQ(cands[4].pitch, 58);  // 72 - 14
-  EXPECT_EQ(cands[5].pitch, 60);  // 74 - 14
+  EXPECT_EQ(cands[2].pitch, 65);  // C5 down a fifth: F4
+  EXPECT_EQ(cands[3].pitch, 67);  // D5 down a fifth: G4
+  EXPECT_EQ(cands[4].pitch, 59);  // F4 down a diminished fifth: B3
+  EXPECT_EQ(cands[5].pitch, 60);  // G4 down a fifth: C4
   // FortspinnungSourced on all 6 notes; SequenceStep on steps 1-2 only.
   for (std::size_t i = 0; i < cands.size(); ++i) {
     EXPECT_NE(cands[i].satisfied_rules & (ruleBitMask(RuleBit::FortspinnungSourced)), 0u)
@@ -1352,8 +1352,8 @@ TEST(CandidateSearchTest, FortspinnungSpanReplaysAscendingStep) {
   ASSERT_EQ(cands.size(), 4u);
   EXPECT_EQ(cands[0].pitch, 72);
   EXPECT_EQ(cands[1].pitch, 74);
-  EXPECT_EQ(cands[2].pitch, 74);  // 72 + 2
-  EXPECT_EQ(cands[3].pitch, 76);  // 74 + 2
+  EXPECT_EQ(cands[2].pitch, 74);  // C5 up a degree: D5
+  EXPECT_EQ(cands[3].pitch, 76);  // D5 up a degree: E5
 }
 
 TEST(CandidateSearchTest, FortspinnungSpanSkipsTemplateForWrongVoice) {

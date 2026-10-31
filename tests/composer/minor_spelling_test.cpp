@@ -131,6 +131,23 @@ TEST(SpellScale, RespellMovesOnlyTheInflectionOfTheSameLetter) {
   EXPECT_EQ(detail::respellInScale(66, 0, Mode::Major, 0), 66);  // major is left alone
 }
 
+TEST(SpellScale, LetterPitchInvertsDiatonicLetterAcrossOctaves) {
+  for (const Mode mode : {Mode::Major, Mode::Minor}) {
+    for (int tonic_pc = 0; tonic_pc < 12; ++tonic_pc) {
+      for (int midi = 0; midi < 128; ++midi) {
+        if (!detail::inSpelledScale(midi, tonic_pc, mode, 0))
+          continue;
+        EXPECT_EQ(detail::letterPitch(detail::diatonicLetter(midi, tonic_pc, mode), tonic_pc, mode),
+                  midi)
+            << "tonic " << tonic_pc << " midi " << midi;
+      }
+    }
+  }
+  // Below the first tonic: the letter under C0 in C minor is B-flat, one below.
+  EXPECT_EQ(detail::letterPitch(-1, 0, Mode::Minor), -2);
+  EXPECT_EQ(detail::letterPitch(-7, 0, Mode::Major), -12);
+}
+
 TEST(SpellScale, AugmentedSecondIsReadByLetterInEitherOctave) {
   EXPECT_TRUE(detail::isAugmentedSecond(68, 71, 0, Mode::Minor));       // A-flat up to B
   EXPECT_FALSE(detail::isAugmentedSecond(67, 70, 0, Mode::Minor));      // G up to B-flat: a third

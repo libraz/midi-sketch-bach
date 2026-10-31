@@ -2,6 +2,7 @@
 #define BACH_COMPOSER_RULE_HELPERS_H
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -238,6 +239,16 @@ bool createsCrossRelation(const VoiceOnsetIndex& placed, VoiceId candidate_voice
 // or nullptr when no cell touches it. Both candidate enumeration paths use it
 // to discover the forced approach/cadence pitch classes at a position.
 const CadenceCell* cadenceCellAt(const Material& material, Tick tick);
+
+// Pitch of seed note `seed_index` in step `step` of `tmpl`, sounding at `tick`.
+// The one expansion both the FortspinnungSpan replay and the
+// sequence_pattern_consistency rule read. Step 0 is the seed verbatim; a later
+// step moves the seed by scale degrees in the key in force at the template's
+// start, a chromatic seed tone keeping its inflection, and a minor result is
+// respelled under the harmony at `tick` (raised 6th and 7th over the
+// dominant). The result is not clamped to the MIDI range.
+int sequenceStepPitch(const SequenceTemplate& tmpl, std::size_t seed_index, int step, Tick tick,
+                      const HarmonicPlan& plan);
 
 // Provenance-bit helpers. Both share the same shape: OR the bits the named
 // idiom implies into `rules`, leaving every other bit untouched.

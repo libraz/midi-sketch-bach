@@ -297,6 +297,20 @@ constexpr int diatonicLetter(int midi, int tonic_pc, Mode mode) {
 }
 
 /**
+ * @brief Pitch of a letter in a key's plain scale; the inverse of diatonicLetter.
+ * @param letter 7 * octave + letter, letter 0 being the tonic.
+ * @param tonic_pc Tonic pitch class of the local key.
+ * @param mode Mode of the local key (minor reads as the natural minor).
+ * @return The MIDI pitch of that letter, which may fall outside [0, 127].
+ */
+constexpr int letterPitch(int letter, int tonic_pc, Mode mode) {
+  const int octave = letter >= 0 ? letter / 7 : -((6 - letter) / 7);
+  const int index = letter - 7 * octave;
+  return ((tonic_pc % 12) + 12) % 12 + 12 * octave +
+         spellScale(tonic_pc, mode, 0)[static_cast<std::size_t>(index)];
+}
+
+/**
  * @brief Move a minor-key pitch onto the inflection its letter takes under a
  *        harmony; major pitches and letters spelled the same are returned as is.
  * @param midi MIDI pitch.

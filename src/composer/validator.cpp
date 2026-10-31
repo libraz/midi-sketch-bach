@@ -118,8 +118,23 @@ std::uint8_t lowestSoundingPitch(const VoiceOnsetIndex& onset_index,
   return lowest;
 }
 
+// Whether `pc` is a tone of `chord`, its declared seventh included. The one
+// membership test both accent rules read, so strong_beat_dissonance and
+// vertical_dissonance agree on what the declared harmony contains.
+bool isDeclaredChordTone(const ChordEvent& chord, std::uint8_t pc) {
+  std::size_t tone_count = 0;
+  const auto tones = chordPitchClasses(chord, &tone_count);
+  for (std::size_t tone = 0; tone < tone_count; ++tone) {
+    if (tones[tone] == pc % 12)
+      return true;
+  }
+  return false;
+}
+
 // True when `sp` is realized as declared at its suspension tick and forms its
-// declared dissonance-resolution pair against `other_voice`.
+// declared dissonance-resolution pair against `other_voice`. Every type
+// resolves down by step; a 2-3 suspends the bass, so its suspended voice must
+// sound below every other voice and `other_voice` above it.
 bool suspensionHoldsAgainst(const VoiceOnsetIndex& onset_index, const std::vector<VoiceId>& voices,
                             const SuspensionPattern& sp, VoiceId other_voice) {
   if (sp.preparation_tick >= sp.suspension_tick || sp.resolution_tick <= sp.suspension_tick)
@@ -134,15 +149,20 @@ bool suspensionHoldsAgainst(const VoiceOnsetIndex& onset_index, const std::vecto
       prep != sus || other_sus == 0 || other_res == 0)
     return false;
   const int resolution_motion = static_cast<int>(res) - static_cast<int>(sus);
-  const bool ascending = sp.type == SuspensionType::Sus2_3;
-  if ((!ascending && resolution_motion != -1 && resolution_motion != -2) ||
-      (ascending && resolution_motion != 1 && resolution_motion != 2))
+  if (resolution_motion != -1 && resolution_motion != -2)
     return false;
   int sus_ic = 0;
   int res_ic = 0;
-  if (ascending) {
-    sus_ic = ((static_cast<int>(other_sus) - static_cast<int>(sus)) % 12 + 12) % 12;
-    res_ic = ((static_cast<int>(other_res) - static_cast<int>(res)) % 12 + 12) % 12;
+  if (sp.type == SuspensionType::Sus2_3) {
+    for (VoiceId voice : voices) {
+      const std::uint8_t pitch = onset_index.pitchAt(voice, tick);
+      if (voice != sp.voice && pitch != 0 && pitch <= sus)
+        return false;
+    }
+    if (other_res <= res)
+      return false;
+    sus_ic = (static_cast<int>(other_sus) - static_cast<int>(sus)) % 12;
+    res_ic = (static_cast<int>(other_res) - static_cast<int>(res)) % 12;
   } else {
     // Upper-voice suspensions are dissonant specifically against the lowest
     // sounding other voice, not against an incidental upper partner.
@@ -763,14 +783,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     if (!isStructuralAccent(harmonic_plan, note.start_tick))
       continue;
 
-    const auto& chord = activeChord(harmonic_plan, note.start_tick);
-    std::size_t chord_tone_count = 0;
-    const auto chord_tones = chordPitchClasses(chord, &chord_tone_count);
-    const std::uint8_t pc = static_cast<std::uint8_t>(note.pitch % 12);
-    bool is_chord_tone = false;
-    for (std::size_t tone = 0; tone < chord_tone_count; ++tone)
-      is_chord_tone = is_chord_tone || chord_tones[tone] == pc;
-    if (!is_chord_tone) {
+    if (!isDeclaredChordTone(activeChord(harmonic_plan, note.start_tick), pitchClass(note.pitch))) {
       ValidationFailure failure;
       failure.span_id = provenance[i].span_id;
       failure.rule_id = "strong_beat_dissonance";
@@ -859,6 +872,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     const std::uint8_t submediant = static_cast<std::uint8_t>((tonic + 9) % 12);
     const std::uint8_t minor_submediant = static_cast<std::uint8_t>((tonic + 8) % 12);
     const ChordEvent& approach_chord = activeChord(harmonic_plan, approach_tick);
+    // The imperfect, deceptive and Picardy closes accept the dominant in the
+    // inversion the plan declares; a perfect cadence needs it in root position.
     const std::uint8_t authentic_bass_pc =
         approach_chord.root_pc % 12 == dominant ? bassPitchClassFor(approach_chord) : dominant;
     // A half cadence is an arrival condition: the bass must land on V, but a
@@ -915,7 +930,7 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       switch (cadence.type) {
         case CadenceType::Perfect:
           ok = resolvesLeadingTone(upper_prev, upper_now, harmonic_plan) &&
-               pitchClass(bass_prev) == authentic_bass_pc && pitchClass(bass_now) == tonic;
+               pitchClass(bass_prev) == dominant && pitchClass(bass_now) == tonic;
           break;
         case CadenceType::ImperfectAuthentic:
           ok = pitchClass(bass_prev) == authentic_bass_pc && pitchClass(bass_now) == tonic &&
@@ -1251,7 +1266,10 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   //    the bass is dissonant unless a fully realized 4-3 suspension or
   //    cadential 6/4 declaration supplies its preparation and resolution.
   //    A fourth between upper voices remains valid when both notes are
-  //    consonant above the bass.
+  //    consonant above the bass. When the active chord declares a seventh, a
+  //    pair whose two tones both belong to that chord is the declared sonority
+  //    itself (the seventh against the root, the tritone of V7, the fourth of
+  //    V4/3) and is read as harmony, as strong_beat_dissonance reads it.
   std::vector<std::size_t> sounding_pair;
   for (std::size_t va = 0; va < voices.size(); ++va) {
     for (std::size_t vb = va + 1; vb < voices.size(); ++vb) {
@@ -1266,6 +1284,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
         const std::size_t authored_b = onset_index.soundingAt(voices[vb], t);
         const std::uint8_t bass_pitch = lowestSoundingPitch(onset_index, voices, t);
         bool consonant = rule_helpers::isBassSensitiveConsonance(pa, pb, bass_pitch);
+        if (!consonant) {
+          const ChordEvent& chord = activeChord(harmonic_plan, t);
+          consonant = hasSeventh(chord.quality) && isDeclaredChordTone(chord, pitchClass(pa)) &&
+                      isDeclaredChordTone(chord, pitchClass(pb));
+        }
         if (!consonant)
           consonant = isDeclaredSuspensionDissonance(onset_index, voices, material, voices[va],
                                                      voices[vb], t);
@@ -1521,9 +1544,11 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
 
   // Suspension checks. Each declaration must describe a real prepared
   // dissonance: consonant preparation (or the declared chord's seventh),
-  // equal-or-longer preparation duration,
-  // stronger metrical placement for the suspension, the type-specific
-  // dissonance/resolution intervals, and a step in the prescribed direction.
+  // equal-or-longer preparation duration, a dissonance metrically stronger
+  // than its resolution, the type-specific dissonance/resolution intervals, and
+  // a descending step. A 2-3 suspends the bass: its intervals are read upward
+  // from the suspended voice, which must lie below the voice it is measured
+  // against.
   for (const auto& sp : material.suspension_patterns) {
     const std::uint8_t prep_actual = onset_index.pitchAt(sp.voice, sp.preparation_tick);
     const std::uint8_t sus_actual = onset_index.pitchAt(sp.voice, sp.suspension_tick);
@@ -1595,21 +1620,22 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     if (!duration_ok)
       addSuspensionFailure("suspension_preparation_duration");
 
-    const MetricalStrength prep_strength =
-        rule_helpers::metricalStrengthAt(harmonic_plan, sp.preparation_tick);
+    // The dissonance is the accent and its resolution the release, so the
+    // suspension tick must be strictly stronger than the resolution tick; the
+    // preparation may fall on any beat.
     const MetricalStrength sus_strength =
         rule_helpers::metricalStrengthAt(harmonic_plan, sp.suspension_tick);
-    if (static_cast<int>(sus_strength) >= static_cast<int>(prep_strength))
+    const MetricalStrength res_strength =
+        rule_helpers::metricalStrengthAt(harmonic_plan, sp.resolution_tick);
+    if (static_cast<int>(sus_strength) >= static_cast<int>(res_strength))
       addSuspensionFailure("suspension_metrical_accent");
 
-    // Resolution: must be a 1- or 2-semitone step in the prescribed
-    // direction. Sus2_3 ascends; the other three descend.
+    // Resolution: the suspended voice descends by a 1- or 2-semitone step,
+    // the bass of a 2-3 included.
     bool res_ok = ordered && sus_actual != 0 && res_actual != 0;
     if (res_ok) {
       const int delta = static_cast<int>(res_actual) - static_cast<int>(sus_actual);
-      const bool small_step = std::abs(delta) == 1 || std::abs(delta) == 2;
-      const bool ascending = sp.type == SuspensionType::Sus2_3;
-      res_ok = small_step && ((ascending && delta > 0) || (!ascending && delta < 0));
+      res_ok = delta == -1 || delta == -2;
     }
     if (!res_ok)
       addSuspensionFailure("suspension_resolution_step_down");
@@ -1619,10 +1645,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     bool interval_ok = other_at_sus != 0 && other_at_res != 0 && sus_actual != 0 && res_actual != 0;
     int sus_ic = -1;
     int res_ic = -1;
+    if (interval_ok && sp.type == SuspensionType::Sus2_3)
+      interval_ok = other_at_sus > sus_actual && other_at_res > res_actual;
     if (interval_ok) {
       if (sp.type == SuspensionType::Sus2_3) {
-        sus_ic = ((static_cast<int>(other_at_sus) - static_cast<int>(sus_actual)) % 12 + 12) % 12;
-        res_ic = ((static_cast<int>(other_at_res) - static_cast<int>(res_actual)) % 12 + 12) % 12;
+        sus_ic = (static_cast<int>(other_at_sus) - static_cast<int>(sus_actual)) % 12;
+        res_ic = (static_cast<int>(other_at_res) - static_cast<int>(res_actual)) % 12;
       } else {
         sus_ic = ((static_cast<int>(sus_actual) - static_cast<int>(other_at_sus)) % 12 + 12) % 12;
         res_ic = ((static_cast<int>(res_actual) - static_cast<int>(other_at_res)) % 12 + 12) % 12;
@@ -1855,7 +1883,8 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // Episode motif-derivation check. For every EpisodeFragment in
   // Material::episodes, re-derive the expected notes via
   // motif_ops::applyTransform on the declared source slice of
-  // Material::subject and assert that every emitted note in the target
+  // Material::subject (an inversion mirrors scale degrees in the key in force
+  // at the episode) and assert that every emitted note in the target
   // voice at the derived ticks matches by (start_tick, duration, pitch).
   // A mismatch — wrong pitch, wrong duration, or missing note — fires
   // an `episode_motif_derived` MusicalFail.
@@ -1884,8 +1913,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     const int factor = (transform == motif_ops::EpisodeMotifTransform::Augment)
                            ? frag.augment_factor
                            : frag.diminish_factor;
-    const auto expected = motif_ops::applyTransform(source_slice, transform, frag.target_start_tick,
-                                                    frag.invert_pivot, factor);
+    const auto expected = motif_ops::applyTransform(
+        source_slice, transform, frag.target_start_tick,
+        rule_helpers::keyAt(harmonic_plan, frag.target_start_tick), frag.invert_pivot, factor);
     for (const auto& exp : expected) {
       SpanId fail_span = kInvalidSpanId;
       bool matched = false;
@@ -2124,9 +2154,10 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // sequence_pattern_consistency: for every SequenceTemplate in Material,
   // walk the actual emitted notes in the template's voice across the
   // expanded window [target_start_tick, target_start_tick +
-  // step_length_ticks*num_steps) and assert that each step is a
-  // verbatim transposition of the seed by step_offset*step_index
-  // semitones. Steps with missing notes, wrong pitch, or wrong duration
+  // step_length_ticks*num_steps) and assert that each step is the seed
+  // moved by scale degrees as rule_helpers::sequenceStepPitch expands it --
+  // a diatonic sequence in the template's key, the expansion the replay
+  // emits. Steps with missing notes, wrong pitch, or wrong duration
   // fire `sequence_pattern_consistency`.
   //
   // imitation_entry_match: for every ImitationEntry, locate the
@@ -2134,17 +2165,6 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   // and assert that (a) follower.tick == leader.tick + distance_ticks
   // and (b) follower.pitch == leader.pitch + interval_semis. Either
   // mismatch fires `imitation_entry_match`.
-  auto sequencePatternSemis = [](SequencePattern pattern) -> int {
-    switch (pattern) {
-      case SequencePattern::DescendingFifths:
-        return -7;
-      case SequencePattern::DescendingStep:
-        return -2;
-      case SequencePattern::AscendingStep:
-        return 2;
-    }
-    return 0;
-  };
   // Declared authored tones, ordered by (voice, authored tick, note index): a
   // sequence step is found either at its sounding onset or through the
   // authored tone a note declares.
@@ -2178,13 +2198,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     for (auto d : tmpl.seed_durations)
       local_offset += d;
     const Tick step_stride = tmpl.step_length_ticks > 0 ? tmpl.step_length_ticks : local_offset;
-    const int offset = sequencePatternSemis(tmpl.pattern);
     bool any_mismatch = false;
     for (std::uint8_t k = 0; k < tmpl.num_steps && !any_mismatch; ++k) {
       Tick beat_cursor = tmpl.target_start_tick + static_cast<Tick>(k) * step_stride;
       for (std::size_t i = 0; i < tmpl.seed_pitches.size(); ++i) {
-        const int expected_pitch =
-            static_cast<int>(tmpl.seed_pitches[i]) + offset * static_cast<int>(k);
+        const int expected_pitch = rule_helpers::sequenceStepPitch(tmpl, i, static_cast<int>(k),
+                                                                   beat_cursor, harmonic_plan);
         if (expected_pitch < 0 || expected_pitch > 127) {
           beat_cursor += tmpl.seed_durations[i];
           continue;

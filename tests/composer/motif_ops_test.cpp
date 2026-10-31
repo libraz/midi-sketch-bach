@@ -28,13 +28,13 @@ std::vector<MaterialNote> ascendingScale4() {
 
 }  // namespace
 
-TEST(MotifOpsTest, InvertMelodyReflectsAroundPivot) {
-  // Pivot 60 (C4). 60 → 60, 62 → 58, 64 → 56, 65 → 55.
-  const auto inv = invertMelody(ascendingScale4(), 60);
+TEST(MotifOpsTest, InvertMelodyMirrorsScaleDegreesAroundPivot) {
+  // Pivot C4 in C major: C D E F -> C B A G, every tone kept in the key.
+  const auto inv = invertMelody(ascendingScale4(), 60, KeyContext{0, false});
   ASSERT_EQ(inv.size(), 4u);
   EXPECT_EQ(inv[0].pitch, 60);
-  EXPECT_EQ(inv[1].pitch, 58);
-  EXPECT_EQ(inv[2].pitch, 56);
+  EXPECT_EQ(inv[1].pitch, 59);
+  EXPECT_EQ(inv[2].pitch, 57);
   EXPECT_EQ(inv[3].pitch, 55);
   // Timing unchanged.
   EXPECT_EQ(inv[0].start_tick, 0u);
@@ -42,12 +42,38 @@ TEST(MotifOpsTest, InvertMelodyReflectsAroundPivot) {
   EXPECT_EQ(inv[2].duration, kQuarter);
 }
 
+TEST(MotifOpsTest, InvertMelodyUsesTheMinorCollection) {
+  // Pivot C4 in C minor: C D Eb F -> C Bb Ab G.
+  const std::vector<MaterialNote> line = {mn(0, kQuarter, 60), mn(kQuarter, kQuarter, 62),
+                                          mn(2 * kQuarter, kQuarter, 63),
+                                          mn(3 * kQuarter, kQuarter, 65)};
+  const auto inv = invertMelody(line, 60, KeyContext{0, true});
+  ASSERT_EQ(inv.size(), 4u);
+  EXPECT_EQ(inv[1].pitch, 58);
+  EXPECT_EQ(inv[2].pitch, 56);
+  EXPECT_EQ(inv[3].pitch, 55);
+}
+
+TEST(MotifOpsTest, InvertMelodyMirrorsInTheGivenKey) {
+  // Pivot D4 in G major: D E F# -> D C B.
+  const std::vector<MaterialNote> line = {mn(0, kQuarter, 62), mn(kQuarter, kQuarter, 64),
+                                          mn(2 * kQuarter, kQuarter, 66)};
+  const auto inv = invertMelody(line, 62, KeyContext{7, false});
+  ASSERT_EQ(inv.size(), 3u);
+  EXPECT_EQ(inv[0].pitch, 62);
+  EXPECT_EQ(inv[1].pitch, 60);
+  EXPECT_EQ(inv[2].pitch, 59);
+}
+
 TEST(MotifOpsTest, InvertMelodyClampsToMidiRange) {
-  // Pivot 0 with a high source pitch should clamp result at 0.
+  // Pivot 0 with a high source pitch should clamp result at 0, and the
+  // reverse at 127.
   std::vector<MaterialNote> in = {mn(0, kQuarter, 100)};
-  const auto inv = invertMelody(in, 0);
+  const auto inv = invertMelody(in, 0, KeyContext{});
   ASSERT_EQ(inv.size(), 1u);
   EXPECT_EQ(inv[0].pitch, 0);
+  in = {mn(0, kQuarter, 10)};
+  EXPECT_EQ(invertMelody(in, 127, KeyContext{}).front().pitch, 127);
 }
 
 TEST(MotifOpsTest, RetrogradePreservesRhythm) {
@@ -131,7 +157,7 @@ TEST(MotifOpsTest, DiminishDurationClampsToOneTick) {
 
 TEST(MotifOpsTest, ApplyTransformOriginalIsIdentityShifted) {
   const auto src = ascendingScale4();
-  const auto out = applyTransform(src, EpisodeMotifTransform::Original, 4 * kQuarter);
+  const auto out = applyTransform(src, EpisodeMotifTransform::Original, 4 * kQuarter, KeyContext{});
   ASSERT_EQ(out.size(), 4u);
   for (std::size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(out[i].pitch, src[i].pitch) << "i=" << i;
@@ -142,12 +168,13 @@ TEST(MotifOpsTest, ApplyTransformOriginalIsIdentityShifted) {
 
 TEST(MotifOpsTest, ApplyTransformInvertUsesPivotAndShift) {
   const auto src = ascendingScale4();
-  // Invert around C4 then shift to bar 2.
-  const auto out = applyTransform(src, EpisodeMotifTransform::Invert, 8 * kQuarter, 60);
+  // Invert around C4 in C major then shift to bar 2.
+  const auto out =
+      applyTransform(src, EpisodeMotifTransform::Invert, 8 * kQuarter, KeyContext{}, 60);
   ASSERT_EQ(out.size(), 4u);
   EXPECT_EQ(out[0].pitch, 60);
-  EXPECT_EQ(out[1].pitch, 58);
-  EXPECT_EQ(out[2].pitch, 56);
+  EXPECT_EQ(out[1].pitch, 59);
+  EXPECT_EQ(out[2].pitch, 57);
   EXPECT_EQ(out[3].pitch, 55);
   EXPECT_EQ(out[0].start_tick, 8u * kQuarter);
   EXPECT_EQ(out[3].start_tick, 11u * kQuarter);
@@ -155,7 +182,7 @@ TEST(MotifOpsTest, ApplyTransformInvertUsesPivotAndShift) {
 
 TEST(MotifOpsTest, ApplyTransformRetrogradePreservesRhythm) {
   const auto src = ascendingScale4();
-  const auto out = applyTransform(src, EpisodeMotifTransform::Retrograde, 0);
+  const auto out = applyTransform(src, EpisodeMotifTransform::Retrograde, 0, KeyContext{});
   ASSERT_EQ(out.size(), 4u);
   EXPECT_EQ(out[0].pitch, 65);
   EXPECT_EQ(out[3].pitch, 60);
@@ -163,7 +190,7 @@ TEST(MotifOpsTest, ApplyTransformRetrogradePreservesRhythm) {
 
 TEST(MotifOpsTest, ApplyTransformAugmentUsesFactor) {
   const auto src = ascendingScale4();
-  const auto out = applyTransform(src, EpisodeMotifTransform::Augment, 0, 60, 3);
+  const auto out = applyTransform(src, EpisodeMotifTransform::Augment, 0, KeyContext{}, 60, 3);
   ASSERT_EQ(out.size(), 4u);
   for (const auto& n : out) {
     EXPECT_EQ(n.duration, 3u * kQuarter);
@@ -172,7 +199,7 @@ TEST(MotifOpsTest, ApplyTransformAugmentUsesFactor) {
 
 TEST(MotifOpsTest, ApplyTransformDiminishUsesFactor) {
   std::vector<MaterialNote> src = {mn(0, 4 * kQuarter, 60), mn(4 * kQuarter, 4 * kQuarter, 62)};
-  const auto out = applyTransform(src, EpisodeMotifTransform::Diminish, 0, 60, 4);
+  const auto out = applyTransform(src, EpisodeMotifTransform::Diminish, 0, KeyContext{}, 60, 4);
   ASSERT_EQ(out.size(), 2u);
   EXPECT_EQ(out[0].duration, kQuarter);
   EXPECT_EQ(out[1].duration, kQuarter);

@@ -140,7 +140,8 @@ enum class SuspensionType : std::uint8_t {
   Sus4_3,  // 4th over the bass resolves down by step to a 3rd.
   Sus7_6,  // 7th resolves down by step to a 6th.
   Sus9_8,  // 9th resolves down by step to an octave.
-  Sus2_3,  // 2nd over a held upper voice resolves UP by step (bass susp.).
+  Sus2_3,  // Bass suspension: held lower voice a 2nd/9th under the upper voice
+           // resolves down by step to a 3rd/10th.
 };
 
 // One suspension occurrence in the planner's material: three explicit
@@ -151,7 +152,7 @@ enum class SuspensionType : std::uint8_t {
 struct SuspensionPattern {
   SuspensionType type = SuspensionType::Sus4_3;
   Tick preparation_tick = 0;  // Consonant prep beat (note begins).
-  Tick suspension_tick = 0;   // Strong-beat dissonance (held over).
+  Tick suspension_tick = 0;   // Dissonance, stronger than the resolution (held over).
   Tick resolution_tick = 0;   // Stepwise resolution.
   std::uint8_t preparation_pitch = 0;
   std::uint8_t suspension_pitch = 0;
@@ -203,22 +204,21 @@ struct EpisodeFragment {
   int diminish_factor = 2;
 };
 
-// One Fortspinnung sequence: a short seed motif transposed by a fixed
-// pattern over N successive steps. Bach's three canonical sequence
-// patterns (descending 5ths / descending step / ascending step) are
-// represented as semitone offsets applied per step.
+// One Fortspinnung sequence: a short seed motif moved by a fixed pattern
+// over N successive steps. Bach's three canonical sequence patterns
+// (descending 5ths / descending step / ascending step) are diatonic: each
+// step moves the seed by scale degrees of the key in force at
+// `target_start_tick`, so its interval qualities follow the key.
 //
-//   DescendingFifths: each step transposes -7 semitones (P5 down) from
-//                     the previous step. Standard "circle of fifths"
+//   DescendingFifths: each step moves 4 degrees down (a fifth, diminished
+//                     where the key puts one). Standard "circle of fifths"
 //                     fortspinnung (e.g. WTC I C minor BWV 847 b. 9-10).
-//   DescendingStep:   each step transposes -2 semitones (whole step
-//                     down). "Sequenza ad gradum".
-//   AscendingStep:    each step transposes +2 semitones (whole step
-//                     up). Climbing fortspinnung.
+//   DescendingStep:   each step moves 1 degree down. "Sequenza ad gradum".
+//   AscendingStep:    each step moves 1 degree up. Climbing fortspinnung.
 //
 // The seed motif (`seed_pitches` + `seed_durations`) is the first step
-// played at `target_start_tick`. Steps 1..num_steps-1 are the seed
-// transposed by step_offset*step_index semitones and time-shifted by
+// played at `target_start_tick`. Steps 1..num_steps-1 are the seed moved by
+// rule_helpers::sequenceStepPitch and time-shifted by
 // step_length_ticks*step_index. CandidateSearch replays all steps as a
 // flat note list when the span's intent is FortspinnungSpan.
 enum class SequencePattern : std::uint8_t {

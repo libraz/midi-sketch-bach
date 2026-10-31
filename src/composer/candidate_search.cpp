@@ -198,7 +198,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       }
       auto derived = motif_ops::applyTransform(
           source_slice, static_cast<motif_ops::EpisodeMotifTransform>(frag.transform),
-          frag.target_start_tick, frag.invert_pivot,
+          frag.target_start_tick, rule_helpers::keyAt(harmonic_plan, frag.target_start_tick),
+          frag.invert_pivot,
           (static_cast<motif_ops::EpisodeMotifTransform>(frag.transform) ==
            motif_ops::EpisodeMotifTransform::Augment)
               ? frag.augment_factor
@@ -268,24 +269,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   if (span.intent == VoiceIntent::FortspinnungSpan) {
     // Replay each SequenceTemplate that targets this span's voice and
     // whose expanded note window falls inside this span. Emits the
-    // seed motif followed by num_steps-1 transposed copies (each
-    // shifted by step_length_ticks*k and step_offset_semis*k). All
-    // notes carry FortspinnungSourced; steps 1..N-1 additionally carry
-    // SequenceStep. Sequence patterns:
-    //   DescendingFifths → -7 semis per step.
-    //   DescendingStep   → -2 semis per step.
-    //   AscendingStep    → +2 semis per step.
-    auto step_semis = [](SequencePattern pattern) -> int {
-      switch (pattern) {
-        case SequencePattern::DescendingFifths:
-          return -7;
-        case SequencePattern::DescendingStep:
-          return -2;
-        case SequencePattern::AscendingStep:
-          return 2;
-      }
-      return 0;
-    };
+    // seed motif followed by num_steps-1 copies, each shifted by
+    // step_length_ticks*k and moved by scale degrees as
+    // rule_helpers::sequenceStepPitch expands it, the same expansion the
+    // Validator checks. All notes carry FortspinnungSourced; steps 1..N-1
+    // additionally carry SequenceStep.
     for (const auto& tmpl : material.sequence_templates) {
       if (tmpl.voice != span.voice)
         continue;
@@ -293,7 +281,6 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (tmpl.seed_durations.size() != tmpl.seed_pitches.size())
         continue;
-      const int offset = step_semis(tmpl.pattern);
       Tick local_offset = 0;
       for (std::size_t i = 0; i < tmpl.seed_pitches.size(); ++i) {
         local_offset += tmpl.seed_durations[i];
@@ -308,8 +295,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           }
           if (beat_cursor >= span.end_tick)
             break;
-          const int transposed =
-              static_cast<int>(tmpl.seed_pitches[i]) + offset * static_cast<int>(k);
+          const int transposed = rule_helpers::sequenceStepPitch(tmpl, i, static_cast<int>(k),
+                                                                 beat_cursor, harmonic_plan);
           if (transposed < 0 || transposed > 127) {
             beat_cursor += tmpl.seed_durations[i];
             continue;

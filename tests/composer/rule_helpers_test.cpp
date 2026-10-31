@@ -531,6 +531,55 @@ TEST(RuleHelpersTest, ForbiddenMelodicLeapKeepsNaturalMinorDescendingSubtonicLeg
   EXPECT_TRUE(isForbiddenMelodicLeap(68, 71, plan));
 }
 
+TEST(RuleHelpersTest, SequenceStepPitchMovesByScaleDegreesOfTheTemplateKey) {
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::DescendingStep;
+  tmpl.seed_pitches = {72, 66};  // C5, and F#4 as a chromatic tone.
+  const HarmonicPlan plan = cMajor();
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 0, 0, plan), 72);  // the seed is verbatim
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 1, 0, plan), 71);  // C -> B, not B-flat
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 2, 0, plan), 69);
+  EXPECT_EQ(sequenceStepPitch(tmpl, 1, 1, 0, plan), 65);  // F# keeps its sharp: E# = F
+  tmpl.pattern = SequencePattern::DescendingFifths;
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 2, 0, plan), 59);  // C -> F -> B
+  tmpl.pattern = SequencePattern::AscendingStep;
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 3, 0, plan), 77);  // C -> D -> E -> F
+}
+
+TEST(RuleHelpersTest, SequenceStepPitchUsesTheKeyAtTheTemplateStart) {
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::DescendingStep;
+  tmpl.target_start_tick = kTicksPerBar;
+  tmpl.seed_pitches = {67};  // G4
+  HarmonicPlan plan = cMajor();
+  plan.modulations.push_back({kTicksPerBar, 0, 7, false, false, ModulationType::Phrase});
+  // In G major the degree below G is F#; in the home key before the boundary
+  // it would be F.
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 1, 2 * kTicksPerBar, plan), 66);
+  tmpl.target_start_tick = 0;
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 1, 2 * kTicksPerBar, plan), 65);
+}
+
+TEST(RuleHelpersTest, SequenceStepPitchSpellsMinorUnderTheHarmonyAtTheTick) {
+  SequenceTemplate tmpl;
+  tmpl.pattern = SequencePattern::DescendingStep;
+  tmpl.seed_pitches = {72};  // C5 in C minor
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent tonic;
+  tonic.root_pc = 0;
+  tonic.quality = ChordQuality::Minor;
+  plan.chords.push_back(tonic);
+  ChordEvent dominant;
+  dominant.start_tick = kTicksPerBar;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Major;
+  plan.chords.push_back(dominant);
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 1, 0, plan), 70);             // B-flat under i
+  EXPECT_EQ(sequenceStepPitch(tmpl, 0, 1, kTicksPerBar, plan), 71);  // B under V
+}
+
 TEST(ProvenanceBitPredicateTest, SpacingCheckedOnlyWhereTheSpacingRuleRuns) {
   HarmonicPlan plan = cMajor();
   plan.chords.push_back(degreeChord(0, 0, RomanNumeral::I));

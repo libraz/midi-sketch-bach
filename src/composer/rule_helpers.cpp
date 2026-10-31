@@ -689,6 +689,33 @@ const CadenceCell* cadenceCellAt(const Material& material, Tick tick) {
   return nullptr;
 }
 
+int sequenceStepPitch(const SequenceTemplate& tmpl, std::size_t seed_index, int step, Tick tick,
+                      const HarmonicPlan& plan) {
+  const int seed = static_cast<int>(tmpl.seed_pitches[seed_index]);
+  if (step == 0)
+    return seed;
+  int degrees_per_step = 0;
+  switch (tmpl.pattern) {
+    case SequencePattern::DescendingFifths:
+      degrees_per_step = -4;
+      break;
+    case SequencePattern::DescendingStep:
+      degrees_per_step = -1;
+      break;
+    case SequencePattern::AscendingStep:
+      degrees_per_step = 1;
+      break;
+  }
+  const KeyContext key = keyAt(plan, tmpl.target_start_tick);
+  const detail::Mode mode = key.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+  const int letter = detail::diatonicLetter(seed, key.tonic_pc, mode);
+  const int inflection = seed - detail::letterPitch(letter, key.tonic_pc, mode);
+  const int moved =
+      detail::letterPitch(letter + step * degrees_per_step, key.tonic_pc, mode) + inflection;
+  return key.is_minor ? detail::respellInScale(moved, key.tonic_pc, mode, chordPcsAt(plan, tick))
+                      : moved;
+}
+
 void applyP7Bits(RuleIdMask& rules, const ChordEvent& chord, std::uint8_t pc, bool is_chord_tone) {
   if (!chord.has_degree)
     return;

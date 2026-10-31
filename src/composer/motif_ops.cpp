@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "composer/figuration.h"
+
 namespace bach::composer::motif_ops {
 
 namespace {
@@ -17,12 +19,16 @@ inline std::uint8_t clampPitch(int p) {
 
 }  // namespace
 
-std::vector<MaterialNote> invertMelody(const std::vector<MaterialNote>& notes, std::uint8_t pivot) {
+std::vector<MaterialNote> invertMelody(const std::vector<MaterialNote>& notes, std::uint8_t pivot,
+                                       const KeyContext& key) {
+  const detail::Mode mode = key.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+  const int axis = detail::diatonicLetter(pivot, key.tonic_pc, mode);
   std::vector<MaterialNote> out;
   out.reserve(notes.size());
   for (const auto& n : notes) {
     MaterialNote m = n;
-    m.pitch = clampPitch(2 * static_cast<int>(pivot) - static_cast<int>(n.pitch));
+    const int mirrored = 2 * axis - detail::diatonicLetter(n.pitch, key.tonic_pc, mode);
+    m.pitch = clampPitch(detail::letterPitch(mirrored, key.tonic_pc, mode));
     out.push_back(m);
   }
   return out;
@@ -118,13 +124,14 @@ std::vector<MaterialNote> reanchorMelody(const std::vector<MaterialNote>& notes,
 
 std::vector<MaterialNote> applyTransform(const std::vector<MaterialNote>& source,
                                          EpisodeMotifTransform transform, Tick target_start_tick,
-                                         std::uint8_t invert_pivot, int factor) {
+                                         const KeyContext& key, std::uint8_t invert_pivot,
+                                         int factor) {
   switch (transform) {
     case EpisodeMotifTransform::Original:
       return reanchorMelody(source, target_start_tick);
     case EpisodeMotifTransform::Invert: {
       // Invert first (preserves source timing), then re-anchor.
-      auto inverted = invertMelody(source, invert_pivot);
+      auto inverted = invertMelody(source, invert_pivot, key);
       return reanchorMelody(inverted, target_start_tick);
     }
     case EpisodeMotifTransform::Retrograde:

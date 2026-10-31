@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
@@ -1508,6 +1509,65 @@ TEST(ValidatorTest, CadenceVoiceLeadingFailsBrokenPac) {
   EXPECT_TRUE(hasRule(r, "cadence_voice_leading"));
 }
 
+namespace {
+
+// C major: V7 in `inversion` on beat one, root-position I on beat two, and a
+// cadence of `type` on beat two. Upper B4 -> C5 over a bass of `bass_prev`
+// -> C4.
+ValidationReport validateDominantInversionCadence(CadenceType type, ChordInversion inversion,
+                                                  std::uint8_t bass_prev) {
+  HarmonicPlan plan = cMajorWithCadence(type);
+  plan.chords.front().root_pc = 7;
+  plan.chords.front().quality = ChordQuality::Dominant7;
+  plan.chords.front().degree = RomanNumeral::V;
+  plan.chords.front().inversion = inversion;
+  plan.chords.front().has_degree = true;
+  ChordEvent tonic = plan.chords.front();
+  tonic.start_tick = kTicksPerBeat;
+  tonic.root_pc = 0;
+  tonic.quality = ChordQuality::Major;
+  tonic.degree = RomanNumeral::I;
+  tonic.inversion = ChordInversion::Root;
+  plan.chords.push_back(tonic);
+  std::vector<NoteEvent> notes = {
+      makeNote(0, kTicksPerBeat, 71, 0),
+      makeNote(0, kTicksPerBeat, bass_prev, 1),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 72, 0),
+      makeNote(kTicksPerBeat, kTicksPerBeat, 60, 1),
+  };
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  return Validator{}.validate(notes, prov, plan);
+}
+
+}  // namespace
+
+// A perfect authentic cadence needs both chords in root position: the bass
+// states 5 -> 1. V4/3 (D in the bass) and V6 (B in the bass) are imperfect.
+TEST(ValidatorTest, PerfectCadenceRejectsInvertedDominant) {
+  EXPECT_TRUE(
+      hasRule(validateDominantInversionCadence(CadenceType::Perfect, ChordInversion::Second, 62),
+              "cadence_voice_leading"));
+  EXPECT_TRUE(
+      hasRule(validateDominantInversionCadence(CadenceType::Perfect, ChordInversion::First, 59),
+              "cadence_voice_leading"));
+}
+
+TEST(ValidatorTest, PerfectCadenceAcceptsRootPositionDominantBass) {
+  EXPECT_FALSE(
+      hasRule(validateDominantInversionCadence(CadenceType::Perfect, ChordInversion::Root, 55),
+              "cadence_voice_leading"));
+}
+
+// The inverted arrivals the perfect cadence refuses are imperfect authentic.
+TEST(ValidatorTest, ImperfectAuthenticCadenceKeepsInvertedDominant) {
+  EXPECT_FALSE(hasRule(
+      validateDominantInversionCadence(CadenceType::ImperfectAuthentic, ChordInversion::Second, 62),
+      "cadence_voice_leading"));
+  EXPECT_FALSE(hasRule(
+      validateDominantInversionCadence(CadenceType::ImperfectAuthentic, ChordInversion::First, 59),
+      "cadence_voice_leading"));
+}
+
 TEST(ValidatorTest, CadenceMonophonicPerfectAcceptsLeadingToneResolution) {
   std::vector<NoteEvent> notes = {
       makeNote(0, kTicksPerBeat, 71, 0),
@@ -1698,23 +1758,54 @@ TEST(ValidatorTest, SuspensionPreparationMustBeAtLeastAsLongAsSuspension) {
   EXPECT_TRUE(hasRule(r, "suspension_preparation_duration"));
 }
 
-TEST(ValidatorTest, SuspensionMustLandOnStrongerMetricalPosition) {
-  const Tick prep_tick = 0;
-  const Tick suspension_tick = kTicksPerBeat;
-  const Tick resolution_tick = 2 * kTicksPerBeat;
+namespace {
+
+// A 4-3 (G4 over C3 prepared, held over D3, resolving to F4) at the given
+// ticks in 4/4 C major. The preparation lasts until the suspension.
+ValidationReport validateTimedFourThree(Tick prep_tick, Tick suspension_tick,
+                                        Tick resolution_tick) {
   std::vector<NoteEvent> notes = {
-      makeNote(prep_tick, kTicksPerBeat, 67, 0),
-      makeNote(suspension_tick, kTicksPerBeat, 67, 0),
+      makeNote(prep_tick, suspension_tick - prep_tick, 67, 0),
+      makeNote(suspension_tick, resolution_tick - suspension_tick, 67, 0),
       makeNote(resolution_tick, kTicksPerBeat, 65, 0),
-      makeNote(prep_tick, kTicksPerBeat, 48, 1),
-      makeNote(suspension_tick, 2 * kTicksPerBeat, 50, 1),
+      makeNote(prep_tick, suspension_tick - prep_tick, 48, 1),
+      makeNote(suspension_tick, resolution_tick + kTicksPerBeat - suspension_tick, 50, 1),
   };
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   Material material;
   material.suspension_patterns.push_back(
       {SuspensionType::Sus4_3, prep_tick, suspension_tick, resolution_tick, 67, 67, 65, 0});
-  const ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+  return Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+}
+
+}  // namespace
+
+// The dissonance must fall on a beat stronger than its resolution:
+// beat 2 (weak) resolving onto beat 3 (secondary accent) is backwards.
+TEST(ValidatorTest, SuspensionWeakerThanItsResolutionFails) {
+  const ValidationReport r = validateTimedFourThree(0, kTicksPerBeat, 2 * kTicksPerBeat);
   EXPECT_TRUE(hasRule(r, "suspension_metrical_accent"));
+}
+
+// Preparation on beat 1, dissonance on beat 3, resolution on beat 4: the
+// preparation is the strongest of the three, which common practice allows.
+TEST(ValidatorTest, SuspensionStrongerThanResolutionPassesWhateverThePreparation) {
+  const ValidationReport r = validateTimedFourThree(0, 2 * kTicksPerBeat, 3 * kTicksPerBeat);
+  EXPECT_FALSE(hasRule(r, "suspension_metrical_accent"));
+  EXPECT_FALSE(hasRule(r, "suspension_preparation"));
+  EXPECT_FALSE(hasRule(r, "suspension_preparation_duration"));
+  EXPECT_FALSE(hasRule(r, "suspension_interval"));
+  EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
+}
+
+// Equal strength is not stronger: beat 2 resolving on its own off-beat fails,
+// while a downbeat resolving onto the beat-3 secondary accent passes.
+TEST(ValidatorTest, SuspensionMetricalAccentRequiresStrictlyStrongerThanResolution) {
+  EXPECT_TRUE(hasRule(validateTimedFourThree(0, kTicksPerBeat, kTicksPerBeat + kTicksPerBeat / 2),
+                      "suspension_metrical_accent"));
+  EXPECT_FALSE(hasRule(
+      validateTimedFourThree(3 * kTicksPerBeat, kTicksPerBar, kTicksPerBar + 2 * kTicksPerBeat),
+      "suspension_metrical_accent"));
 }
 
 TEST(ValidatorTest, SuspensionIntervalTableAcceptsAllFourTypes) {
@@ -1732,7 +1823,7 @@ TEST(ValidatorTest, SuspensionIntervalTableAcceptsAllFourTypes) {
       {SuspensionType::Sus4_3, 67, 67, 65, 48, 50, 50, 0},
       {SuspensionType::Sus7_6, 70, 70, 69, 63, 60, 60, 0},
       {SuspensionType::Sus9_8, 74, 74, 72, 67, 60, 60, 0},
-      {SuspensionType::Sus2_3, 59, 59, 60, 66, 60, 64, 1},
+      {SuspensionType::Sus2_3, 50, 50, 48, 65, 64, 64, 1},
   };
   const Tick prep_tick = 3 * kTicksPerBeat;
   const Tick suspension_tick = kTicksPerBar;
@@ -1908,6 +1999,55 @@ TEST(ValidatorTest, CadentialSixFourWithWrongResolutionFailsClosed) {
   EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
 }
 
+namespace {
+
+// One downbeat sonority in C major over a G chord of `quality`, every note
+// generated so the vertical rule is evaluated rather than exempted.
+ValidationReport validateOverG(ChordQuality quality, const std::vector<std::uint8_t>& pitches) {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  ChordEvent chord;
+  chord.root_pc = 7;
+  chord.quality = quality;
+  plan.chords.push_back(chord);
+  std::vector<NoteEvent> notes;
+  for (std::size_t voice = 0; voice < pitches.size(); ++voice)
+    notes.push_back(makeNote(0, kTicksPerBeat, pitches[voice], static_cast<VoiceId>(voice)));
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
+  return Validator{}.validate(notes, prov, plan, Material{});
+}
+
+}  // namespace
+
+// F4 / B3 / G2 under a declared G7: the tritone F-B and the minor seventh F-G
+// are both intervals inside the declared chord, which strong_beat_dissonance
+// already reads as harmony; the vertical rule agrees.
+TEST(ValidatorTest, VerticalPairInsideDeclaredSeventhChordIsLicensed) {
+  const ValidationReport r = validateOverG(ChordQuality::Dominant7, {65, 59, 43});
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
+  EXPECT_FALSE(hasRule(r, "strong_beat_dissonance"));
+}
+
+// The same sonority under a plain G triad declares no seventh to be.
+TEST(ValidatorTest, SeventhSonorityUnderATriadStillFails) {
+  EXPECT_TRUE(hasRule(validateOverG(ChordQuality::Major, {65, 59, 43}), "vertical_dissonance"));
+}
+
+// A dissonance with a tone outside the declared chord is not licensed: A4 is a
+// ninth over G2 and no tone of G B D F.
+TEST(ValidatorTest, NonMemberDissonanceUnderSeventhChordStillFails) {
+  EXPECT_TRUE(hasRule(validateOverG(ChordQuality::Dominant7, {69, 59, 43}), "vertical_dissonance"));
+}
+
+// A fourth over the bass is licensed only as part of the declared seventh
+// sonority (V4/3: G over D); the same fourth over a triad, or a fourth whose
+// upper tone is foreign to the seventh chord, still fails.
+TEST(ValidatorTest, FourthOverBassFollowsTheDeclaredSeventhSonority) {
+  EXPECT_FALSE(hasRule(validateOverG(ChordQuality::Dominant7, {55, 50}), "vertical_dissonance"));
+  EXPECT_TRUE(hasRule(validateOverG(ChordQuality::Major, {55, 50}), "vertical_dissonance"));
+  EXPECT_TRUE(hasRule(validateOverG(ChordQuality::Dominant7, {60, 55}), "vertical_dissonance"));
+}
+
 TEST(ValidatorTest, SuspensionResolutionFailsOnLeap) {
   // Sus7_6 with V0 prep=A4 → sus=A4 → resolution=D4 (62), a 7-semi leap
   // instead of a step. Resolution rule must fire.
@@ -1961,35 +2101,116 @@ TEST(ValidatorTest, SuspensionPreparationFailsWhenNotTied) {
   EXPECT_TRUE(hasRule(r, "suspension_preparation"));
 }
 
-TEST(ValidatorTest, Sus2_3RequiresUpwardStep) {
-  // Sus2_3 is the bass-rising flavor: suspension → resolution moves UP
-  // by step. A downward resolution must fail. V0=C5 (held), V1 prep=B3
-  // (59) → sus=B3 → res=C4 (60, upward step). prep B3 against C5 →
-  // m7 ish; we pick a consonance for prep: V0 plays D5 (62) instead so
-  // interval(B3, D5) = 38 → mod 12 = 2 (M2 = dissonant).
-  // Simpler: V0=E5 (76) over V1 prep B3 (59): interval 17 mod 12 = 5
-  // (P4) — also context-sensitive consonant. Use V0=G5 (79) → interval
-  // 20 mod 12 = 8 (m6, consonant). OK.
+namespace {
+
+// A 2-3 bass suspension across the bar line in C major: V1 prepares
+// `bass_prep` under V0's `upper_prep` on beat 4, holds it into the downbeat
+// while V0 moves to `upper_sus`, then moves to `bass_res` on beat 2 under V0's
+// `upper_res`. `suspended_voice` names the voice the declaration suspends.
+struct TwoThreeCase {
+  std::uint8_t upper_prep = 65;  // F4 over D3: a tenth.
+  std::uint8_t upper_sus = 64;   // E4 over the held D3: a ninth.
+  std::uint8_t upper_res = 64;   // E4 over C3: a tenth.
+  std::uint8_t bass_prep = 50;
+  std::uint8_t bass_res = 48;
+  VoiceId suspended_voice = 1;
+  bool declared = true;
+};
+
+ValidationReport validateTwoThree(const TwoThreeCase& c) {
+  const Tick prep_tick = 3 * kTicksPerBeat;
+  const Tick suspension_tick = kTicksPerBar;
+  const Tick resolution_tick = kTicksPerBar + kTicksPerBeat;
   std::vector<NoteEvent> notes = {
-      makeNote(0, kTicksPerBeat * 3, 79, 0),              // V0 G5 held
-      makeNote(0, kTicksPerBeat, 59, 1),                  // V1 prep B3
-      makeNote(kTicksPerBeat, kTicksPerBeat, 59, 1),      // V1 sus B3
-      makeNote(kTicksPerBeat * 2, kTicksPerBeat, 60, 1),  // V1 res C4 (up)
+      makeNote(prep_tick, kTicksPerBeat, c.upper_prep, 0),
+      makeNote(suspension_tick, kTicksPerBeat, c.upper_sus, 0),
+      makeNote(resolution_tick, kTicksPerBeat, c.upper_res, 0),
+      makeNote(prep_tick, kTicksPerBeat, c.bass_prep, 1),
+      makeNote(suspension_tick, kTicksPerBeat, c.bass_prep, 1),
+      makeNote(resolution_tick, kTicksPerBeat, c.bass_res, 1),
   };
-  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Compose));
   Material material;
-  SuspensionPattern sp;
-  sp.type = SuspensionType::Sus2_3;
-  sp.preparation_tick = 0;
-  sp.suspension_tick = kTicksPerBeat;
-  sp.resolution_tick = kTicksPerBeat * 2;
-  sp.preparation_pitch = 59;
-  sp.suspension_pitch = 59;
-  sp.resolution_pitch = 60;
-  sp.voice = 1;
-  material.suspension_patterns.push_back(sp);
-  ValidationReport r = Validator{}.validate(notes, prov, cMajorTwoBars(), material);
-  EXPECT_FALSE(hasRule(r, "suspension_resolution_step_down"));
+  if (c.declared) {
+    const bool lower = c.suspended_voice == 1;
+    const std::uint8_t held = lower ? c.bass_prep : c.upper_sus;
+    material.suspension_patterns.push_back({SuspensionType::Sus2_3, prep_tick, suspension_tick,
+                                            resolution_tick, held, held,
+                                            lower ? c.bass_res : c.upper_res, c.suspended_voice});
+  }
+  return Validator{}.validate(notes, prov, cMajorTwoBars(), material);
+}
+
+bool hasAnySuspensionFailure(const ValidationReport& r) {
+  return hasRule(r, "suspension_preparation") || hasRule(r, "suspension_preparation_duration") ||
+         hasRule(r, "suspension_metrical_accent") || hasRule(r, "suspension_interval") ||
+         hasRule(r, "suspension_resolution_step_down");
+}
+
+}  // namespace
+
+// The 2-3 is a bass suspension: the held lower voice sits a ninth under the
+// upper voice on the accent, then steps down to make a tenth. The declared
+// figure satisfies every suspension rule and licenses its accented ninth.
+TEST(ValidatorTest, Sus2_3BassResolvingDownToATenthPasses) {
+  const ValidationReport r = validateTwoThree({});
+  EXPECT_FALSE(hasAnySuspensionFailure(r));
+  EXPECT_FALSE(hasRule(r, "vertical_dissonance"));
+}
+
+TEST(ValidatorTest, Sus2_3UndeclaredNinthOverTheBassFails) {
+  TwoThreeCase undeclared;
+  undeclared.declared = false;
+  EXPECT_TRUE(hasRule(validateTwoThree(undeclared), "vertical_dissonance"));
+}
+
+// The bass rising out of the second is not a suspension resolution at all,
+// so the step rule fails and the accented second is not licensed.
+TEST(ValidatorTest, Sus2_3RisingBassFailsResolutionAndLicensesNothing) {
+  TwoThreeCase rising;
+  rising.bass_res = 52;   // D3 -> E3
+  rising.upper_res = 67;  // G4 over E3: a tenth again.
+  const ValidationReport r = validateTwoThree(rising);
+  EXPECT_TRUE(hasRule(r, "suspension_resolution_step_down"));
+  EXPECT_TRUE(hasRule(r, "vertical_dissonance"));
+}
+
+// Declaring the upper voice as the suspended one describes no 2-3: the
+// suspended voice of a 2-3 is the lower of the pair.
+TEST(ValidatorTest, Sus2_3SuspendedUpperVoiceFailsInterval) {
+  TwoThreeCase upper;
+  upper.suspended_voice = 0;
+  upper.upper_prep = 64;  // V0 holds E4 from beat 4 into the downbeat ...
+  upper.upper_res = 62;   // ... and steps down to D4 over C3.
+  upper.bass_prep = 48;   // C3 under the preparation, held.
+  upper.bass_res = 48;
+  const ValidationReport r = validateTwoThree(upper);
+  EXPECT_TRUE(hasRule(r, "suspension_interval"));
+}
+
+// A minor ninth or a simple second qualifies as the dissonance; a third of
+// descent is a leap, not a resolution, and the result must be a third.
+TEST(ValidatorTest, Sus2_3BoundaryIntervalsAndStepSize) {
+  TwoThreeCase minor_ninth;
+  minor_ninth.upper_prep = 65;  // F4 over D3
+  minor_ninth.upper_sus = 63;   // Eb4 over D3: a minor ninth.
+  minor_ninth.upper_res = 63;   // Eb4 over C3: a minor tenth.
+  EXPECT_FALSE(hasAnySuspensionFailure(validateTwoThree(minor_ninth)));
+
+  TwoThreeCase simple_second;
+  simple_second.upper_prep = 53;  // F3 over D3
+  simple_second.upper_sus = 52;   // E3 over D3: a major second.
+  simple_second.upper_res = 52;   // E3 over C3: a major third.
+  EXPECT_FALSE(hasAnySuspensionFailure(validateTwoThree(simple_second)));
+
+  TwoThreeCase leap;
+  leap.bass_res = 47;   // D3 -> B2: three semitones.
+  leap.upper_res = 62;  // D4 over B2: a tenth.
+  EXPECT_TRUE(hasRule(validateTwoThree(leap), "suspension_resolution_step_down"));
+
+  TwoThreeCase into_fourth;
+  into_fourth.upper_res = 65;  // F4 over C3: an eleventh.
+  EXPECT_TRUE(hasRule(validateTwoThree(into_fourth), "suspension_interval"));
 }
 
 // Episode motif-derivation tests. Subject = C4-D4-E4-F4 in voice 0;
@@ -2051,24 +2272,65 @@ TEST(ValidatorTest, EpisodeMotifDerivedOriginalPasses) {
   EXPECT_FALSE(hasRule(r, "episode_motif_derived"));
 }
 
-TEST(ValidatorTest, EpisodeMotifDerivedInvertPasses) {
-  Material material = subjectAscendingScale();
+namespace {
+
+// The subject in V0 and an inverted episode in V1 four beats later, the
+// episode sounding `inverted`, validated against `plan`.
+ValidationReport validateInvertedEpisode(const Material& subject_material,
+                                         const std::vector<std::uint8_t>& inverted,
+                                         const HarmonicPlan& plan) {
+  Material material = subject_material;
   material.episodes.push_back(
       makeEpisode(motif_ops::EpisodeMotifTransform::Invert, 1, 4 * kTicksPerBeat));
-
   std::vector<NoteEvent> notes;
-  // Subject in V0.
   for (const auto& m : material.subject)
     notes.push_back(makeNote(m.start_tick, m.duration, m.pitch, 0));
-  // Invert around 60: 60→60, 62→58, 64→56, 65→55.
-  std::vector<std::uint8_t> inverted = {60, 58, 56, 55};
-  for (std::size_t i = 0; i < inverted.size(); ++i) {
+  for (std::size_t i = 0; i < inverted.size(); ++i)
     notes.push_back(makeNote((i + 4) * kTicksPerBeat, kTicksPerBeat, inverted[i], 1));
-  }
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  return Validator{}.validate(notes, prov, plan, material);
+}
 
-  ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), material);
-  EXPECT_FALSE(hasRule(r, "episode_motif_derived"));
+HarmonicPlan cMinorWhole() {
+  HarmonicPlan plan = cMajorWhole();
+  plan.is_minor = true;
+  plan.chords.front().quality = ChordQuality::Minor;
+  return plan;
+}
+
+}  // namespace
+
+// Inversion mirrors scale degrees about the pivot, so C D E F about C in C
+// major is C B A G -- the line stays in the key.
+TEST(ValidatorTest, EpisodeMotifDerivedInvertPasses) {
+  EXPECT_FALSE(
+      hasRule(validateInvertedEpisode(subjectAscendingScale(), {60, 59, 57, 55}, cMajorWhole()),
+              "episode_motif_derived"));
+}
+
+// The semitone mirror (C Bb Ab G) leaves C major and is not the declared
+// inversion; neither is a mirror one degree off.
+TEST(ValidatorTest, EpisodeMotifDerivedInvertRejectsChromaticAndWrongDegreeMirrors) {
+  EXPECT_TRUE(
+      hasRule(validateInvertedEpisode(subjectAscendingScale(), {60, 58, 56, 55}, cMajorWhole()),
+              "episode_motif_derived"));
+  EXPECT_TRUE(
+      hasRule(validateInvertedEpisode(subjectAscendingScale(), {60, 59, 57, 53}, cMajorWhole()),
+              "episode_motif_derived"));
+}
+
+// In C minor, C D Eb F about C mirrors to C Bb Ab G in the minor collection;
+// the semitone mirror would land on A natural.
+TEST(ValidatorTest, EpisodeMotifDerivedInvertUsesTheMinorCollection) {
+  Material minor_subject;
+  minor_subject.subject = {subjectNote(0, kTicksPerBeat, 60),
+                           subjectNote(kTicksPerBeat, kTicksPerBeat, 62),
+                           subjectNote(2 * kTicksPerBeat, kTicksPerBeat, 63),
+                           subjectNote(3 * kTicksPerBeat, kTicksPerBeat, 65)};
+  EXPECT_FALSE(hasRule(validateInvertedEpisode(minor_subject, {60, 58, 56, 55}, cMinorWhole()),
+                       "episode_motif_derived"));
+  EXPECT_TRUE(hasRule(validateInvertedEpisode(minor_subject, {60, 58, 57, 55}, cMinorWhole()),
+                      "episode_motif_derived"));
 }
 
 TEST(ValidatorTest, EpisodeMotifDerivedRetrogradePasses) {
@@ -2789,52 +3051,87 @@ TEST(ValidatorTest, SecondaryDominantResolutionFailsForWrongDegreeNext) {
 
 // sequence_pattern_consistency tests.
 //
-// Seed motif: 2 notes (C5=72, D5=74) each 1 quarter long. Three steps.
-// Each pattern transposes by its declared semitones per step:
-//   DescendingFifths: -7 → step0={72,74}, step1={65,67}, step2={58,60}
-//   DescendingStep:   -2 → step0={72,74}, step1={70,72}, step2={68,70}
-//   AscendingStep:    +2 → step0={72,74}, step1={74,76}, step2={76,78}
+// Seed motif: 2 notes (C5=72, D5=74) each 1 quarter long. Each pattern moves
+// the seed by scale degrees of the key, so in C major:
+//   DescendingFifths: -4 degrees -> step0={72,74}, step1={65,67}, step2={59,60}
+//   DescendingStep:   -1 degree  -> step0={72,74}, step1={71,72}, step2={69,71}
+//   AscendingStep:    +1 degree  -> step0={72,74}, step1={74,76}, step2={76,77}
 
 namespace {
 
-SequenceTemplate makeSeqTemplate(SequencePattern pattern, std::uint8_t num_steps) {
+SequenceTemplate makeSeqTemplate(SequencePattern pattern, std::uint8_t num_steps,
+                                 std::vector<std::uint8_t> seed = {72, 74}) {
   SequenceTemplate t;
   t.pattern = pattern;
   t.target_start_tick = 0;
   t.step_length_ticks = 2 * kTicksPerBeat;
   t.num_steps = num_steps;
   t.voice = 0;
-  t.seed_pitches = {72, 74};
+  t.seed_pitches = std::move(seed);
   t.seed_durations = {kTicksPerBeat, kTicksPerBeat};
   return t;
 }
 
-std::vector<NoteEvent> renderSequence(SequencePattern pattern, std::uint8_t num_steps,
-                                      bool tamper_step1_pitch = false) {
-  auto step_semis = [&]() {
-    switch (pattern) {
-      case SequencePattern::DescendingFifths:
-        return -7;
-      case SequencePattern::DescendingStep:
-        return -2;
-      case SequencePattern::AscendingStep:
-        return 2;
-    }
-    return 0;
-  }();
+// Two quarter notes per step, one step every half note, in voice 0.
+std::vector<NoteEvent> renderSteps(const std::vector<std::array<std::uint8_t, 2>>& steps) {
   std::vector<NoteEvent> notes;
-  for (std::uint8_t k = 0; k < num_steps; ++k) {
-    Tick base_tick = static_cast<Tick>(k) * 2 * kTicksPerBeat;
-    int p0 = 72 + step_semis * k;
-    int p1 = 74 + step_semis * k;
-    if (tamper_step1_pitch && k == 1) {
-      p0 += 1;  // intentionally off-pattern
-    }
-    notes.push_back(makeNote(base_tick, kTicksPerBeat, static_cast<std::uint8_t>(p0), 0));
-    notes.push_back(
-        makeNote(base_tick + kTicksPerBeat, kTicksPerBeat, static_cast<std::uint8_t>(p1), 0));
+  for (std::size_t k = 0; k < steps.size(); ++k) {
+    const Tick base_tick = static_cast<Tick>(k) * 2 * kTicksPerBeat;
+    notes.push_back(makeNote(base_tick, kTicksPerBeat, steps[k][0], 0));
+    notes.push_back(makeNote(base_tick + kTicksPerBeat, kTicksPerBeat, steps[k][1], 0));
   }
   return notes;
+}
+
+std::vector<NoteEvent> renderSequence(SequencePattern pattern, std::uint8_t num_steps,
+                                      bool tamper_step1_pitch = false) {
+  std::vector<std::array<std::uint8_t, 2>> table;
+  switch (pattern) {
+    case SequencePattern::DescendingFifths:
+      table = {{72, 74}, {65, 67}, {59, 60}};
+      break;
+    case SequencePattern::DescendingStep:
+      table = {{72, 74}, {71, 72}, {69, 71}};
+      break;
+    case SequencePattern::AscendingStep:
+      table = {{72, 74}, {74, 76}, {76, 77}};
+      break;
+  }
+  table.resize(num_steps);
+  if (tamper_step1_pitch && num_steps > 1)
+    ++table[1][0];  // intentionally off-pattern
+  return renderSteps(table);
+}
+
+ValidationReport validateSequence(const SequenceTemplate& tmpl, const std::vector<NoteEvent>& notes,
+                                  const HarmonicPlan& plan) {
+  Material m;
+  m.sequence_templates.push_back(tmpl);
+  std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
+  return Validator{}.validate(notes, prov, plan, m);
+}
+
+// C minor with i from the downbeat and V from the second step on.
+HarmonicPlan cMinorTonicThenDominant() {
+  HarmonicPlan plan;
+  plan.tonic_pc = 0;
+  plan.is_minor = true;
+  ChordEvent tonic;
+  tonic.root_pc = 0;
+  tonic.quality = ChordQuality::Minor;
+  plan.chords.push_back(tonic);
+  ChordEvent dominant;
+  dominant.start_tick = 2 * kTicksPerBeat;
+  dominant.root_pc = 7;
+  dominant.quality = ChordQuality::Major;
+  plan.chords.push_back(dominant);
+  return plan;
+}
+
+HarmonicPlan cMinorTonicOnly() {
+  HarmonicPlan plan = cMinorTonicThenDominant();
+  plan.chords.pop_back();
+  return plan;
 }
 
 }  // namespace
@@ -2890,6 +3187,43 @@ TEST(ValidatorTest, SequencePatternConsistencySkippedWhenNoTemplate) {
   std::vector<NoteProvenance> prov(notes.size(), makeProv(0, NoteSource::Material));
   ValidationReport r = Validator{}.validate(notes, prov, cMajorWhole(), m);
   EXPECT_FALSE(hasRule(r, "sequence_pattern_consistency"));
+}
+
+// A step is a scale degree, not two semitones: the chromatic descent
+// C D -> Bb C -> Ab Bb leaves C major and is not the declared sequence, and a
+// step that moves two degrees is the wrong step.
+TEST(ValidatorTest, SequencePatternConsistencyRejectsChromaticAndWrongDegreeSteps) {
+  const SequenceTemplate tmpl = makeSeqTemplate(SequencePattern::DescendingStep, 3);
+  EXPECT_TRUE(
+      hasRule(validateSequence(tmpl, renderSteps({{72, 74}, {70, 72}, {68, 70}}), cMajorWhole()),
+              "sequence_pattern_consistency"));
+  EXPECT_TRUE(
+      hasRule(validateSequence(tmpl, renderSteps({{72, 74}, {69, 71}, {69, 71}}), cMajorWhole()),
+              "sequence_pattern_consistency"));
+}
+
+// In C minor the seed C Eb steps down through the minor collection: Bb D, then
+// Ab C. The semitone transposition (Bb Db) is not in the key.
+TEST(ValidatorTest, SequencePatternConsistencyStepsThroughTheMinorCollection) {
+  const SequenceTemplate tmpl = makeSeqTemplate(SequencePattern::DescendingStep, 3, {72, 75});
+  EXPECT_FALSE(hasRule(
+      validateSequence(tmpl, renderSteps({{72, 75}, {70, 74}, {68, 72}}), cMinorTonicOnly()),
+      "sequence_pattern_consistency"));
+  EXPECT_TRUE(hasRule(
+      validateSequence(tmpl, renderSteps({{72, 75}, {70, 73}, {68, 71}}), cMinorTonicOnly()),
+      "sequence_pattern_consistency"));
+}
+
+// Over the minor dominant the step takes the raised seventh: G C stepping down
+// under V is F B-natural, as the key is spelled under that harmony.
+TEST(ValidatorTest, SequencePatternConsistencyRaisesTheMinorSeventhOverTheDominant) {
+  const SequenceTemplate tmpl = makeSeqTemplate(SequencePattern::DescendingStep, 2, {67, 72});
+  EXPECT_FALSE(
+      hasRule(validateSequence(tmpl, renderSteps({{67, 72}, {65, 71}}), cMinorTonicThenDominant()),
+              "sequence_pattern_consistency"));
+  EXPECT_TRUE(
+      hasRule(validateSequence(tmpl, renderSteps({{67, 72}, {65, 70}}), cMinorTonicThenDominant()),
+              "sequence_pattern_consistency"));
 }
 
 // imitation_entry_match tests.
