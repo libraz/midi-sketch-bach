@@ -732,6 +732,56 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
     }
   }
+  // Declared suspensions, checked as emitted shapes. Authored material declares a shape and must
+  // emit it; a search-chosen note is not authored to a shape.
+  const RuleIdMask prepared_bit = ruleBitMask(RuleBit::SuspensionPrepared);
+  const RuleIdMask resolved_bit = ruleBitMask(RuleBit::SuspensionResolved);
+  const auto reportSuspensionShape = [&report](SpanId span_id) {
+    ValidationFailure failure;
+    failure.span_id = span_id;
+    failure.rule_id = "declared_suspension_integrity";
+    failure.kind = FailKind::StructuralFail;
+    report.failures.push_back(failure);
+  };
+  for (const SuspensionPattern& sp : material.suspension_patterns) {
+    std::size_t held = notes.size();
+    std::size_t resolution = notes.size();
+    for (std::size_t idx = 0; idx < notes.size() && idx < provenance.size(); ++idx) {
+      const NoteEvent& note = notes[idx];
+      if (note.voice != sp.voice)
+        continue;
+      if (held == notes.size() && note.start_tick <= sp.suspension_tick &&
+          note.start_tick + note.duration > sp.suspension_tick)
+        held = idx;
+      if (resolution == notes.size() && note.start_tick == sp.resolution_tick)
+        resolution = idx;
+    }
+    if (held == notes.size() || provenance[held].source != NoteSource::Material)
+      continue;
+    const NoteEvent& held_note = notes[held];
+    const bool holds = held_note.start_tick == sp.preparation_tick &&
+                       held_note.start_tick + held_note.duration == sp.resolution_tick &&
+                       (provenance[held].satisfied_rules & prepared_bit).any() &&
+                       resolution != notes.size() &&
+                       (provenance[resolution].satisfied_rules & resolved_bit).any();
+    if (!holds)
+      reportSuspensionShape(provenance[held].span_id);
+  }
+  // A SuspensionCarrier span synthesizes each declared pattern on its own, so two patterns of one
+  // voice sharing a resolution-preparation note there are a chain it cannot emit.
+  for (const SuspensionPattern& first : material.suspension_patterns) {
+    for (const SuspensionPattern& second : material.suspension_patterns) {
+      if (first.voice != second.voice || first.resolution_tick != second.preparation_tick)
+        continue;
+      for (std::size_t idx = 0; idx < notes.size() && idx < provenance.size(); ++idx) {
+        if (notes[idx].voice == first.voice && notes[idx].start_tick == first.resolution_tick &&
+            provenance[idx].voice_intent == VoiceIntent::SuspensionCarrier) {
+          reportSuspensionShape(provenance[idx].span_id);
+          break;
+        }
+      }
+    }
+  }
   // Whether a two-voice finding lies inside a doubling that was checked and
   // held. Both notes must be the pair the window names (in either order) and
   // both must begin inside its ticks; outside them the same two voices are

@@ -3963,6 +3963,107 @@ TEST(ValidatorTest, SuspensionSeventhSixthSkippedWithoutProvenanceBits) {
   EXPECT_FALSE(hasRule(r, "suspension_seventh_sixth"));
 }
 
+namespace {
+
+// The genuine 7-6 of makeSus76 written as a held note: Bb4 tied from the
+// preparation into the dissonance, then A4 on the resolution.
+Sus76Fixture makeTiedSus76() {
+  Sus76Fixture fix = makeSus76(/*prep=*/70, /*sus=*/70, /*res=*/69, /*bass=*/48);
+  fix.notes = {
+      makeNote(0, kTicksPerBeat * 2, 70, 0),
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat, 69, 0),
+      makeNote(0, kTicksPerBeat * 3, 48, 1),
+  };
+  fix.prov = std::vector<NoteProvenance>(fix.notes.size(), makeProv(0, NoteSource::Material));
+  fix.prov[0].satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
+  fix.prov[1].satisfied_rules = ruleBitMask(RuleBit::SuspensionResolved);
+  return fix;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityAcceptsTiedMaterial) {
+  Sus76Fixture fix = makeTiedSus76();
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_FALSE(hasRule(r, "declared_suspension_integrity"));
+}
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityRejectsRestruckMaterial) {
+  Sus76Fixture fix = makeSus76(/*prep=*/70, /*sus=*/70, /*res=*/69, /*bass=*/48);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_TRUE(hasRuleKind(r, "declared_suspension_integrity", FailKind::StructuralFail));
+}
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityIgnoresRestruckComposeNotes) {
+  Sus76Fixture fix = makeSus76(/*prep=*/70, /*sus=*/70, /*res=*/69, /*bass=*/48);
+  for (NoteProvenance& prov : fix.prov)
+    prov.source = NoteSource::Compose;
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_FALSE(hasRule(r, "declared_suspension_integrity"));
+}
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityRejectsAHeldNoteWithoutItsBits) {
+  Sus76Fixture missing_prepared = makeTiedSus76();
+  missing_prepared.prov[0].satisfied_rules = 0;
+  EXPECT_TRUE(hasRule(Validator{}.validate(missing_prepared.notes, missing_prepared.prov,
+                                           cMajorTwoBars(), missing_prepared.material),
+                      "declared_suspension_integrity"));
+  Sus76Fixture missing_resolved = makeTiedSus76();
+  missing_resolved.prov[1].satisfied_rules = 0;
+  EXPECT_TRUE(hasRule(Validator{}.validate(missing_resolved.notes, missing_resolved.prov,
+                                           cMajorTwoBars(), missing_resolved.material),
+                      "declared_suspension_integrity"));
+}
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityRejectsAHeldNoteEndingPastTheResolution) {
+  Sus76Fixture fix = makeTiedSus76();
+  fix.notes[0].duration = kTicksPerBeat * 3;
+  fix.notes.erase(fix.notes.begin() + 1);
+  fix.prov.erase(fix.prov.begin() + 1);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_TRUE(hasRule(r, "declared_suspension_integrity"));
+}
+
+namespace {
+
+// Two 7-6 suspensions chained in V0 over a bass falling by step every half
+// bar: the first resolution note is the second preparation.
+Sus76Fixture makeTiedChain(VoiceIntent intent) {
+  Sus76Fixture fix;
+  fix.notes = {
+      makeNote(0, kTicksPerBeat * 2, 70, 0),                  // Bb held
+      makeNote(kTicksPerBeat * 2, kTicksPerBeat * 2, 69, 0),  // A resolves, then held
+      makeNote(kTicksPerBeat * 4, kTicksPerBeat, 67, 0),      // G resolves
+      makeNote(0, kTicksPerBeat * 3, 48, 1),
+      makeNote(kTicksPerBeat * 3, kTicksPerBeat * 2, 46, 1),
+  };
+  fix.prov = std::vector<NoteProvenance>(fix.notes.size(),
+                                         makeProvIntent(0, NoteSource::Material, intent));
+  fix.prov[0].satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
+  fix.prov[1].satisfied_rules =
+      ruleBitMask(RuleBit::SuspensionResolved) | ruleBitMask(RuleBit::SuspensionPrepared);
+  fix.prov[2].satisfied_rules = ruleBitMask(RuleBit::SuspensionResolved);
+  fix.material.suspension_patterns.push_back(
+      {SuspensionType::Sus7_6, 0, kTicksPerBeat, kTicksPerBeat * 2, 70, 70, 69, 0});
+  fix.material.suspension_patterns.push_back({SuspensionType::Sus7_6, kTicksPerBeat * 2,
+                                              kTicksPerBeat * 3, kTicksPerBeat * 4, 69, 69, 67, 0});
+  return fix;
+}
+
+}  // namespace
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityAcceptsAChainOnMaterial) {
+  Sus76Fixture fix = makeTiedChain(VoiceIntent::FigurationCarrier);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_FALSE(hasRule(r, "declared_suspension_integrity"));
+}
+
+TEST(ValidatorTest, DeclaredSuspensionIntegrityRejectsAChainOnASuspensionCarrier) {
+  Sus76Fixture fix = makeTiedChain(VoiceIntent::SuspensionCarrier);
+  ValidationReport r = Validator{}.validate(fix.notes, fix.prov, cMajorTwoBars(), fix.material);
+  EXPECT_TRUE(hasRuleKind(r, "declared_suspension_integrity", FailKind::StructuralFail));
+}
+
 // countersubject_invertible: a countersubject (voice 0, CountersubjectInvertible
 // bit) sounding against a subject (voice 1, SubjectCarrier intent). Two bar
 // downbeats (strong beats). The upper countersubject stays above the lower
