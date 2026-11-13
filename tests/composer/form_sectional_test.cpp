@@ -934,7 +934,7 @@ TEST(FormSectionalTest, FreeSectionPunctuationArrivesWithoutParallelPerfects) {
                     other_prev >= 0 && other_curr >= 0 &&
                     formsStrictPerfectParallel(v1_prev, note.pitch, other_prev, other_curr))
                     << formName(form) << " minor " << minor << " bars " << bars << " seed " << seed
-                    << " tick " << head << " against V" << other;
+                    << " tick " << head << " against V" << static_cast<int>(other);
               }
             }
             v1_prev = note.pitch;
@@ -1661,9 +1661,74 @@ bool allDurationsAre(const std::vector<const NoteEvent*>& notes, Tick dur) {
   return true;
 }
 
+using FreeBarVoices = std::array<std::vector<const NoteEvent*>, 3>;
+
+// The solo opening gesture: V0 sixteenths alone, the second half of the bar silent.
+bool isSoloGestureBar(const FreeBarVoices& by_voice, int bar) {
+  if (by_voice[0].empty() || !by_voice[1].empty() || !by_voice[2].empty())
+    return false;
+  for (const NoteEvent* n : by_voice[0]) {
+    if (n->duration != kTicksPerBeat / 4 ||
+        n->start_tick + n->duration > static_cast<Tick>(bar) * kBar + 2 * kTicksPerBeat)
+      return false;
+  }
+  return true;
+}
+
+// The pedal solo: four V2 quarters under silent manuals.
+bool isPedalSoloBar(const FreeBarVoices& by_voice) {
+  return by_voice[0].empty() && by_voice[1].empty() && by_voice[2].size() == 4 &&
+         allDurationsAre(by_voice[2], kTicksPerBeat);
+}
+
+// The fermata breath: one whole note struck in each of the three voices.
+bool isFermataBar(const FreeBarVoices& by_voice) {
+  for (const auto& notes : by_voice) {
+    if (notes.size() != 1 || notes.front()->duration != static_cast<Tick>(kTicksPerBar))
+      return false;
+  }
+  return true;
+}
+
+// Every archetype draws on the shared free-bar devices (solo gesture, pedal-solo
+// pair, fermata breath) rather than running the wave throughout; the unison
+// doubling alone stays with the Dramaticus cascade.
+TEST(FormSectionalTest, EveryToccataArchetypeDrawsOnTheSharedFreeBarDevices) {
+  for (std::uint32_t seed = 1; seed <= 12; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
+    const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    ASSERT_EQ(r.validation.status, ValidationStatus::Ok)
+        << "seed " << seed << " first rule "
+        << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+    const int free_bars = freeBarsFor(32);
+    const auto bars = freeBarsByVoice(r, free_bars);
+    int gesture_bars = 0;
+    int pedal_solo_bars = 0;
+    int fermata_bars = 0;
+    for (int bar = 0; bar < free_bars; ++bar) {
+      const FreeBarVoices& by_voice = bars[static_cast<std::size_t>(bar)];
+      gesture_bars += isSoloGestureBar(by_voice, bar) ? 1 : 0;
+      pedal_solo_bars += isPedalSoloBar(by_voice) ? 1 : 0;
+      fermata_bars += isFermataBar(by_voice) ? 1 : 0;
+    }
+    const int devices =
+        (gesture_bars > 0 ? 1 : 0) + (pedal_solo_bars > 0 ? 1 : 0) + (fermata_bars > 0 ? 1 : 0);
+    EXPECT_GE(devices, 2) << "seed " << seed << " archetype " << seed % 4 << ": gesture "
+                          << gesture_bars << " pedal solo " << pedal_solo_bars << " fermata "
+                          << fermata_bars;
+    EXPECT_EQ(pedal_solo_bars, 2) << "seed " << seed << ": the pedal solo is one two-bar pair";
+    // No archetype spends more solo gesture bars than the Dramaticus opening.
+    EXPECT_LE(gesture_bars, 2) << "seed " << seed;
+    EXPECT_EQ(fx.material.declared_doublings.size(), seed % 4 == 0 ? 1u : 0u)
+        << "seed " << seed << ": the unison gesture belongs to the Dramaticus cascade only";
+  }
+}
+
 // Concertato: forte 4-bar windows run sixteenths over the full pedal +
-// punctuation texture; the odd (piano) windows answer in eighths with the V1
-// punctuation only (no V2 pedal).
+// punctuation texture; the odd (piano) windows open on the solo gesture and
+// answer in eighths with the V1 punctuation only (no V2 pedal). The fermata
+// breath closes the first forte window and the pedal solo is the interior of
+// the last one.
 TEST(FormSectionalTest, ConcertatoAlternatesForteAndPianoWindows) {
   for (std::uint32_t seed : {2u, 6u, 10u}) {  // seed % 4 == 2 -> Concertato.
     const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
@@ -1675,8 +1740,18 @@ TEST(FormSectionalTest, ConcertatoAlternatesForteAndPianoWindows) {
       const auto& by_voice = bars[static_cast<std::size_t>(bar)];
       const bool piano = (bar / 4) % 2 == 1;
       const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
+      if (bar == 3) {
+        EXPECT_TRUE(isFermataBar(by_voice)) << ctx << ": the breath closes the first terrace";
+        continue;
+      }
+      if (bar == free_bars - 3 || bar == free_bars - 2) {
+        EXPECT_TRUE(isPedalSoloBar(by_voice)) << ctx << ": pedal solo inside the last terrace";
+        continue;
+      }
       ASSERT_FALSE(by_voice[0].empty()) << ctx;
-      if (piano) {
+      if (piano && bar % 4 == 0) {
+        EXPECT_TRUE(isSoloGestureBar(by_voice, bar)) << ctx << ": the echo enters on the gesture";
+      } else if (piano) {
         EXPECT_TRUE(allDurationsAre(by_voice[0], kTicksPerBeat / 2))
             << ctx << ": piano echo must run eighths";
         EXPECT_TRUE(by_voice[2].empty()) << ctx << ": piano echo must rest the pedal";
@@ -1689,8 +1764,10 @@ TEST(FormSectionalTest, ConcertatoAlternatesForteAndPianoWindows) {
   }
 }
 
-// Sectionalis: the first half runs the wave; the second half alternates
-// declamatory chord blocks (three-voice half-note strikes) with running bars.
+// Sectionalis: the first half opens on the solo gesture and runs the wave, then
+// hands to the pedal-solo pair and the fermata breath at the break; the second
+// half alternates declamatory chord blocks (three-voice half-note strikes) with
+// running bars.
 TEST(FormSectionalTest, SectionalisSecondHalfAlternatesChordBlocks) {
   for (std::uint32_t seed : {3u, 7u, 11u}) {  // seed % 4 == 3 -> Sectionalis.
     const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
@@ -1704,7 +1781,13 @@ TEST(FormSectionalTest, SectionalisSecondHalfAlternatesChordBlocks) {
     for (int bar = 0; bar < free_bars; ++bar) {
       const auto& by_voice = bars[static_cast<std::size_t>(bar)];
       const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
-      if (bar < split_bar) {
+      if (bar == 0) {
+        EXPECT_TRUE(isSoloGestureBar(by_voice, bar)) << ctx << ": the half opens on the gesture";
+      } else if (bar == split_bar - 3 || bar == split_bar - 2) {
+        EXPECT_TRUE(isPedalSoloBar(by_voice)) << ctx << ": pedal solo before the break";
+      } else if (bar == split_bar - 1) {
+        EXPECT_TRUE(isFermataBar(by_voice)) << ctx << ": the breath marks the break";
+      } else if (bar < split_bar) {
         EXPECT_FALSE(by_voice[0].empty()) << ctx;
         for (const NoteEvent* n : by_voice[0])
           EXPECT_LE(n->duration, kTicksPerBeat / 2) << ctx << ": first half runs the wave";
@@ -1721,7 +1804,52 @@ TEST(FormSectionalTest, SectionalisSecondHalfAlternatesChordBlocks) {
   }
 }
 
-// Perpetuus: continuous figuration closed by a single chord-block bar.
+// A solo gesture's last tone and the tone the running bar after it opens on
+// never form an augmented second: in minor Sectionalis the gesture descends to
+// the 6th over the tonic and the next bar opens on the leading tone, so the
+// tail takes the raised 6th.
+TEST(FormSectionalTest, MinorGestureTailMeetsTheNextBarWithoutAnAugmentedSecond) {
+  for (SubjectCharacter character :
+       {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Restless}) {
+    for (std::uint32_t seed : {3u, 7u, 11u}) {  // seed % 4 == 3 -> Sectionalis.
+      const HarnessFixture fx =
+          buildFixture(FormType::ToccataAndFugue, seed, true, 32, nullptr, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.validation.status, ValidationStatus::Ok) << "seed " << seed;
+      const int free_bars = freeBarsFor(32);
+      const auto bars = freeBarsByVoice(r, free_bars);
+      int seams = 0;
+      for (int bar = 0; bar + 1 < free_bars; ++bar) {
+        const auto& gesture = bars[static_cast<std::size_t>(bar)];
+        const auto& next = bars[static_cast<std::size_t>(bar + 1)][0];
+        if (!isSoloGestureBar(gesture, bar) || next.empty() ||
+            isSoloGestureBar(bars[static_cast<std::size_t>(bar + 1)], bar + 1))
+          continue;
+        ++seams;
+        const NoteEvent* tail = gesture[0].front();
+        for (const NoteEvent* note : gesture[0]) {
+          if (note->start_tick > tail->start_tick)
+            tail = note;
+        }
+        const NoteEvent* head = next.front();
+        for (const NoteEvent* note : next) {
+          if (note->start_tick < head->start_tick)
+            head = note;
+        }
+        const KeyContext local = localKeyAt(fx.harmony, head->start_tick);
+        ASSERT_TRUE(local.is_minor) << "seed " << seed << " bar " << bar;
+        EXPECT_FALSE(detail::isAugmentedSecond(tail->pitch, head->pitch, local.tonic_pc,
+                                               detail::Mode::Minor))
+            << "seed " << seed << " bar " << bar << ": " << static_cast<int>(tail->pitch) << " -> "
+            << static_cast<int>(head->pitch);
+      }
+      EXPECT_GT(seams, 0) << "seed " << seed << ": a running bar follows the gesture";
+    }
+  }
+}
+
+// Perpetuus: the gesture announces one unbroken span, the pedal-solo pair ends
+// its first half, and a single chord-block bar closes it.
 TEST(FormSectionalTest, PerpetuusClosesWithOneChordBlock) {
   for (std::uint32_t seed : {1u, 5u, 9u}) {  // seed % 4 == 1 -> Perpetuus.
     const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, false, 32);
@@ -1732,8 +1860,14 @@ TEST(FormSectionalTest, PerpetuusClosesWithOneChordBlock) {
     for (int bar = 0; bar < free_bars; ++bar) {
       const auto& by_voice = bars[static_cast<std::size_t>(bar)];
       const std::string ctx = "seed " + std::to_string(seed) + " bar " + std::to_string(bar);
+      if (bar == free_bars / 2 - 2 || bar == free_bars / 2 - 1) {
+        EXPECT_TRUE(isPedalSoloBar(by_voice)) << ctx << ": pedal solo ends the first half";
+        continue;
+      }
       ASSERT_FALSE(by_voice[0].empty()) << ctx;
-      if (bar == free_bars - 1) {
+      if (bar == 0) {
+        EXPECT_TRUE(isSoloGestureBar(by_voice, bar)) << ctx << ": the span opens on the gesture";
+      } else if (bar == free_bars - 1) {
         EXPECT_TRUE(allDurationsAre(by_voice[0], 2 * kTicksPerBeat))
             << ctx << ": the closing bar is a chord block";
       } else {

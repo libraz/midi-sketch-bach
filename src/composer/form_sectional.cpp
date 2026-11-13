@@ -225,6 +225,9 @@ constexpr int kFreeV2Hi = 55;
 /// @param asm_ctx The accumulator (spans + figuration sections).
 /// @param v0_notes The already-built V0 free-section notes (registered so the
 ///        layers can read what V0 sounds at any tick).
+/// @param pedal_solo_notes V2 notes already written outside these layers (the
+///        pedal solo), registered so the V1 strike entering after them reads
+///        the bass motion it lands against.
 /// @param plan The per-bar chord plan (root supplies the pedal pitch class).
 /// @param mode Diatonic mode selecting the scale walker.
 /// @param free_bars Number of free-section bars (the layer span).
@@ -235,6 +238,7 @@ constexpr int kFreeV2Hi = 55;
 ///        punctuation lifts the V1 voice's piece occupancy; a shorter one leaves
 ///        the bar to the V0 figuration for a lighter accompaniment.
 void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<MaterialNote>& v0_notes,
+                             const std::vector<MaterialNote>& pedal_solo_notes,
                              const std::vector<ChordSpec>& plan, Mode mode, int free_bars,
                              const std::vector<FreeLayerPlan>& layout, const ResolvedRequest& req,
                              Tick v1_punct_dur) {
@@ -249,6 +253,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       break;
     registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
   }
+  for (const auto& note : pedal_solo_notes)
+    registry.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch), note.duration);
 
   // V2 pedal section: contiguous over every pedal bar. Each bar holds the chord
   // root in the V2 band (sustained whole note), except on a "walking pedal" bar
@@ -1842,13 +1848,22 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   //                 the homophonic V1+V2 strike); when at least 8 free bars are
   //                 available, the two bars before the close are a pedal solo
   //                 (V2 walking pedal alone); every other bar runs the wave.
-  //   Perpetuus   = continuous figuration with a single closing chord block.
+  //   Perpetuus   = the gesture announces one unbroken span, the pedal takes
+  //                 the line alone for the two bars ending its first half, and
+  //                 a single chord block closes it.
   //   Concertato  = forte/piano echo pairs: even 4-bar windows run sixteenths
   //                 over the full pedal + punctuation texture, odd windows
-  //                 answer in eighths with the punctuation only (the dynamic
-  //                 terracing itself is the expression pass's concern).
-  //   Sectionalis = a running first half, then a declamatory chordal second
-  //                 half (per-bar chord blocks).
+  //                 open on the solo gesture and answer in eighths with the
+  //                 punctuation only (the dynamic terracing itself is the
+  //                 expression pass's concern). The fermata breath closes the
+  //                 first forte window; the pedal solo is the interior of the
+  //                 last full one.
+  //   Sectionalis = a first half that opens on the gesture, runs, and hands to
+  //                 the pedal solo and the fermata breath at the break; then a
+  //                 declamatory chordal second half (block + running pairs).
+  // The gesture, pedal-solo pair and fermata breath are every archetype's
+  // vocabulary; the window layout above decides where each falls. The unison
+  // doubling and the minor-mode dim7 roll stay with the Dramaticus cascade.
   enum class FreeBarKind : std::uint8_t {
     kWave,
     kWavePiano,
@@ -1865,6 +1880,14 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   // (free_bars - 5, free_bars - 4); shorter sections keep the two-bar gesture
   // opening and avoid a pedal solo so it cannot overwrite those gestures.
   const bool dramaticus_cascade = (archetype == ToccataArchetype::Dramaticus) && free_bars >= 12;
+  // Room the shared devices need whatever the archetype: the pedal-solo pair
+  // must stay clear of the opening and the close, the breath needs a longer span.
+  const bool fits_pedal_solo = free_bars >= 8;
+  const bool fits_breath = free_bars >= 12;
+  const auto set_pedal_solo_pair = [&](int first) {
+    bar_kinds[static_cast<std::size_t>(first)] = FreeBarKind::kPedalSolo;
+    bar_kinds[static_cast<std::size_t>(first + 1)] = FreeBarKind::kPedalSolo;
+  };
   switch (archetype) {
     case ToccataArchetype::Dramaticus: {
       if (dramaticus_cascade) {
@@ -1885,11 +1908,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         bar_kinds[2] = FreeBarKind::kChordBlock;
       }
       bar_kinds[static_cast<std::size_t>(free_bars - 1)] = FreeBarKind::kChordBlock;
-      if (free_bars >= 8) {
-        const int pedal_solo = free_bars - 5;  // two bars, ending before the close.
-        bar_kinds[static_cast<std::size_t>(pedal_solo)] = FreeBarKind::kPedalSolo;
-        bar_kinds[static_cast<std::size_t>(pedal_solo + 1)] = FreeBarKind::kPedalSolo;
-      }
+      if (fits_pedal_solo)
+        set_pedal_solo_pair(free_bars - 5);  // two bars, ending before the close.
       // BWV565 leading-tone diminished-seventh sweep, minor-mode only: the dim7
       // roll answers the fermata breath at the first wave bar after it, and
       // drives into the close at the last wave bar before the closing chord
@@ -1918,23 +1938,58 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       break;
     }
     case ToccataArchetype::Perpetuus:
+      // The single window has no inner boundary, so its landmarks are its head,
+      // its midpoint and its close; the motion never takes the fermata breath.
+      bar_kinds[0] = FreeBarKind::kGesture;
+      if (fits_pedal_solo)
+        set_pedal_solo_pair(free_bars / 2 - 2);  // the pair ends the first half.
       bar_kinds[static_cast<std::size_t>(free_bars - 1)] = FreeBarKind::kChordBlock;
       break;
-    case ToccataArchetype::Concertato:
-      for (int bar = 0; bar < free_bars; ++bar) {
-        if ((bar / 4) % 2 == 1)
+    case ToccataArchetype::Concertato: {
+      int last_full_forte = -1;  // window index.
+      for (std::size_t idx = 0; idx < windows.size(); ++idx) {
+        const BarWindow& win = windows[idx];
+        if (idx % 2 == 0) {
+          if (win.last_bar - win.first_bar == 3)
+            last_full_forte = static_cast<int>(idx);
+          continue;
+        }
+        for (int bar = win.first_bar; bar <= win.last_bar; ++bar)
           bar_kinds[static_cast<std::size_t>(bar)] = FreeBarKind::kWavePiano;
+        // The echo enters on the solo gesture. A one-bar window is the closing
+        // bar, whose cadence strike sounds under it, so it keeps the wave.
+        if (win.last_bar > win.first_bar)
+          bar_kinds[static_cast<std::size_t>(win.first_bar)] = FreeBarKind::kGesture;
+      }
+      // The breath falls once, where the first terrace hands over to its echo.
+      if (fits_breath)
+        bar_kinds[static_cast<std::size_t>(windows.front().last_bar)] = FreeBarKind::kFermataBlock;
+      // The pedal answers alone inside the last full forte terrace, framed by
+      // that window's own running head and tail.
+      if (fits_pedal_solo && last_full_forte >= 0) {
+        set_pedal_solo_pair(windows[static_cast<std::size_t>(last_full_forte)].first_bar + 1);
       }
       break;
-    case ToccataArchetype::Sectionalis:
-      // The second window (windows[1]) is the declamatory half: chord blocks
-      // alternating with running bars (block + flourish pairs), so the chordal
-      // rhetoric arrives without flooding the piece with half notes.
-      for (int bar = windows.back().first_bar; bar < free_bars; ++bar) {
-        if ((bar - windows.back().first_bar) % 2 == 0)
+    }
+    case ToccataArchetype::Sectionalis: {
+      const int split_bar = windows.back().first_bar;
+      // The first half opens on the gesture; when it is long enough to keep a
+      // running stretch between them, the pedal solo and then the breath mark
+      // the break the two halves are named for.
+      bar_kinds[0] = FreeBarKind::kGesture;
+      if (fits_breath) {
+        set_pedal_solo_pair(split_bar - 3);
+        bar_kinds[static_cast<std::size_t>(split_bar - 1)] = FreeBarKind::kFermataBlock;
+      }
+      // The second window is the declamatory half: chord blocks alternating
+      // with running bars (block + flourish pairs), so the chordal rhetoric
+      // arrives without flooding the piece with half notes.
+      for (int bar = split_bar; bar < free_bars; ++bar) {
+        if ((bar - split_bar) % 2 == 0)
           bar_kinds[static_cast<std::size_t>(bar)] = FreeBarKind::kChordBlock;
       }
       break;
+    }
   }
 
   // Emit one ToccataSection per window (V0). Every section carries the piece's
@@ -1945,9 +2000,9 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   // once per section.
   //
   // Accompaniment layout: every wave bar carries a V2 pedal and a V1 head
-  // punctuation. The Dramaticus gesture and pedal-solo bars stay solo (the
+  // punctuation. The gesture and pedal-solo bars stay solo (the
   // dramatic rhetoric is a deliberate single-voice gesture; this is why the
-  // toccata mono ceiling is not 0), and its chord-block bars take the
+  // toccata mono ceiling is not 0), and the chord-block bars take the
   // homophonic V1+V2 strike instead of the running layers.
   std::vector<FreeLayerPlan> layout(static_cast<std::size_t>(free_bars));
   std::vector<MaterialNote> v0_free_notes;
@@ -1971,6 +2026,31 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     // The wave chains conjunctly across the bars of this section (reset at the
     // section head so each section keeps its own register identity).
     int prev_pitch = -1;
+    // Index of the last tone of a gesture whose following bar is this one
+    // (kNoGestureTail when the previous bar was not a gesture).
+    constexpr std::size_t kNoGestureTail = static_cast<std::size_t>(-1);
+    std::size_t pending_gesture_tail = kNoGestureTail;
+    // A gesture's run is spelled under its own bar, so in minor its last tone
+    // can sit an augmented second from the tone the running bar after it opens
+    // on (the lowered 6th under a leading tone). The tail then takes the
+    // inflection that bar's harmony gives its letter: the raised 6th that
+    // belongs with the leading tone.
+    const auto respell_gesture_tail = [&](std::size_t tail, int next_bar, std::size_t first) {
+      if (tail == kNoGestureTail || first >= section.notes.size())
+        return;
+      const KeyContext local = localKeyAt(out.harmony, barTick(next_bar));
+      if (!local.is_minor)
+        return;
+      MaterialNote& tail_note = section.notes[tail];
+      const int tail_pitch = static_cast<int>(tail_note.pitch);
+      if (!detail::isAugmentedSecond(tail_pitch, static_cast<int>(section.notes[first].pitch),
+                                     local.tonic_pc, Mode::Minor))
+        return;
+      const detail::PcMask next_chord = detail::chordPcMaskInKey(
+          plan[static_cast<std::size_t>(next_bar)], local.tonic_pc, Mode::Minor);
+      tail_note.pitch = static_cast<std::uint8_t>(
+          detail::respellInScale(tail_pitch, local.tonic_pc, Mode::Minor, next_chord));
+    };
     for (int bar = win.first_bar; bar <= win.last_bar; ++bar) {
       FreeLayerPlan& lp = layout[static_cast<std::size_t>(bar)];
       const FreeBarKind kind = bar_kinds[static_cast<std::size_t>(bar)];
@@ -1978,6 +2058,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       // restated in the key sounding at it (the palette walks a fixed C
       // collection and would otherwise keep the whole section in the home key).
       const std::size_t before = section.notes.size();
+      const std::size_t gesture_tail = pending_gesture_tail;
+      pending_gesture_tail = kNoGestureTail;
       if (kind == FreeBarKind::kGesture) {
         // V0 solo opening gesture; the bar's tail is silent and no layer enters.
         // In the octave cascade the gesture keeps the window's opening harmony
@@ -1987,6 +2069,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         appendGestureBar(section.notes, bar, plan[static_cast<std::size_t>(chord_bar)], mode,
                          kGestureFloor, kBandHi[0], octave_drop);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
+        if (section.notes.size() > before)
+          pending_gesture_tail = section.notes.size() - 1;
         prev_pitch = -1;
         continue;
       }
@@ -2044,6 +2128,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
         appendScalarWaveBar(section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                             /*notes_per_beat=*/2, base, kBandHi[0], fig_offset, prev_pitch);
         bendIntoLocalKeys(section.notes, before, out.harmony, plan);
+        respell_gesture_tail(gesture_tail, bar, before);
         lp.punctuate = true;
         continue;
       }
@@ -2094,6 +2179,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
                           notes_per_beat, base, kBandHi[0], fig_offset, prev_pitch,
                           /*rotate_figures=*/true, /*triplet=*/tighten);
       bendIntoLocalKeys(section.notes, before, out.harmony, plan);
+      respell_gesture_tail(gesture_tail, bar, before);
       lp.pedal = true;
       lp.punctuate = true;
     }
@@ -2133,7 +2219,10 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
     out.material.declared_doublings.push_back(doubling);
   }
 
-  // --- Dramaticus pedal solo (V2 walking pedal alone, root-fifth quarters). ---
+  // --- Pedal solo (V2 walking pedal alone, root-fifth quarters). ---
+  // Kept after the section takes them: the accompaniment layers below register
+  // the walk so the V1 strike on the bar after it is judged against it.
+  std::vector<MaterialNote> pedal_solo_notes;
   {
     FigurationSection pedal_solo_section;
     pedal_solo_section.voice = 2;
@@ -2150,6 +2239,7 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
       appendPedalWalkBar(pedal_solo_section.notes, bar, plan[static_cast<std::size_t>(bar)], mode,
                          kFreeV2Lo, kFreeV2Hi, walk_prev);
     }
+    pedal_solo_notes = pedal_solo_section.notes;
     if (!pedal_solo_section.notes.empty()) {
       pedal_solo_section.start_tick = barTick(first);
       pedal_solo_section.end_tick = barTick(last + 1);
@@ -2161,8 +2251,8 @@ HarnessFixture buildToccataAndFugueForm(const ResolvedRequest& req) {
   // --- ACCOMPANIMENT LAYERS (V2 pedal + V1 punctuation) over the free section.
   // Half-note V1 punctuation so the V1 voice clears the piece-occupancy floor.
   layout.back().fermata = true;  // explicit dominant half-cadence strike.
-  appendFreeSectionLayers(asm_ctx, v0_free_notes, plan, mode, free_bars, layout, req,
-                          /*v1_punct_dur=*/kTicksPerBeat * 2);
+  appendFreeSectionLayers(asm_ctx, v0_free_notes, pedal_solo_notes, plan, mode, free_bars, layout,
+                          req, /*v1_punct_dur=*/kTicksPerBeat * 2);
 
   // --- FUGUE TAIL (bars free_bars .. total-1). ---
   appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,
@@ -2361,8 +2451,8 @@ HarnessFixture buildFantasiaAndFugueForm(const ResolvedRequest& req) {
   // require a V1 occupancy floor; a longer V1 strike would only depress the
   // corpus model score under the dense Toccata-style sections).
   layout.back().fermata = true;  // explicit dominant half-cadence strike.
-  appendFreeSectionLayers(asm_ctx, v0_free_notes, plan, mode, free_bars, layout, req,
-                          /*v1_punct_dur=*/kTicksPerBeat);
+  appendFreeSectionLayers(asm_ctx, v0_free_notes, /*pedal_solo_notes=*/{}, plan, mode, free_bars,
+                          layout, req, /*v1_punct_dur=*/kTicksPerBeat);
 
   // --- FUGUE TAIL (bars free_bars .. total-1). ---
   appendFugueTail(asm_ctx, free_bars, split.fugue_bars, plan, req,

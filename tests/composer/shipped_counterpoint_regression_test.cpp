@@ -1518,7 +1518,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // V1 punctuation judged a sixteenth back, not a bar: its true parallels against
     // V0 leave (12 in the sectional test sweep), fourths 146 -> 153.
     // Same counter: fourths 153 -> 13 (140 pedal-exempt, 14 an ornament's upper tone).
-    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 29316, 14},
+    // Every archetype draws on the shared free-bar devices: solo bars carry no pairs,
+    // successions 29316 -> 25758.
+    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 25758, 14},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
