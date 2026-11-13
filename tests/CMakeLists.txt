@@ -16,6 +16,7 @@ set(BACH_TEST_SOURCES
   core/note_source_test.cpp
   core/instrument_program_test.cpp
   core/rng_util_test.cpp
+  core/seed_decision_test.cpp
 
   # midi/
   midi/midi_writer_test.cpp
