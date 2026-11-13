@@ -1900,7 +1900,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // held dominant on the beat grid, fourths 0 -> 16.
     // Output placement now honours the harpsichord compass, so the B-minor cell
     // that used to sound above it is placed down an octave: hidden 8 -> 10.
-    {FormType::GoldbergVariations, 0, 0, 10, 15, 8, 0, 1, 1, 1, 30669, 16},
+    // Seeded aria-bass contours and V0 contour figures: battuta 15 -> 9, anti 8 -> 9,
+    // successions 30669 -> 30687.
+    {FormType::GoldbergVariations, 0, 0, 10, 9, 9, 0, 1, 1, 1, 30687, 16},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {

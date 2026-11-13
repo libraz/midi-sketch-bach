@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -703,6 +704,215 @@ TEST(GoldbergCanon, LastVariationBeforeTheCloseComposesClean) {
           << "bars " << bars << " seed " << seed << " first="
           << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     }
+  }
+}
+
+// --- Contour departures ------------------------------------------------------
+
+constexpr std::array<SubjectCharacter, 4> kCharacters = {
+    {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+     SubjectCharacter::Restless}};
+
+HarnessFixture buildFor(SubjectCharacter character, bool minor, std::uint32_t seed) {
+  ComposeRequest req;
+  req.form = FormType::GoldbergVariations;
+  req.is_minor = minor;
+  req.character = character;
+  req.seed = seed;
+  HarnessFixture fx;
+  EXPECT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+  return fx;
+}
+
+// The pitches of each bar of a line, in tick order.
+std::vector<std::vector<int>> pitchesByBar(const std::vector<MaterialNote>& notes) {
+  std::vector<std::vector<int>> bars;
+  for (const MaterialNote& note : notes) {
+    const std::size_t bar = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+    if (bars.size() <= bar)
+      bars.resize(bar + 1);
+    bars[bar].push_back(static_cast<int>(note.pitch));
+  }
+  return bars;
+}
+
+// A bar's pitch order free of its chord and its rhythm: each tone as its rank
+// among the bar's distinct pitches, with a re-articulated tone counted once.
+std::vector<int> rankContour(const std::vector<int>& pitches) {
+  std::vector<int> distinct = pitches;
+  std::sort(distinct.begin(), distinct.end());
+  distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
+  std::vector<int> contour;
+  for (const int pitch : pitches) {
+    const int rank = static_cast<int>(std::lower_bound(distinct.begin(), distinct.end(), pitch) -
+                                      distinct.begin());
+    if (contour.empty() || contour.back() != rank)
+      contour.push_back(rank);
+  }
+  return contour;
+}
+
+// Every aria-bass bar opens on its ground tone, closes on it, and stays inside
+// the fifth above it, whatever order it walks the bar in.
+TEST(GoldbergCanon, AriaBassBarsKeepTheGroundUnderEveryContour) {
+  for (const SubjectCharacter character : kCharacters) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed = 1; seed <= 4; ++seed) {
+        const HarnessFixture fx = buildFor(character, minor, seed);
+        const std::vector<std::vector<int>> bars = pitchesByBar(fx.material.goldberg_aria_bass);
+        ASSERT_GE(bars.size(), 4u);
+        for (std::size_t bar = 0; bar < bars.size(); ++bar) {
+          ASSERT_FALSE(bars[bar].empty());
+          const int ground_tone = bars[bar % 4].front();
+          EXPECT_EQ(bars[bar].front(), ground_tone)
+              << "minor=" << minor << " seed=" << seed << " bar " << bar;
+          EXPECT_EQ(bars[bar].back(), ground_tone)
+              << "minor=" << minor << " seed=" << seed << " bar " << bar;
+          for (const int pitch : bars[bar]) {
+            EXPECT_GE(pitch, ground_tone) << "seed=" << seed << " bar " << bar;
+            EXPECT_LE(pitch, ground_tone + 7) << "seed=" << seed << " bar " << bar;
+          }
+        }
+      }
+    }
+  }
+}
+
+// The bass does not walk every bar in one order: a piece states more than one
+// contour, and which bars take which depends on the seed.
+TEST(GoldbergCanon, AriaBassContourVariesWithinAPieceAndAcrossSeeds) {
+  for (const SubjectCharacter character : kCharacters) {
+    std::set<std::vector<std::vector<int>>> pieces;
+    for (std::uint32_t seed = 1; seed <= 4; ++seed) {
+      const HarnessFixture fx = buildFor(character, /*minor=*/false, seed);
+      std::vector<std::vector<int>> piece;
+      for (const std::vector<int>& bar : pitchesByBar(fx.material.goldberg_aria_bass))
+        piece.push_back(rankContour(bar));
+      const std::set<std::vector<int>> distinct(piece.begin(), piece.end());
+      EXPECT_GE(distinct.size(), 2u)
+          << "character " << static_cast<int>(character) << " seed " << seed;
+      pieces.insert(piece);
+    }
+    EXPECT_GE(pieces.size(), 2u) << "character " << static_cast<int>(character);
+  }
+}
+
+// The free variations draw their beat anchors over more than one contour, and
+// the seed decides which bar takes which. Read off the beat onsets of the free
+// figuration blocks, short of the cadential landing in the last two bars.
+TEST(GoldbergCanon, FigurationAnchorContourVariesAcrossSeeds) {
+  for (const SubjectCharacter character : kCharacters) {
+    std::set<std::vector<int>> shapes;
+    std::set<std::vector<std::vector<int>>> pieces;
+    for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+      const HarnessFixture fx = buildFor(character, /*minor=*/false, seed);
+      const auto& blocks = fx.material.goldberg_variations;
+      const Tick landing_start = blockStart(static_cast<int>(blocks.size())) - 2 * kTicksPerBar;
+      std::vector<std::vector<int>> piece;
+      for (std::size_t blk = 1; blk < blocks.size(); ++blk) {
+        if (goldbergVariationKind(blk - 1) != GoldbergVariationKind::Figuration)
+          continue;
+        std::map<Tick, std::vector<int>> anchors;
+        for (const MaterialNote& note : blocks[blk].notes) {
+          if (note.start_tick % kTicksPerBeat == 0 && note.start_tick < landing_start)
+            anchors[note.start_tick / kTicksPerBar].push_back(static_cast<int>(note.pitch));
+        }
+        for (const auto& bar : anchors) {
+          if (bar.second.size() != 4)
+            continue;
+          piece.push_back(rankContour(bar.second));
+          shapes.insert(piece.back());
+        }
+      }
+      pieces.insert(piece);
+    }
+    EXPECT_GE(shapes.size(), 2u) << "character " << static_cast<int>(character);
+    EXPECT_GE(pieces.size(), 2u) << "character " << static_cast<int>(character);
+  }
+}
+
+// Every contour the bass and the figuration take is admitted against the same
+// readings the rest of the block is designed with, so the set still validates
+// for every character, mode and seed.
+TEST(GoldbergCanon, ContourDeparturesValidateClean) {
+  for (const SubjectCharacter character : kCharacters) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed = 1; seed <= 4; ++seed) {
+        const HarnessFixture fx = buildFor(character, minor, seed);
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        EXPECT_EQ(r.validation.status, ValidationStatus::Ok)
+            << "character " << static_cast<int>(character) << " minor=" << minor << " seed=" << seed
+            << " first="
+            << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
+      }
+    }
+  }
+}
+
+// Whatever surface spreads a bar and whatever order the bar walks, the bass
+// sounds its ground tone on the first and third beats and a chord tone of the
+// bar on the fourth: the tone that leads over the barline is never the passing
+// tone, which would otherwise sit under the upper voices as an accented
+// dissonance and, where the ground rises by step, anticipate the next bar.
+TEST(GoldbergCanon, AriaBassKeepsChordTonesOnTheAccentsUnderEverySurface) {
+  for (const SubjectCharacter character : kCharacters) {
+    for (bool minor : {false, true}) {
+      for (std::uint16_t target_bars : {0, 128}) {
+        for (std::uint32_t seed = 1; seed <= 4; ++seed) {
+          ComposeRequest req;
+          req.form = FormType::GoldbergVariations;
+          req.is_minor = minor;
+          req.character = character;
+          req.target_bars = target_bars;
+          req.seed = seed;
+          HarnessFixture fx;
+          ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+          const std::vector<MaterialNote>& bass = fx.material.goldberg_aria_bass;
+          ASSERT_FALSE(bass.empty());
+          const Tick end = bass.back().start_tick + bass.back().duration;
+          std::size_t cursor = 0;
+          int ground_tone = 0;
+          for (Tick tick = 0; tick < end; tick += kTicksPerBeat) {
+            while (cursor + 1 < bass.size() && bass[cursor + 1].start_tick <= tick)
+              ++cursor;
+            const int pitch = static_cast<int>(bass[cursor].pitch);
+            const int beat = static_cast<int>((tick % kTicksPerBar) / kTicksPerBeat);
+            if (beat == 0)
+              ground_tone = pitch;
+            const int above = pitch - ground_tone;
+            if (beat == 2) {
+              EXPECT_EQ(above, 0) << "minor=" << minor << " bars=" << target_bars
+                                  << " seed=" << seed << " tick " << tick;
+            } else if (beat == 3) {
+              EXPECT_TRUE(above == 3 || above == 4 || above == 7)
+                  << "minor=" << minor << " bars=" << target_bars << " seed=" << seed << " tick "
+                  << tick << " sounds " << above << " over its ground tone";
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Seeds congruent mod kGroundVariantCount pick the same goldberg ground. The
+// ground is the bar-head tone; the tones between heads follow a seed-reached
+// contour, so only the heads are compared.
+TEST(GoldbergCanon, CongruentSeedsShareGround) {
+  // A surface sets how many notes a bar holds, so heads are found by tick.
+  const auto bar_heads = [](const HarnessFixture& fx) {
+    std::vector<int> heads;
+    for (const MaterialNote& note : fx.material.goldberg_aria_bass) {
+      if (note.start_tick % kTicksPerBar == 0)
+        heads.push_back(note.pitch);
+    }
+    return heads;
+  };
+  for (bool minor : {false, true}) {
+    const std::vector<int> heads_a = bar_heads(build(minor, 0, 1));
+    const std::vector<int> heads_b = bar_heads(build(minor, 0, 4));
+    ASSERT_FALSE(heads_a.empty());
+    EXPECT_EQ(heads_a, heads_b) << "minor " << minor;
   }
 }
 

@@ -106,7 +106,111 @@ constexpr Tick kAriaBassUnit = kTicksPerBeat / 2;
 // The finest the aria bass ever moves: a return may dot or re-articulate its
 // tones, which halves the eighth the skeleton is written on.
 constexpr Tick kAriaBassFinestUnit = kTicksPerBeat / 4;
-std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds) {
+
+// The four tones a walking aria-bass bar is written with, low to high.
+constexpr std::uint8_t kAriaBassRoot = 0;
+constexpr std::uint8_t kAriaBassPassing = 1;  // the scale degree between root and third
+constexpr std::uint8_t kAriaBassThird = 2;
+constexpr std::uint8_t kAriaBassFifth = 3;
+
+using AriaBassContour = std::array<std::uint8_t, 8>;
+
+// The order the aria states its bar in, and the one every other order is
+// measured against.
+constexpr AriaBassContour kAriaBassReferenceOrder = {
+    kAriaBassRoot, kAriaBassPassing, kAriaBassThird, kAriaBassPassing,
+    kAriaBassRoot, kAriaBassFifth,   kAriaBassThird, kAriaBassRoot};
+
+// A move between two different tones is a step when one of them is the passing
+// tone and the other its neighbour, and a chord-tone leap otherwise. The
+// passing tone has no other way in or out.
+constexpr bool ariaBassMoveIsStep(std::uint8_t from, std::uint8_t to) {
+  return (from == kAriaBassPassing || to == kAriaBassPassing) && (from + 1 == to || to + 1 == from);
+}
+
+constexpr bool ariaBassMoveIsAllowed(std::uint8_t from, std::uint8_t to) {
+  if (from == to)
+    return false;
+  return ariaBassMoveIsStep(from, to) || (from != kAriaBassPassing && to != kAriaBassPassing);
+}
+
+constexpr int ariaBassLeapCount(const AriaBassContour& order) {
+  int leaps = 0;
+  for (std::size_t pos = 1; pos < order.size(); ++pos) {
+    if (!ariaBassMoveIsStep(order[pos - 1], order[pos]))
+      ++leaps;
+  }
+  return leaps;
+}
+
+struct AriaBassContourFamily {
+  std::array<AriaBassContour, 16> members{};
+  std::size_t count = 0;
+};
+
+// Every order of the bar's tones that keeps what the reference order promises:
+// the ground tone on both structural accents and on the last eighth and nowhere
+// else, so the seam into the next bar is the ground's own motion and the bar
+// never circles its root; a chord tone on every even position, which is where
+// the beats fall when the bar is stated in equal eighths; the passing tone only
+// between its two neighbours; the whole triad stated; and no more leaps than
+// the reference takes, since leaps are the melodic-interval cost the walking
+// bass exists to keep down. The reference is member zero; the rest follow in
+// enumeration order.
+//
+// Which positions sound on the beats is a property of the surface, not of the
+// order: a surface that spreads the tones unequally brings other positions onto
+// them. So a member is admissible on a surface only if, on every beat of that
+// surface where the reference order sounds a chord tone, the member sounds one
+// too. ariaBassContourSuitsSurface reads the beats off the surface's own layout
+// and every choice of a member asks it.
+constexpr AriaBassContourFamily ariaBassContourFamily() {
+  AriaBassContourFamily family;
+  family.members[0] = kAriaBassReferenceOrder;
+  family.count = 1;
+  const int leap_budget = ariaBassLeapCount(kAriaBassReferenceOrder);
+  constexpr unsigned kToneCount = 4;
+  constexpr unsigned kFreeSlots = 6;  // positions one to six; both ends are the ground
+  unsigned orders = 1;
+  for (unsigned slot = 0; slot < kFreeSlots; ++slot)
+    orders *= kToneCount;
+  for (unsigned code = 0; code < orders; ++code) {
+    AriaBassContour order{};
+    unsigned digits = code;
+    for (std::size_t pos = 1; pos <= kFreeSlots; ++pos) {
+      order[pos] = static_cast<std::uint8_t>(digits % kToneCount);
+      digits /= kToneCount;
+    }
+    bool valid = true;
+    bool has_third = false;
+    bool has_fifth = false;
+    for (std::size_t pos = 1; pos < order.size() && valid; ++pos) {
+      const bool ground_position = pos == 4 || pos + 1 == order.size();
+      valid = ariaBassMoveIsAllowed(order[pos - 1], order[pos]) &&
+              (pos % 2 != 0 || order[pos] != kAriaBassPassing) &&
+              ground_position == (order[pos] == kAriaBassRoot);
+      has_third = has_third || order[pos] == kAriaBassThird;
+      has_fifth = has_fifth || order[pos] == kAriaBassFifth;
+    }
+    if (!valid || !has_third || !has_fifth || ariaBassLeapCount(order) > leap_budget)
+      continue;
+    bool is_reference = true;
+    for (std::size_t pos = 0; pos < order.size(); ++pos)
+      is_reference = is_reference && order[pos] == kAriaBassReferenceOrder[pos];
+    if (is_reference || family.count >= family.members.size())
+      continue;
+    family.members[family.count++] = order;
+  }
+  return family;
+}
+
+constexpr AriaBassContourFamily kAriaBassContours = ariaBassContourFamily();
+constexpr std::size_t kAriaBassReferenceContour = 0;
+static_assert(kAriaBassContours.count > 1, "the aria bass needs an order to depart to");
+
+// `contour` indexes kAriaBassContours. A bar that cannot walk -- the plain triad
+// statement below -- has one order only, whichever contour is asked for.
+std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds, std::size_t contour) {
   const BarChord chord = goldbergBarChord(static_cast<std::uint8_t>(root), mode);
   const int third = root + (chord.minor ? 3 : 4);
   const int fifth = root + 7;
@@ -122,15 +226,20 @@ std::array<int, 8> goldbergAriaBassBar(int root, Mode mode, bool fill_thirds) {
   // plain triad statement rather than inventing a chromatic passing tone.
   if (fill <= root || fill >= third)
     return plain;
-  return {root, fill, third, fill, root, fifth, third, root};
+  const std::array<int, 4> tones = {root, fill, third, fifth};
+  const AriaBassContour& order = kAriaBassContours.members[contour % kAriaBassContours.count];
+  std::array<int, 8> bar{};
+  for (std::size_t pos = 0; pos < bar.size(); ++pos)
+    bar[pos] = tones[order[pos]];
+  return bar;
 }
 
 // The surface one four-bar statement of the aria bass is laid out on.
 //
 // A variation set holds its harmonic skeleton still and varies only the surface,
-// so a return states the same eight tones in the same order under the same bar
-// chord and departs from the statement before it in exactly one respect: how the
-// tones are spread through the bar, or how densely each is articulated. No
+// so a return states the same tones under the same bar chord and departs from
+// the aria in how they are spread through the bar or how densely each is
+// articulated, and in the order the bar walks them (kAriaBassContours). No
 // departure moves a tone to another octave -- the bass already sits on the floor
 // of the compass, and carrying it up an octave would put it through the canon
 // follower, whose band is fixed by the imitation interval.
@@ -159,13 +268,17 @@ AriaBassSurface goldbergAriaBassSurface(int block_index, bool is_aria_block) {
   return kAriaBassDepartures[slot];
 }
 
-// Lay one aria-bass bar out on its surface. The eight skeleton tones keep their
-// order, so the bar head is still the ground tone and every structural accent
-// still belongs to the bar chord; only their placement and articulation move.
-void appendAriaBassBar(std::vector<MaterialNote>& out, int bar, int root, Mode mode,
-                       bool fill_thirds, AriaBassSurface surface) {
-  const std::array<int, 8> phrase = goldbergAriaBassBar(root, mode, fill_thirds);
-  const Tick base = barTick(bar);
+// How one four-bar statement of the aria bass is stated: the surface it is laid
+// out on and the order its bars walk their tones in. Passed whole to everything
+// that writes or reads the bass, so no reader can see a different line.
+struct AriaBassTreatment {
+  AriaBassSurface surface = AriaBassSurface::Plain;
+  std::size_t contour = kAriaBassReferenceContour;
+};
+
+// Spread the eight tones of one bar over a surface, from `base`.
+void layOutAriaBassBar(std::vector<MaterialNote>& out, Tick base, const std::array<int, 8>& phrase,
+                       AriaBassSurface surface) {
   constexpr Tick kSixteenth = kAriaBassFinestUnit;
   constexpr Tick kDottedEighth = kAriaBassUnit + kSixteenth;
   switch (surface) {
@@ -204,6 +317,38 @@ void appendAriaBassBar(std::vector<MaterialNote>& out, int bar, int root, Mode m
       }
       break;
   }
+}
+
+// Whether a contour may be stated on a surface: its passing tone sounds on no
+// beat the reference order keeps a chord tone on. The positions a surface puts
+// on the beats are read off the surface's own layout, by laying out a bar whose
+// tones are their position numbers, so a surface added later is answered for
+// without being listed here. The reference suits every surface by definition.
+bool ariaBassContourSuitsSurface(std::size_t contour, AriaBassSurface surface) {
+  constexpr std::array<int, 8> kPositions = {0, 1, 2, 3, 4, 5, 6, 7};
+  std::vector<MaterialNote> laid;
+  laid.reserve(16);
+  layOutAriaBassBar(laid, /*base=*/0, kPositions, surface);
+  const AriaBassContour& order = kAriaBassContours.members[contour % kAriaBassContours.count];
+  for (const MaterialNote& note : laid) {
+    // A tone is on a beat when a beat falls anywhere inside it.
+    const Tick next_beat = ((note.start_tick + kTicksPerBeat - 1) / kTicksPerBeat) * kTicksPerBeat;
+    if (next_beat >= note.start_tick + note.duration)
+      continue;
+    const std::size_t pos = note.pitch;
+    if (order[pos] == kAriaBassPassing && kAriaBassReferenceOrder[pos] != kAriaBassPassing)
+      return false;
+  }
+  return true;
+}
+
+// Lay one aria-bass bar out as treated. Every contour opens on the ground tone,
+// so the bar head is the same under any treatment.
+void appendAriaBassBar(std::vector<MaterialNote>& out, int bar, int root, Mode mode,
+                       bool fill_thirds, const AriaBassTreatment& treatment) {
+  layOutAriaBassBar(out, barTick(bar),
+                    goldbergAriaBassBar(root, mode, fill_thirds, treatment.contour),
+                    treatment.surface);
 }
 
 // Diatonic transpose a pitch UP by `degrees` scale steps (degrees may be 0 =
@@ -259,12 +404,16 @@ int goldbergFigurationStart(int register_base, int offset, const BarChord& chord
 
 // Append a figuration variation bar: a downbeat-anchored scalar wave with
 // `notes_per_beat` subdivision (1 = quarters, 2 = eighths, 4 = sixteenths).
+// `figure` selects the anchor contour the wave is drawn over.
 void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mode mode,
-                        int notes_per_beat, int register_base, int offset) {
+                        int notes_per_beat, int register_base, int offset, int figure = 0) {
   const int snapped = goldbergFigurationStart(register_base, offset, chord, mode);
-  emitAnchoredBar(bar, snapped, chord, mode, notes_per_beat, [&](Tick start, Tick dur, int pitch) {
-    var.notes.push_back(materialNote(start, dur, pitch));
-  });
+  emitAnchoredBar(
+      bar, snapped, chord, mode, notes_per_beat,
+      [&](Tick start, Tick dur, int pitch) {
+        var.notes.push_back(materialNote(start, dur, pitch));
+      },
+      figure);
 }
 
 // Canon register anchor. Narrow canons place the dux in this upper band and
@@ -423,14 +572,14 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode,
-                                       bool fill_thirds, AriaBassSurface surface,
+                                       bool fill_thirds, const AriaBassTreatment& bass_treatment,
                                        const std::array<int, 3>& entry = {-1, -1, -1}) {
   std::vector<MaterialNote> bass;
   bass.reserve(64);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
     appendAriaBassBar(bass, bar, ground[static_cast<std::size_t>(bar % 4)], mode, fill_thirds,
-                      surface);
+                      bass_treatment);
   }
   // Register order, highest first, matching the physical voice indices.
   const std::vector<MaterialNote>* voices[3] = {&upper, &inner, &bass};
@@ -534,7 +683,7 @@ struct CanonDesign {
 CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                              const std::array<std::uint8_t, 4>& ground, int source_register_shift,
                              int imitation_degrees, int comes_octave_shift, bool imitate_above,
-                             bool fill_thirds, AriaBassSurface surface) {
+                             bool fill_thirds, const AriaBassTreatment& bass_treatment) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
@@ -568,7 +717,7 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
                               imitation_degrees, comes_octave_shift, mode, rising, ground);
               const std::array<int, 8> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
-                  /*block_start_bar=*/0, ground, mode, fill_thirds, surface);
+                  /*block_start_bar=*/0, ground, mode, fill_thirds, bass_treatment);
               // The leader's own bar-to-bar steps, which the comes inherits
               // exactly: a tritone or a seventh between adjacent bars is
               // unsingable however well it behaves against the other voices, so
@@ -658,6 +807,8 @@ int canonBlockIndex(int imitation_degrees) {
 // a crossing and a true parallel takes the plain bass instead. The answer
 // follows from the ground alone, so it is settled once and the bass and every
 // reader of it agree for the whole piece.
+//
+// Asked of the reference order, which is the one a canon block falls back to.
 bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& ground) {
   for (int imitation_degrees = 0; imitation_degrees < kCanonImitationDegreeCount;
        ++imitation_degrees) {
@@ -665,24 +816,52 @@ bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& 
     const CanonDesign probe = designCanonBlock(
         layout.design_ceiling, mode, ground, layout.source_register_shift, imitation_degrees,
         layout.comes_octave_shift, layout.imitate_above, /*fill_thirds=*/true,
-        goldbergAriaBassSurface(canonBlockIndex(imitation_degrees), /*is_aria_block=*/false));
+        {goldbergAriaBassSurface(canonBlockIndex(imitation_degrees), /*is_aria_block=*/false),
+         kAriaBassReferenceContour});
     if (!probe.clean)
       return false;
   }
   return true;
 }
 
+// The order a canon block's bass walks its bars in: the first member of the
+// family, taken in rotation from `first_contour`, under which the canon can
+// still be written clear of a crossing and a true parallel, among those the
+// block's surface can state. The reference order is in the rotation and
+// ariaBassFillAdmitsEveryCanon has already answered for it, so a walking bass
+// always finds one; a plain bass has a single order.
+std::size_t admitCanonBassContour(int imitation_degrees, Mode mode,
+                                  const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
+                                  AriaBassSurface surface, std::size_t first_contour) {
+  if (!fill_thirds)
+    return kAriaBassReferenceContour;
+  const CanonLayout layout = canonLayout(imitation_degrees);
+  for (std::size_t turn = 0; turn < kAriaBassContours.count; ++turn) {
+    const std::size_t contour = (first_contour + turn) % kAriaBassContours.count;
+    if (contour == kAriaBassReferenceContour)
+      break;
+    if (!ariaBassContourSuitsSurface(contour, surface))
+      continue;
+    const CanonDesign probe = designCanonBlock(
+        layout.design_ceiling, mode, ground, layout.source_register_shift, imitation_degrees,
+        layout.comes_octave_shift, layout.imitate_above, fill_thirds, {surface, contour});
+    if (probe.clean)
+      return contour;
+  }
+  return kAriaBassReferenceContour;
+}
+
 // Build one canonic variation block (a 4-bar window).
 void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
                      int block_start_bar, int imitation_degrees, Mode mode,
                      const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
-                     AriaBassSurface surface) {
+                     const AriaBassTreatment& bass_treatment) {
   const CanonLayout layout = canonLayout(imitation_degrees);
   const bool imitate_above = layout.imitate_above;
   const int source_register_shift = layout.source_register_shift;
   const CanonDesign designed = designCanonBlock(
       layout.design_ceiling, mode, ground, source_register_shift, imitation_degrees,
-      layout.comes_octave_shift, imitate_above, fill_thirds, surface);
+      layout.comes_octave_shift, imitate_above, fill_thirds, bass_treatment);
   const CanonLines lines =
       layOutCanon(designed.assignment, block_start_bar, source_register_shift, imitation_degrees,
                   layout.comes_octave_shift, mode, designed.rising, ground);
@@ -818,7 +997,7 @@ int innerExitTone(const std::array<int, 3>& candidates, int tone, int target) {
 std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper, int ceiling,
                                           int block_start_bar, Mode mode,
                                           const std::array<std::uint8_t, 4>& ground,
-                                          bool fill_thirds, AriaBassSurface bass_surface,
+                                          bool fill_thirds, const AriaBassTreatment& bass_treatment,
                                           InnerSurface surface, const std::array<int, 3>& entry) {
   const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
   std::vector<MaterialNote> chosen;
@@ -845,7 +1024,7 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
                            exits[local], surface);
           }
           const std::array<int, 8> faults = goldbergBlockFaults(
-              upper, line, block_start_bar, ground, mode, fill_thirds, bass_surface, entry);
+              upper, line, block_start_bar, ground, mode, fill_thirds, bass_treatment, entry);
           // Every bar of a block is laid out on the same surface, so two of them
           // that state the same tones are the same bar. A block that repeats a
           // bar verbatim is not varying anything, which is why this is weighed
@@ -979,7 +1158,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // states the same tones over the same chords, laid out differently, which is
   // what makes the set a set of variations rather than a loop. The line is
   // declared once and replayed verbatim; it is not represented as Passacaglia
-  // material.
+  // material. It is written block by block in the loop below, because the order
+  // a variation's bass walks its tones in is admitted against the voices that
+  // block has already settled.
   const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
@@ -987,11 +1168,50 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   auto bass_surface_of_block = [&](int blk) {
     return goldbergAriaBassSurface(blk, /*is_aria_block=*/blk == 0 || blk == da_capo_block);
   };
-  for (int bar = 0; bar + 1 < bars; ++bar) {
-    appendAriaBassBar(out.material.goldberg_aria_bass, bar,
-                      ground[static_cast<std::size_t>(bar % kCycleBars)], mode, fill_thirds,
-                      bass_surface_of_block(bar / kCycleBars));
-  }
+  auto declare_block_bass = [&](int blk, const AriaBassTreatment& treatment) {
+    for (int local = 0; local < kCycleBars; ++local) {
+      const int bar = blk * kCycleBars + local;
+      if (bar + 1 >= bars)
+        break;
+      appendAriaBassBar(out.material.goldberg_aria_bass, bar,
+                        ground[static_cast<std::size_t>(bar % kCycleBars)], mode, fill_thirds,
+                        treatment);
+    }
+  };
+  // The member of the contour family a block asks for first, rotated by the
+  // seed so the same block layout meets the orders in a different place.
+  auto first_bass_contour_of_block = [&](int blk) {
+    return static_cast<std::size_t>((req.seed + static_cast<std::uint32_t>(blk)) %
+                                    static_cast<std::uint32_t>(kAriaBassContours.count));
+  };
+  const std::vector<MaterialNote> no_inner_line;
+  // The order a free block's bass walks its bars in: the first member, in
+  // rotation, that reads no worse against the block's settled upper line than
+  // the reference order does. The reference is in the rotation, so one always
+  // passes; a plain bass has a single order.
+  auto admit_bass_contour = [&](const std::vector<MaterialNote>& upper, int blk) {
+    AriaBassTreatment admitted{bass_surface_of_block(blk), kAriaBassReferenceContour};
+    if (!fill_thirds)
+      return admitted;
+    const std::array<int, 8> reference_faults = goldbergBlockFaults(
+        upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, admitted);
+    const std::size_t first = first_bass_contour_of_block(blk);
+    for (std::size_t turn = 0; turn < kAriaBassContours.count; ++turn) {
+      const std::size_t contour = (first + turn) % kAriaBassContours.count;
+      if (contour == kAriaBassReferenceContour)
+        break;
+      if (!ariaBassContourSuitsSurface(contour, admitted.surface))
+        continue;
+      const std::array<int, 8> faults =
+          goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
+                              {admitted.surface, contour});
+      if (faults <= reference_faults) {
+        admitted.contour = contour;
+        break;
+      }
+    }
+    return admitted;
+  };
   // One statement, so the period spans the whole declaration: the carrier lays
   // the line down once instead of tiling a cycle of it.
   out.material.goldberg_aria_bass_period = final_bar_tick;
@@ -1084,6 +1304,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         var.notes[var.notes.size() - 2].pitch = kVarRegisterBase + 7;
         var.notes.back().pitch = kVarRegisterBase;
       }
+      // The aria returns as it began: plain surface, reference order.
+      declare_block_bass(blk, {bass_surface_of_block(blk), kAriaBassReferenceContour});
       out.material.goldberg_variations.push_back(var);
       continue;
     }
@@ -1103,6 +1325,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     // the piece's last block still has its cadential landing to come.
     const bool fill_middle_voice = kind == GoldbergVariationKind::Figuration &&
                                    !innerVoiceWithdraws(blk, num_blocks, da_capo_block);
+    AriaBassTreatment bass_treatment{bass_surface_of_block(blk), kAriaBassReferenceContour};
 
     switch (kind) {
       case GoldbergVariationKind::Canon: {
@@ -1114,8 +1337,11 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int canon_number = static_cast<int>(variation_number / 3);
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
+        bass_treatment.contour =
+            admitCanonBassContour(imitation_degrees, mode, ground, fill_thirds,
+                                  bass_treatment.surface, first_bass_contour_of_block(blk));
         buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground,
-                        fill_thirds, bass_surface_of_block(blk));
+                        fill_thirds, bass_treatment);
         inner_blocks.push_back(blk);
         canon_blocks.push_back(blk);
         break;
@@ -1130,6 +1356,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
               var, bar, goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
               mode, 4, kVarRegisterBase, offset);
         }
+        bass_treatment = admit_bass_contour(var.notes, blk);
         // The tune states each bar's triad in one rotation held across the whole
         // block, so what recurs is its shape. Which rotation that is has to be
         // read off the texture rather than fixed: the bass arpeggiates the same
@@ -1158,9 +1385,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 8> score =
-              goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds,
-                                  bass_surface_of_block(blk));
+          const std::array<int, 8> score = goldbergBlockFaults(
+              var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds, bass_treatment);
           if (rotation == 0 || score < best_score) {
             best_score = score;
             tune = std::move(candidate);
@@ -1192,22 +1418,69 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const PatternKind pattern = design_peak
                                         ? PatternKind::kScalarWave
                                         : kGoldbergPalette[(req.seed + variation_index) % 2];
-        for (int local = 0; local < kCycleBars; ++local) {
-          const int bar = blk * kCycleBars + local;
-          const BarChord chord =
-              goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
-          switch (pattern) {
-            case PatternKind::kFiguraCorta:
-              appendFiguraCortaBar(var.notes, bar,
-                                   goldbergFigurationStart(register_base, offset, chord, mode),
-                                   detail::ChordSpec{chord.root_pc, chord.minor}, mode);
-              break;
-            case PatternKind::kScalarWave:
-            default:
-              appendVariationBar(var, bar, chord, mode, notes_per_beat, register_base, offset);
-              break;
+        using BlockFigures = std::array<int, kCycleBars>;
+        auto lay_out_block = [&](const BlockFigures& figures) {
+          PassacagliaVariation laid;
+          for (int local = 0; local < kCycleBars; ++local) {
+            const int bar = blk * kCycleBars + local;
+            const BarChord chord =
+                goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode);
+            const int figure = figures[static_cast<std::size_t>(local)];
+            switch (pattern) {
+              case PatternKind::kFiguraCorta:
+                appendFiguraCortaBar(laid.notes, bar,
+                                     goldbergFigurationStart(register_base, offset, chord, mode),
+                                     detail::ChordSpec{chord.root_pc, chord.minor}, mode, figure);
+                break;
+              case PatternKind::kScalarWave:
+              default:
+                appendVariationBar(laid, bar, chord, mode, notes_per_beat, register_base, offset,
+                                   figure);
+                break;
+            }
+          }
+          return laid.notes;
+        };
+        // Every bar opens on the plain anchor contour, and a peak block keeps it:
+        // the peak is a design value. Elsewhere each bar in turn asks for the
+        // contour the seed rotates to it and takes the first, in rotation, that
+        // stays inside the keyboard and leaves the block reading no worse
+        // against the reference bass than it already did. The plain contour is
+        // in the rotation, so a bar with no admissible departure keeps it.
+        BlockFigures figures{};
+        std::vector<MaterialNote> settled = lay_out_block(figures);
+        if (!design_peak) {
+          const AriaBassTreatment probe_bass = bass_treatment;
+          std::array<int, 8> settled_faults = goldbergBlockFaults(
+              settled, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, probe_bass);
+          for (int local = 0; local < kCycleBars; ++local) {
+            const std::uint32_t bar = static_cast<std::uint32_t>(blk * kCycleBars + local);
+            const std::uint32_t first = (req.seed + req.seed / 4u + bar) % 4u;
+            for (std::uint32_t turn = 0; turn < 4u; ++turn) {
+              const int figure = static_cast<int>((first + turn) % 4u);
+              if (figure == 0)
+                break;
+              BlockFigures trial_figures = figures;
+              trial_figures[static_cast<std::size_t>(local)] = figure;
+              std::vector<MaterialNote> trial = lay_out_block(trial_figures);
+              const bool in_compass =
+                  std::all_of(trial.begin(), trial.end(), [](const MaterialNote& note) {
+                    return static_cast<int>(note.pitch) <= kKeyboardTop;
+                  });
+              if (!in_compass)
+                continue;
+              const std::array<int, 8> faults = goldbergBlockFaults(
+                  trial, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, probe_bass);
+              if (faults <= settled_faults) {
+                figures = trial_figures;
+                settled = std::move(trial);
+                settled_faults = faults;
+                break;
+              }
+            }
           }
         }
+        var.notes = std::move(settled);
         break;
       }
     }
@@ -1252,6 +1525,12 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                              /*prefer_descending=*/false, /*lift_ceiling=*/kKeyboardTop);
     }
 
+    // A free variation's bass order is admitted against the line as it now
+    // stands, cadential landing included.
+    if (kind == GoldbergVariationKind::Figuration)
+      bass_treatment = admit_bass_contour(var.notes, blk);
+    declare_block_bass(blk, bass_treatment);
+
     if (fill_middle_voice) {
       const int ceiling = goldbergInnerBandCeilingFor(var.notes);
       if (ceiling > 0) {
@@ -1264,10 +1543,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                 : soundingMaterialPitch(out.material.goldberg_variations.back().notes, entry_tick),
             soundingMaterialPitch(inner_voice, entry_tick),
             soundingMaterialPitch(out.material.goldberg_aria_bass, entry_tick)};
-        const std::vector<MaterialNote> line =
-            designInnerLine(var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds,
-                            bass_surface_of_block(blk),
-                            kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()], entry);
+        const std::vector<MaterialNote> line = designInnerLine(
+            var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds, bass_treatment,
+            kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()], entry);
         ++inner_surface_slot;
         inner_voice.insert(inner_voice.end(), line.begin(), line.end());
         inner_blocks.push_back(blk);
