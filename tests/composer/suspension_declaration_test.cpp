@@ -130,6 +130,47 @@ TEST(SuspensionDeclarationTest, ToneSpanCoversHeldNoteAndResolutionOnset) {
   EXPECT_FALSE(isDeclaredSuspensionTone(patterns, 1, 150));
 }
 
+TEST(SuspensionDeclarationTest, CarrierShipsOneSoundingNoteAcrossTheBarlineAndValidates) {
+  Material material;
+  material.suspension_patterns.push_back(fourThreePattern());
+  const HarmonicPlan plan = cMajor();
+  CandidateSearch search;
+  CandidateContext ctx;
+  const auto cands = search.enumerate(carrierSpan(), plan, material, ctx);
+
+  ASSERT_EQ(cands.size(), 2u);
+  EXPECT_EQ(cands[0].start_tick, kPrepTick);
+  EXPECT_EQ(cands[0].duration, kResTick - kPrepTick);
+  EXPECT_EQ(cands[0].pitch, 67u);
+  EXPECT_EQ(cands[0].satisfied_rules, ruleBitMask(RuleBit::SuspensionPrepared));
+  EXPECT_EQ(cands[1].start_tick, kResTick);
+  EXPECT_EQ(cands[1].satisfied_rules, ruleBitMask(RuleBit::SuspensionResolved));
+
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> prov;
+  for (const auto& cand : cands) {
+    notes.push_back(makeNote(cand.start_tick, cand.duration, cand.pitch, 0));
+    NoteProvenance entry;
+    entry.source = NoteSource::Material;
+    entry.voice_intent = VoiceIntent::SuspensionCarrier;
+    entry.satisfied_rules = cand.satisfied_rules;
+    prov.push_back(entry);
+  }
+  notes.push_back(makeNote(kPrepTick, kTicksPerBeat, 48, 1));
+  notes.push_back(makeNote(kSusTick, 2 * kTicksPerBeat, 50, 1));
+  prov.resize(notes.size());
+
+  // No note of the suspended voice starts on the barline, yet the figure is a
+  // validated prepared dissonance.
+  for (const auto& note : notes) {
+    if (note.voice == 0)
+      EXPECT_NE(note.start_tick, kSusTick);
+  }
+  const ValidationReport report = Validator{}.validate(notes, prov, plan, material);
+  EXPECT_FALSE(hasSuspensionFailure(report));
+  EXPECT_FALSE(hasRule(report, "vertical_dissonance"));
+}
+
 TEST(SuspensionDeclarationTest, CarrierStampsDeclaredBitsAndTheEmittedFigureValidates) {
   Material material;
   material.suspension_patterns.push_back(fourThreePattern());

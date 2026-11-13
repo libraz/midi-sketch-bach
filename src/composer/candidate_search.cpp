@@ -239,10 +239,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
 
   if (span.intent == VoiceIntent::SuspensionCarrier) {
     // Replay each SuspensionPattern that targets this span's voice and falls
-    // inside the span window. Emits three notes (preparation, suspension,
-    // resolution) per pattern. SuspensionPrepared / SuspensionResolved mark the
-    // preparation and resolution so the Validator and downstream gates can
-    // assert the figure actually shipped.
+    // inside the span window. Emits two notes per pattern: the held tone from the
+    // preparation through the suspension (one sounding note across the barline),
+    // then the resolution. SuspensionPrepared / SuspensionResolved mark them so the
+    // Validator and downstream gates can assert the figure actually shipped.
+    // A pattern whose preparation and suspension pitches differ cannot be held as
+    // one tone and emits nothing, so the Validator reports it.
     for (const auto& pattern : material.suspension_patterns) {
       if (pattern.voice != span.voice)
         continue;
@@ -250,24 +252,18 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (pattern.resolution_tick >= span.end_tick)
         continue;
-      // Preparation and suspension durations follow tick distances exactly. A
-      // one-beat resolution is followed by an explicit one-beat rest before the
+      if (pattern.preparation_pitch != pattern.suspension_pitch)
+        continue;
+      Candidate held;
+      held.start_tick = pattern.preparation_tick;
+      held.duration = pattern.resolution_tick - pattern.preparation_tick;
+      held.pitch = pattern.suspension_pitch;
+      held.score = 1.0f;
+      held.satisfied_rules =
+          declaredSuspensionBits(material.suspension_patterns, span.voice, held.start_tick);
+      out.push_back(held);
+      // A one-beat resolution is followed by an explicit one-beat rest before the
       // original carrier resumes; installSuspensionCarrier reserves that window.
-      Candidate prep;
-      prep.start_tick = pattern.preparation_tick;
-      prep.duration = pattern.suspension_tick - pattern.preparation_tick;
-      prep.pitch = pattern.preparation_pitch;
-      prep.score = 1.0f;
-      prep.satisfied_rules =
-          declaredSuspensionBits(material.suspension_patterns, span.voice, prep.start_tick);
-      out.push_back(prep);
-      Candidate sus;
-      sus.start_tick = pattern.suspension_tick;
-      sus.duration = pattern.resolution_tick - pattern.suspension_tick;
-      sus.pitch = pattern.suspension_pitch;
-      sus.score = 1.0f;
-      sus.satisfied_rules = 0;
-      out.push_back(sus);
       Candidate res;
       res.start_tick = pattern.resolution_tick;
       res.duration = kQuarter;
