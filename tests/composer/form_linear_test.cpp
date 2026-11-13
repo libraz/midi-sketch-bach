@@ -31,6 +31,7 @@
 #include "composer/rule_helpers.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -294,6 +295,151 @@ TEST(FormLinearCello, EveryNoteStepAvoidsForbiddenLeaps) {
                 << " minor=" << minor << " bars=" << bars << " tick " << notes[idx].start_tick
                 << " (" << static_cast<int>(notes[idx - 1].pitch) << "->"
                 << static_cast<int>(notes[idx].pitch) << ")";
+          }
+        }
+      }
+    }
+  }
+}
+
+std::vector<NoteEvent> celloLine(SubjectCharacter character, std::uint32_t seed, bool minor,
+                                 std::uint16_t bars) {
+  ComposeRequest req;
+  req.form = FormType::CelloPrelude;
+  req.seed = seed;
+  req.is_minor = minor;
+  req.target_bars = bars;
+  req.character = character;
+  HarnessFixture fx;
+  EXPECT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+  std::vector<NoteEvent> notes = Composer{}.run(fx.material, fx.harmony, fx.voice_plan).notes;
+  std::sort(notes.begin(), notes.end(),
+            [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+  return notes;
+}
+
+constexpr std::array<SubjectCharacter, 4> kCharacters = {
+    {SubjectCharacter::Severe, SubjectCharacter::Playful, SubjectCharacter::Noble,
+     SubjectCharacter::Restless}};
+
+// The solo-suite preludes span an octave or more in most bars and reach the
+// low strings; the bariolage pedal dropped an octave is what gives this line
+// that depth. Across the sweep a share of the sixteenth bars spans an octave,
+// and most pieces reach below B2 without leaving the cello's compass.
+TEST(FormLinearCello, BariolagePedalReachesTheLowStrings) {
+  int wide_bars = 0;
+  int figuration_bars = 0;
+  int low_pieces = 0;
+  int pieces = 0;
+  for (SubjectCharacter character : kCharacters) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : kMinorFlags) {
+        const std::vector<NoteEvent> notes = celloLine(character, seed, minor, 32);
+        ASSERT_FALSE(notes.empty());
+        std::map<Tick, std::pair<int, int>> bar_range;
+        std::map<Tick, int> bar_notes;
+        int lowest = 127;
+        for (const NoteEvent& note : notes) {
+          const Tick bar = note.start_tick / kTicksPerBar;
+          auto [iter, inserted] = bar_range.try_emplace(bar, note.pitch, note.pitch);
+          iter->second.first = std::min(iter->second.first, static_cast<int>(note.pitch));
+          iter->second.second = std::max(iter->second.second, static_cast<int>(note.pitch));
+          ++bar_notes[bar];
+          lowest = std::min(lowest, static_cast<int>(note.pitch));
+        }
+        for (const auto& [bar, range] : bar_range) {
+          if (bar_notes[bar] != 16)
+            continue;  // the held cadential landing is not figuration.
+          ++figuration_bars;
+          if (range.second - range.first >= 12)
+            ++wide_bars;
+        }
+        EXPECT_GE(lowest, 36) << "seed=" << seed << " minor=" << minor;
+        ++pieces;
+        if (lowest < 47)
+          ++low_pieces;
+      }
+    }
+  }
+  ASSERT_GT(figuration_bars, 0);
+  EXPECT_GE(static_cast<double>(wide_bars) / static_cast<double>(figuration_bars), 0.05)
+      << wide_bars << "/" << figuration_bars << " bars span an octave";
+  EXPECT_GE(low_pieces * 4, pieces * 3) << low_pieces << "/" << pieces << " pieces go below B2";
+}
+
+// No note-to-note leap of the line, bar seams and the cadential landing
+// included, is wider than an octave: the dropped pedal is placed only where
+// both of its seams stay within that bound.
+TEST(FormLinearCello, NoLeapIsWiderThanAnOctave) {
+  for (SubjectCharacter character : kCharacters) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : kMinorFlags) {
+        for (std::uint16_t bars : testLengths(FormType::CelloPrelude)) {
+          const std::vector<NoteEvent> notes = celloLine(character, seed, minor, bars);
+          for (std::size_t idx = 1; idx < notes.size(); ++idx) {
+            const int leap = std::abs(static_cast<int>(notes[idx].pitch) -
+                                      static_cast<int>(notes[idx - 1].pitch));
+            EXPECT_LE(leap, 12) << "character=" << static_cast<int>(character) << " seed=" << seed
+                                << " minor=" << minor << " bars=" << bars << " tick "
+                                << notes[idx].start_tick;
+          }
+        }
+      }
+    }
+  }
+}
+
+// The line sounds inside the solo cello compass in every output key: the
+// builder bounds its register by the key's transposition, so the lowest and
+// highest sounding pitches (composed pitch plus that offset; the output octave
+// shift is zero for a line already inside the compass) stay within C2-A5, and
+// no leap, bar seams included, exceeds an octave.
+TEST(FormLinearCello, SoundsInsideTheSoloCompassInEveryKey) {
+  constexpr std::array<Key, 12> kKeys = {{Key::C, Key::Cs, Key::D, Key::Eb, Key::E, Key::F, Key::Fs,
+                                          Key::G, Key::Ab, Key::A, Key::Bb, Key::B}};
+  const std::uint16_t natural = formSpec(FormType::CelloPrelude).natural_bars;
+  for (Key key : kKeys) {
+    const int offset = keyTranspositionSemitones(key);
+    for (SubjectCharacter character : kCharacters) {
+      for (std::uint32_t seed : kSeeds) {
+        for (bool minor : kMinorFlags) {
+          for (std::uint16_t bars :
+               {natural, static_cast<std::uint16_t>(32), static_cast<std::uint16_t>(128)}) {
+            ComposeRequest req;
+            req.form = FormType::CelloPrelude;
+            req.seed = seed;
+            req.is_minor = minor;
+            req.target_bars = bars;
+            req.character = character;
+            req.tonic = key;
+            HarnessFixture fx;
+            ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+            std::vector<NoteEvent> notes =
+                Composer{}.run(fx.material, fx.harmony, fx.voice_plan).notes;
+            ASSERT_FALSE(notes.empty());
+            std::sort(notes.begin(), notes.end(), [](const NoteEvent& x, const NoteEvent& y) {
+              return x.start_tick < y.start_tick;
+            });
+            int lowest = 127;
+            int highest = 0;
+            for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+              const int pitch = static_cast<int>(notes[idx].pitch);
+              lowest = std::min(lowest, pitch + offset);
+              highest = std::max(highest, pitch + offset);
+              if (idx > 0) {
+                EXPECT_LE(std::abs(pitch - static_cast<int>(notes[idx - 1].pitch)), 12)
+                    << "key=" << keyToString(key) << " character=" << static_cast<int>(character)
+                    << " seed=" << seed << " minor=" << minor << " bars=" << bars << " tick "
+                    << notes[idx].start_tick;
+              }
+            }
+            const std::string where = std::string("key=") + keyToString(key) +
+                                      " character=" + std::to_string(static_cast<int>(character)) +
+                                      " seed=" + std::to_string(seed) +
+                                      " minor=" + std::to_string(minor) +
+                                      " bars=" + std::to_string(bars);
+            EXPECT_GE(lowest, string_range::kCelloLow) << where;
+            EXPECT_LE(highest, string_range::kCelloHigh) << where;
           }
         }
       }

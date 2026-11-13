@@ -30,14 +30,12 @@ using detail::Mode;
 //
 // Progression: one chord per bar from buildCadencedProgression (4-bar blocks
 // cycling the diatonic catalog, V -> I close). Figure: each bar is sixteen 16th
-// notes (group_size = 4 -> four implicit cells per bar) forming a COMPACT
-// scalar wave -- the line opens on a chord tone, runs scalewise up the diatonic
-// scale and folds back down, predominantly by step. This is the CelloPrelude/16/17
-// note language (a stepwise-dominant running figuration touching chord tones)
-// rather than wide bass-fifth-third broken chords: the BWV1007 prelude keeps a
-// COMPACT voicing where the line moves mostly by step or small skip between
-// neighbouring sixteenths, so the model-scorer's melodic-interval cost stays
-// low (large_leap_ratio ~ 0, no remote leaps).
+// notes (group_size = 4 -> four implicit cells per bar) forming a scalar wave
+// -- the line opens on a chord tone, runs scalewise up the diatonic scale and
+// folds back down, predominantly by step -- rather than wide bass-fifth-third
+// broken chords on every note. The register depth of the solo suites comes from
+// the bariolage bars, whose pedal can drop an octave to the low strings so the
+// bar spans an octave and implies a bass; no note-to-note leap exceeds an octave.
 //
 // The validator reconstructs two implicit voices from the cell (per-beat) min
 // (bass stream) and max (top stream). For a scalar wave both streams move
@@ -54,6 +52,11 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   const Tick kSix = kTicksPerBeat / 4;  // sixteenth note.
   constexpr int kGroup = 4;             // four sixteenths per implicit cell.
   constexpr int kNotesPerBar = 16;      // sixteen sixteenths per bar.
+  constexpr int kMaxLineLeap = 12;      // widest note-to-note leap the line takes.
+  // The solo cello compass in this frame: the output transposes by the key
+  // offset, so the line must sit that far inside it to sound within it.
+  const int line_floor = string_range::kCelloLow - req.key_transposition_semitones;
+  const int line_ceiling = string_range::kCelloHigh - req.key_transposition_semitones;
 
   std::vector<ChordSpec> chords = buildCadencedProgression(bars, req.seed, mode,
                                                            /*cello_implicit_safe=*/true);
@@ -102,21 +105,31 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     const ArcPoint point = req.arc(std::min(cyc, req.cycle_count - 1));
     return 43 + ((point.register_shift >= 6) ? 12 : 0);
   };
+  // The three triad tones of `bar_idx` (root, third, fifth), each realized in
+  // that bar's window and climbed to the octave nearest `prev`: every anchor a
+  // bar can open on.
+  auto realizedAnchorsForBar = [&](int bar_idx, int prev, int(&cands)[3]) {
+    const int root_pc = chords[static_cast<std::size_t>(bar_idx)].root_pc % 12;
+    const int third_semi = chords[static_cast<std::size_t>(bar_idx)].minor ? 3 : 4;
+    const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
+    const int wlo = barWindowLo(bar_idx);
+    for (int tone = 0; tone < 3; ++tone) {
+      int cand = wlo + (((triad_pc[tone] - wlo) % 12) + 12) % 12;
+      while (cand + 12 - prev <= prev - cand)  // climb to the nearest octave.
+        cand += 12;
+      cands[tone] = cand;
+    }
+  };
   // Chord tone of `bar_idx` NEAREST `prev`, realized in that bar's window (the
   // same voice-leading rule the per-bar loop applies). Kept as a reusable
   // helper so the cadence landing can extend the anchor chain through the
   // final V and I bars without re-emitting them.
   auto nearestAnchorForBar = [&](int bar_idx, int prev) {
-    const int root_pc = chords[static_cast<std::size_t>(bar_idx)].root_pc % 12;
-    const int third_semi = chords[static_cast<std::size_t>(bar_idx)].minor ? 3 : 4;
-    const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
-    const int wlo = barWindowLo(bar_idx);
-    int best = wlo;
+    int cands[3];
+    realizedAnchorsForBar(bar_idx, prev, cands);
+    int best = barWindowLo(bar_idx);
     int best_dist = 1 << 20;
-    for (int tone = 0; tone < 3; ++tone) {
-      int cand = wlo + (((triad_pc[tone] - wlo) % 12) + 12) % 12;
-      while (cand + 12 - prev <= prev - cand)  // climb to the nearest octave.
-        cand += 12;
+    for (const int cand : cands) {
       const int dist = std::abs(cand - prev);
       if (dist < best_dist) {
         best_dist = dist;
@@ -175,9 +188,6 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     const int reach = (tier >= 2) ? 3 : 2;
 
     const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
-    const bool chord_minor = chords[static_cast<std::size_t>(bar)].minor;
-    const int third_semi = chord_minor ? 3 : 4;
-    const int triad_pc[3] = {root_pc, (root_pc + third_semi) % 12, (root_pc + 7) % 12};
     const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
 
     // Register window: the cello's tenor range, lifted by a whole octave at the
@@ -195,13 +205,9 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // cadential landing without a forbidden seam.
     int cand_anchors[3];
     int cand_dist[3];
-    for (int tone = 0; tone < 3; ++tone) {
-      int cand = window_lo + (((triad_pc[tone] - window_lo) % 12) + 12) % 12;
-      while (cand + 12 - prev_anchor <= prev_anchor - cand)  // climb to the nearest octave.
-        cand += 12;
-      cand_anchors[tone] = cand;
-      cand_dist[tone] = std::abs(cand - prev_anchor);
-    }
+    realizedAnchorsForBar(bar, prev_anchor, cand_anchors);
+    for (int tone = 0; tone < 3; ++tone)
+      cand_dist[tone] = std::abs(cand_anchors[tone] - prev_anchor);
     int anchor_order[3] = {0, 1, 2};
     for (int aidx = 0; aidx < 3; ++aidx) {
       for (int bidx = aidx + 1; bidx < 3; ++bidx) {
@@ -297,18 +303,69 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         }
       }
     };
-    auto pedal_bariolage_bar = [&](std::array<int, 16>& p) {
-      // BWV1007-style bariolage: the anchor as a constant pedal under an
-      // upper tone that walks down one scale degree per beat. The implicit
-      // bass stream is the pedal (constant); the top stream is stepwise.
-      for (int cell = 0; cell < 4; ++cell) {
-        const int top = walk(anchor, 6 - cell, harmonic);
-        const int under = walk(anchor, 5 - cell, harmonic);
-        p[static_cast<std::size_t>(cell * 4 + 0)] = anchor;
-        p[static_cast<std::size_t>(cell * 4 + 1)] = top;
-        p[static_cast<std::size_t>(cell * 4 + 2)] = under;
-        p[static_cast<std::size_t>(cell * 4 + 3)] = top;
+    // BWV1007-style bariolage: a constant pedal under an upper tone that walks
+    // down one scale degree per beat. The implicit bass stream is the pedal
+    // (constant); the top stream is stepwise. Three pedal registers:
+    //   0: the pedal on the anchor, the upper line a seventh down to a fourth above;
+    //   1: the pedal an octave below the anchor, the upper line walking down from
+    //      the anchor, so every pedal leap stays within kMaxLineLeap;
+    //   2: as 1, but the first beat stays in the anchor's register and the
+    //      pedal enters on beat two, for when the incoming seam is too wide.
+    // A dropped register closes a fourth below the anchor, a note no other figure
+    // ends on, so it vets that closing seam itself and returns false where it
+    // fails: into the landing, by size (the landing vets read only the interval
+    // class); otherwise into every opening the next bar can take -- each of its
+    // anchors, or that anchor's dropped pedal -- by the forbidden-leap predicate,
+    // and by size through the window, since without a lift the next anchor is
+    // within a tritone of this one.
+    auto pedal_bariolage_bar = [&](std::array<int, 16>& p, int variant) {
+      if (variant == 0) {
+        for (int cell = 0; cell < 4; ++cell) {
+          const int top = walk(anchor, 6 - cell, harmonic);
+          const int under = walk(anchor, 5 - cell, harmonic);
+          p[static_cast<std::size_t>(cell * 4 + 0)] = anchor;
+          p[static_cast<std::size_t>(cell * 4 + 1)] = top;
+          p[static_cast<std::size_t>(cell * 4 + 2)] = under;
+          p[static_cast<std::size_t>(cell * 4 + 3)] = top;
+        }
+        return true;
       }
+      const int pedal = anchor - 12;
+      if (pedal < line_floor)
+        return false;
+      const bool opens_low = variant == 1;
+      if (opens_low && prev_last >= 0 && std::abs(prev_last - pedal) > kMaxLineLeap)
+        return false;
+      const int closing = walk(anchor, -3, harmonic);
+      if (landing_lo >= 0) {
+        if (std::abs(closing - landing_lo) > kMaxLineLeap ||
+            std::abs(closing - (landing_hi - 1)) > kMaxLineLeap)
+          return false;
+      } else {
+        if (barWindowLo(bar + 1) > window_lo)
+          return false;
+        int next_anchors[3];
+        realizedAnchorsForBar(bar + 1, anchor, next_anchors);
+        const Tick next_bar_tick = static_cast<Tick>(bar + 1) * kTicksPerBar;
+        for (const int next_anchor : next_anchors) {
+          for (const int opening : {next_anchor, next_anchor - 12}) {
+            if (rule_helpers::isForbiddenMelodicLeap(
+                    static_cast<std::uint8_t>(closing), static_cast<std::uint8_t>(opening),
+                    out.harmony, next_bar_tick - kSix, next_bar_tick))
+              return false;
+          }
+        }
+      }
+      for (int cell = 0; cell < 4; ++cell) {
+        const int top = walk(anchor, -cell, harmonic);
+        const int under = walk(anchor, -cell - 1, harmonic);
+        const bool upper_only = cell == 0 && !opens_low;
+        p[static_cast<std::size_t>(cell * 4 + 0)] = upper_only ? top : pedal;
+        p[static_cast<std::size_t>(cell * 4 + 1)] = upper_only ? under : top;
+        p[static_cast<std::size_t>(cell * 4 + 2)] = upper_only ? top : under;
+        p[static_cast<std::size_t>(cell * 4 + 3)] = upper_only ? under : top;
+      }
+      return true;
     };
     // Forbidden note-to-note leaps the line itself would sound: every step in
     // the bar, the seam from the previous bar's last note, and (final
@@ -342,7 +399,8 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // Vet a candidate bar exactly the way the validator's implicit-voice rules
     // read it: per-cell min/max streams, adjacent-cell forbidden leaps
     // (including the seam from the previous bar's last cell), implicit parallel
-    // perfects, and the cello's practical register ceiling.
+    // perfects, and the solo compass -- for the cadential landing too, whose
+    // trill spans the lower turn note (tonic - 3) up to the tonic.
     auto cells_safe = [&](const std::array<int, 16>& p) {
       int lo[4];
       int hi[4];
@@ -354,10 +412,12 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
           lo[cell] = std::min(lo[cell], pitch);
           hi[cell] = std::max(hi[cell], pitch);
         }
-        if (lo[cell] < 36 || hi[cell] > 76) {
+        if (lo[cell] < line_floor || hi[cell] > line_ceiling) {
           return false;
         }
       }
+      if (landing_lo >= 0 && (landing_hi - 3 < line_floor || landing_hi > line_ceiling))
+        return false;
       int pl = prev_cell_lo;
       int ph = prev_cell_hi;
       for (int cell = 0; cell < 4; ++cell) {
@@ -435,6 +495,19 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       }
       return faults == 0;
     };
+    // The pedal registers are walked in a seed-rotated order, as the cell shapes
+    // are, so which register a bar reaches varies by seed; every available one
+    // is still tried before the figure falls through.
+    const int pedal_turn = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) % 3u);
+    auto try_bariolage = [&]() {
+      for (int turn = 0; turn < 3; ++turn) {
+        if (pedal_bariolage_bar(pitches, (pedal_turn + turn) % 3) && accept())
+          return true;
+      }
+      return false;
+    };
+    // Bariolage follows the oscillation in the walk, so it is the first
+    // fallback of the plainest figure.
     auto try_figures = [&]() {
       for (int attempt = 0; attempt < 4; ++attempt) {
         switch ((pref + attempt) % 4) {
@@ -442,13 +515,14 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
             oscillation_bar(pitches);
             break;
           case 1:
+            if (try_bariolage())
+              return true;
+            continue;
+          case 2:
             run_triangle_bar(pitches);
             break;
-          case 2:
-            broken_thirds_bar(pitches);
-            break;
           default:
-            pedal_bariolage_bar(pitches);
+            broken_thirds_bar(pitches);
             break;
         }
         if (accept())
