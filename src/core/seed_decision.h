@@ -49,6 +49,7 @@ enum class SeedDecision : std::uint32_t {
   kGroundPassingSlot = 34,
   kGoldbergBassContour = 35,
   kGoldbergFigure = 36,
+  kChoraleQuarterContour = 37,
 };
 
 /// @brief Independent 32-bit draw for one decision of one piece.
