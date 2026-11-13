@@ -99,7 +99,9 @@ bool declaredSuspensionIntervals(const DeclaredSuspensionReading& reading, Suspe
 bool declaredSuspensionHolds(const HarmonicPlan& plan, const DeclaredSuspensionReading& reading,
                              SuspensionType type) {
   return declaredSuspensionPrepared(plan, reading, type) && declaredSuspensionStepsDown(reading) &&
-         declaredSuspensionAccented(plan, reading) && declaredSuspensionIntervals(reading, type);
+         declaredSuspensionAccented(plan, reading) && declaredSuspensionIntervals(reading, type) &&
+         reading.suspension_tick - reading.preparation_tick >=
+             reading.resolution_tick - reading.suspension_tick;
 }
 
 bool classifyDeclaredSuspension(const HarmonicPlan& plan, const DeclaredSuspensionReading& reading,
@@ -127,6 +129,22 @@ bool isDeclaredSuspensionTone(const std::vector<SuspensionPattern>& patterns, Vo
       return true;
   }
   return false;
+}
+
+RuleIdMask declaredSuspensionNoteBits(const std::vector<SuspensionPattern>& patterns, VoiceId voice,
+                                      Tick start_tick, Tick duration, std::uint8_t pitch) {
+  RuleIdMask bits;
+  for (const SuspensionPattern& pattern : patterns) {
+    if (pattern.voice != voice)
+      continue;
+    if (pattern.preparation_tick == start_tick &&
+        pattern.resolution_tick == start_tick + duration && pattern.preparation_pitch == pitch &&
+        pattern.suspension_pitch == pitch)
+      bits |= ruleBitMask(RuleBit::SuspensionPrepared);
+    if (pattern.resolution_tick == start_tick && pattern.resolution_pitch == pitch)
+      bits |= ruleBitMask(RuleBit::SuspensionResolved);
+  }
+  return bits;
 }
 
 }  // namespace bach::composer

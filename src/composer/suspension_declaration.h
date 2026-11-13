@@ -1,10 +1,12 @@
 #ifndef BACH_COMPOSER_SUSPENSION_DECLARATION_H
 #define BACH_COMPOSER_SUSPENSION_DECLARATION_H
 
+#include <cstdint>
 #include <vector>
 
 #include "composer/harmonic_plan.h"
 #include "composer/material.h"
+#include "composer/provenance.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -47,7 +49,9 @@ bool declaredSuspensionIntervals(const DeclaredSuspensionReading& reading, Suspe
 /// @brief The type's interval table over interval classes (semitones mod 12).
 bool suspensionIntervalClassesHold(SuspensionType type, int suspension_ic, int resolution_ic);
 
-/// @brief True when every declared-suspension rule holds for `type`.
+/// @brief True when every declared-suspension rule holds for `type`: the single-voice rules
+///        (preparation, step down, accent, intervals) and a held tone at least as long before
+///        the suspension tick as after it.
 bool declaredSuspensionHolds(const HarmonicPlan& plan, const DeclaredSuspensionReading& reading,
                              SuspensionType type);
 
@@ -61,6 +65,17 @@ bool classifyDeclaredSuspension(const HarmonicPlan& plan, const DeclaredSuspensi
 ///        onset of any pattern declared in `voice`.
 bool isDeclaredSuspensionTone(const std::vector<SuspensionPattern>& patterns, VoiceId voice,
                               Tick tick);
+
+/// @brief Provenance bits a declared suspension gives the note sounding
+///        [start_tick, start_tick + duration) at `pitch` in `voice`.
+///
+/// SuspensionPrepared: the note spans exactly [preparation_tick, resolution_tick) at the
+/// pattern's held pitch, so a note cut short by span clipping gets none.
+/// SuspensionResolved: the note starts at resolution_tick at the resolution pitch.
+/// Bits of every pattern are ORed, so a note that resolves one pattern and prepares the
+/// next carries both.
+RuleIdMask declaredSuspensionNoteBits(const std::vector<SuspensionPattern>& patterns, VoiceId voice,
+                                      Tick start_tick, Tick duration, std::uint8_t pitch);
 
 }  // namespace bach::composer
 

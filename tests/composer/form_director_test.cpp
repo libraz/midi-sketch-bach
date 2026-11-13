@@ -650,6 +650,34 @@ TEST(FormDirectorFreeCounterpoint, OnReroutesInnerVoiceToSearch) {
   EXPECT_GT(rerouted, 0u);
 }
 
+// After the reroute no declared pattern of the searched voice is left without a
+// SuspensionCarrier span to synthesize it, and carrier-hosted patterns are untouched.
+TEST(FormDirectorFreeCounterpoint, KeepsOnlyPatternsASuspensionCarrierStillSynthesizes) {
+  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+    SCOPED_TRACE(seed);
+    ComposeRequest req;
+    req.form = FormType::Passacaglia;
+    req.seed = seed;
+    HarnessFixture off_fx;
+    ASSERT_EQ(buildFormFixture(req, &off_fx), FormDirectorStatus::Ok);
+    req.enable_free_counterpoint = true;
+    HarnessFixture on_fx;
+    ASSERT_EQ(buildFormFixture(req, &on_fx), FormDirectorStatus::Ok);
+    for (const SuspensionPattern& pattern : on_fx.material.suspension_patterns) {
+      bool carried = false;
+      for (const Span& span : on_fx.voice_plan.spans) {
+        carried = carried ||
+                  (span.intent == VoiceIntent::SuspensionCarrier && span.voice == pattern.voice &&
+                   span.start_tick <= pattern.preparation_tick &&
+                   span.end_tick > pattern.resolution_tick);
+      }
+      EXPECT_TRUE(carried);
+    }
+    EXPECT_EQ(on_fx.material.suspension_patterns.size(),
+              off_fx.material.suspension_patterns.size());
+  }
+}
+
 TEST(FormDirectorFreeCounterpoint, FormsWithoutAnEligibleSecondaryVoiceAreRejected) {
   for (FormType form : kAllForms) {
     if (form == FormType::Passacaglia)

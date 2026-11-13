@@ -8,6 +8,7 @@
 #include "composer/free_counterpoint_search.h"
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
+#include "composer/suspension_declaration.h"
 
 namespace bach::composer {
 
@@ -74,22 +75,15 @@ bool clipMaterialNoteToSpan(const MaterialNote& source, const Span& span, Materi
   return true;
 }
 
-// Provenance bits for a note a declared suspension names: SuspensionPrepared on the
-// held note that starts at the preparation tick, SuspensionResolved on the note that
-// starts at the resolution tick. Keyed by (voice, onset) so a declared tie inside any
-// span intent is stamped the same way as a carrier suspension.
-RuleIdMask declaredSuspensionBits(const std::vector<SuspensionPattern>& patterns, VoiceId voice,
-                                  Tick start_tick) {
-  RuleIdMask bits;
-  for (const SuspensionPattern& pattern : patterns) {
-    if (pattern.voice != voice)
-      continue;
-    if (pattern.preparation_tick == start_tick)
-      bits |= ruleBitMask(RuleBit::SuspensionPrepared);
-    if (pattern.resolution_tick == start_tick)
-      bits |= ruleBitMask(RuleBit::SuspensionResolved);
-  }
-  return bits;
+// A replayed note as it ships: the baseline and branch bits of emitMaterialNote plus the
+// bits any declared suspension gives this exact sounding extent. Every material replay
+// branch emits through here so none carries its own stamping.
+Candidate emitReplayNote(const MaterialNote& sounding, VoiceId voice, const HarmonicPlan& plan,
+                         const Material& material, RuleIdMask branch_bits) {
+  Candidate cand = emitMaterialNote(sounding, plan, branch_bits);
+  cand.satisfied_rules |= declaredSuspensionNoteBits(
+      material.suspension_patterns, voice, sounding.start_tick, sounding.duration, sounding.pitch);
+  return cand;
 }
 
 }  // namespace
@@ -181,7 +175,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           }
         }
       }
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, extra_bits));
+      out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, extra_bits));
     }
     return out;
   }
@@ -230,8 +224,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         // EpisodeMotifSourced plus the baseline ChordTone and harmonic-plan bits (the
         // ChordTone bit keeps passing-tone tracking on the next Compose span
         // accurate).
-        out.push_back(
-            emitMaterialNote(n, harmonic_plan, ruleBitMask(RuleBit::EpisodeMotifSourced)));
+        out.push_back(emitReplayNote(n, span.voice, harmonic_plan, material,
+                                     ruleBitMask(RuleBit::EpisodeMotifSourced)));
       }
     }
     return out;
@@ -259,8 +253,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       held.duration = pattern.resolution_tick - pattern.preparation_tick;
       held.pitch = pattern.suspension_pitch;
       held.score = 1.0f;
-      held.satisfied_rules =
-          declaredSuspensionBits(material.suspension_patterns, span.voice, held.start_tick);
+      held.satisfied_rules = declaredSuspensionNoteBits(material.suspension_patterns, span.voice,
+                                                        held.start_tick, held.duration, held.pitch);
       out.push_back(held);
       // A one-beat resolution is followed by an explicit one-beat rest before the
       // original carrier resumes; installSuspensionCarrier reserves that window.
@@ -269,8 +263,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       res.duration = kQuarter;
       res.pitch = pattern.resolution_pitch;
       res.score = 1.0f;
-      res.satisfied_rules =
-          declaredSuspensionBits(material.suspension_patterns, span.voice, res.start_tick);
+      res.satisfied_rules = declaredSuspensionNoteBits(material.suspension_patterns, span.voice,
+                                                       res.start_tick, res.duration, res.pitch);
       out.push_back(res);
     }
     return out;
@@ -319,9 +313,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           if (k > 0) {
             extra_bits |= ruleBitMask(RuleBit::SequenceStep);
           }
-          extra_bits |=
-              declaredSuspensionBits(material.suspension_patterns, span.voice, beat_cursor);
-          out.push_back(emitMaterialNote(step_note, harmonic_plan, extra_bits));
+          out.push_back(emitReplayNote(step_note, span.voice, harmonic_plan, material, extra_bits));
           beat_cursor += tmpl.seed_durations[i];
         }
       }
@@ -345,8 +337,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       pedal_note.start_tick = pedal.start_tick;
       pedal_note.duration = pedal.duration;
       pedal_note.pitch = pedal.pitch;
-      out.push_back(
-          emitMaterialNote(pedal_note, harmonic_plan, ruleBitMask(RuleBit::PedalCommitted)));
+      out.push_back(emitReplayNote(pedal_note, span.voice, harmonic_plan, material,
+                                   ruleBitMask(RuleBit::PedalCommitted)));
     }
     return out;
   }
@@ -386,8 +378,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
               continue;
             if (mnote.start_tick >= span.end_tick)
               break;
-            out.push_back(
-                emitMaterialNote(mnote, harmonic_plan, ruleBitMask(RuleBit::StrettoCommitted)));
+            out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material,
+                                         ruleBitMask(RuleBit::StrettoCommitted)));
           }
         }
       }
@@ -426,7 +418,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
                       })) {
         bits |= ruleBitMask(RuleBit::SubjectVariantApplied);
       }
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, bits));
+      out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, bits));
     }
     return out;
   }
@@ -467,7 +459,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             break;
           }
         }
-        out.push_back(emitMaterialNote(mnote, harmonic_plan, extra_bits));
+        out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, extra_bits));
       }
     }
     return out;
@@ -488,7 +480,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         break;
       // NCT figure bits (CambiataDetected etc.) are stamped later by the
       // Composer's NCT post-pass, so only the baseline bits are set here.
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, 0));
+      out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, 0));
     }
     return out;
   }
@@ -510,7 +502,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, flow_bits));
+      out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, flow_bits));
     }
     return out;
   }
@@ -536,7 +528,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
             break;
           MaterialNote shifted = mnote;
           shifted.start_tick = t;
-          out.push_back(emitMaterialNote(shifted, harmonic_plan, ground_bits));
+          out.push_back(emitReplayNote(shifted, span.voice, harmonic_plan, material, ground_bits));
         }
       }
     }
@@ -570,7 +562,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (first && density_shift)
           bits |= (ruleBitMask(RuleBit::TextureDensityShift));
         first = false;
-        out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
+        out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, bits));
       }
     }
     return out;
@@ -613,11 +605,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (std::find(section.relaxed_anchor_ticks.begin(), section.relaxed_anchor_ticks.end(),
                       mnote.start_tick) != section.relaxed_anchor_ticks.end())
           note_bits |= (ruleBitMask(RuleBit::FigurationAnchorRelaxed));
-        // A clipped note ships as a shortened copy, never as the declared held tone.
-        if (clipped.start_tick == mnote.start_tick && clipped.duration == mnote.duration)
-          note_bits |=
-              declaredSuspensionBits(material.suspension_patterns, span.voice, mnote.start_tick);
-        out.push_back(emitMaterialNote(clipped, harmonic_plan, note_bits));
+        out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, note_bits));
       }
     }
     return out;
@@ -649,7 +637,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (first && section.is_section_head)
           bits |= (ruleBitMask(RuleBit::SectionTransition));
         first = false;
-        out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
+        out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, bits));
       }
     }
     return out;
@@ -675,7 +663,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (mnote.start_tick >= span.end_tick)
         break;
-      out.push_back(emitMaterialNote(mnote, harmonic_plan, cf_bits));
+      out.push_back(emitReplayNote(mnote, span.voice, harmonic_plan, material, cf_bits));
     }
     return out;
   }
@@ -737,11 +725,12 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
               MaterialNote chunk = shifted;
               chunk.start_tick = t + off;
               chunk.duration = std::min(kTicksPerBeat, shifted.duration - off);
-              out.push_back(emitMaterialNote(chunk, harmonic_plan, ground_bits));
+              out.push_back(
+                  emitReplayNote(chunk, span.voice, harmonic_plan, material, ground_bits));
             }
             continue;
           }
-          out.push_back(emitMaterialNote(shifted, harmonic_plan, ground_bits));
+          out.push_back(emitReplayNote(shifted, span.voice, harmonic_plan, material, ground_bits));
         }
       }
     }
@@ -757,8 +746,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           shifted.start_tick = base + source.start_tick;
           if (shifted.start_tick >= span.end_tick)
             break;
-          out.push_back(
-              emitMaterialNote(shifted, harmonic_plan, ruleBitMask(RuleBit::GoldbergBassReplayed)));
+          out.push_back(emitReplayNote(shifted, span.voice, harmonic_plan, material,
+                                       ruleBitMask(RuleBit::GoldbergBassReplayed)));
         }
       }
     }
@@ -779,7 +768,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           break;
         MaterialNote clipped;
         if (clipMaterialNoteToSpan(note, span, &clipped))
-          out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
+          out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, bits));
       }
       break;
     }
@@ -792,8 +781,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (note.start_tick >= span.end_tick)
         break;
-      out.push_back(
-          emitMaterialNote(note, harmonic_plan, ruleBitMask(RuleBit::GoldbergInnerVoiceRealized)));
+      out.push_back(emitReplayNote(note, span.voice, harmonic_plan, material,
+                                   ruleBitMask(RuleBit::GoldbergInnerVoiceRealized)));
     }
     return out;
   }
@@ -820,7 +809,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           break;
         MaterialNote clipped;
         if (clipMaterialNoteToSpan(mnote, span, &clipped))
-          out.push_back(emitMaterialNote(clipped, harmonic_plan, bits));
+          out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, bits));
       }
     }
     return out;
@@ -843,7 +832,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           break;
         MaterialNote clipped;
         if (clipMaterialNoteToSpan(mnote, span, &clipped))
-          out.push_back(emitMaterialNote(clipped, harmonic_plan, trio_bits));
+          out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, trio_bits));
       }
     }
     return out;
@@ -869,7 +858,7 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           break;
         MaterialNote clipped;
         if (clipMaterialNoteToSpan(mnote, span, &clipped))
-          out.push_back(emitMaterialNote(clipped, harmonic_plan, fan_bits));
+          out.push_back(emitReplayNote(clipped, span.voice, harmonic_plan, material, fan_bits));
       }
     }
     return out;

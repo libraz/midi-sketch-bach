@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "composer/arc.h"
 #include "composer/figuration.h"
@@ -428,12 +429,33 @@ FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* o
   // TrioVoiceCarrier intent.
   if (req.enable_free_counterpoint) {
     bool rerouted = false;
+    std::vector<VoiceId> searched_voices;
     for (Span& span : fixture.voice_plan.spans) {
       if (isFreeCounterpointTarget(req.form, span)) {
         span.intent = VoiceIntent::SequentialCounterline;
         rerouted = true;
+        searched_voices.push_back(span.voice);
       }
     }
+    // A search-chosen note is not authored to a declared shape, so a pattern that only
+    // the replayed material would have carried is dropped with it. A pattern a
+    // SuspensionCarrier span still synthesizes stays.
+    auto& patterns = fixture.material.suspension_patterns;
+    patterns.erase(std::remove_if(patterns.begin(), patterns.end(),
+                                  [&](const SuspensionPattern& pattern) {
+                                    if (std::find(searched_voices.begin(), searched_voices.end(),
+                                                  pattern.voice) == searched_voices.end())
+                                      return false;
+                                    return std::none_of(
+                                        fixture.voice_plan.spans.begin(),
+                                        fixture.voice_plan.spans.end(), [&](const Span& span) {
+                                          return span.intent == VoiceIntent::SuspensionCarrier &&
+                                                 span.voice == pattern.voice &&
+                                                 span.start_tick <= pattern.preparation_tick &&
+                                                 span.end_tick > pattern.resolution_tick;
+                                        });
+                                  }),
+                   patterns.end());
     if (!rerouted) {
       return FormDirectorStatus::FreeCounterpointUnavailable;
     }

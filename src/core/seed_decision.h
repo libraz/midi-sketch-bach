@@ -50,6 +50,9 @@ enum class SeedDecision : std::uint32_t {
   kGoldbergBassContour = 35,
   kGoldbergFigure = 36,
   kChoraleQuarterContour = 37,
+  kPassacagliaDelayedResolution = 38,
+  kEpisodeChainHost = 39,
+  kEpisodeChainStart = 40,
 };
 
 /// @brief Independent 32-bit draw for one decision of one piece.

@@ -1904,4 +1904,31 @@ TEST(OrnamentPassTest, ComposerRunUnaffectedWithoutPass) {
   EXPECT_TRUE(noOrnamentSourceNotes(r));
 }
 
+TEST(OrnamentPassTest, DeclaredChainStaysPlainEndToEnd) {
+  ComposeResult r = twoVoiceFixture(8);
+  std::vector<NoteEvent> before;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 0 && note.start_tick >= 960 && note.start_tick <= 4800)
+      before.push_back(note);
+  }
+  // Two chained patterns: the note starting at 2880 resolves the first and prepares the second.
+  const std::vector<SuspensionPattern> chain = {
+      {SuspensionType::Sus4_3, 960, 1920, 2880, 67, 67, 65, 0},
+      {SuspensionType::Sus4_3, 2880, 3840, 4800, 65, 65, 64, 0}};
+  applyOrnamentPass(r, baseParams(), chain);
+
+  std::vector<NoteEvent> after;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 0 && note.start_tick >= 960 && note.start_tick <= 4800)
+      after.push_back(note);
+  }
+  ASSERT_FALSE(before.empty());
+  ASSERT_EQ(after.size(), before.size());
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    EXPECT_EQ(after[i].start_tick, before[i].start_tick);
+    EXPECT_EQ(after[i].duration, before[i].duration);
+    EXPECT_NE(after[i].source, BachNoteSource::Ornament);
+  }
+}
+
 }  // namespace bach::composer
