@@ -8,7 +8,9 @@
 
 #include "composer/figuration.h"
 #include "composer/motif_ops.h"
+#include "composer/rule_helpers.h"
 #include "composer/span.h"
+#include "composer/suspension_declaration.h"
 #include "composer/tonal_answer.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -3231,26 +3233,65 @@ HarnessFixture buildHarnessFixture(HarnessPhase phase, int seed) {
   }
 
   if (spec.with_suspension) {
-    // One deterministic Sus7_6 in V0 spanning bars [subject_bars,
-    // subject_bars + 1). Prep tied across the bar line so the
-    // suspension lands on the bar-5 downbeat (strong beat = required
-    // by the validator's isStrongBeat semantics). The prep/sus pitch
-    // B5 (83) is pc 11, which lies in the consonant intersection of
-    // every kSubjectPatterns' answer-V1 column at this tick (the
-    // intersection of consonant pcs against V1 pitches across the
-    // 5 patterns reduces to {pc 2, pc 11}; B5 is the higher of the two
-    // and keeps V0 safely above V1's catalog maximum of 79). Step-down
-    // resolution to A5 (81) on beat 2.
-    SuspensionPattern sp;
-    sp.type = SuspensionType::Sus7_6;
-    sp.preparation_tick = static_cast<Tick>(subject_bars + 1) * kTicksPerBar - kTicksPerBeat;
-    sp.suspension_tick = static_cast<Tick>(subject_bars + 1) * kTicksPerBar;
-    sp.resolution_tick = sp.suspension_tick + kTicksPerBeat;
-    sp.preparation_pitch = 83;
-    sp.suspension_pitch = 83;
-    sp.resolution_pitch = 81;
-    sp.voice = 0;
-    out.material.suspension_patterns.push_back(sp);
+    // One Sus7_6 in V0 at eighth-note level against the answer, which moves every
+    // beat: the tone enters on the off-beat eighth before a strong beat, becomes a
+    // seventh when the answer strikes that beat, and steps down to a sixth on the
+    // next eighth while that answer note still sounds. The quarter-long resolution
+    // also meets the next answer note, so it must be consonant above it too. The
+    // earliest strong beat in the carrier window with such a diatonic tone wins.
+    const auto answerPitchAt = [&](Tick at) {
+      for (const MaterialNote& note : out.material.answer) {
+        if (note.start_tick <= at && at < note.start_tick + note.duration)
+          return static_cast<int>(note.pitch);
+      }
+      return -1;
+    };
+    constexpr Tick kEighth = kTicksPerBeat / 2;
+    constexpr int kHighestHeldPitch = 88;
+    const Tick window_start = static_cast<Tick>(subject_bars) * kTicksPerBar;
+    const Tick window_end = window_start + 2 * kTicksPerBar;
+    bool placed = false;
+    for (Tick sus_tick = window_start + 2 * kTicksPerBeat; !placed && sus_tick < window_end;
+         sus_tick += 2 * kTicksPerBeat) {
+      DeclaredSuspensionReading reading;
+      reading.preparation_tick = sus_tick - kEighth;
+      reading.suspension_tick = sus_tick;
+      reading.resolution_tick = sus_tick + kEighth;
+      reading.lowest_other_at_preparation = answerPitchAt(reading.preparation_tick);
+      reading.lowest_other_at_suspension = answerPitchAt(reading.suspension_tick);
+      reading.lowest_other_at_resolution = answerPitchAt(reading.resolution_tick);
+      const int next_answer = answerPitchAt(sus_tick + kTicksPerBeat);
+      for (int held = reading.lowest_other_at_suspension + 1; !placed && held <= kHighestHeldPitch;
+           ++held) {
+        for (int step = 1; !placed && step <= 2; ++step) {
+          const int resolution = held - step;
+          if (!rule_helpers::isDiatonicPc(static_cast<std::uint8_t>(held % 12),
+                                          out.harmony.tonic_pc, out.harmony.is_minor) ||
+              !rule_helpers::isDiatonicPc(static_cast<std::uint8_t>(resolution % 12),
+                                          out.harmony.tonic_pc, out.harmony.is_minor))
+            continue;
+          if (held <= reading.lowest_other_at_preparation || resolution <= next_answer)
+            continue;
+          reading.held_pitch = held;
+          reading.resolution_pitch = resolution;
+          if (!declaredSuspensionHolds(out.harmony, reading, SuspensionType::Sus7_6) ||
+              !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(resolution),
+                                                  static_cast<std::uint8_t>(next_answer)))
+            continue;
+          SuspensionPattern sp;
+          sp.type = SuspensionType::Sus7_6;
+          sp.preparation_tick = reading.preparation_tick;
+          sp.suspension_tick = reading.suspension_tick;
+          sp.resolution_tick = reading.resolution_tick;
+          sp.preparation_pitch = static_cast<std::uint8_t>(held);
+          sp.suspension_pitch = static_cast<std::uint8_t>(held);
+          sp.resolution_pitch = static_cast<std::uint8_t>(resolution);
+          sp.voice = 0;
+          out.material.suspension_patterns.push_back(sp);
+          placed = true;
+        }
+      }
+    }
   }
 
   if (spec.with_fortspinnung) {

@@ -165,7 +165,7 @@ struct HarnessPhaseSpec {
   std::uint8_t subject_bars;  // V0 SubjectCarrier length
   bool with_answer;           // adds a V1 AnswerCarrier
   bool with_third_entry;      // adds a V2 SubjectCarrier re-entry
-  bool with_suspension;       // FugueAnswerSuspension: V1 suspension carrier injected
+  bool with_suspension;       // FugueAnswerSuspension: V0 suspension carrier injected
   bool with_episode;          // FugueExpositionEpisode: V0 Episode span at bars [bars-4, bars)
   bool with_tonal_answer;  // FugueExpositionTonalAnswer: AnswerCarrier reads from tonal_answer + V0
                            // CS

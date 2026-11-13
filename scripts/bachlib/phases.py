@@ -147,6 +147,10 @@ PHASE_DEFAULTS = {
     "FugueSubject2v": {"tag": "p3", "threshold": 0.45, "min_pass": 8},
     "FugueSubject2vShort": {"tag": "p3.5", "threshold": 0.45, "min_pass": 8},
     "FugueAnswer2v": {"tag": "p4", "threshold": 0.55, "min_pass": 8},
+    # FugueAnswerSuspension closure asserts both suspension RuleBits fire:
+    #   python3 scripts/bach_tools.py closure --phase FugueAnswerSuspension \
+    #     --required-rule-bit SuspensionPrepared=13 \
+    #     --required-rule-bit SuspensionResolved=14
     "FugueAnswerSuspension": {"tag": "p4sus", "threshold": 0.55, "min_pass": 8},
     "FugueSubject3v": {"tag": "p5", "threshold": 0.60, "min_pass": 8},
     "FugueExposition3v": {"tag": "p6", "threshold": 0.65, "min_pass": 6},

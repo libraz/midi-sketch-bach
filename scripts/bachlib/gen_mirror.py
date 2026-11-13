@@ -322,6 +322,10 @@ def extract() -> dict[str, object]:
     # fixtures. The closure invocation supplies AffektCurveApplied + 1 masks.
     values["AFFEKT_CURVE_BIT"] = _parse_ruletbit(provenance, "AffektCurveApplied")
     values["FUGUE_COMPLETE_REQUIRED_BIT_COUNT"] = values["AFFEKT_CURVE_BIT"] + 1
+    values["FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS"] = (
+        _parse_ruletbit(provenance, "SuspensionPrepared"),
+        _parse_ruletbit(provenance, "SuspensionResolved"),
+    )
     values["CELLO_PRELUDE_REQUIRED_BITS"] = (
         _parse_ruletbit(provenance, "ArpeggioFlowActive"),
         _parse_ruletbit(provenance, "ImplicitVoiceTracked"),
@@ -585,6 +589,7 @@ def render(values: dict[str, object]) -> str:
         fugue_complete_rows=fugue_complete_rows,
         fugue_complete_bit_count=v["FUGUE_COMPLETE_REQUIRED_BIT_COUNT"],
         affekt_curve_bit=v["AFFEKT_CURVE_BIT"],
+        suspension_bits=_fmt_int_tuple_inline(v["FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS"]),  # type: ignore[arg-type]
         cello_bits=_fmt_int_tuple_inline(v["CELLO_PRELUDE_REQUIRED_BITS"]),  # type: ignore[arg-type]
         chaconne_bits=_fmt_int_tuple_inline(v["CHACONNE_REQUIRED_BITS"]),  # type: ignore[arg-type]
         organ_bits=_fmt_int_tuple_inline(v["ORGAN_PRELUDE_REQUIRED_BITS"]),  # type: ignore[arg-type]
@@ -1004,6 +1009,12 @@ FUGUE_COMPLETE_SUBJECTS: tuple[tuple[int, ...], ...] = (
 # --required-rule-bit masks. provenance.h RuleBit currently tops out at
 # AffektCurveApplied = {affekt_curve_bit}, so max_bit + 1 == {fugue_complete_bit_count}.
 FUGUE_COMPLETE_REQUIRED_BIT_COUNT = {fugue_complete_bit_count}
+
+# FugueAnswerSuspension stamps the two suspension RuleBits on its one declared
+# suspension (provenance.h): SuspensionPrepared = 13 on the preparation note and
+# SuspensionResolved = 14 on the resolution note. Both must be asserted or the
+# bit checks are trivially bypassed.
+FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS: tuple[int, ...] = {suspension_bits}
 
 # CelloPrelude (Solo String Flow) stamps exactly two RuleBits on every note:
 # ArpeggioFlowActive = 47 and ImplicitVoiceTracked = 48 (provenance.h). Both

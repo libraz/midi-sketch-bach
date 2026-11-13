@@ -436,6 +436,12 @@ class RequiredBitGuardTest(unittest.TestCase):
         required = [(f"Rule{bit}", bit) for bit in range(46)]
         self.assertEqual(_check_required_bits("FugueComplete", required), 2)
 
+    def test_fugue_answer_suspension_requires_both_suspension_bits(self) -> None:
+        both = [("SuspensionPrepared", 13), ("SuspensionResolved", 14)]
+        self.assertIsNone(_check_required_bits("FugueAnswerSuspension", both))
+        self.assertEqual(_check_required_bits("FugueAnswerSuspension", both[:1]), 2)
+        self.assertEqual(_check_required_bits("FugueAnswerSuspension", []), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

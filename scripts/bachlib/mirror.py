@@ -383,6 +383,12 @@ FUGUE_COMPLETE_SUBJECTS: tuple[tuple[int, ...], ...] = (
 # AffektCurveApplied = 46, so max_bit + 1 == 47.
 FUGUE_COMPLETE_REQUIRED_BIT_COUNT = 47
 
+# FugueAnswerSuspension stamps the two suspension RuleBits on its one declared
+# suspension (provenance.h): SuspensionPrepared = 13 on the preparation note and
+# SuspensionResolved = 14 on the resolution note. Both must be asserted or the
+# bit checks are trivially bypassed.
+FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS: tuple[int, ...] = (13, 14)
+
 # CelloPrelude (Solo String Flow) stamps exactly two RuleBits on every note:
 # ArpeggioFlowActive = 47 and ImplicitVoiceTracked = 48 (provenance.h). Both
 # must be asserted or the bit checks are trivially bypassed.

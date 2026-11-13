@@ -34,6 +34,7 @@ from bachlib.common import (
 )
 from bachlib.mirror import (
     FUGUE_COMPLETE_REQUIRED_BIT_COUNT,
+    FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS,
     CELLO_PRELUDE_REQUIRED_BITS,
     CHACONNE_REQUIRED_BITS,
     ORGAN_PRELUDE_REQUIRED_BITS,
@@ -157,6 +158,16 @@ def _check_required_bits(phase: str, required_rule_bit: list[tuple[str, int]]) -
             )
             return 2
 
+    if phase == "FugueAnswerSuspension":
+        miss = missing(FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS)
+        if miss:
+            sys.stderr.write(
+                "FugueAnswerSuspension closure requires --required-rule-bit masks for both "
+                f"suspension bits {list(FUGUE_ANSWER_SUSPENSION_REQUIRED_BITS)} "
+                "(SuspensionPrepared=13, SuspensionResolved=14); "
+                f"missing {miss}.\n"
+            )
+            return 2
     if phase == "CelloPrelude":
         miss = missing(CELLO_PRELUDE_REQUIRED_BITS)
         if miss:
