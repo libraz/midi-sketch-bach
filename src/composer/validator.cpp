@@ -502,6 +502,101 @@ TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes) {
   return metrics;
 }
 
+StrongBeatTally computeStrongBeatTally(const std::vector<NoteEvent>& notes,
+                                       const std::vector<NoteProvenance>& provenance,
+                                       const HarmonicPlan& plan,
+                                       const std::vector<SuspensionPattern>& suspension_patterns,
+                                       const std::vector<PedalPointDecl>& pedal_points) {
+  StrongBeatTally tally;
+  if (plan.ts_denominator == 0 || plan.ticksPerBar() == 0)
+    return tally;
+  // Every structural accent sits on the beat grid, so stepping by one beat and asking
+  // isStructuralAccent visits all of them without restating the meter table.
+  const Tick beat_ticks = kTicksPerBeat * 4 / plan.ts_denominator;
+  if (beat_ticks == 0)
+    return tally;
+
+  // Whether each declared suspension is realized as declared by the sounding pitches.
+  // The reading is built as the suspension rules build it, so a tied and a re-struck
+  // suspension tone read identically.
+  std::vector<bool> suspension_holds(suspension_patterns.size(), false);
+  if (!suspension_patterns.empty()) {
+    const VoiceOnsetIndex onset_index(notes);
+    const auto lowestOtherPitch = [&](VoiceId voice, Tick at) {
+      int lowest = -1;
+      for (VoiceId other : onset_index.activeVoices()) {
+        if (other == voice)
+          continue;
+        const std::uint8_t pitch = onset_index.pitchAt(other, at);
+        if (pitch != 0 && (lowest < 0 || pitch < lowest))
+          lowest = pitch;
+      }
+      return lowest;
+    };
+    for (std::size_t idx = 0; idx < suspension_patterns.size(); ++idx) {
+      const SuspensionPattern& sp = suspension_patterns[idx];
+      const std::uint8_t prep_actual = onset_index.pitchAt(sp.voice, sp.preparation_tick);
+      const std::uint8_t sus_actual = onset_index.pitchAt(sp.voice, sp.suspension_tick);
+      const std::uint8_t res_actual = onset_index.pitchAt(sp.voice, sp.resolution_tick);
+      DeclaredSuspensionReading reading;
+      reading.preparation_tick = sp.preparation_tick;
+      reading.suspension_tick = sp.suspension_tick;
+      reading.resolution_tick = sp.resolution_tick;
+      reading.held_pitch = sus_actual;
+      reading.resolution_pitch = res_actual;
+      reading.lowest_other_at_preparation = lowestOtherPitch(sp.voice, sp.preparation_tick);
+      reading.lowest_other_at_suspension = lowestOtherPitch(sp.voice, sp.suspension_tick);
+      reading.lowest_other_at_resolution = lowestOtherPitch(sp.voice, sp.resolution_tick);
+      suspension_holds[idx] = declaredSuspensionOrdered(reading) && prep_actual != 0 &&
+                              prep_actual == sp.preparation_pitch &&
+                              sus_actual == sp.suspension_pitch &&
+                              res_actual == sp.resolution_pitch && prep_actual == sus_actual &&
+                              declaredSuspensionHolds(plan, reading, sp.type);
+    }
+  }
+
+  for (std::size_t idx = 0; idx < notes.size() && idx < provenance.size(); ++idx) {
+    const NoteEvent& note = notes[idx];
+    const std::uint8_t pc = pitchClass(note.pitch);
+    if (isStructuralAccent(plan, note.start_tick) &&
+        !isDeclaredChordTone(activeChord(plan, note.start_tick), pc))
+      ++tally.onset;
+
+    const Tick end_tick = note.start_tick + note.duration;
+    // The first accent at or after the onset; an onset that is itself an accent is
+    // visited even for a zero-length note, so `sounding` always contains `onset`.
+    Tick tick = (note.start_tick + beat_ticks - 1) / beat_ticks * beat_ticks;
+    for (; tick < end_tick || tick == note.start_tick; tick += beat_ticks) {
+      if (!isStructuralAccent(plan, tick) || isDeclaredChordTone(activeChord(plan, tick), pc))
+        continue;
+      ++tally.sounding;
+      if (note.start_tick < tick)
+        ++tally.held_over;
+      if (provenance[idx].source == NoteSource::Ornament)
+        ++tally.ornament;
+      for (const PedalPointDecl& pedal : pedal_points) {
+        if (pedal.voice == note.voice && pedal.pitch == note.pitch && tick >= pedal.start_tick &&
+            tick < pedal.start_tick + pedal.duration) {
+          ++tally.declared_pedal;
+          break;
+        }
+      }
+      if (isDeclaredSuspensionTone(suspension_patterns, note.voice, tick)) {
+        for (std::size_t pat = 0; pat < suspension_patterns.size(); ++pat) {
+          const SuspensionPattern& sp = suspension_patterns[pat];
+          if (suspension_holds[pat] && sp.voice == note.voice &&
+              note.pitch == sp.suspension_pitch && tick >= sp.suspension_tick &&
+              tick < sp.resolution_tick) {
+            ++tally.declared_suspension;
+            break;
+          }
+        }
+      }
+    }
+  }
+  return tally;
+}
+
 ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
                                      const std::vector<NoteProvenance>& provenance,
                                      const HarmonicPlan& harmonic_plan, const Material& material,
@@ -727,6 +822,12 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
   if (!notes.empty()) {
     report.texture_metrics.push_back(computeTextureMetrics(notes));
   }
+  // Observation only: nothing below reads the tally.
+  StrongBeatTally strong_beat_tally = computeStrongBeatTally(
+      notes, provenance, harmonic_plan, material.suspension_patterns, material.pedal_points);
+  strong_beat_tally.surface =
+      audit_final_score ? StrongBeatSurface::Shipped : StrongBeatSurface::Composed;
+  report.strong_beat_tally.push_back(strong_beat_tally);
   if (!material.subject.empty()) {
     const std::size_t canonical_count =
         material.canonical_subject_note_count == 0

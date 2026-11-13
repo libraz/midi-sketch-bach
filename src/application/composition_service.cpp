@@ -280,6 +280,14 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   if (!out->final_validation.failures.empty()) {
     out->final_validation.status = composer::ValidationStatus::FailedSpan;
   }
+  // The final report measured the shipped notes only; the composed tally was taken
+  // before the ornament pass and travels with it.
+  for (const auto& tally : out->composition.validation.strong_beat_tally) {
+    if (tally.surface == composer::StrongBeatSurface::Composed) {
+      auto& tallies = out->final_validation.strong_beat_tally;
+      tallies.insert(tallies.begin(), tally);
+    }
+  }
   // After the wholesale assignment above and the budget pass, and before every
   // emitGeneratedJson call that carries `final_validation`.
   out->final_validation.wave_veto = composer::waveVetoStats();

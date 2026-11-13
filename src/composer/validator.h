@@ -81,6 +81,26 @@ RuleGeometry counterpointRuleGeometry(const std::string& rule_id);
 TextureMetrics computeTextureMetrics(const std::vector<NoteEvent>& notes);
 
 /**
+ * @brief Tally non-chord tones sounding at structural accents (observation only).
+ *
+ * Accents are those of `isStructuralAccent` under the plan's meter. Notes without a
+ * provenance entry are skipped, as the onset-based strong-beat rule skips them.
+ * The returned surface is left at its default; the caller labels it.
+ *
+ * @param notes Notes to measure.
+ * @param provenance Index-parallel provenance for `notes`.
+ * @param plan Harmonic plan supplying the chord at each accent tick.
+ * @param suspension_patterns Declared suspensions, judged against the sounding pitches.
+ * @param pedal_points Declared pedal points.
+ * @return The tally for `notes`.
+ */
+StrongBeatTally computeStrongBeatTally(const std::vector<NoteEvent>& notes,
+                                       const std::vector<NoteProvenance>& provenance,
+                                       const HarmonicPlan& plan,
+                                       const std::vector<SuspensionPattern>& suspension_patterns,
+                                       const std::vector<PedalPointDecl>& pedal_points);
+
+/**
  * @brief Count notes whose sounding pitch lies outside an instrument's declared compass.
  *
  * @param notes The notes to judge.

@@ -411,6 +411,7 @@ void resolveFixtureOrnamentContext(const HarnessFixture& fixture, FormType form,
   params->ts_numerator = fixture.harmony.ts_numerator;
   params->meter_profile = fixture.harmony.meter_profile;
   params->harmonic_plan = &fixture.harmony;
+  params->pedal_points = &fixture.material.pedal_points;
   params->exempt_voices = voicesForIntent(
       fixture.voice_plan, {VoiceIntent::GroundCarrier, VoiceIntent::PassacagliaGround,
                            VoiceIntent::GoldbergBassCarrier});
@@ -1232,6 +1233,21 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
   if (!result.validation.texture_metrics.empty()) {
     result.validation.texture_metrics.clear();
     result.validation.texture_metrics.push_back(computeTextureMetrics(result.notes));
+  }
+  // The strong-beat tally is refreshed the same way, keeping the composed entry intact.
+  if (!result.validation.strong_beat_tally.empty() && params.harmonic_plan != nullptr) {
+    auto& tallies = result.validation.strong_beat_tally;
+    tallies.erase(std::remove_if(tallies.begin(), tallies.end(),
+                                 [](const StrongBeatTally& tally) {
+                                   return tally.surface == StrongBeatSurface::Shipped;
+                                 }),
+                  tallies.end());
+    static const std::vector<PedalPointDecl> kNoPedals;
+    StrongBeatTally shipped = computeStrongBeatTally(
+        result.notes, result.provenance, *params.harmonic_plan, declared_suspensions,
+        params.pedal_points != nullptr ? *params.pedal_points : kNoPedals);
+    shipped.surface = StrongBeatSurface::Shipped;
+    tallies.push_back(shipped);
   }
 }
 

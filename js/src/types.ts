@@ -218,6 +218,15 @@ export interface GeneratedInfo {
       max_pitch: number;
     }>;
   }>;
+  strong_beat_tally?: Array<{
+    surface: 'composed' | 'shipped';
+    onset: number;
+    sounding: number;
+    held_over: number;
+    declared_suspension: number;
+    declared_pedal: number;
+    ornament: number;
+  }>;
 }
 
 /** generated.v1 document from a successful generation. */

@@ -246,7 +246,7 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
   w.value(static_cast<std::uint64_t>(validation.wave_veto.total()));
   w.endObject();
   if (!validation.subject_features.empty() || !validation.stream_segregation.empty() ||
-      !validation.texture_metrics.empty()) {
+      !validation.texture_metrics.empty() || !validation.strong_beat_tally.empty()) {
     w.key("info");
     w.beginObject();
     if (!validation.subject_features.empty()) {
@@ -333,6 +333,29 @@ std::string emitGeneratedJson(const std::vector<NoteEvent>& notes,
           w.endObject();
         }
         w.endArray();
+        w.endObject();
+      }
+      w.endArray();
+    }
+    if (!validation.strong_beat_tally.empty()) {
+      w.key("strong_beat_tally");
+      w.beginArray();
+      for (const auto& tally : validation.strong_beat_tally) {
+        w.beginObject();
+        w.key("surface");
+        writeStr(w, tally.surface == StrongBeatSurface::Shipped ? "shipped" : "composed");
+        w.key("onset");
+        w.value(tally.onset);
+        w.key("sounding");
+        w.value(tally.sounding);
+        w.key("held_over");
+        w.value(tally.held_over);
+        w.key("declared_suspension");
+        w.value(tally.declared_suspension);
+        w.key("declared_pedal");
+        w.value(tally.declared_pedal);
+        w.key("ornament");
+        w.value(tally.ornament);
         w.endObject();
       }
       w.endArray();

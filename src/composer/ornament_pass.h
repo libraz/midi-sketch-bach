@@ -118,7 +118,8 @@ struct OrnamentParams {
   Tick ticks_per_bar = kTicksPerBar;                      // meter (3/4 forms pass 1440).
   std::uint8_t ts_numerator = 4;                          // actual beat grid for strong-beat sites.
   MeterProfile meter_profile = MeterProfile::StandardTriple;
-  const HarmonicPlan* harmonic_plan = nullptr;  // non-owning local tonal context.
+  const HarmonicPlan* harmonic_plan = nullptr;                // non-owning local tonal context.
+  const std::vector<PedalPointDecl>* pedal_points = nullptr;  // non-owning declared pedals.
   std::uint16_t bpm = 72;                       // trill pacing (32nds <= 100 < 16ths).
   std::vector<VoiceId> exempt_voices;           // ground carriers: never ornamented.
   std::vector<VoiceId> skeleton_exempt_voices;  // CF: bar heads immutable, body free.
@@ -174,7 +175,8 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
  * candidate expands into its ornament sub-notes in all three views, provenance
  * stays index-parallel with notes, and ornament sub-notes carry
  * NoteSource::Ornament. `result.validation` keeps its verdict and findings, but its
- * texture_metrics are recomputed for the ornamented notes (re-run the
+ * texture_metrics and Shipped strong-beat tally (when `params.harmonic_plan` is set) are
+ * recomputed for the ornamented notes (re-run the
  * Validator separately to confirm the ornamented line still passes).
  *
  * Idempotent: a result that already carries NoteSource::Ornament notes is

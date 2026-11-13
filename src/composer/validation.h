@@ -79,6 +79,32 @@ struct TextureMetrics {
   std::vector<VoiceTextureMetrics> voices;
 };
 
+/// @brief Which note array a strong-beat tally describes.
+enum class StrongBeatSurface : std::uint8_t {
+  Composed = 0,  ///< The composed notes, before the ornament pass.
+  Shipped = 1,   ///< The ornamented notes that ship.
+};
+
+/**
+ * @brief Observation-only count of non-chord tones at structural accents.
+ *
+ * Nothing reads this tally: it is not a gate, budget, veto or ranking input.
+ * `onset` is what the onset-based `strong_beat_dissonance` rule counts (notes struck
+ * on an accent, any source). `sounding` counts every (note, accent tick) pair where a
+ * note sounds (start <= tick < end) and its pitch class is not a declared chord tone,
+ * with no exemptions; each note is judged on its own against the plan's chord. The
+ * remaining fields are independent subset counts inside `sounding` and may overlap.
+ */
+struct StrongBeatTally {
+  StrongBeatSurface surface = StrongBeatSurface::Composed;
+  int onset = 0;
+  int sounding = 0;
+  int held_over = 0;            ///< Not struck at the accent tick (start < tick).
+  int declared_suspension = 0;  ///< A declared suspension tone whose declaration holds.
+  int declared_pedal = 0;       ///< Inside a declared pedal point of the same voice and pitch.
+  int ornament = 0;             ///< Provenance source is Ornament.
+};
+
 // Which musical relation a counterpoint rule constrains.
 //
 // A LINEAR rule describes one voice's own melodic succession. When every note
@@ -184,6 +210,10 @@ struct ValidationReport {
   std::vector<SubjectFeatures> subject_features;
   std::vector<StreamSegregationSpan> stream_segregation;
   std::vector<TextureMetrics> texture_metrics;
+  // Observation-only strong-beat tallies, at most one per surface. The validator
+  // fills the entry for the notes it was given (Generation scope: Composed,
+  // FinalScore scope: Shipped); the ornament pass refreshes the Shipped entry.
+  std::vector<StrongBeatTally> strong_beat_tally;
 };
 
 }  // namespace bach::composer
