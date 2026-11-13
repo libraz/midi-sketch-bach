@@ -11,6 +11,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/rule_helpers.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -327,18 +328,7 @@ ArcPoint arcPoint(std::size_t cycle_index, std::size_t cycle_count) {
   return point;
 }
 
-FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* out) {
-  if (out == nullptr) {
-    return FormDirectorStatus::UnknownForm;
-  }
-  const std::size_t form_idx = static_cast<std::size_t>(req.form);
-  if (form_idx >= kFormSpecs.size()) {
-    return FormDirectorStatus::UnknownForm;
-  }
-  if (!isFormCharacterCompatible(req.form, req.character)) {
-    return FormDirectorStatus::IncompatibleCharacter;
-  }
-
+ResolvedRequest resolveRequest(const ComposeRequest& req) {
   const FormSpec& spec = formSpec(req.form);
 
   // The director's own DurationScale axis is target_bars; an explicit
@@ -353,10 +343,31 @@ FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* o
     cycle_count = 1;
   }
 
-  ResolvedRequest resolved{
-      bars,          req.seed, req.is_minor ? detail::Mode::Minor : detail::Mode::Major,
-      req.character, spec,     cycle_count,
+  return ResolvedRequest{
+      bars,
+      req.seed,
+      req.is_minor ? detail::Mode::Minor : detail::Mode::Major,
+      req.character,
+      spec,
+      cycle_count,
+      keyTranspositionSemitones(req.tonic),
   };
+}
+
+FormDirectorStatus buildFormFixture(const ComposeRequest& req, HarnessFixture* out) {
+  if (out == nullptr) {
+    return FormDirectorStatus::UnknownForm;
+  }
+  const std::size_t form_idx = static_cast<std::size_t>(req.form);
+  if (form_idx >= kFormSpecs.size()) {
+    return FormDirectorStatus::UnknownForm;
+  }
+  if (!isFormCharacterCompatible(req.form, req.character)) {
+    return FormDirectorStatus::IncompatibleCharacter;
+  }
+
+  const ResolvedRequest resolved = resolveRequest(req);
+  const FormSpec& spec = resolved.spec;
 
   HarnessFixture fixture;
   switch (req.form) {

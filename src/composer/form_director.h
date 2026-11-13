@@ -14,6 +14,9 @@ namespace bach::composer {
 struct ComposeRequest {
   FormType form = FormType::Fugue;
   bool is_minor = false;
+  /// Output tonic. The composition itself stays in C; this only derives the sounding offset
+  /// exposed to builders as ResolvedRequest::key_transposition_semitones.
+  Key tonic = Key::C;
   SubjectCharacter character = SubjectCharacter::Severe;
   std::uint16_t target_bars = 0;  // 0 = use the form's natural length
   std::uint32_t seed = 0;

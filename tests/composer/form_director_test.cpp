@@ -21,9 +21,11 @@
 #include "composer/arc.h"
 #include "composer/cadenced_progression.h"
 #include "composer/composer.h"
+#include "composer/form_builders.h"
 #include "composer/rule_helpers.h"
 #include "composer/validator.h"
 #include "core/basic_types.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 namespace {
@@ -662,6 +664,28 @@ TEST(FormDirectorFreeCounterpoint, FormsWithoutAnEligibleSecondaryVoiceAreReject
         << "form " << static_cast<int>(form);
     EXPECT_EQ(fixture.ts_numerator, 7);
   }
+}
+
+TEST(FormDirectorKey, ResolvedOffsetMatchesKeyTranspositionForEveryTonic) {
+  for (int idx = 0; idx < 12; ++idx) {
+    ComposeRequest request;
+    request.tonic = static_cast<Key>(idx);
+    EXPECT_EQ(resolveRequest(request).key_transposition_semitones,
+              keyTranspositionSemitones(request.tonic))
+        << "tonic " << idx;
+  }
+  ComposeRequest sharp_request;
+  sharp_request.tonic = Key::Fs;
+  EXPECT_EQ(resolveRequest(sharp_request).key_transposition_semitones, 6);
+  ComposeRequest g_request;
+  g_request.tonic = Key::G;
+  EXPECT_EQ(resolveRequest(g_request).key_transposition_semitones, -5);
+}
+
+TEST(FormDirectorKey, DefaultRequestHasNoKeyOffset) {
+  const ComposeRequest request;
+  EXPECT_EQ(request.tonic, Key::C);
+  EXPECT_EQ(resolveRequest(request).key_transposition_semitones, 0);
 }
 
 }  // namespace

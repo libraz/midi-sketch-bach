@@ -25,11 +25,22 @@ struct ResolvedRequest {
   const FormSpec& spec;
   std::size_t cycle_count;  // arc cycles for this piece (>= 1)
 
+  /// Semitone offset the MIDI output applies for the request tonic
+  /// (keyTranspositionSemitones); excludes the later whole-piece output octave shift.
+  /// Read-only register information for bounding sounding pitch. Builders must never
+  /// transpose material with it: the composition stays in C.
+  int key_transposition_semitones = 0;
+
   /// @brief Resolve the arc design-values for a cycle of this piece.
   /// @param cycle_index Cycle index in [0, cycle_count).
   /// @return The ArcPoint for the cycle.
   ArcPoint arc(std::size_t cycle_index) const { return arcPoint(cycle_index, cycle_count); }
 };
+
+/// @brief Resolve a validated request (snap/clamp, arc cycles, key offset) for a builder.
+/// @param req Request whose form/character pair has already passed validation.
+/// @return The ResolvedRequest buildFormFixture hands to the per-form builder.
+ResolvedRequest resolveRequest(const ComposeRequest& req);
 
 // One builder per FormType. Each assembles the (Material, HarmonicPlan,
 // VoicePlan) triple plus meter for its form.

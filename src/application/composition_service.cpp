@@ -198,6 +198,7 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   composer::ComposeRequest compose_request;
   compose_request.form = effective.form;
   compose_request.is_minor = effective.key.is_minor;
+  compose_request.tonic = effective.key.tonic;
   compose_request.character = effective.character;
   compose_request.target_bars = out->resolved_bars;
   compose_request.seed = out->seed;
