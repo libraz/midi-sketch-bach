@@ -74,6 +74,9 @@ ComposeResult twoVoiceFixture(int bars) {
   return result;
 }
 
+// Explicit empty declaration list for pieces that declare no suspensions.
+const std::vector<SuspensionPattern> kNoSuspensions;
+
 OrnamentParams baseParams() {
   OrnamentParams p;
   p.character = SubjectCharacter::Playful;  // ornament_density 2.
@@ -116,8 +119,8 @@ std::size_t ornamentNoteCount(const ComposeResult& r) {
 TEST(OrnamentPassTest, DeterministicForSameInputs) {
   ComposeResult a = twoVoiceFixture(8);
   ComposeResult b = twoVoiceFixture(8);
-  applyOrnamentPass(a, baseParams());
-  applyOrnamentPass(b, baseParams());
+  applyOrnamentPass(a, baseParams(), kNoSuspensions);
+  applyOrnamentPass(b, baseParams(), kNoSuspensions);
 
   ASSERT_EQ(a.notes.size(), b.notes.size());
   for (std::size_t i = 0; i < a.notes.size(); ++i) {
@@ -153,10 +156,10 @@ void expectSameResult(const ComposeResult& lhs, const ComposeResult& rhs) {
 
 TEST(OrnamentPassTest, IdempotentSecondApplicationIsNoOp) {
   ComposeResult r = twoVoiceFixture(8);
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
   ASSERT_GT(ornamentNoteCount(r), 0u);
   const ComposeResult once = r;
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
   expectSameResult(once, r);
 }
 
@@ -177,10 +180,10 @@ TEST(OrnamentPassTest, IdempotentOnShippedForms) {
     for (const NoteEvent& note : r.notes)
       end = std::max(end, note.start_tick + note.duration);
     resolveFixtureOrnamentContext(fx, form, end, &params);
-    applyOrnamentPass(r, params);
+    applyOrnamentPass(r, params, fx.material.suspension_patterns);
     ASSERT_GT(ornamentNoteCount(r), 0u) << formTypeToString(form);
     const ComposeResult once = r;
-    applyOrnamentPass(r, params);
+    applyOrnamentPass(r, params, fx.material.suspension_patterns);
     expectSameResult(once, r);
   }
 }
@@ -191,7 +194,7 @@ TEST(OrnamentPassTest, ExemptVoiceIsNeverOrnamented) {
   ComposeResult r = twoVoiceFixture(8);
   OrnamentParams p = baseParams();
   p.exempt_voices = {0};  // exempt the melody voice entirely.
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   for (const auto& n : r.notes) {
     if (n.voice == 0)
@@ -199,17 +202,17 @@ TEST(OrnamentPassTest, ExemptVoiceIsNeverOrnamented) {
   }
 }
 
-TEST(OrnamentPassTest, SuspensionCarrierIsNeverOrnamented) {
+TEST(OrnamentPassTest, DeclaredSuspensionNotesAreNeverOrnamented) {
   ComposeResult r = twoVoiceFixture(8);
   std::vector<NoteEvent> before;
   for (std::size_t i = 0; i < r.notes.size(); ++i) {
     if (r.notes[i].voice != 0)
       continue;
-    r.provenance[i].voice_intent = VoiceIntent::SuspensionCarrier;
+    r.provenance[i].satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
     before.push_back(r.notes[i]);
   }
 
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
 
   std::vector<NoteEvent> after;
   for (const NoteEvent& note : r.notes) {
@@ -225,6 +228,34 @@ TEST(OrnamentPassTest, SuspensionCarrierIsNeverOrnamented) {
   }
 }
 
+TEST(OrnamentPassTest, DeclaredSuspensionSpanIsNeverOrnamentedWithoutBits) {
+  ComposeResult r = twoVoiceFixture(8);
+  std::vector<NoteEvent> before;
+  Tick last_onset = 0;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice != 0)
+      continue;
+    before.push_back(note);
+    last_onset = std::max(last_onset, note.start_tick);
+  }
+  // The declaration alone protects every voice-0 note from the first onset through
+  // the resolution onset; none carries a suspension bit.
+  std::vector<SuspensionPattern> patterns = {
+      {SuspensionType::Sus4_3, 0, last_onset / 2 + 1, last_onset, 67, 67, 65, 0}};
+  applyOrnamentPass(r, baseParams(), patterns);
+
+  std::vector<NoteEvent> after;
+  for (const NoteEvent& note : r.notes) {
+    if (note.voice == 0)
+      after.push_back(note);
+  }
+  ASSERT_EQ(after.size(), before.size());
+  for (std::size_t i = 0; i < before.size(); ++i) {
+    EXPECT_EQ(after[i].start_tick, before[i].start_tick);
+    EXPECT_NE(after[i].source, BachNoteSource::Ornament);
+  }
+}
+
 TEST(OrnamentPassTest, DeclaredCadenceResolutionOnsetStaysPlain) {
   ComposeResult result = twoVoiceFixture(8);
   HarmonicPlan plan;
@@ -232,7 +263,7 @@ TEST(OrnamentPassTest, DeclaredCadenceResolutionOnsetStaysPlain) {
   OrnamentParams params = baseParams();
   params.harmonic_plan = &plan;
 
-  applyOrnamentPass(result, params);
+  applyOrnamentPass(result, params, kNoSuspensions);
 
   std::vector<std::size_t> resolution_notes;
   for (std::size_t i = 0; i < result.notes.size(); ++i) {
@@ -250,7 +281,7 @@ TEST(OrnamentPassTest, DeclaredCadenceResolutionOnsetStaysPlain) {
 
 TEST(OrnamentPassTest, LowestVoiceStaysClean) {
   ComposeResult r = twoVoiceFixture(8);
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
   for (const auto& n : r.notes) {
     if (n.voice == 1)  // the bass voice.
       EXPECT_NE(n.source, BachNoteSource::Ornament);
@@ -265,7 +296,7 @@ TEST(OrnamentPassTest, TotalDurationPerVoicePreserved) {
   const Tick v1_before = voiceCoverage(before.notes, 1);
 
   ComposeResult after = twoVoiceFixture(8);
-  applyOrnamentPass(after, baseParams());
+  applyOrnamentPass(after, baseParams(), kNoSuspensions);
 
   EXPECT_EQ(voiceCoverage(after.notes, 0), v0_before);
   EXPECT_EQ(voiceCoverage(after.notes, 1), v1_before);
@@ -306,7 +337,7 @@ std::pair<std::size_t, std::size_t> firstOrnamentRun(const std::vector<NoteEvent
 
 TEST(OrnamentPassTest, TrillStartsOnUpperAndEndsWithLowerNeighbourThenMain) {
   ComposeResult r = twoVoiceFixture(8);
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
 
   ASSERT_GT(ornamentNoteCount(r), 0u);
   const std::vector<NoteEvent> v0 = voiceNotes(r, 0);
@@ -351,7 +382,7 @@ TEST(OrnamentPassTest, FinalNotePerVoiceNeverOrnamented) {
 
     OrnamentParams p = baseParams();
     p.character = character;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     std::size_t final_attacks = 0;
     for (const auto& n : r.notes) {
@@ -407,7 +438,7 @@ TEST(OrnamentPassTest, LongCadenceTrillMixesAppuyAndVonUntenOpenings) {
     ComposeResult r = longCadenceNoteFixture();
     OrnamentParams p = baseParams();
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     // Collect the ornament run replacing the bar-6 half note (pitch 74).
     std::vector<NoteEvent> run;
@@ -469,7 +500,7 @@ TEST(OrnamentPassTest, LongNoteOpensWithHeldUpperAppoggiatura) {
 
     OrnamentParams p = baseParams();  // Playful: density 2, interior inner trills.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     std::vector<NoteEvent> run;
     for (const auto& n : r.notes) {
@@ -501,7 +532,7 @@ TEST(OrnamentPassTest, TrillPacingFollowsBpm) {
     ComposeResult r = twoVoiceFixture(8);
     OrnamentParams p = baseParams();
     p.bpm = bpm;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     const std::vector<NoteEvent> v0 = voiceNotes(r, 0);
     const auto [i, j] = firstOrnamentRun(v0, 4);
@@ -567,7 +598,7 @@ TEST(OrnamentPassTest, AppoggiaturaFillsFallingThirdGapAtPhraseBoundary) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;  // density 1.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (int bar : {3, 7, 11}) {
       std::vector<const NoteEvent*> group;
@@ -598,7 +629,7 @@ TEST(OrnamentPassTest, DottedAppoggiaturaLeansTwoThirds) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (int bar : {3, 7, 11}) {
       std::vector<const NoteEvent*> group;
@@ -647,7 +678,7 @@ TEST(OrnamentPassTest, TurnAnimatesIsolatedMidPhraseLongNote) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;  // density 1.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (int bar = 0; bar < 13; ++bar) {
       if (bar % 4 == 3)
@@ -701,7 +732,7 @@ TEST(OrnamentPassTest, SlideFillsRisingLeapArrival) {
 
     OrnamentParams p = baseParams();  // Playful: the slide belongs to its vocabulary.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (int bar = 0; bar < 13; ++bar) {
       std::vector<const NoteEvent*> group;
@@ -757,7 +788,7 @@ TEST(OrnamentPassTest, CharacterVocabularyGrammarAtBoundaries) {
       OrnamentParams p = baseParams();
       p.character = row.character;
       p.seed = seed;
-      applyOrnamentPass(r, p);
+      applyOrnamentPass(r, p, kNoSuspensions);
       for (int bar : {3, 7, 11}) {
         std::size_t group = 0;
         for (const auto& n : r.notes) {
@@ -786,7 +817,7 @@ TEST(OrnamentPassTest, NewVocabularySitesAreNotMandatory) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     for (int bar : {3, 7, 11}) {
       bool ornamented = false;
       for (const auto& n : r.notes) {
@@ -809,7 +840,7 @@ TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {
   p.character = SubjectCharacter::Severe;  // ornament_density 0.
   p.instrument = InstrumentType::Organ;    // unchanged -> effective 0.
   ASSERT_EQ(effectiveOrnamentDensity(p.character, p.instrument), 0u);
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   // The mandatory cadence trill must land in the last two bars (bars 6, 7),
   // and the only other density-0 site is the designed mid-piece boundary
@@ -831,7 +862,7 @@ TEST(OrnamentPassTest, CadenceTrillPresentInLastTwoBarsAtDensityZero) {
 
 TEST(OrnamentPassTest, FinalCadenceWindowContainsOneOrnamentGroup) {
   ComposeResult result = longCadenceNoteFixture();
-  applyOrnamentPass(result, baseParams());
+  applyOrnamentPass(result, baseParams(), kNoSuspensions);
   std::vector<Tick> authored_onsets;
   for (std::size_t index = 0; index < result.notes.size(); ++index) {
     if (result.notes[index].source != BachNoteSource::Ornament ||
@@ -857,7 +888,7 @@ TEST(OrnamentPassTest, OrganOrnamentsDoNotExceedManualCompass) {
   OrnamentParams p = baseParams();
   p.character = SubjectCharacter::Severe;  // mandatory cadence trill if eligible.
   p.instrument = InstrumentType::Organ;
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   for (const auto& note : r.notes) {
     EXPECT_LE(note.pitch, organ_range::kManualHigh) << "organ ornament exceeded manual compass";
@@ -884,7 +915,7 @@ TEST(OrnamentPassTest, OrganMordentOnTheTopKeyIsNotRefusedForItsUpperNeighbour) 
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Restless;  // downbeat mordents on even bars.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     for (std::size_t idx = 0; idx + 2 < r.notes.size(); ++idx) {
       const NoteEvent& first = r.notes[idx];
       if (first.voice != 0 || first.source != BachNoteSource::Ornament ||
@@ -913,7 +944,7 @@ TEST(OrnamentPassTest, SparseCharacterGetsPhraseBoundaryAppoggiaturasMidPiece) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Severe;  // ornament_density 0.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     bool mid_boundary_fired = false;
     std::vector<const NoteEvent*> mid_group;
     for (const auto& n : r.notes) {
@@ -947,7 +978,7 @@ TEST(OrnamentPassTest, PhraseBoundaryOrnamentsAreNotMandatory) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;  // ornament_density 1.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     for (int bar : {3, 7, 11}) {
       bool ornamented = false;
       for (const auto& n : r.notes) {
@@ -986,7 +1017,7 @@ TEST(OrnamentPassTest, NobleHalfNoteDownbeatTakesTurn) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Noble;  // ornament_density 1.
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     // Look for the 4-note turn on an even-bar downbeat half note outside both
     // the phrase boundaries (bar % 4 == 3) and the cadence window (bars
@@ -1034,7 +1065,7 @@ TEST(OrnamentPassTest, DensityTwoHalfNoteDownbeatKeepsInnerTrill) {
   r.tracks = Renderer{}.render(r.notes);
 
   OrnamentParams p = baseParams();  // Playful: ornament_density 2.
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   for (int bar = 0; bar < 10; bar += 2) {
     if (bar % 4 == 3)
@@ -1080,8 +1111,8 @@ TEST(OrnamentPassTest, DenserCharacterProducesAtLeastAsManyOrnaments) {
   sp.character = SubjectCharacter::Severe;
   OrnamentParams pp = baseParams();
   pp.character = SubjectCharacter::Playful;
-  applyOrnamentPass(severe, sp);
-  applyOrnamentPass(playful, pp);
+  applyOrnamentPass(severe, sp, kNoSuspensions);
+  applyOrnamentPass(playful, pp, kNoSuspensions);
 
   EXPECT_GE(ornamentNoteCount(playful), ornamentNoteCount(severe));
 }
@@ -1090,7 +1121,7 @@ TEST(OrnamentPassTest, DenserCharacterProducesAtLeastAsManyOrnaments) {
 
 TEST(OrnamentPassTest, NotesProvenanceTracksConsistent) {
   ComposeResult r = twoVoiceFixture(8);
-  applyOrnamentPass(r, baseParams());
+  applyOrnamentPass(r, baseParams(), kNoSuspensions);
 
   // Index-parallel.
   ASSERT_EQ(r.notes.size(), r.provenance.size());
@@ -1141,7 +1172,7 @@ TEST(OrnamentPassTest, MinorModeNeighboursAvoidAugmentedSecond) {
 
   OrnamentParams p = baseParams();
   p.mode = detail::Mode::Minor;
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   // Within voice 0, scan consecutive ornament sub-notes; no adjacent pair may
   // form exactly 3 semitones through pitch classes {8 (Ab), 11 (B)}.
@@ -1196,7 +1227,7 @@ TEST(OrnamentPassTest, MinorCadenceLeadingToneTrillUsesRaisedScaleMembrane) {
 
   OrnamentParams p = baseParams();
   p.mode = detail::Mode::Minor;
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, kNoSuspensions);
 
   // Collect the mandatory cadence-trill run on the bar-2 half note.
   std::vector<NoteEvent> run;
@@ -1252,7 +1283,7 @@ TEST(OrnamentPassTest, ChoralePreludePipelineValidatesCleanAfterOrnament) {
   p.seed = req.seed;
   p.ticks_per_bar = fx.harmony.ticksPerBar();
   p.skeleton_exempt_voices = skeleton;
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, fx.material.suspension_patterns);
 
   // Re-run the Validator on the ornamented notes; it must still pass.
   const ValidationReport rerun =
@@ -1280,7 +1311,7 @@ TEST(OrnamentPassTest, TrioSonataPipelineValidatesCleanAfterOrnament) {
   p.mode = detail::Mode::Major;
   p.seed = req.seed;
   p.ticks_per_bar = fx.harmony.ticksPerBar();
-  applyOrnamentPass(r, p);
+  applyOrnamentPass(r, p, fx.material.suspension_patterns);
 
   const ValidationReport rerun =
       Validator{}.validate(r.notes, r.provenance, fx.harmony, fx.material);
@@ -1323,7 +1354,7 @@ TEST(OrnamentPassTest, EmbellishedCantusFirmusKeepsBarHeadSkeleton) {
     p.character = SubjectCharacter::Noble;  // the embellished subtype.
     p.seed = seed;
     p.skeleton_exempt_voices = {0};
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (const auto& n : r.notes) {
       if (n.voice != 0)
@@ -1348,7 +1379,7 @@ TEST(OrnamentPassTest, SevereKeepsCantusFirmusPlain) {
     p.character = SubjectCharacter::Severe;
     p.seed = seed;
     p.skeleton_exempt_voices = {0};
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     for (const auto& n : r.notes) {
       if (n.voice == 0)
         EXPECT_NE(n.source, BachNoteSource::Ornament) << "Severe CF ornamented, seed " << seed;
@@ -1381,7 +1412,7 @@ TEST(OrnamentPassTest, GoldbergAriaUpliftOutpacesVariations) {
     p.character = SubjectCharacter::Severe;  // sparsest grammar: the uplift dominates.
     p.seed = seed;
     p.aria_end_tick = barToTick(4);
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (const auto& n : r.notes) {
       if (n.voice != 0 || n.source != BachNoteSource::Ornament)
@@ -1424,7 +1455,7 @@ TEST(OrnamentPassTest, PedalSoloEntryTakesMordentEnsembleBassStaysPlain) {
 
     OrnamentParams p = baseParams();
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     for (const auto& n : r.notes) {
       if (n.voice != 1 || n.source != BachNoteSource::Ornament)
@@ -1459,7 +1490,7 @@ TEST(OrnamentPassTest, CelloPreludeOrnamentsAreCadenceTrillOnly) {
     p.mode = detail::Mode::Major;
     p.seed = req.seed;
     p.ticks_per_bar = fx.harmony.ticksPerBar();
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, fx.material.suspension_patterns);
 
     const Tick piece_end = [&] {
       Tick end = 0;
@@ -1500,13 +1531,13 @@ TEST(OrnamentPassTest, ClimaxWindowIntensifiesDecorationAcrossSeeds) {
     params.seed = seed;
 
     ComposeResult plain = twoVoiceFixture(16);
-    applyOrnamentPass(plain, params);
+    applyOrnamentPass(plain, params, kNoSuspensions);
     plain_total += ornamentNoteCount(plain);
 
     params.climax_start_tick = barToTick(8);
     params.climax_end_tick = barToTick(12);
     ComposeResult windowed = twoVoiceFixture(16);
-    applyOrnamentPass(windowed, params);
+    applyOrnamentPass(windowed, params, kNoSuspensions);
     windowed_total += ornamentNoteCount(windowed);
 
     // Every extra decoration must live inside the window: notes strictly
@@ -1531,12 +1562,12 @@ TEST(OrnamentPassTest, ZeroClimaxWindowIsInert) {
   // climax_end_tick == 0 (the default) must reproduce the pre-window output.
   OrnamentParams params = baseParams();
   ComposeResult a = twoVoiceFixture(12);
-  applyOrnamentPass(a, params);
+  applyOrnamentPass(a, params, kNoSuspensions);
 
   params.climax_start_tick = 0;
   params.climax_end_tick = 0;
   ComposeResult b = twoVoiceFixture(12);
-  applyOrnamentPass(b, params);
+  applyOrnamentPass(b, params, kNoSuspensions);
 
   ASSERT_EQ(a.notes.size(), b.notes.size());
   for (std::size_t i = 0; i < a.notes.size(); ++i) {
@@ -1588,7 +1619,7 @@ TEST(OrnamentPassTest, SectionCadenceTrillFiresForSevereMidPiece) {
     p.character = SubjectCharacter::Severe;  // ornament_density 0.
     p.seed = seed;
     p.section_cadence_ticks = {barToTick(3)};
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     std::size_t bar3_subs = 0;
     for (const auto& n : r.notes) {
@@ -1609,7 +1640,7 @@ TEST(OrnamentPassTest, SectionCadenceSiteIsTopLineOnly) {
     OrnamentParams p = baseParams();  // Playful: the densest grammar.
     p.seed = seed;
     p.section_cadence_ticks = {barToTick(3)};
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
 
     std::size_t top_subs = 0;
     for (const auto& n : r.notes) {
@@ -1633,12 +1664,12 @@ TEST(OrnamentPassTest, SectionCadenceSiteIsTopLineOnly) {
 TEST(OrnamentPassTest, SectionCadenceInsideFinalWindowIsInert) {
   ComposeResult a = twoVoiceFixture(8);
   OrnamentParams pa = baseParams();
-  applyOrnamentPass(a, pa);
+  applyOrnamentPass(a, pa, kNoSuspensions);
 
   ComposeResult b = twoVoiceFixture(8);
   OrnamentParams pb = baseParams();
   pb.section_cadence_ticks = {barToTick(6)};  // inside the final two bars.
-  applyOrnamentPass(b, pb);
+  applyOrnamentPass(b, pb, kNoSuspensions);
 
   ASSERT_EQ(a.notes.size(), b.notes.size());
   for (std::size_t i = 0; i < a.notes.size(); ++i) {
@@ -1660,7 +1691,7 @@ TEST(OrnamentPassTest, RestlessQuarterBoundaryTrillFires) {
     OrnamentParams p = baseParams();
     p.character = SubjectCharacter::Restless;
     p.seed = seed;
-    applyOrnamentPass(r, p);
+    applyOrnamentPass(r, p, kNoSuspensions);
     for (int bar : {3, 7, 11}) {
       std::size_t group = 0;
       for (const auto& n : r.notes) {
@@ -1728,7 +1759,7 @@ bool decorateShippedForm(FormType form, SubjectCharacter character, std::uint32_
   for (const NoteEvent& note : plain->notes)
     end = std::max(end, note.start_tick + note.duration);
   resolveFixtureOrnamentContext(fx, form, end, &params);
-  applyOrnamentPass(*decorated, params);
+  applyOrnamentPass(*decorated, params, fx.material.suspension_patterns);
   *ticks_per_bar = fx.harmony.ticksPerBar();
   return true;
 }

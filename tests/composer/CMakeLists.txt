@@ -22,6 +22,7 @@ set(BACH_COMPOSER_TEST_SOURCES
   chord_voicing_test.cpp
   validator_test.cpp
   candidate_search_test.cpp
+  suspension_declaration_test.cpp
   texture_helpers_test.cpp
   material_pair_guard_test.cpp
   figuration_palette_test.cpp

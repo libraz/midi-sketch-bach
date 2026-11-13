@@ -245,7 +245,7 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   ornament.seed = out->seed;
   ornament.bpm = effective.bpm;
   composer::resolveFixtureOrnamentContext(fixture, effective.form, out->total_ticks, &ornament);
-  composer::applyOrnamentPass(out->composition, ornament);
+  composer::applyOrnamentPass(out->composition, ornament, fixture.material.suspension_patterns);
   // Vertical counterpoint findings are exempted from `failures` at the recorder
   // whenever every operand is an immutable carrier, which is every note the
   // shipped forms emit. Gating the per-rule totals is what lets those findings

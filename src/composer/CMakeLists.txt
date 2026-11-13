@@ -16,6 +16,7 @@ set(BACH_COMPOSER_SOURCES
   material.cpp
   voice_intent.cpp
   candidate_search.cpp
+  suspension_declaration.cpp
   free_counterpoint_search.cpp
   texture_helpers.cpp
   material_pair_guard.cpp

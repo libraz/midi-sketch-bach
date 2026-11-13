@@ -15,6 +15,7 @@
 #include "composer/motif_ops.h"
 #include "composer/rule_helpers.h"
 #include "composer/stream_segregation.h"
+#include "composer/suspension_declaration.h"
 #include "composer/voice_onset_index.h"
 #include "core/instrument_program.h"
 #include "core/pitch_utils.h"
@@ -179,17 +180,7 @@ bool suspensionHoldsAgainst(const VoiceOnsetIndex& onset_index, const std::vecto
     sus_ic = ((static_cast<int>(sus) - static_cast<int>(other_sus)) % 12 + 12) % 12;
     res_ic = ((static_cast<int>(res) - static_cast<int>(other_res)) % 12 + 12) % 12;
   }
-  switch (sp.type) {
-    case SuspensionType::Sus4_3:
-      return sus_ic == 5 && (res_ic == 3 || res_ic == 4);
-    case SuspensionType::Sus7_6:
-      return (sus_ic == 10 || sus_ic == 11) && (res_ic == 8 || res_ic == 9);
-    case SuspensionType::Sus9_8:
-      return (sus_ic == 1 || sus_ic == 2) && res_ic == 0;
-    case SuspensionType::Sus2_3:
-      return (sus_ic == 1 || sus_ic == 2) && (res_ic == 3 || res_ic == 4);
-  }
-  return false;
+  return suspensionIntervalClassesHold(sp.type, sus_ic, res_ic);
 }
 
 bool isDeclaredSuspensionDissonance(const VoiceOnsetIndex& onset_index,
@@ -1554,7 +1545,9 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     const std::uint8_t sus_actual = onset_index.pitchAt(sp.voice, sp.suspension_tick);
     const std::uint8_t res_actual = onset_index.pitchAt(sp.voice, sp.resolution_tick);
     const std::size_t prep_index = onset_index.startingAt(sp.voice, sp.preparation_tick);
-    const std::size_t sus_index = onset_index.startingAt(sp.voice, sp.suspension_tick);
+    // The note sounding at the suspension tick, whether it was struck there or held
+    // in from the preparation.
+    const std::size_t sus_index = onset_index.soundingAt(sp.voice, sp.suspension_tick);
     const std::size_t res_index = onset_index.startingAt(sp.voice, sp.resolution_tick);
     SpanId fail_span = kInvalidSpanId;
     if (sus_index < provenance.size())
@@ -1583,93 +1576,55 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       }
       return lowest;
     };
-    // The one dissonant preparation admitted: the seventh of the chord the plan
-    // declares at the preparation onset (ii7 preparing the 4-3 over V). Any
-    // other dissonant preparation still fails.
-    const auto isDeclaredChordSeventh = [&](std::uint8_t pitch, Tick at) {
-      const ChordEvent* chord = rule_helpers::chordAt(harmonic_plan, at);
-      if (chord == nullptr)
-        return false;
-      const int pc = pitch % 12;
-      for (const std::uint8_t triad_pc : rule_helpers::triadPitchClasses(*chord)) {
-        if (triad_pc == pc)
-          return false;
-      }
-      // chordPcsAt may spell a minor triad's fifth diminished; that is not a seventh.
-      return pc != (chord->root_pc + 6) % 12 &&
-             (rule_helpers::chordPcsAt(harmonic_plan, at) & detail::pcBit(pc)) != 0;
-    };
-    bool prep_ok = ordered && prep_actual != 0 && prep_actual == sp.preparation_pitch &&
-                   sus_actual == sp.suspension_pitch && res_actual == sp.resolution_pitch &&
-                   prep_actual == sus_actual;
-    if (prep_ok) {
-      const std::uint8_t other_pitch = lowestOtherPitch(sp.preparation_tick);
-      if (other_pitch == 0)
-        prep_ok = false;
-      else if (sp.type == SuspensionType::Sus2_3)
-        prep_ok = rule_helpers::isConsonantAboveBass(other_pitch, prep_actual);
-      else
-        prep_ok = rule_helpers::isConsonantAboveBass(prep_actual, other_pitch) ||
-                  isDeclaredChordSeventh(prep_actual, sp.preparation_tick);
-    }
+    const std::uint8_t other_at_prep = lowestOtherPitch(sp.preparation_tick);
+    const std::uint8_t other_at_sus = lowestOtherPitch(sp.suspension_tick);
+    const std::uint8_t other_at_res = lowestOtherPitch(sp.resolution_tick);
+    const auto otherOrNone = [](std::uint8_t pitch) { return pitch == 0 ? -1 : int{pitch}; };
+    DeclaredSuspensionReading reading;
+    reading.preparation_tick = sp.preparation_tick;
+    reading.suspension_tick = sp.suspension_tick;
+    reading.resolution_tick = sp.resolution_tick;
+    reading.held_pitch = sus_actual;
+    reading.resolution_pitch = res_actual;
+    reading.lowest_other_at_preparation = otherOrNone(other_at_prep);
+    reading.lowest_other_at_suspension = otherOrNone(other_at_sus);
+    reading.lowest_other_at_resolution = otherOrNone(other_at_res);
+    const bool prep_ok = ordered && prep_actual != 0 && prep_actual == sp.preparation_pitch &&
+                         sus_actual == sp.suspension_pitch && res_actual == sp.resolution_pitch &&
+                         prep_actual == sus_actual &&
+                         declaredSuspensionPrepared(harmonic_plan, reading, sp.type);
     if (!prep_ok)
       addSuspensionFailure("suspension_preparation");
 
-    const bool duration_ok = prep_index < notes.size() && sus_index < notes.size() &&
-                             notes[prep_index].duration >= notes[sus_index].duration;
+    // One held note spans the preparation and the suspension (the tied shape); two
+    // notes compare their own durations (the re-struck shape).
+    bool duration_ok = false;
+    const std::size_t prep_sounding = onset_index.soundingAt(sp.voice, sp.preparation_tick);
+    if (prep_sounding < notes.size() && sus_index < notes.size()) {
+      if (prep_sounding == sus_index) {
+        const Tick held_end = notes[sus_index].start_tick + notes[sus_index].duration;
+        duration_ok =
+            sp.suspension_tick - notes[sus_index].start_tick >= held_end - sp.suspension_tick;
+      } else {
+        duration_ok = notes[prep_sounding].duration >= notes[sus_index].duration;
+      }
+    }
     if (!duration_ok)
       addSuspensionFailure("suspension_preparation_duration");
 
     // The dissonance is the accent and its resolution the release, so the
     // suspension tick must be strictly stronger than the resolution tick; the
     // preparation may fall on any beat.
-    const MetricalStrength sus_strength =
-        rule_helpers::metricalStrengthAt(harmonic_plan, sp.suspension_tick);
-    const MetricalStrength res_strength =
-        rule_helpers::metricalStrengthAt(harmonic_plan, sp.resolution_tick);
-    if (static_cast<int>(sus_strength) >= static_cast<int>(res_strength))
+    if (!declaredSuspensionAccented(harmonic_plan, reading))
       addSuspensionFailure("suspension_metrical_accent");
 
     // Resolution: the suspended voice descends by a 1- or 2-semitone step,
     // the bass of a 2-3 included.
-    bool res_ok = ordered && sus_actual != 0 && res_actual != 0;
-    if (res_ok) {
-      const int delta = static_cast<int>(res_actual) - static_cast<int>(sus_actual);
-      res_ok = delta == -1 || delta == -2;
-    }
+    const bool res_ok = declaredSuspensionStepsDown(reading);
     if (!res_ok)
       addSuspensionFailure("suspension_resolution_step_down");
 
-    const std::uint8_t other_at_sus = lowestOtherPitch(sp.suspension_tick);
-    const std::uint8_t other_at_res = lowestOtherPitch(sp.resolution_tick);
-    bool interval_ok = other_at_sus != 0 && other_at_res != 0 && sus_actual != 0 && res_actual != 0;
-    int sus_ic = -1;
-    int res_ic = -1;
-    if (interval_ok && sp.type == SuspensionType::Sus2_3)
-      interval_ok = other_at_sus > sus_actual && other_at_res > res_actual;
-    if (interval_ok) {
-      if (sp.type == SuspensionType::Sus2_3) {
-        sus_ic = (static_cast<int>(other_at_sus) - static_cast<int>(sus_actual)) % 12;
-        res_ic = (static_cast<int>(other_at_res) - static_cast<int>(res_actual)) % 12;
-      } else {
-        sus_ic = ((static_cast<int>(sus_actual) - static_cast<int>(other_at_sus)) % 12 + 12) % 12;
-        res_ic = ((static_cast<int>(res_actual) - static_cast<int>(other_at_res)) % 12 + 12) % 12;
-      }
-      switch (sp.type) {
-        case SuspensionType::Sus4_3:
-          interval_ok = sus_ic == 5 && (res_ic == 3 || res_ic == 4);
-          break;
-        case SuspensionType::Sus7_6:
-          interval_ok = (sus_ic == 10 || sus_ic == 11) && (res_ic == 8 || res_ic == 9);
-          break;
-        case SuspensionType::Sus9_8:
-          interval_ok = (sus_ic == 1 || sus_ic == 2) && res_ic == 0;
-          break;
-        case SuspensionType::Sus2_3:
-          interval_ok = (sus_ic == 1 || sus_ic == 2) && (res_ic == 3 || res_ic == 4);
-          break;
-      }
-    }
+    const bool interval_ok = declaredSuspensionIntervals(reading, sp.type);
     if (!interval_ok)
       addSuspensionFailure("suspension_interval");
 

@@ -12,6 +12,7 @@
 #include "composer/form_director.h"
 #include "composer/renderer.h"
 #include "composer/rule_helpers.h"
+#include "composer/suspension_declaration.h"
 #include "composer/texture_helpers.h"
 #include "composer/validator.h"
 #include "core/instrument_program.h"
@@ -458,7 +459,8 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
   return static_cast<std::uint8_t>(density);
 }
 
-void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
+void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
+                       const std::vector<SuspensionPattern>& declared_suspensions) {
   if (result.notes.empty())
     return;
   if (result.notes.size() != result.provenance.size())
@@ -585,12 +587,17 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params) {
                                    prov.voice_intent == VoiceIntent::SubjectCarrierAugmented ||
                                    prov.voice_intent == VoiceIntent::SubjectCarrierDiminished ||
                                    prov.voice_intent == VoiceIntent::SubjectCarrierInverted;
+    // A declared suspension's held span and resolution stay plain, whatever span carries them.
+    const RuleIdMask suspension_bits =
+        ruleBitMask(RuleBit::SuspensionPrepared) | ruleBitMask(RuleBit::SuspensionResolved);
+    const bool declared_suspension =
+        (prov.satisfied_rules & suspension_bits).any() ||
+        isDeclaredSuspensionTone(declared_suspensions, note.voice, note.start_tick);
     // Eighth notes are admitted as mordent candidates at the phrase-boundary
     // sites only; sixteenths and shorter are never ornamented.
-    return prov.voice_intent != VoiceIntent::SuspensionCarrier && !cadence_resolution &&
-           !subject_statement && note.duration >= kEighth &&
-           !isExempt(params.exempt_voices, note.voice) && !skeleton_plain &&
-           note.start_tick != last_onset[note.voice];
+    return !declared_suspension && !cadence_resolution && !subject_statement &&
+           note.duration >= kEighth && !isExempt(params.exempt_voices, note.voice) &&
+           !skeleton_plain && note.start_tick != last_onset[note.voice];
   };
 
   // The cadential landing of a cadence bar: its longest top-line tone of a

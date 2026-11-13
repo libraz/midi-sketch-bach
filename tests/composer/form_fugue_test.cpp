@@ -2837,7 +2837,7 @@ TEST(FormFuguePreludeAndFugueTest, LongFormStaysParallelFreeThroughOrnamentPass)
     params.mode = detail::Mode::Major;
     params.seed = seed;
     params.ticks_per_bar = fx.harmony.ticksPerBar();
-    applyOrnamentPass(r, params);
+    applyOrnamentPass(r, params, fx.material.suspension_patterns);
     EXPECT_LE(pfCountParallelPerfects(r.notes), 2) << "seed " << seed;
   }
 }

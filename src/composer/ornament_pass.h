@@ -8,6 +8,7 @@
 #include "composer/figuration.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
+#include "composer/material.h"
 #include "core/basic_types.h"
 
 namespace bach::composer {
@@ -21,7 +22,7 @@ namespace bach::composer {
 //
 // The pass is a pure function of its inputs (ComposeResult + OrnamentParams):
 // every placement choice is derived from (seed, bar, voice) hashes, never from
-// an RNG, so applyOrnamentPass(result, params) is reproducible.
+// an RNG, so applyOrnamentPass(result, params, suspensions) is reproducible.
 //
 // Musical contract (port of the legacy ornament rules, composer-adapted):
 //   * Candidate notes: duration >= a quarter note, not in `exempt_voices`,
@@ -182,8 +183,13 @@ std::uint8_t effectiveOrnamentDensity(SubjectCharacter character, InstrumentType
  * @param result The composed result to ornament in place.
  * @param params Ornament configuration (character, instrument, mode, seed,
  *               meter, exempt voices).
+ * @param declared_suspensions The piece's declared suspensions (pass the fixture's
+ *               `material.suspension_patterns`; empty when none are declared). The
+ *               held span and resolution onset of each stay plain, as does any note
+ *               carrying a suspension rule bit.
  */
-void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params);
+void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
+                       const std::vector<SuspensionPattern>& declared_suspensions);
 
 /**
  * @brief Deterministic placement hash keyed by (seed, bar, voice).

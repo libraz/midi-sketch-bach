@@ -213,7 +213,7 @@ TEST(CompassPlacementTest, ChaconneSoundsInsideTheViolinCompassInEveryKey) {
       ornament.seed = seed;
       ornament.bpm = application::kDefaultBpm;
       resolveFixtureOrnamentContext(fixture, request.form, total, &ornament);
-      applyOrnamentPass(result, ornament);
+      applyOrnamentPass(result, ornament, fixture.material.suspension_patterns);
       const auto placement = placeInOutputCompass(
           &result, fixture.material, fixture.harmony, key, InstrumentType::Violin,
           fixture.harmony.ticksPerBar(), [&](const ComposeResult& placed) {

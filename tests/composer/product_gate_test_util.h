@@ -197,7 +197,7 @@ inline ProductGateResult runProductGate(const ComposeRequest& request, Key tonic
   ornament.seed = request.seed;
   ornament.bpm = application::kDefaultBpm;
   resolveFixtureOrnamentContext(out.fixture, request.form, total_ticks, &ornament);
-  applyOrnamentPass(out.shipped, ornament);
+  applyOrnamentPass(out.shipped, ornament, out.fixture.material.suspension_patterns);
   const auto validate = [&](const ComposeResult& result) {
     ValidationReport report =
         Validator{}.validate(result.notes, result.provenance, out.fixture.harmony,

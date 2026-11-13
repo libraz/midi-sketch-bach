@@ -74,6 +74,24 @@ bool clipMaterialNoteToSpan(const MaterialNote& source, const Span& span, Materi
   return true;
 }
 
+// Provenance bits for a note a declared suspension names: SuspensionPrepared on the
+// held note that starts at the preparation tick, SuspensionResolved on the note that
+// starts at the resolution tick. Keyed by (voice, onset) so a declared tie inside any
+// span intent is stamped the same way as a carrier suspension.
+RuleIdMask declaredSuspensionBits(const std::vector<SuspensionPattern>& patterns, VoiceId voice,
+                                  Tick start_tick) {
+  RuleIdMask bits;
+  for (const SuspensionPattern& pattern : patterns) {
+    if (pattern.voice != voice)
+      continue;
+    if (pattern.preparation_tick == start_tick)
+      bits |= ruleBitMask(RuleBit::SuspensionPrepared);
+    if (pattern.resolution_tick == start_tick)
+      bits |= ruleBitMask(RuleBit::SuspensionResolved);
+  }
+  return bits;
+}
+
 }  // namespace
 
 std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
@@ -220,14 +238,11 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
   }
 
   if (span.intent == VoiceIntent::SuspensionCarrier) {
-    // Replay each SuspensionPattern that targets this span's voice and
-    // falls inside the span window. Emits exactly three notes
-    // (preparation, suspension, resolution) per pattern. Score = 1.0.
-    // Provenance bits SuspensionPrepared and SuspensionResolved are set
-    // on the resolution note so the Validator and downstream gates can
-    // assert that prep/sus/res actually shipped (not just intended).
-    Tick prep_duration = kQuarter;
-    Tick sus_duration = kQuarter;
+    // Replay each SuspensionPattern that targets this span's voice and falls
+    // inside the span window. Emits three notes (preparation, suspension,
+    // resolution) per pattern. SuspensionPrepared / SuspensionResolved mark the
+    // preparation and resolution so the Validator and downstream gates can
+    // assert the figure actually shipped.
     for (const auto& pattern : material.suspension_patterns) {
       if (pattern.voice != span.voice)
         continue;
@@ -235,22 +250,20 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         continue;
       if (pattern.resolution_tick >= span.end_tick)
         continue;
-      // Preparation and suspension durations follow tick distances exactly so
-      // the held-over dissonance reads as a tie. A one-beat resolution is
-      // followed by an explicit one-beat rest before the original carrier
-      // resumes; installSuspensionCarrier reserves that complete window.
-      prep_duration = pattern.suspension_tick - pattern.preparation_tick;
-      sus_duration = pattern.resolution_tick - pattern.suspension_tick;
+      // Preparation and suspension durations follow tick distances exactly. A
+      // one-beat resolution is followed by an explicit one-beat rest before the
+      // original carrier resumes; installSuspensionCarrier reserves that window.
       Candidate prep;
       prep.start_tick = pattern.preparation_tick;
-      prep.duration = prep_duration;
+      prep.duration = pattern.suspension_tick - pattern.preparation_tick;
       prep.pitch = pattern.preparation_pitch;
       prep.score = 1.0f;
-      prep.satisfied_rules = ruleBitMask(RuleBit::SuspensionPrepared);
+      prep.satisfied_rules =
+          declaredSuspensionBits(material.suspension_patterns, span.voice, prep.start_tick);
       out.push_back(prep);
       Candidate sus;
       sus.start_tick = pattern.suspension_tick;
-      sus.duration = sus_duration;
+      sus.duration = pattern.resolution_tick - pattern.suspension_tick;
       sus.pitch = pattern.suspension_pitch;
       sus.score = 1.0f;
       sus.satisfied_rules = 0;
@@ -260,7 +273,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
       res.duration = kQuarter;
       res.pitch = pattern.resolution_pitch;
       res.score = 1.0f;
-      res.satisfied_rules = ruleBitMask(RuleBit::SuspensionResolved);
+      res.satisfied_rules =
+          declaredSuspensionBits(material.suspension_patterns, span.voice, res.start_tick);
       out.push_back(res);
     }
     return out;
@@ -309,6 +323,8 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
           if (k > 0) {
             extra_bits |= ruleBitMask(RuleBit::SequenceStep);
           }
+          extra_bits |=
+              declaredSuspensionBits(material.suspension_patterns, span.voice, beat_cursor);
           out.push_back(emitMaterialNote(step_note, harmonic_plan, extra_bits));
           beat_cursor += tmpl.seed_durations[i];
         }
@@ -601,6 +617,10 @@ std::vector<Candidate> CandidateSearch::enumerate(const Span& span,
         if (std::find(section.relaxed_anchor_ticks.begin(), section.relaxed_anchor_ticks.end(),
                       mnote.start_tick) != section.relaxed_anchor_ticks.end())
           note_bits |= (ruleBitMask(RuleBit::FigurationAnchorRelaxed));
+        // A clipped note ships as a shortened copy, never as the declared held tone.
+        if (clipped.start_tick == mnote.start_tick && clipped.duration == mnote.duration)
+          note_bits |=
+              declaredSuspensionBits(material.suspension_patterns, span.voice, mnote.start_tick);
         out.push_back(emitMaterialNote(clipped, harmonic_plan, note_bits));
       }
     }
