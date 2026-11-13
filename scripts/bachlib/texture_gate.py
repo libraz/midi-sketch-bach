@@ -225,9 +225,10 @@ class FormThresholds:
 FANTASIA_DUX_BARS = 4
 FANTASIA_DEFAULT_BARS = 32
 
-# Middle-entry count at which the fugue builder switches from a uniform entry
-# schedule to corpus-derived spacing (kVariableScheduleMinEntries, form_fugue.cpp).
-VARIABLE_SCHEDULE_MIN_ENTRIES = 8
+# Fewest middle entries an entry plan can be periodic over: two intervals need
+# three entries. The fugue builder spaces its entries from the corpus interval
+# table at every length, so the axis applies from this count on.
+ENTRY_PLAN_MIN_ENTRIES = 3
 
 
 # Texture targets per form. Fugue forms use the historical enforced gate
@@ -588,10 +589,9 @@ class GateCase:
             results["compass"] = (
                 self.compass_violation_count <= thresholds.max_compass_violations
             )
-        # The builder keeps a uniform entry schedule until it would place
-        # VARIABLE_SCHEDULE_MIN_ENTRIES middle entries, so nonperiodicity is
-        # only demanded from that size on.
-        if len(self.middle_entry_bars or []) >= VARIABLE_SCHEDULE_MIN_ENTRIES:
+        # Periodicity is undefined below two entry intervals, so the axis is
+        # omitted there rather than reported as a pass.
+        if len(self.middle_entry_bars or []) >= ENTRY_PLAN_MIN_ENTRIES:
             results["entry_plan_nonperiodic"] = self.entry_plan_nonperiodic
         if self.target_bars is not None:
             return results

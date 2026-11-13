@@ -25,6 +25,7 @@
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
@@ -33,8 +34,8 @@ namespace bach::composer {
 //
 // Both builders are dedicated assemblers. They honour ResolvedRequest length, mode, character,
 // and the arc curve. The fugue is the flagship form, so it is built from a
-// fixed exposition + a variable number of repeatable 8-bar device-cycles +
-// a fixed coda; the prelude+fugue pair reuses the same fugue assembly behind a
+// fixed exposition + a variable number of repeatable device-cycles of 8 to 10
+// bars + a fixed coda; the prelude+fugue pair reuses the same fugue assembly behind a
 // figuration prelude.
 //
 // EVERY note in both forms is NoteSource::Material (verbatim carriers). At
@@ -148,6 +149,9 @@ std::array<std::uint8_t, 16> invertDiatonicLine(const std::array<std::uint8_t, 1
 constexpr std::array<std::uint8_t, 3> kVoiceKeyPc = {7, 9, 5};       // V0->V, V1->vi, V2->IV.
 constexpr std::array<std::uint8_t, 3> kMinorVoiceKeyPc = {7, 3, 5};  // V0->v, V1->III, V2->iv.
 constexpr std::array<int, 3> kMinorVoiceDegreeShift = {4, 2, 3};
+// The voice whose station takes the inverted entry: the middle voice, which
+// states the mediant-related key in either mode.
+constexpr int kInvertedEntryVoice = 1;
 
 std::uint8_t middleEntryKeyPc(int voice, Mode mode) {
   const std::size_t index = static_cast<std::size_t>(voice);
@@ -184,17 +188,6 @@ struct DevelopmentWindow {
 constexpr int kMinEpisodeBars = 2;
 constexpr int kMaxEpisodeBars = 6;
 
-// Fixed-schedule cycle length: a 4-bar subject statement plus a fixed 4-bar
-// episode (the entry interval of 8 minus the 4-bar subject). Used to count how
-// many entries a uniform schedule would place in a given development span.
-constexpr int kFixedCycleBars = kSubjectBars + (8 - kSubjectBars);
-
-// Variable scheduling is enabled once a uniform 8-bar schedule would place at
-// least this many middle entries: with that many equally spaced entries the
-// development becomes metrically monotonous, so the corpus-derived (non-uniform)
-// entry intervals are applied instead. There is no upper bar limit -- longer
-// developments only benefit more from non-uniform spacing.
-constexpr int kVariableScheduleMinEntries = 8;
 constexpr int kEntryDecileCount =
     static_cast<int>(sizeof(kEntryIntervalDeciles) / sizeof(kEntryIntervalDeciles[0]));
 
@@ -219,9 +212,11 @@ int adaptCorpusEntryInterval(int corpus_interval_bars) {
   return kSubjectBars + mapped_episode;
 }
 
-int entryIntervalForCycle(std::uint32_t seed, int cycle) {
+/// @brief The entry interval at `slot`, a position in the corpus decile table
+/// counted from the seed's own starting decile.
+int entryIntervalAtSlot(std::uint32_t seed, int slot) {
   const int corpus_interval =
-      kEntryIntervalDeciles[(static_cast<int>(seed % kEntryDecileCount) + cycle * 2) %
+      kEntryIntervalDeciles[(static_cast<int>(seed % kEntryDecileCount) + slot) %
                             kEntryDecileCount];
   const int raw = adaptCorpusEntryInterval(corpus_interval);
   // Clamp only to the builder's structural episode window. The old additional
@@ -232,47 +227,67 @@ int entryIntervalForCycle(std::uint32_t seed, int cycle) {
   return std::clamp(raw, kSubjectBars + kMinEpisodeBars, kSubjectBars + kMaxEpisodeBars);
 }
 
-bool useVariableEntrySchedule(int fugue_bars) {
-  const bool short_form = fugue_bars < 20;
-  const int exposition_bars = short_form ? 8 : 12;
-  constexpr int coda_bars = 4;
-  const int development_bars = fugue_bars - exposition_bars - coda_bars;
-  if (development_bars <= 0) {
-    return false;
-  }
-  // How many entries a uniform 8-bar schedule would place in the development.
-  const int fixed_entry_count = development_bars / kFixedCycleBars;
-  return fixed_entry_count >= kVariableScheduleMinEntries;
-}
-
+/// @brief Lay the development out as entry cycles (a subject statement plus its
+/// episode), every entry on a barline.
+///
+/// Cycle lengths come from the corpus interval table at every fugue length, and
+/// the second cycle never repeats the first, so three or more middle entries
+/// never fall on an even grid. The last cycle's episode gives way to a closing
+/// entry that runs into the coda wherever the minimum episode still fits before
+/// it; a remainder shorter than a subject is an episode-only window, and no
+/// episode is shorter than kMinEpisodeBars.
 std::vector<DevelopmentWindow> buildDevelopmentWindows(int dev_start, int fugue_bars, int coda_bars,
                                                        bool short_form, std::uint32_t seed) {
   std::vector<DevelopmentWindow> windows;
   const int dev_end = fugue_bars - coda_bars;
-  const bool use_variable_entries = useVariableEntrySchedule(fugue_bars);
   int cursor = dev_start;
-  int cycle = 0;
+  // The table advances two deciles per cycle, so neighbouring cycles read
+  // different regions of the distribution.
+  int slot = 0;
+  int previous_interval = 0;
   while (cursor < dev_end) {
     const int remaining = dev_end - cursor;
-    if (short_form || remaining < kSubjectBars + 2) {
-      // Room for a subject but not for an episode after it still takes the
-      // entry when the development would otherwise hold none, so every fugue
-      // past the short form states a middle entry for its stretto.
-      if (!short_form && windows.empty() && remaining >= kSubjectBars) {
-        windows.push_back(
-            DevelopmentWindow{cursor, cursor + kSubjectBars, remaining - kSubjectBars, true});
-        break;
-      }
+    if (short_form || remaining < kSubjectBars) {
       windows.push_back(DevelopmentWindow{0, cursor, remaining, false});
       break;
     }
+    const int room = remaining - kSubjectBars;
+    if (room < kMinEpisodeBars) {
+      // A subject fits but no full episode after it: the entry is still taken.
+      windows.push_back(DevelopmentWindow{cursor, cursor + kSubjectBars, room, true});
+      break;
+    }
 
-    const int interval = use_variable_entries ? entryIntervalForCycle(seed, cycle) : 8;
-    const int episode_len =
-        std::min(std::clamp(interval - kSubjectBars, 2, 6), remaining - kSubjectBars);
+    int interval = entryIntervalAtSlot(seed, slot);
+    // The second cycle reads ahead to the table's next different length; the
+    // cycles after it keep their own table positions.
+    const bool second_cycle = windows.size() == 1;
+    for (int step = 1; second_cycle && step < kEntryDecileCount && interval == previous_interval;
+         ++step) {
+      interval = entryIntervalAtSlot(seed, slot + step);
+    }
+    slot += 2;
+    int episode_len = std::min(interval - kSubjectBars, room);
+    // An episode that would strand less than a subject before the coda shortens
+    // to leave exactly one, unless that repeats the previous cycle's length.
+    const int closing_episode = room - kSubjectBars;
+    if (room - episode_len < kSubjectBars && closing_episode >= kMinEpisodeBars &&
+        kSubjectBars + closing_episode != previous_interval) {
+      episode_len = closing_episode;
+    }
+    // What this episode leaves before the coda must not end in an episode
+    // shorter than the minimum, alone or behind the closing entry: the episode
+    // takes the stray bar, or gives one up where it is already at its maximum.
+    const int left = room - episode_len;
+    const int stray = left % kSubjectBars;
+    if (left < kSubjectBars + kMinEpisodeBars && stray > 0 && stray < kMinEpisodeBars) {
+      episode_len = (episode_len + stray <= kMaxEpisodeBars)
+                        ? episode_len + stray
+                        : episode_len - (kMinEpisodeBars - stray);
+    }
+    previous_interval = interval;
     windows.push_back(DevelopmentWindow{cursor, cursor + kSubjectBars, episode_len, true});
     cursor += kSubjectBars + episode_len;
-    ++cycle;
   }
   return windows;
 }
@@ -496,9 +511,26 @@ StationRealization stationRealization(int carry_voice, Mode mode) {
 /// states in the dominant on V0: a vi or IV rotation would stamp a foreign-key
 /// subject over the held dominant, and a V2 carry would push the pedal into the
 /// middle voice while the bass walks underneath it.
-int carryVoiceFor(int cycle, int pedal_cycle) {
-  const int rotation_voice = cycle % 3;
-  return (cycle == pedal_cycle && rotation_voice != 0) ? 0 : rotation_voice;
+///
+/// The rotation is therefore counted back from the pedal cycle, which lands V0
+/// on it without displacing another voice's turn and never hands two
+/// neighbouring entries to one voice. Of the two orders the lower voices can
+/// take, the one that would open the development on V2 -- the voice that closed
+/// the exposition -- is not used; where neither does, a seed draw picks.
+/// A development without a pedal cycle holds at most one entry and states it
+/// on V0.
+int carryVoiceFor(int cycle, int pedal_cycle, std::uint32_t seed) {
+  const int cycles_before_pedal = ((pedal_cycle - cycle) % 3 + 3) % 3;
+  if (pedal_cycle < 0 || cycles_before_pedal == 0) {
+    return 0;
+  }
+  // The descending order carries a cycle on the voice numbered by its distance
+  // from the pedal, the ascending order on the other lower voice.
+  const int opening_distance = pedal_cycle % 3;
+  const bool descending = opening_distance == 0
+                              ? rng::seedChoice(seed, rng::SeedDecision::kCarryVoiceStart, 2) == 0
+                              : opening_distance == 1;
+  return descending ? cycles_before_pedal : 3 - cycles_before_pedal;
 }
 
 /// @brief 4-bar harmonic progression for an entry window, keyed by the entry's
@@ -557,14 +589,15 @@ std::array<ChordSpec, 4> entryProgression(std::uint8_t key_pc, Mode mode) {
 
 /// @brief Build the fugue's per-bar chord plan from its tonal stations.
 ///
-/// `windows` / `pedal_cycle` are the already-computed development layout; bars
+/// `windows` / `pedal_cycle` / `carry_voices` (one per window) are the
+/// already-computed development layout; bars
 /// are section-relative. Entry windows take their key's progression (the pedal
 /// cycle takes dominant prolongation instead), episode windows take the
 /// backward descending-fifths chain into the next station, and the coda takes
 /// the home progression. The caller pins the final V -> I afterwards.
 std::vector<ChordSpec> buildFugueTonalPlan(int bars, Mode mode, int exposition_bars, int coda_bars,
                                            const std::vector<DevelopmentWindow>& windows,
-                                           int pedal_cycle) {
+                                           int pedal_cycle, const std::vector<int>& carry_voices) {
   const bool minor = (mode == Mode::Minor);
   std::vector<ChordSpec> plan(static_cast<std::size_t>(bars), ChordSpec{0, minor});
   const auto home_prog = entryProgression(0, mode);
@@ -582,7 +615,8 @@ std::vector<ChordSpec> buildFugueTonalPlan(int bars, Mode mode, int exposition_b
     if (!window.has_entry) {
       continue;
     }
-    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+    const std::uint8_t key_pc =
+        middleEntryKeyPc(carry_voices[static_cast<std::size_t>(cycle)], mode);
     // The pedal window prolongs the dominant by alternating V with the tonic
     // 6/4 colour over the held pedal (the textbook dominant-pedal harmony). In
     // minor the dominant is the minor v, the chord of the v-station entry the
@@ -657,11 +691,22 @@ bool isTonicizedStation(std::uint8_t key_pc, Mode mode) {
 /// bars before it: a tonicized station, not the pedal cycle, whose approach bars
 /// clear the exposition (an entry that follows the exposition directly has no
 /// episode in front of it).
-bool takesRelatedKeyApproach(const DevelopmentWindow& window, int cycle, int pedal_cycle, Mode mode,
-                             int exposition_bars) {
+bool takesRelatedKeyApproach(const DevelopmentWindow& window, int cycle, int pedal_cycle,
+                             int carry_voice, Mode mode, int exposition_bars) {
   return window.has_entry && cycle != pedal_cycle &&
-         isTonicizedStation(middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode), mode) &&
+         isTonicizedStation(middleEntryKeyPc(carry_voice, mode), mode) &&
          relatedKeyApproachClearsExposition(window.entry_start, exposition_bars);
+}
+
+/// @brief `pitch` with scale degrees 6 and 7 spelled for where it sounds: by
+/// the chord at `tick` and, for its own letter, by the tone of the line it is
+/// set against (`sounding`, negative when it is set against none).
+int spellAgainstHarmony(const HarmonicPlan& harmony, int pitch, Tick tick, int sounding) {
+  const KeyContext local = localKeyAt(harmony, tick);
+  const Mode local_mode = local.is_minor ? Mode::Minor : Mode::Major;
+  const detail::PcMask context = detail::withSoundingTone(rule_helpers::chordPcsAt(harmony, tick),
+                                                          sounding, local.tonic_pc, local_mode);
+  return detail::respellInScale(pitch, local.tonic_pc, local_mode, context);
 }
 
 RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
@@ -688,10 +733,10 @@ RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
 //               subject V0 (0-3) alone, answer V1 (4-7) + V0 countersubject,
 //               third entry V2 (8-11) + V1 countersubject + V0 figuration
 //               (the third entry only when the exposition is the full 12 bars).
-//   development: ceil((bars-16)/8) device-cycles of 8 bars each (middle entry
-//               4 bars + episode 4 bars); the last cycle may be a 4-bar
-//               episode-only half-cycle, except that a development holding
-//               no other entry takes one even without room for its episode.
+//   development: device-cycles of 8 to 10 bars (middle entry 4 bars + an
+//               episode), the second never the first's length; the closing
+//               entry may run straight into the coda, and a remainder shorter
+//               than a subject is an episode-only half-cycle.
 //   coda: final subject entry V0 + a 2-bar cadence (4 bars).
 //
 // All material is Material verbatim; the per-voice band confinement keeps
@@ -861,12 +906,24 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // development has two or more entry cycles to spare one for a dominant
   // prolongation before the home return.
   const int pedal_cycle = entry_cycles.size() >= 2 ? entry_cycles.back() : -1;
+  // The voice carrying each window's entry: the rotation, except where the
+  // climax below has to leave it to state its stretto.
+  std::vector<int> carry_voices(development_windows.size());
+  for (std::size_t cycle = 0; cycle < carry_voices.size(); ++cycle) {
+    carry_voices[cycle] = carryVoiceFor(static_cast<int>(cycle), pedal_cycle, req.seed);
+  }
+  const auto carry_voice_of = [&](int cycle) {
+    return carry_voices[static_cast<std::size_t>(cycle)];
+  };
   // Climax cycle: the entry nearest ~80% of the entry span (matches arcPoint's
   // climax) that the pedal does not own. The climax states the stretto, so when
   // that entry's voice admits no canon configuration the climax moves to the
   // nearest entry that does, earlier ones first, a close canon anywhere before
-  // the loose one; with none available it stays at the nominal entry and the
-  // window keeps its ordinary texture.
+  // the loose one. Entries led from an upper voice are read before the bass's:
+  // they leave the bass free to enter last, the order the three-voice pile-up
+  // is built in. With no canon available in any rotation voice the nominal
+  // entry moves to V0 where V0 admits one -- the stretto outranks the rotation
+  // -- and otherwise keeps its ordinary texture.
   int climax_cycle = -1;
   if (!entry_cycles.empty()) {
     const int count = static_cast<int>(entry_cycles.size());
@@ -882,24 +939,36 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     climax_cycle = entry_cycles[static_cast<std::size_t>(nominal)];
     bool found = false;
     for (const bool allow_loose : {false, true}) {
-      for (int idx : order) {
-        const int cycle = entry_cycles[static_cast<std::size_t>(idx)];
-        if (!found && stretto_available(carryVoiceFor(cycle, pedal_cycle), allow_loose)) {
-          climax_cycle = cycle;
-          found = true;
+      for (const bool upper_leader : {true, false}) {
+        for (int idx : order) {
+          const int cycle = entry_cycles[static_cast<std::size_t>(idx)];
+          const int voice = carry_voice_of(cycle);
+          if (!found && (voice != 2) == upper_leader && stretto_available(voice, allow_loose)) {
+            climax_cycle = cycle;
+            found = true;
+          }
         }
       }
     }
+    if (!found && stretto_available(0, /*allow_loose=*/true)) {
+      carry_voices[static_cast<std::size_t>(climax_cycle)] = 0;
+    }
   }
-  // The second entry-carrying development cycle states the subject inverted --
-  // one mirrored entry per fugue, and only when the development is long enough
-  // to spare a canonical restatement (>= 3 entry cycles). The stretto climax
-  // and the dominant-pedal cycle keep the upright subject.
+  // The first entry the middle voice carries -- the mediant station, III in
+  // minor and vi in major -- states the subject inverted: one mirrored entry
+  // per fugue, and only when the development is long enough to spare a
+  // canonical restatement (>= 3 entry cycles). The inversion belongs to the
+  // station rather than to a position in the entry order, so it follows the
+  // voice rotation. The stretto climax and the dominant-pedal cycle keep the
+  // upright subject.
   int inverted_cycle = -1;
   if (entry_cycles.size() >= 3) {
-    const int candidate = entry_cycles[1];
-    if (candidate != climax_cycle && candidate != pedal_cycle) {
-      inverted_cycle = candidate;
+    const auto mediant_entry =
+        std::find_if(entry_cycles.begin(), entry_cycles.end(),
+                     [&](int cycle) { return carry_voice_of(cycle) == kInvertedEntryVoice; });
+    if (mediant_entry != entry_cycles.end() && *mediant_entry != climax_cycle &&
+        *mediant_entry != pedal_cycle) {
+      inverted_cycle = *mediant_entry;
     }
   }
   // Second stretto moment: a development long enough to spare a canonical
@@ -967,18 +1036,19 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // pinned to a V -> I authentic cadence so the explicit cadential bass
   // (dominant then tonic) is harmonically consistent and the
   // cadence_voice_leading rule reads a true V->I.
-  std::vector<ChordSpec> plan =
-      buildFugueTonalPlan(bars, mode, exposition_bars, coda_bars, development_windows, pedal_cycle);
+  std::vector<ChordSpec> plan = buildFugueTonalPlan(bars, mode, exposition_bars, coda_bars,
+                                                    development_windows, pedal_cycle, carry_voices);
   // Prepare related-key entries with V/X -> X in the two bars immediately
   // before the station's opening chord. The target X is diatonic in the home
   // key, so it stays a chord both keys share while the preceding secondary
   // dominant gives the approach genuine directional harmonic force.
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars)) {
+    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, carry_voice_of(cycle), mode,
+                                 exposition_bars)) {
       continue;
     }
-    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+    const std::uint8_t key_pc = middleEntryKeyPc(carry_voice_of(cycle), mode);
     plan[static_cast<std::size_t>(window.entry_start - kRelatedKeyApproachBars)] =
         ChordSpec{static_cast<std::uint8_t>((key_pc + 7) % 12), false};
     plan[static_cast<std::size_t>(window.entry_start - 1)] =
@@ -1007,10 +1077,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
     if (!window.has_entry || cycle == pedal_cycle)
       continue;
-    if (!isTonicizedStation(middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode), mode))
+    if (!isTonicizedStation(middleEntryKeyPc(carry_voice_of(cycle), mode), mode))
       continue;
     triad_only_bars.push_back(window.entry_start);
-    if (takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars))
+    if (takesRelatedKeyApproach(window, cycle, pedal_cycle, carry_voice_of(cycle), mode,
+                                exposition_bars))
       triad_only_bars.push_back(window.entry_start - kRelatedKeyApproachBars);
   }
   // Inside a declared key area a seventh the local scale does not own would
@@ -1020,7 +1091,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
     if (!window.has_entry)
       continue;
-    const KeyContext station = stationRealization(carryVoiceFor(cycle, pedal_cycle), mode).key;
+    const KeyContext station = stationRealization(carry_voice_of(cycle), mode).key;
     for (int local = 0; local < kSubjectBars && window.entry_start + local < bars; ++local) {
       const ChordSpec& chord = plan[static_cast<std::size_t>(window.entry_start + local)];
       if (!rule_helpers::isDiatonicPc(static_cast<std::uint8_t>(detail::chordSeventhPc(chord)),
@@ -1034,10 +1105,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
 
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, mode, exposition_bars)) {
+    if (!takesRelatedKeyApproach(window, cycle, pedal_cycle, carry_voice_of(cycle), mode,
+                                 exposition_bars)) {
       continue;
     }
-    const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+    const std::uint8_t key_pc = middleEntryKeyPc(carry_voice_of(cycle), mode);
     const Tick secondary_tick = barTick(first_bar + window.entry_start - kRelatedKeyApproachBars);
     const Tick target_tick = secondary_tick + kTicksPerBar;
     for (ChordEvent& chord : out.harmony.chords) {
@@ -1062,7 +1134,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   if (mode != Mode::Minor) {
     for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
       const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
-      const std::uint8_t key_pc = middleEntryKeyPc(carryVoiceFor(cycle, pedal_cycle), mode);
+      const std::uint8_t key_pc = middleEntryKeyPc(carry_voice_of(cycle), mode);
       if (!window.has_entry || cycle == pedal_cycle || !isTonicizedStation(key_pc, mode)) {
         continue;
       }
@@ -1096,7 +1168,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     if (!window.has_entry) {
       continue;
     }
-    const KeyContext station = stationRealization(carryVoiceFor(cycle, pedal_cycle), mode).key;
+    const KeyContext station = stationRealization(carry_voice_of(cycle), mode).key;
     if (station.tonic_pc == home_key.tonic_pc && station.is_minor == home_key.is_minor) {
       continue;
     }
@@ -1227,13 +1299,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       // Degrees 6 and 7 take the spelling of the harmony and the entry tone
       // sounding where the note is restated, not the one it was derived over.
       const Tick restated_tick = anchor_start + note.start;
-      const KeyContext local = localKeyAt(out.harmony, restated_tick);
-      const Mode local_mode = local.is_minor ? Mode::Minor : Mode::Major;
-      const detail::PcMask context = detail::withSoundingTone(
-          rule_helpers::chordPcsAt(out.harmony, restated_tick),
-          soundingMaterialPitch(entry, restated_tick), local.tonic_pc, local_mode);
-      const int pitch = detail::respellInScale(transposeIntoKey(shifted_base, home_key, to),
-                                               local.tonic_pc, local_mode, context);
+      const int pitch =
+          spellAgainstHarmony(out.harmony, transposeIntoKey(shifted_base, home_key, to),
+                              restated_tick, soundingMaterialPitch(entry, restated_tick));
       shifted.push_back(pitch);
       lo = std::min(lo, pitch);
       hi = std::max(hi, pitch);
@@ -1726,9 +1794,9 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     const bool half_cycle = !window.has_entry;
     const ArcPoint arc = req.arc(
         static_cast<std::size_t>(std::min<int>(cycle, static_cast<int>(req.cycle_count) - 1)));
-    // Entries rotate through the voices, EXCEPT in the pedal cycle: the
+    // Entries rotate through the voices, counted back from the pedal cycle: the
     // dominant pedal prepares the home-key return, so that cycle's entry is
-    // ALWAYS re-carried by V0 -- a dominant-key (G major) statement over the
+    // ALWAYS carried by V0 -- a dominant-key (G major) statement over the
     // dominant pedal is the textbook pedal preparation, and it matches the
     // window's pinned V/I64 chord alternation. Letting the vi rotation stand
     // deflects to the relative minor at exactly the wrong moment, and letting
@@ -1736,7 +1804,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     // the held G AND pushes the pedal into the middle voice while the bass
     // walks underneath it -- the seconds-family grind that made every
     // pedal window the piece's roughest four bars.
-    const int carry_voice = carryVoiceFor(cycle, pedal_cycle);
+    const int carry_voice = carry_voice_of(cycle);
     // Accompaniment density rises with the arc; figuration accompanies the
     // highest non-carrying voice (one accompaniment voice per window).
     const int acc_voice = (carry_voice == 0) ? 1 : 0;
@@ -2267,7 +2335,12 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
             break;
           }
           const int deg = model_deg[static_cast<std::size_t>(slot)] + stride_shift(kstep);
-          const int pitch = std::clamp(degree_shift(seed_base, deg), kBandLo[0], kBandHi[0]);
+          // The sequence walks the plain scale; over a minor key's dominant its
+          // degrees 6 and 7 take that chord's spelling, as a restated line's do.
+          const int pitch =
+              std::clamp(spellAgainstHarmony(out.harmony, degree_shift(seed_base, deg), cursor,
+                                             /*sounding=*/-1),
+                         kBandLo[0], kBandHi[0]);
           const Tick dur = std::min(model_dur[static_cast<std::size_t>(slot)], span_hi - cursor);
           tmpl.seed_pitches.push_back(static_cast<std::uint8_t>(pitch));
           tmpl.seed_durations.push_back(dur);

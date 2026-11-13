@@ -177,11 +177,25 @@ class FormShapeTest(unittest.TestCase):
             texture_gate.FANTASIA_DUX_BARS, cpp_int_constant(FORM_SECTIONAL, "kSubjectBars")
         )
 
-    def test_variable_entry_schedule_size_equals_the_fugue_builder(self) -> None:
-        self.assertEqual(
-            texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES,
-            cpp_int_constant(FORM_FUGUE, "kVariableScheduleMinEntries"),
-        )
+    def test_entry_plan_axis_starts_where_plans_can_be_told_apart(self) -> None:
+        def nonperiodic(entry_bars: list[int]) -> bool:
+            notes = [{"start_tick": bar * 1920} for bar in entry_bars]
+            provenance = [
+                {"voice_intent": "MiddleEntryCarrier", "span_id": idx}
+                for idx in range(len(entry_bars))
+            ]
+            return texture_gate.compute_entry_plan_metrics(notes, provenance)[2]
+
+        count = texture_gate.ENTRY_PLAN_MIN_ENTRIES
+        uneven = [12, 20, 29, 39, 47][:count]
+        self.assertTrue(nonperiodic(uneven))
+        self.assertFalse(nonperiodic(uneven[:-1]))
+
+    def test_fugue_builder_spaces_entries_at_every_length(self) -> None:
+        # The axis has no size gate of its own, so a length gate reappearing in
+        # the builder would lay short fugues out on a grid the axis rejects.
+        self.assertNotIn("kVariableScheduleMinEntries", FORM_FUGUE)
+        self.assertNotIn("useVariableEntrySchedule", FORM_FUGUE)
 
 
 class InstrumentTableTest(unittest.TestCase):

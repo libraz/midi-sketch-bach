@@ -738,7 +738,17 @@ std::vector<std::vector<int>> middleEntryWindowSigns(const HarnessFixture& fx) {
 // piece must validate clean.
 TEST(FormFugueTest, SelectedMiddleEntriesAddBassHarmonicSupportAfterAccompaniment) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 2, false, 84);
-  const int middle_entry_bar = 12;
+  // The first middle entry the top voice carries: its countersubject then
+  // rides in V1 and the bass is free to support.
+  int middle_entry_bar = -1;
+  for (const auto& span : fx.voice_plan.spans) {
+    const int start_bar = static_cast<int>(span.start_tick / kBar);
+    if (span.intent == VoiceIntent::MiddleEntryCarrier && span.voice == 0 &&
+        (middle_entry_bar < 0 || start_bar < middle_entry_bar)) {
+      middle_entry_bar = start_bar;
+    }
+  }
+  ASSERT_GE(middle_entry_bar, 0) << "no middle entry carried by V0";
 
   int accompaniment_index = -1;
   int support_index = -1;
@@ -809,7 +819,9 @@ TEST(FormFugueTest, MiddleEntrySupportCenterTracksChordRoot) {
 
 // With fig_offset == 1 the early development middle entries omit the V2 bass
 // support. The seed-derived figuration offset must not suppress the first
-// middle-entry bass; both early and later entries carry V2 support.
+// middle-entry bass; both early and later entries carry V2 support. An entry
+// the bass itself carries has no bass support to keep, so only the upper-voice
+// entries are read.
 TEST(FormFugueTest, FigOffsetOneKeepsEveryMiddleEntryBassSupport) {
   const HarnessFixture fx = buildFixture(FormType::Fugue, 1, false, 84);
   bool early_support = false;
@@ -817,7 +829,7 @@ TEST(FormFugueTest, FigOffsetOneKeepsEveryMiddleEntryBassSupport) {
   std::vector<int> middle_entry_starts;
 
   for (const auto& span : fx.voice_plan.spans) {
-    if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+    if (span.intent == VoiceIntent::MiddleEntryCarrier && span.voice != 2) {
       middle_entry_starts.push_back(static_cast<int>(span.start_tick / kBar));
     }
   }
@@ -946,6 +958,59 @@ TEST(FormFugueTest, EntrySchedulerUsesDecileIntervalsForLongFugue) {
   const std::set<int> distinct_intervals(intervals.begin(), intervals.end());
   EXPECT_EQ(distinct_intervals, (std::set<int>{8, 9, 10}))
       << "corrected corpus deciles did not preserve lower/middle/upper cycles";
+}
+
+// At the default length the middle entries leave the four-bar grid the
+// exposition sets up and are not evenly spaced among themselves. The
+// carrying-voice rotation gives every voice a second statement of the subject,
+// never hands two neighbouring entries to one voice, and does not open the
+// development on the voice that closed the exposition.
+TEST(FormFugueTest, DefaultLengthEntriesLeaveTheFourBarGridAndReachEveryVoice) {
+  const std::uint16_t bars = naturalBars(FormType::Fugue);
+  std::set<std::vector<std::pair<int, int>>> layouts;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, false, bars);
+    std::set<std::pair<int, int>> entries;  // (start bar, voice)
+    std::set<int> middle_starts;
+    for (const auto& span : fx.voice_plan.spans) {
+      const int start_bar = static_cast<int>(span.start_tick / kBar);
+      if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+        middle_starts.insert(start_bar);
+      }
+      if (span.intent == VoiceIntent::SubjectCarrier || span.intent == VoiceIntent::AnswerCarrier ||
+          span.intent == VoiceIntent::MiddleEntryCarrier) {
+        entries.insert({start_bar, static_cast<int>(span.voice)});
+      }
+    }
+    layouts.insert(std::vector<std::pair<int, int>>(entries.begin(), entries.end()));
+
+    std::array<int, 3> per_voice{};
+    bool off_grid = false;
+    int previous_bar = -1;
+    int previous_voice = -1;
+    for (const auto& [start_bar, voice] : entries) {
+      ASSERT_LT(voice, 3) << "seed " << seed;
+      ++per_voice[static_cast<std::size_t>(voice)];
+      off_grid = off_grid || (previous_bar >= 0 && (start_bar - previous_bar) % 4 != 0);
+      EXPECT_NE(voice, previous_voice)
+          << "seed " << seed << ": bar " << start_bar << " restates in the voice before it";
+      previous_bar = start_bar;
+      previous_voice = voice;
+    }
+    EXPECT_TRUE(off_grid) << "seed " << seed << ": every entry gap is a multiple of four bars";
+    for (std::size_t voice = 0; voice < per_voice.size(); ++voice) {
+      EXPECT_GE(per_voice[voice], 2)
+          << "seed " << seed << ": voice " << voice << " states the subject only once";
+    }
+
+    ASSERT_GE(middle_starts.size(), 3u) << "seed " << seed;
+    const std::vector<int> starts(middle_starts.begin(), middle_starts.end());
+    EXPECT_NE(starts[2] - starts[1], starts[1] - starts[0])
+        << "seed " << seed << ": the middle entries open on an even grid";
+    // The last full statement closes into the final third of the piece.
+    EXPECT_GE(starts.back() * 3, static_cast<int>(bars) * 2) << "seed " << seed;
+  }
+  EXPECT_GT(layouts.size(), 1u) << "every seed lays its entries out identically";
 }
 
 // The episode Fortspinnung is a 2-bar model that FILLS its stride (no
@@ -1176,7 +1241,7 @@ TEST(FormFugueTest, SecondStrettoMomentRestatesBeforeCoda) {
         << (r.validation.failures.empty() ? "" : r.validation.failures.front().rule_id);
     EXPECT_FALSE(hasRule(r.validation, "stretto_overlap_valid")) << "seed " << seed;
   }
-  EXPECT_EQ(with_second_moment, 3u) << "the pre-coda stretto reprise changed how often it lands";
+  EXPECT_EQ(with_second_moment, 6u) << "the pre-coda stretto reprise changed how often it lands";
 }
 
 // The dominant pedal is proportional to development weight: any development with
@@ -2426,7 +2491,7 @@ TEST(FormFugueTest, StrettoOverlapNeverSoundsATrueParallel) {
 // getting scarcer, which is a fact about the subject catalog and not a fault in
 // the choice.
 TEST(FormFugueTest, StrettoOverlapSustainsASharpOnlyWhereTheParallelWasRefused) {
-  EXPECT_EQ(measureStrettoOverlaps().sustained_sharps, 8u)
+  EXPECT_EQ(measureStrettoOverlaps().sustained_sharps, 6u)
       << "the beat-long m2/M7 count in the stretto overlap moved";
 }
 
@@ -3152,9 +3217,15 @@ bool hasUnresolvedBassFourthAtHandoff(const HandoffCase& handoff) {
 
 }  // namespace
 
+// The seam read here is the top voice's figuration over the third entry handing
+// into its own middle entry while the bass support starts beneath it, so the
+// case needs a development that opens on V0. Seed 5 selects the subject whose
+// seam once moved by battuta; at 48 bars its rotation opens on V0, which it
+// does not at the default length.
 TEST(FormFugueHandoffTest, PlayfulMinorFugueAvoidsBattutaAtFirstMiddleEntry) {
   HandoffCase handoff;
-  ASSERT_TRUE(buildHandoffCase(FormType::Fugue, /*seed=*/5, /*bars=*/44, &handoff));
+  ASSERT_TRUE(buildHandoffCase(FormType::Fugue, /*seed=*/5, /*bars=*/48, &handoff));
+  ASSERT_EQ(handoff.entry->voice, 0);
   ASSERT_FALSE(handoff.outgoing->notes.empty());
 
   Tick previous_onset = 0;

@@ -1106,7 +1106,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Pedal line plays fewer notes and the exposition approach no longer overwrites the
     // exposition: successions 55637 -> 56051, battuta 59 -> 58, anti 4 -> 8, fourths 175 -> 172.
     // Placed in the seed's rotated key instead of C, a change of measurement: hidden 18 -> 26.
-    {FormType::Fugue, 0, 0, 26, 58, 8, 0, 2, 3, 1, 56051, 172},
+    // Entries on the corpus 8-10 bar schedule at every length, a closing entry, the inverted
+    // entry tied to the alto's station: hidden 26 -> 21, battuta 58 -> 42, anti 8 -> 6,
+    // successions 56051 -> 51624, fourths 172 -> 184.
+    {FormType::Fugue, 0, 0, 21, 42, 6, 0, 2, 3, 1, 51624, 184},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -2164,7 +2167,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // successions 501386 -> 496714, fourths 1241 -> 1203. Then a change of measurement --
     // placement in the seed's rotated key, lengths deduplicated (Long and Full were both
     // 128 bars): hidden 183 -> 230, worst-cell hidden 5 -> 7.
-    {FormType::Fugue, 0, 0, 230, 266, 48, 0, 7, 4, 2, 496714, 1203},
+    // Corpus entry schedule at every length: hidden 230 -> 203, battuta 266 -> 241,
+    // anti 48 -> 46, worst-cell hidden 7 -> 4, successions 496714 -> 491595,
+    // fourths 1203 -> 1270.
+    {FormType::Fugue, 0, 0, 203, 241, 46, 0, 4, 4, 2, 491595, 1270},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2264,7 +2270,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // measurement -- placement in the seed's rotated key and the 128-bar request added:
     // hidden 91 -> 192, battuta 205 -> 286, anti 21 -> 37, worst-cell hidden 3 -> 5 and
     // anti 1 -> 2, successions 436657 -> 656886, fourths 734 -> 1020.
-    {FormType::PreludeAndFugue, 0, 0, 192, 286, 37, 0, 5, 4, 2, 656886, 1020},
+    // Corpus entry schedule at every length: hidden 192 -> 158, battuta 286 -> 219,
+    // anti 37 -> 36, worst-cell hidden 5 -> 3, worst-cell battuta 4 -> 5,
+    // successions 656886 -> 641318, fourths 1020 -> 1007.
+    {FormType::PreludeAndFugue, 0, 0, 158, 219, 36, 0, 3, 5, 2, 641318, 1007},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

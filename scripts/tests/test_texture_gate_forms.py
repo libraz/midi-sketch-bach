@@ -284,7 +284,7 @@ class PerAxisRoutingTest(unittest.TestCase):
         self.assertFalse(case.axis_results()["compass"])
 
     def test_entry_plan_axis_requires_a_periodicity_free_plan(self) -> None:
-        count = texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES
+        count = texture_gate.ENTRY_PLAN_MIN_ENTRIES
         uniform = [12 + 8 * idx for idx in range(count)]
         varied_bars = uniform[:-1] + [uniform[-1] + 3]
         periodic = self._case(
@@ -300,8 +300,8 @@ class PerAxisRoutingTest(unittest.TestCase):
         self.assertFalse(periodic.passes_all_axes)
         self.assertTrue(varied.axis_results()["entry_plan_nonperiodic"])
 
-    def test_entry_plan_axis_omitted_below_the_variable_schedule_size(self) -> None:
-        count = texture_gate.VARIABLE_SCHEDULE_MIN_ENTRIES - 1
+    def test_entry_plan_axis_omitted_below_two_intervals(self) -> None:
+        count = texture_gate.ENTRY_PLAN_MIN_ENTRIES - 1
         case = self._case(
             "fugue", middle_entry_bars=[12 + 8 * idx for idx in range(count)],
             entry_intervals=[8] * (count - 1), entry_plan_nonperiodic=False,
