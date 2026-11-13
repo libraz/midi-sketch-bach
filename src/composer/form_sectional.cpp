@@ -552,7 +552,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       registry.concurrentMotions(tail - kSixteenth, tail, /*voice=*/1, /*num_voices=*/3, motions);
       const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
                                            theme_pitches, v1_prev, motions, mode,
-                                           /*downbeat=*/true);
+                                           /*downbeat=*/true, /*window_pitches=*/{},
+                                           /*parallel_free_over_consonant=*/true);
       v1_prev = pitch;
       addNote(punct_section.notes, tail, bar_start + kTicksPerBar - tail, pitch);
       registry.record(tail, /*voice=*/1, pitch, bar_start + kTicksPerBar - tail);
@@ -562,7 +563,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/1,
                                /*num_voices=*/3, motions);
     const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
-                                         theme_pitches, v1_prev, motions, mode, /*downbeat=*/true);
+                                         theme_pitches, v1_prev, motions, mode, /*downbeat=*/true,
+                                         /*window_pitches=*/{},
+                                         /*parallel_free_over_consonant=*/true);
     v1_prev = pitch;
     // A fermata bar strikes one whole note (the metered breath), a homophonic
     // bar a half note (sounding two beats so the V1+V2 chord articulates
