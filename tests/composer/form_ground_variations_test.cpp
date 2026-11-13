@@ -30,6 +30,7 @@
 
 #include "composer/chord_voicing.h"
 #include "composer/composer.h"
+#include "composer/figuration.h"
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
@@ -40,6 +41,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 #include "product_gate_test_util.h"
 
@@ -1312,6 +1314,353 @@ TEST(GroundVariationChaconne, MiddleVoiceIsNeitherADoublingNorTheBusiestLine) {
         EXPECT_NE(middle, below) << "middle voice doubles the ground at " << note.start_tick;
     }
   }
+}
+
+// The middle voice of both ground forms is a line, not a broken chord. Its
+// resting tones are consonant over the held ground; between two of them a third
+// apart it may sound the scale tone that joins them, and that tone is the only
+// dissonance over the ground the fill writes. It therefore falls off the beat
+// and is approached and left by step, from and onto tones that are themselves
+// consonant over the ground.
+
+// The middle line as it is composed, in onset order.
+std::vector<NoteEvent> middleLine(const ComposeResult& r) {
+  std::vector<NoteEvent> line;
+  for (std::size_t idx = 0; idx < r.notes.size() && idx < r.provenance.size(); ++idx) {
+    if (r.provenance[idx].voice_intent == VoiceIntent::TrioVoiceCarrier)
+      line.push_back(r.notes[idx]);
+  }
+  std::stable_sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
+  return line;
+}
+
+void expectMiddleVoiceDissonanceIsPassing(FormType form) {
+  std::size_t passing = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.provenance.size(), r.notes.size());
+      const std::vector<NoteEvent> line = middleLine(r);
+      // The ground tone each bar holds: its bar-head tone, which is what the
+      // middle voice is written over however the statement decorates the bar.
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      std::vector<int> ground(bars, -1);
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == groundVoice(c.form) && note.start_tick % kTicksPerBar34 == 0 &&
+            note.start_tick / kTicksPerBar34 < bars)
+          ground[note.start_tick / kTicksPerBar34] = note.pitch;
+      }
+      const auto restsOverGround = [&](const NoteEvent& note) {
+        const std::size_t bar = note.start_tick / kTicksPerBar34;
+        return bar < ground.size() && ground[bar] >= 0 &&
+               rule_helpers::isConsonantAboveBass(note.pitch,
+                                                  static_cast<std::uint8_t>(ground[bar]));
+      };
+      // The closing two bars are the cadence formula, not the fill.
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      for (std::size_t idx = 0; idx < line.size(); ++idx) {
+        const NoteEvent& note = line[idx];
+        if (note.start_tick >= fill_end || note.start_tick % kTicksPerBeat == 0)
+          continue;
+        if (ground[note.start_tick / kTicksPerBar34] < 0 || restsOverGround(note))
+          continue;
+        // A tone held over from the onset before it adds no interval of its own.
+        if (idx > 0 && line[idx - 1].pitch == note.pitch)
+          continue;
+        ++passing;
+        const auto where = [&]() {
+          return ::testing::Message()
+                 << "form " << static_cast<int>(form) << " character "
+                 << static_cast<int>(character) << " seed " << c.seed << " minor " << c.is_minor
+                 << " bars " << c.target_bars << " tick " << note.start_tick << " pitch "
+                 << static_cast<int>(note.pitch);
+        };
+        ASSERT_GT(idx, 0u) << where();
+        ASSERT_LT(idx + 1, line.size()) << where();
+        const NoteEvent& before = line[idx - 1];
+        const NoteEvent& after = line[idx + 1];
+        EXPECT_EQ(before.start_tick + before.duration, note.start_tick) << where();
+        EXPECT_EQ(note.start_tick + note.duration, after.start_tick) << where();
+        const int approach = std::abs(static_cast<int>(note.pitch) - before.pitch);
+        const int departure = std::abs(static_cast<int>(after.pitch) - note.pitch);
+        EXPECT_TRUE(approach == 1 || approach == 2) << where() << " approached by " << approach;
+        EXPECT_TRUE(departure == 1 || departure == 2) << where() << " left by " << departure;
+        EXPECT_TRUE(restsOverGround(before)) << where() << " from a dissonance";
+        EXPECT_TRUE(restsOverGround(after)) << where() << " onto a dissonance";
+      }
+    }
+  }
+  EXPECT_GT(passing, 0u) << "the sweep reached no passing tone in the middle voice";
+}
+
+TEST(GroundVariationChaconne, MiddleVoiceDissonanceOverTheGroundIsPassing) {
+  expectMiddleVoiceDissonanceIsPassing(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MiddleVoiceDissonanceOverTheGroundIsPassing) {
+  expectMiddleVoiceDissonanceIsPassing(FormType::Passacaglia);
+}
+
+// A passing figure that the line carries on past by step, in the same
+// direction and onto another tone consonant over the ground, is a four-note
+// run. That run never spans a tritone: a line that climbs F G A B has nowhere
+// to go but back across the interval it has just outlined.
+//
+// Only runs through a passing tone are read. The leap between two resting
+// tones, and the leap into a beat anchor, can be a tritone on their own; the
+// passing figure does not write those and is not allowed to add to them.
+void expectPassingRunOutlinesNoTritone(FormType form) {
+  std::size_t runs = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.provenance.size(), r.notes.size());
+      const std::vector<NoteEvent> line = middleLine(r);
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      std::vector<int> ground(bars, -1);
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == groundVoice(c.form) && note.start_tick % kTicksPerBar34 == 0 &&
+            note.start_tick / kTicksPerBar34 < bars)
+          ground[note.start_tick / kTicksPerBar34] = note.pitch;
+      }
+      const auto restsOverGround = [&](const NoteEvent& note) {
+        const std::size_t bar = note.start_tick / kTicksPerBar34;
+        return bar < ground.size() && ground[bar] >= 0 &&
+               rule_helpers::isConsonantAboveBass(note.pitch,
+                                                  static_cast<std::uint8_t>(ground[bar]));
+      };
+      const auto isStep = [](int motion) { return motion == 1 || motion == 2; };
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      for (std::size_t idx = 1; idx + 2 < line.size(); ++idx) {
+        const NoteEvent& from = line[idx - 1];
+        const NoteEvent& pass = line[idx];
+        const NoteEvent& land = line[idx + 1];
+        const NoteEvent& beyond = line[idx + 2];
+        if (beyond.start_tick >= fill_end || pass.start_tick % kTicksPerBeat == 0)
+          continue;
+        if (from.start_tick / kTicksPerBar34 != beyond.start_tick / kTicksPerBar34)
+          continue;
+        if (from.start_tick + from.duration != pass.start_tick ||
+            pass.start_tick + pass.duration != land.start_tick ||
+            land.start_tick + land.duration != beyond.start_tick)
+          continue;
+        if (!restsOverGround(from) || restsOverGround(pass) || !restsOverGround(land) ||
+            !restsOverGround(beyond))
+          continue;
+        const int first = static_cast<int>(pass.pitch) - from.pitch;
+        const int second = static_cast<int>(land.pitch) - pass.pitch;
+        const int third = static_cast<int>(beyond.pitch) - land.pitch;
+        const bool one_way = (first > 0) == (second > 0) && (second > 0) == (third > 0);
+        if (!one_way || !isStep(std::abs(first)) || !isStep(std::abs(second)) ||
+            !isStep(std::abs(third)))
+          continue;
+        ++runs;
+        EXPECT_NE(std::abs(static_cast<int>(beyond.pitch) - from.pitch), 6)
+            << "form " << static_cast<int>(form) << " character " << static_cast<int>(character)
+            << " seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+            << " run from tick " << from.start_tick << " pitch " << static_cast<int>(from.pitch)
+            << " to " << static_cast<int>(beyond.pitch);
+      }
+    }
+  }
+  EXPECT_GT(runs, 0u) << "the sweep reached no stepwise run through a passing tone";
+}
+
+TEST(GroundVariationChaconne, MiddleVoicePassingRunOutlinesNoTritone) {
+  expectPassingRunOutlinesNoTritone(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MiddleVoicePassingRunOutlinesNoTritone) {
+  expectPassingRunOutlinesNoTritone(FormType::Passacaglia);
+}
+
+// Share of the middle voice's successions that move by step, over the whole
+// sweep. A line confined to the tones consonant over the ground steps in about
+// one succession in five, because only the fifth and sixth above the ground are
+// adjacent; the passing tones lift that. The floor sits between the two, well
+// under the reference inner voices, which step in about three of five.
+void expectMiddleVoiceMovesByStep(FormType form) {
+  std::size_t successions = 0;
+  std::size_t steps = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const std::vector<NoteEvent> line = middleLine(r);
+      for (std::size_t idx = 1; idx < line.size(); ++idx) {
+        if (line[idx - 1].start_tick + line[idx - 1].duration != line[idx].start_tick)
+          continue;  // a rest separates two phrases, not two tones of one.
+        const int motion = std::abs(static_cast<int>(line[idx].pitch) - line[idx - 1].pitch);
+        ++successions;
+        if (motion == 1 || motion == 2)
+          ++steps;
+      }
+    }
+  }
+  ASSERT_GT(successions, 0u);
+  const double share = static_cast<double>(steps) / static_cast<double>(successions);
+  EXPECT_GE(share, 0.30) << "form " << static_cast<int>(form) << " step share " << share << " ("
+                         << steps << " of " << successions << ")";
+}
+
+TEST(GroundVariationChaconne, MiddleVoiceStepShareClearsTheBrokenChordFloor) {
+  expectMiddleVoiceMovesByStep(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, MiddleVoiceStepShareClearsTheBrokenChordFloor) {
+  expectMiddleVoiceMovesByStep(FormType::Passacaglia);
+}
+
+// The composition stays in C and the output is transposed to the request key,
+// so a register that fits the instrument in C need not fit it a fourth lower or
+// a tritone higher. The ground is immutable and fixes the octave the piece is
+// placed in; every voice written over it has to sound inside the instrument's
+// compass at that octave, in every key.
+//
+// Placement is asked for the octave and refused every note move, so a voice
+// that only fits once single bars are folded inward fails here rather than
+// being rescued. The ground itself is not read: it is not the builder's to move.
+void expectUpperVoicesSoundInsideCompassInEveryKey(FormType form) {
+  const InstrumentType instrument = defaultInstrumentForForm(form);
+  const InstrumentPitchRange range = pitchRangeFor(instrument);
+  for (int tonic_pc = 0; tonic_pc < 12; ++tonic_pc) {
+    const Key tonic = static_cast<Key>(tonic_pc);
+    for (bool minor : {false, true}) {
+      for (SubjectCharacter character : kCharacters) {
+        // Three consecutive seeds reach every ground variant.
+        for (std::uint32_t seed : {1u, 2u, 3u}) {
+          for (std::uint16_t target_bars : {std::uint16_t{0}, std::uint16_t{128}}) {
+            ComposeRequest req = requestFor({form, seed, minor, target_bars}, character);
+            req.tonic = tonic;
+            HarnessFixture fx;
+            ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+            ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+            const auto placement = placeInOutputCompass(&r, fx.material, fx.harmony, tonic,
+                                                        instrument, fx.harmony.ticksPerBar(),
+                                                        [](const ComposeResult&) { return false; });
+            ASSERT_TRUE(placement.has_value());
+            const int sounding = keyTranspositionSemitones(tonic) + placement->octave_shift;
+            int lowest = 127;
+            int highest = 0;
+            for (const NoteEvent& note : r.notes) {
+              if (note.voice == groundVoice(form))
+                continue;
+              lowest = std::min(lowest, static_cast<int>(note.pitch) + sounding);
+              highest = std::max(highest, static_cast<int>(note.pitch) + sounding);
+            }
+            const auto where = [&]() {
+              return ::testing::Message()
+                     << "form " << static_cast<int>(form) << " tonic " << tonic_pc << " minor "
+                     << minor << " character " << static_cast<int>(character) << " seed " << seed
+                     << " bars " << target_bars << " octave " << placement->octave_shift;
+            };
+            EXPECT_GE(lowest, static_cast<int>(range.low)) << where();
+            EXPECT_LE(highest, static_cast<int>(range.high)) << where();
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, UpperVoicesSoundInsideTheCompassInEveryKey) {
+  expectUpperVoicesSoundInsideCompassInEveryKey(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, UpperVoicesSoundInsideTheCompassInEveryKey) {
+  expectUpperVoicesSoundInsideCompassInEveryKey(FormType::Passacaglia);
+}
+
+// Bounding the register by key narrows what a repair may reach, so a tone that
+// was clean in C can be out of reach a semitone lower. Every key therefore has
+// to ship at the longest length, where the arc lifts the variation highest: the
+// product gate is run as it is for a request, in the request's own key.
+void expectShipsInEveryKeyAtFullLength(FormType form) {
+  for (int tonic_pc = 0; tonic_pc < 12; ++tonic_pc) {
+    const Key tonic = static_cast<Key>(tonic_pc);
+    for (bool minor : {false, true}) {
+      for (SubjectCharacter character : kCharacters) {
+        for (std::uint32_t seed : {1u, 2u, 3u, 5u}) {
+          ComposeRequest req = requestFor({form, seed, minor, 128}, character);
+          req.tonic = tonic;
+          const test::ProductGateResult gate = test::runProductGate(req, tonic);
+          EXPECT_TRUE(gate.ships())
+              << "form " << static_cast<int>(form) << " tonic " << tonic_pc << " minor " << minor
+              << " character " << static_cast<int>(character) << " seed " << seed << " built "
+              << gate.built << " generated " << gate.generated << " placed " << gate.placed
+              << " first final failure "
+              << (gate.failures.empty() ? "none" : gate.failures.front().rule_id);
+        }
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, ShipsInEveryKeyAtFullLength) {
+  expectShipsInEveryKeyAtFullLength(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, ShipsInEveryKeyAtFullLength) {
+  expectShipsInEveryKeyAtFullLength(FormType::Passacaglia);
+}
+
+// A passing figure that lands on the last onset of a bar hands the line to a
+// tone the next bar chooses for itself. In minor that tone may not lie an
+// augmented second from the landing: the raised seventh closing a dominant bar
+// has to be free to go anywhere but down to the lowered sixth.
+void expectBarClosingLandingIsLeftWithoutAugmentedSecond(FormType form) {
+  for (const Case& c : casesFor(form)) {
+    if (!c.is_minor)
+      continue;
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.provenance.size(), r.notes.size());
+      const std::vector<NoteEvent> line = middleLine(r);
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      std::vector<int> ground(bars, -1);
+      for (const NoteEvent& note : r.notes) {
+        if (note.voice == groundVoice(c.form) && note.start_tick % kTicksPerBar34 == 0 &&
+            note.start_tick / kTicksPerBar34 < bars)
+          ground[note.start_tick / kTicksPerBar34] = note.pitch;
+      }
+      const auto restsOverGround = [&](const NoteEvent& note) {
+        const std::size_t bar = note.start_tick / kTicksPerBar34;
+        return bar < ground.size() && ground[bar] >= 0 &&
+               rule_helpers::isConsonantAboveBass(note.pitch,
+                                                  static_cast<std::uint8_t>(ground[bar]));
+      };
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      for (std::size_t idx = 1; idx + 1 < line.size(); ++idx) {
+        const NoteEvent& pass = line[idx - 1];
+        const NoteEvent& land = line[idx];
+        const NoteEvent& next = line[idx + 1];
+        if (next.start_tick >= fill_end || next.start_tick % kTicksPerBar34 != 0)
+          continue;
+        if (pass.start_tick + pass.duration != land.start_tick ||
+            land.start_tick + land.duration != next.start_tick)
+          continue;
+        if (pass.start_tick % kTicksPerBeat == 0 || restsOverGround(pass))
+          continue;  // not a passing figure.
+        EXPECT_FALSE(detail::isAugmentedSecond(land.pitch, next.pitch, 0, detail::Mode::Minor))
+            << "form " << static_cast<int>(form) << " character " << static_cast<int>(character)
+            << " seed " << c.seed << " bars " << c.target_bars << " tick " << land.start_tick << " "
+            << static_cast<int>(land.pitch) << " -> " << static_cast<int>(next.pitch);
+      }
+    }
+  }
+}
+
+TEST(GroundVariationChaconne, BarClosingLandingIsLeftWithoutAugmentedSecond) {
+  expectBarClosingLandingIsLeftWithoutAugmentedSecond(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, BarClosingLandingIsLeftWithoutAugmentedSecond) {
+  expectBarClosingLandingIsLeftWithoutAugmentedSecond(FormType::Passacaglia);
 }
 
 // --- 9. Passacaglia terraced growth schedule (period-derived) ---------------

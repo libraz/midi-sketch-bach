@@ -1662,7 +1662,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Same counter: fourths 180 -> 200, a step by another voice no longer resolves the fourth.
     // Ground and counterline repairs: hidden 14 -> 18, anti 4 -> 3, successions 28038 -> 28042,
     // fourths 126 -> 128.
-    {FormType::Passacaglia, 0, 0, 18, 0, 3, 0, 1, 0, 1, 28042, 128},
+    // Counter-line over the ground moves by step: hidden 18 -> 14 (an upper-voice leap is gone),
+    // fourths 128 -> 107, successions 28042 -> 28027 (fewer ornament notes on that line).
+    {FormType::Passacaglia, 0, 0, 14, 0, 3, 0, 1, 0, 1, 28027, 107},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1844,7 +1846,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // floor 148 lower where it now withdraws or holds.
     // Ornament sites follow the cadence landing and the density floor: fourths 49 -> 46.
     // Same counter: fourths 46 -> 48, own-voice resolution only.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18603, 12},
+    // Counter-line over the ground moves by step: fourths 12 -> 11, successions 18603 -> 18612.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18612, 11},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

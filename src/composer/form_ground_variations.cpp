@@ -8,6 +8,7 @@
 #include "composer/arc.h"
 #include "composer/cadenced_progression.h"
 #include "composer/character_profile.h"
+#include "composer/counterpoint_budget.h"
 #include "composer/figuration.h"
 #include "composer/figuration_palette.h"
 #include "composer/form_builders.h"
@@ -20,6 +21,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 
 namespace bach::composer {
@@ -268,6 +270,34 @@ int notesPerBeatForTier(int tier) {
 }
 
 /**
+ * @brief Highest composed-frame pitch a voice above the ground may take so the
+ *        piece sounds inside its instrument's coded compass in the request key.
+ *
+ * The ground is immutable, so it fixes the whole-piece octave the output is
+ * placed in: the lowest one that still holds the ground's lowest tone, which is
+ * the one leaving the most room above it. The ceiling is the compass top read
+ * back through that octave and the key offset.
+ *
+ * @param form The form, which names the instrument whose compass applies.
+ * @param req The resolved request (key offset).
+ * @param ground_pitch The ground table, in the composed frame.
+ * @return The ceiling in the composed frame.
+ */
+int upperVoiceCeiling(FormType form, const ResolvedRequest& req,
+                      const std::vector<std::uint8_t>& ground_pitch) {
+  const InstrumentPitchRange range = pitchRangeFor(defaultInstrumentForForm(form));
+  const int ground_low =
+      static_cast<int>(*std::min_element(ground_pitch.begin(), ground_pitch.end())) +
+      req.key_transposition_semitones;
+  int octave = 0;
+  while (ground_low + octave - interval::kOctave >= static_cast<int>(range.low))
+    octave -= interval::kOctave;
+  while (ground_low + octave < static_cast<int>(range.low))
+    octave += interval::kOctave;
+  return static_cast<int>(range.high) - req.key_transposition_semitones - octave;
+}
+
+/**
  * @brief Resolve the arc-driven density tier for a cycle, biased by character.
  * @param req The resolved request (supplies the arc curve and character).
  * @param cycle Cycle index in [0, cycle_count).
@@ -440,6 +470,9 @@ constexpr detail::ChordSpec kCodaDominantChord{7, false};
 ///   - the same beat of the previous bar, the chain the ground's bar-rate motion
 ///     turns into consecutive perfects at that metrical position.
 ///
+/// @param form The form being built. A contrary-motion fault its gate closes is
+///        never taken as a relocation: trading a fault the piece may ship for
+///        one that fails it is not a repair.
 /// @param band_lo Lowest pitch a relocation may take. The repair changes
 ///        register freely, so this floor is what keeps the variation above the
 ///        voices under it: a cycle the arc lifts must raise it by the same
@@ -466,10 +499,12 @@ constexpr detail::ChordSpec kCodaDominantChord{7, false};
 void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                           const std::vector<std::uint8_t>& ground_pitch,
                           const std::vector<CycleBar>& cycle_bar_plan, const HarmonicPlan& harmony,
-                          int preceding_v0_bar_head, int preceding_ground_pitch,
+                          FormType form, int preceding_v0_bar_head, int preceding_ground_pitch,
                           int preceding_v0_last, int band_lo, int band_hi,
                           bool every_voice_placed = true) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
+  const bool anti_closed = counterpointRuleIsClosed(form, "anti_parallel_perfect");
+  const bool battuta_closed = counterpointRuleIsClosed(form, "battuta");
   // Realized V0 pitch per beat: the previous bar's (the chain reference, seeded
   // at the cycle seam with the caller's closing bar head) and this bar's.
   int prior_beat_pitch[3] = {preceding_v0_bar_head, -1, -1};
@@ -549,6 +584,23 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
           worst = std::max(worst, 1);
       }
       return worst;
+    };
+    // The rank orders the faults by how they sound; the gate orders them by
+    // what the form may ship, and the two disagree where a form closes a mild
+    // class and leaves a harsher one open. A relocation into a closed class
+    // would be accepted as the lesser fault and then fail the piece.
+    const auto formsClosedFault = [&](int candidate) {
+      if (!anti_closed && !battuta_closed)
+        return false;
+      const int reference[2][2] = {{previous_onset_pitch, previous_onset_ground},
+                                   {prior_beat_pitch[beat], prior_bar_ground}};
+      for (const auto& pair : reference) {
+        if (anti_closed && formsAntiParallelPerfect(pair[0], candidate, pair[1], ground_now))
+          return true;
+        if (battuta_closed && formsBattuta(pair[0], candidate, pair[1], ground_now))
+          return true;
+      }
+      return false;
     };
     const int original_rank = groundFaultRank(pitch);
     const int prev_pitch = previous_onset_pitch;
@@ -665,7 +717,7 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
             if (leap_veto && leavesConsecutiveLeaps(cand)) {
               continue;
             }
-            if (groundFaultRank(cand) > accept) {
+            if (groundFaultRank(cand) > accept || formsClosedFault(cand)) {
               continue;
             }
             notes[i].pitch = static_cast<std::uint8_t>(cand);
@@ -684,7 +736,8 @@ void scrubGroundParallels(std::vector<MaterialNote>& notes, Tick block_start,
                 !inSpelledScaleAt(cand, tick) ||
                 (melodic_prev >= 0 && createsAugmentedSecond(melodic_prev, cand)) ||
                 (next_pitch >= 0 && createsAugmentedSecond(cand, next_pitch)) ||
-                (leap_veto && leavesConsecutiveLeaps(cand)) || groundFaultRank(cand) > accept) {
+                (leap_veto && leavesConsecutiveLeaps(cand)) || groundFaultRank(cand) > accept ||
+                formsClosedFault(cand)) {
               continue;
             }
             notes[i].pitch = static_cast<std::uint8_t>(cand);
@@ -737,9 +790,10 @@ constexpr int kPassV1BandHi = 59;  // B3.
  * V1 is built AFTER V0 and the ground are recorded in `registry`, so each beat
  * anchor is selected via the shared tier-scored consonantChordTone: a chord tone
  * inside the middle band that is consonant with the concurrent V0 / ground tones
- * and forms no parallel/hidden perfect against them. Off-beats fill stepwise
- * toward the next anchor (conjunct, no leaps), and every pick is registered so
- * the next beat's parallel check sees it.
+ * and forms no parallel/hidden perfect against them. Off-beats walk the tones
+ * consonant over the ground, joined by a passing tone wherever the tone it
+ * resolves onto can be fixed in advance, and every pick is registered so the
+ * next beat's parallel check sees it.
  *
  * @param notes Destination note vector (the V1 counter-line).
  * @param registry Inter-voice read-back (already holds V0 + ground tones).
@@ -749,10 +803,18 @@ constexpr int kPassV1BandHi = 59;  // B3.
  * @param band_hi Highest pitch the line may take (below every voice over it).
  * @param notes_per_beat Subdivision: 1 / 2 / 4 notes per beat.
  * @param mode Diatonic mode (Major / Minor) selecting the scale.
+ * @param cadence_tick Tick from which the caller's cadence replaces this line;
+ *        no passing tone is left to resolve onto a beat at or after it.
+ * @param suspension_bar Cycle-relative bar whose head the caller may give to a
+ *        suspension prepared on the beat before it, or -1; that preparation
+ *        beat is likewise never a passing tone's landing.
+ * @param rotation Seed-derived rotation (seed + cycle) that settles a passing
+ *        figure's direction and slot wherever more than one is admissible.
  */
 void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry& registry,
                              Tick block_start, const std::vector<CycleBar>& cycle_bar_plan,
-                             int band_lo, int band_hi, int notes_per_beat, detail::Mode mode) {
+                             int band_lo, int band_hi, int notes_per_beat, detail::Mode mode,
+                             Tick cadence_tick, int suspension_bar, std::uint32_t rotation) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
 
@@ -775,6 +837,11 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
   std::vector<int> theme_pitches;
   std::vector<ConcurrentMotion> motions;
   std::vector<int> ladder;
+  // The tone a passing tone already sounding resolves onto, taken by the next
+  // onset unconditionally; -1 when the line is free. Never held across a bar.
+  int committed = -1;
+  std::vector<int> ahead_pitches;
+  std::vector<ConcurrentMotion> ahead_motions;
 
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
@@ -782,6 +849,12 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     chord.root_pc = plan.root_pc;
     chord.minor = plan.minor;
     chord.seventh = plan.seventh;
+    // The ground repeats, so the bar after the cycle's last is its first.
+    const CycleBar& next_plan = cycle_bar_plan[static_cast<std::size_t>((bar + 1) % cycle_bars)];
+    detail::ChordSpec next_chord;
+    next_chord.root_pc = next_plan.root_pc;
+    next_chord.minor = next_plan.minor;
+    next_chord.seventh = next_plan.seventh;
     // Nearest DIFFERENT chord tone in band (prefer above): shared by the
     // anti-stall escape and the off-beat oscillation below. A triad tone the
     // scale does not spell under this chord flattens onto it (the V0 anchor
@@ -817,12 +890,10 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       }
       return from;
     };
-    // Every tone the fill may take over this bar's ground, low to high: a scale
-    // tone inside the band that is consonant with the held ground note. The
-    // fill walks this ladder rather than circling one companion tone, so the
-    // line states the harmony across its whole register instead of trilling a
-    // single interval; over a bar-long ground the ladder is a broken chord,
-    // which is what a middle voice realising the harmony writes.
+    // The tones the line may rest on over this bar's ground, low to high: scale
+    // tones in the band consonant with the held ground note. A tone that is not
+    // consonant is never a rung; it sounds only off the beat, between two such
+    // tones a scale step either side of it (passing_tone below).
     // Consonance with the ground is read with the bass-sensitive table, not the
     // upper-voice one: this line's band sits above the ground by construction,
     // so the ground IS the bass under every tone here, and the perfect fourth
@@ -876,6 +947,72 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         return from;
       return ladder[static_cast<std::size_t>(next_rung)];
     };
+    // Whether `to`, reached from `from` at `tick`, arrives on a perfect interval
+    // against a concurrently moving voice, by similar or contrary motion. The
+    // figure moves by step, but the voice it meets may leap onto it.
+    auto perfect_arrival = [&](int from, int to, Tick tick) {
+      ahead_motions.clear();
+      registry.concurrentMotions(tick - kTicksPerBeat / 4, tick, /*voice=*/1, /*num_voices=*/3,
+                                 ahead_motions);
+      for (const ConcurrentMotion& motion : ahead_motions) {
+        if (formsStrictPerfectParallel(from, to, motion.prev, motion.curr) ||
+            formsPerfectParallel(from, to, motion.prev, motion.curr) ||
+            formsAntiParallelPerfect(from, to, motion.prev, motion.curr) ||
+            formsBattuta(from, to, motion.prev, motion.curr))
+          return true;
+      }
+      return false;
+    };
+    // The passing tone one scale step from `from`, or -1. `landing` receives the
+    // tone a further step on. The landing is vetted here against everything its
+    // own onset meets, because the walk takes it without a second look.
+    auto passing_tone = [&](int from, int direction, Tick tick, bool lands_on_beat,
+                            bool land_closes_bar, int& landing) {
+      const int pass = detail::melodicScaleStep(from, direction, mode, &chord);
+      const int land = detail::melodicScaleStep(pass, direction, mode, &chord);
+      const int first = (pass - from) * direction;
+      const int second = (land - pass) * direction;
+      if (first < 1 || first > 2 || second < 1 || second > 2)
+        return -1;
+      if (pass < band_lo || pass > band_hi || land < band_lo || land > band_hi)
+        return -1;
+      if (!clean_over_ground(from) || clean_over_ground(pass) || !clean_over_ground(land))
+        return -1;
+      // Where the walk can carry on by step past the landing, the run must not
+      // span a tritone from where it began: the line then falls back across it.
+      const int beyond = detail::melodicScaleStep(land, direction, mode, &chord);
+      if (std::abs(beyond - from) == 6 && beyond >= band_lo && beyond <= band_hi &&
+          clean_over_ground(beyond))
+        return -1;
+      // A landing that closes the bar is left by a tone the next bar chooses
+      // freely from its own scale, so none of those may lie an augmented second
+      // from it.
+      if (land_closes_bar) {
+        for (int reach : {land - 3, land + 3}) {
+          if (detail::inScale(reach, mode, &next_chord) &&
+              detail::isAugmentedSecond(land, reach, 0, mode))
+            return -1;
+        }
+      }
+      const Tick land_tick = tick + step;
+      if (perfect_arrival(from, pass, tick) || perfect_arrival(pass, land, land_tick))
+        return -1;
+      if (lands_on_beat) {
+        ahead_pitches.clear();
+        registry.concurrentThemePitches(land_tick, /*voice=*/1, ahead_pitches);
+        for (int upper : ahead_pitches) {
+          if (!isConsonantIc(land - upper))
+            return -1;
+        }
+        const auto lowest = std::min_element(ahead_pitches.begin(), ahead_pitches.end());
+        if (lowest != ahead_pitches.end() &&
+            !rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(land),
+                                                static_cast<std::uint8_t>(*lowest)))
+          return -1;
+      }
+      landing = land;
+      return pass;
+    };
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
@@ -898,8 +1035,14 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
                                                   static_cast<std::uint8_t>(bass_pitch));
       };
-      int anchor = consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor, theme_pitches,
-                                      line_prev, motions, mode, /*downbeat=*/beat == 0);
+      // A beat a passing tone resolves onto is already chosen and already vetted
+      // against this onset; re-selecting it would strand the passing tone.
+      const bool resolving = committed >= 0;
+      int anchor = resolving ? committed
+                             : consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor,
+                                                  theme_pitches, line_prev, motions, mode,
+                                                  /*downbeat=*/beat == 0);
+      committed = -1;
       // Adjacent bars whose chords share a tone near the band centre can pin
       // the nearest-tone anchor chain to ONE pitch for many beats. At the
       // quarter-note tier that surfaces as a stalled repeated-note line; where
@@ -913,7 +1056,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       // repeats a pitch, so even a pair reads as a stall. When no admissible
       // different tone exists the repeat stands -- a repeated consonance beats
       // a fresh clash.
-      if (anchor == line_prev) {
+      if (!resolving && anchor == line_prev) {
         for (int dist = 1; dist <= 12; ++dist) {
           bool placed = false;
           for (int cand : {anchor + dist, anchor - dist}) {
@@ -1065,22 +1208,59 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           }
         }
       }
-      // Off-beat fills walk the ladder built above: each one is a rung on from
-      // the tone that just sounded, so the beat carries the line somewhere
-      // instead of restating a pair. The alternative -- an anchor and one fixed
-      // companion tone -- states two pitches for the whole beat, and because
-      // the anchor selector prefers the tone nearest the last one it kept
-      // restating the same two across whole bars; a blind diatonic
-      // upper-neighbour oscillation is harsher still, hammering a sustained
-      // 9th/7th against the bar-long ground note under the running V0
-      // figuration. Every rung is consonant with the held ground by
-      // construction, so the walk buys its variety without adding a clash.
+      // Off-beat fills walk the ladder built above, one rung on from the tone
+      // that just sounded, so the beat carries the line somewhere instead of
+      // restating a pair. Where the next rung is a leap, the scale tone between
+      // is taken as a passing tone if its landing can be committed now; a free
+      // neighbour oscillation is not, because nothing obliges it to resolve and
+      // it hammers a seventh or ninth against the bar-long ground.
       for (int sub = 0; sub < notes_per_beat; ++sub) {
         MaterialNote mnote;
         mnote.start_tick = beat_tick + static_cast<Tick>(sub) * step;
         mnote.duration = step;
         int pitch = (sub == 0) ? anchor : walk_step(prev_emitted, walk_dir);
-        if (sub > 0 && augmentedFrom(prev_emitted, pitch)) {
+        // Set when a passing figure fixes this tone: it is then vetted already
+        // and the escapes below would break the figure.
+        bool in_figure = false;
+        if (sub > 0 && committed >= 0) {
+          pitch = committed;
+          committed = -1;
+          in_figure = true;
+        } else if (sub > 0 && prev_emitted >= 0 &&
+                   (pitch == prev_emitted || std::abs(pitch - prev_emitted) > 2)) {
+          // The next rung is not a step, so a passing figure is worth having.
+          // A landing on the next beat is committed only inside the bar, where
+          // the ground and chord it was vetted over still hold, and only while
+          // this builder still owns that beat: not once the cadence has the
+          // line, and not on the beat a suspension's preparation may replace.
+          const bool lands_on_beat = sub + 1 == notes_per_beat;
+          const bool beat_is_free = beat < 2 && mnote.start_tick + step < cadence_tick &&
+                                    !(beat == 1 && bar + 1 == suspension_bar);
+          // Where the figure fits both ways, or in either of a beat's first two
+          // slots, the seed's rotation settles which.
+          const std::uint32_t turn = rotation + static_cast<std::uint32_t>(bar * 3 + beat);
+          const bool deferred = notes_per_beat == 4 && sub == 1 && (turn / 2) % 2 == 1;
+          if (!deferred && (!lands_on_beat || beat_is_free)) {
+            const int directions[2] = {walk_dir, -walk_dir};
+            int passes[2] = {-1, -1};
+            int landings[2] = {-1, -1};
+            for (int way = 0; way < 2; ++way) {
+              passes[way] = passing_tone(
+                  prev_emitted, directions[way], mnote.start_tick, lands_on_beat,
+                  /*land_closes_bar=*/beat == 2 && sub + 2 == notes_per_beat, landings[way]);
+            }
+            int way = passes[0] >= 0 ? 0 : 1;
+            if (passes[0] >= 0 && passes[1] >= 0)
+              way = static_cast<int>(turn % 2);
+            if (passes[way] >= 0) {
+              pitch = passes[way];
+              committed = landings[way];
+              walk_dir = directions[way];
+              in_figure = true;
+            }
+          }
+        }
+        if (sub > 0 && !in_figure && augmentedFrom(prev_emitted, pitch)) {
           int reversed = -walk_dir;
           const int other = walk_step(prev_emitted, reversed);
           if (!augmentedFrom(prev_emitted, other)) {
@@ -1098,7 +1278,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         // head was judged on, and leaving it out shipped the largest single
         // group of parallel octaves this form produced. Only the beat head
         // itself is excluded, having just been judged above.
-        if (sub > 0 && prev_emitted >= 0) {
+        if (sub > 0 && !in_figure && prev_emitted >= 0) {
           motions.clear();
           registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
                                      /*voice=*/1, /*num_voices=*/3, motions);
@@ -1210,6 +1390,8 @@ constexpr int kChaconneMiddleMinSpan = 5;
  * @param cycle_bar_plan Per-bar harmony for one ground statement.
  * @param variation_notes_per_beat The variation's subdivision, one per cycle.
  * @param mode Diatonic mode the line is drawn from.
+ * @param cadence_tick Tick from which the closing cadence replaces the line.
+ * @param seed Request seed; with the cycle it settles the line's free choices.
  * @param out_present Receives, per cycle, whether the middle voice sounds.
  */
 void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
@@ -1217,6 +1399,7 @@ void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
                                const std::vector<MaterialNote>& ground,
                                const std::vector<CycleBar>& cycle_bar_plan,
                                const std::vector<int>& variation_notes_per_beat, detail::Mode mode,
+                               Tick cadence_tick, std::uint32_t seed,
                                std::vector<bool>& out_present) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   const Tick period = static_cast<Tick>(cycle_bars) * kTicksPerBar34;
@@ -1287,7 +1470,8 @@ void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
     const int variation_rate = variation_notes_per_beat[cycle];
     const std::size_t before = notes.size();
     appendCounterFiguration(notes, registry, block_start, cycle_bar_plan, band_lo, band_hi,
-                            variation_rate > 1 ? variation_rate / 2 : 1, mode);
+                            variation_rate > 1 ? variation_rate / 2 : 1, mode, cadence_tick,
+                            /*suspension_bar=*/-1, seed + static_cast<std::uint32_t>(cycle));
     // Bar by bar, the line is offered the statement and withdraws from what it
     // cannot hold. A bar is dropped when the line reaches a perfect interval
     // against either neighbour by a forbidden motion, or when its bar head --
@@ -1389,6 +1573,10 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
                                           const std::vector<std::uint8_t>& ground_pitch,
                                           const std::vector<CycleBar>& cycle_bar_plan) {
   HarnessFixture out;
+  // The variation climbs no higher than the manual compass, nor than the key
+  // lets that compass sound.
+  const int manual_ceiling = std::min(static_cast<int>(organ_range::kManualHigh),
+                                      upperVoiceCeiling(FormType::Passacaglia, req, ground_pitch));
 
   const int total_bars = static_cast<int>(req.bars);
   const int cycles = total_bars / cycle_bars;
@@ -1583,14 +1771,14 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       const int seed_rotation = static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) %
                                                  ((pattern == PatternKind::kScalarWave) ? 5 : 4));
       build_variant(seed_rotation, v0_notes);
-      if (highest(v0_notes) > organ_range::kManualHigh && lift > 0) {
+      if (highest(v0_notes) > manual_ceiling && lift > 0) {
         lift = std::max({lift - interval::kOctave, 0, ground_clearance});
         v0_notes.clear();
         build_variant(seed_rotation, v0_notes);
       }
-      while (highest(v0_notes) > organ_range::kManualHigh) {
+      while (highest(v0_notes) > manual_ceiling) {
         const int unlowered = lift;
-        lift -= highest(v0_notes) - organ_range::kManualHigh;
+        lift -= highest(v0_notes) - manual_ceiling;
         std::vector<MaterialNote> lowered;
         build_variant(seed_rotation, lowered);
         if (dipsUnderBand(lowered)) {
@@ -1633,7 +1821,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
               continue;
             const int seam = std::abs(static_cast<int>(trial.front().pitch) - prev_v0_last);
             if (seam < best_seam && internal_leaps(trial) <= default_leaps &&
-                highest(trial) <= organ_range::kManualHigh && !dipsUnderBand(trial)) {
+                highest(trial) <= manual_ceiling && !dipsUnderBand(trial)) {
               best_seam = seam;
               v0_notes = std::move(trial);
             }
@@ -1648,9 +1836,9 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           ground_beats.begin() +
               static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
       scrubGroundParallels(
-          v0_notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, prev_v0_bar_head,
-          cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1, prev_v0_last,
-          kPassV0BandLo + std::max(lift, ground_clearance), organ_range::kManualHigh,
+          v0_notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, FormType::Passacaglia,
+          prev_v0_bar_head, cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
+          prev_v0_last, kPassV0BandLo + std::max(lift, ground_clearance), manual_ceiling,
           /*every_voice_placed=*/true);
       if (!v0_notes.empty()) {
         prev_v0_last = static_cast<int>(v0_notes.back().pitch);
@@ -1698,9 +1886,11 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           std::max(std::min(lift, static_cast<int>(point.register_shift)), ground_clearance);
       counter_centre[static_cast<std::size_t>(cycle)] =
           (kPassV1BandLo + kPassV1BandHi) / 2 + v1_lift;
-      appendCounterFiguration(counter_notes, registry, block_start, cycle_bar_plan,
-                              kPassV1BandLo + v1_lift, kPassV1BandHi + v1_lift, notes_per_beat,
-                              mode);
+      appendCounterFiguration(
+          counter_notes, registry, block_start, cycle_bar_plan, kPassV1BandLo + v1_lift,
+          kPassV1BandHi + v1_lift, notes_per_beat, mode,
+          static_cast<Tick>(total_bars - 2) * kTicksPerBar34 + kTicksPerBeat,
+          /*suspension_bar=*/cycle_bars - 2, req.seed + static_cast<std::uint32_t>(cycle));
     }
 
     carry_v0_valid = !v0_notes.empty();
@@ -1745,7 +1935,7 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
       // The trill's upper neighbour, a semitone over B or a tone over D, stays
       // on the manual.
       const int trill_reach = tritone_seam ? 2 : 1;
-      while (prefinal + trill_reach > organ_range::kManualHigh)
+      while (prefinal + trill_reach > manual_ceiling)
         prefinal -= 12;
       while (prefinal < 67)
         prefinal += 12;
@@ -1993,6 +2183,17 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // variation_role_ornament_constraint stays satisfied. ---
   int previous_v0_bar_head = -1;
   int previous_v0_last = -1;
+  // The variation climbs no higher than the violin compass, nor than the key
+  // lets that compass sound. The middle voice takes its band from under the
+  // variation, so it is held by the same ceiling.
+  const int variation_ceiling = std::min(static_cast<int>(string_range::kViolinHigh),
+                                         upperVoiceCeiling(FormType::Chaconne, req, ground_pitch));
+  const auto highest = [](const std::vector<MaterialNote>& line) {
+    int top = 0;
+    for (const MaterialNote& note : line)
+      top = std::max(top, static_cast<int>(note.pitch));
+    return top;
+  };
   // The variation's subdivision per statement: the middle voice written below
   // takes half of it, so the variation stays the line the ear follows.
   std::vector<int> variation_notes_per_beat;
@@ -2026,33 +2227,48 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
     // Register band for the band-confined patterns: the variation tessitura
     // anchored on the first bar's start tone, an octave-and-a-fifth wide
     // (matching the scalar-wave band proportions).
-    const int band_lo = cycle_bar_plan.front().low_tone + point.register_shift;
-    const int band_hi = band_lo + 19;
-
-    std::vector<MaterialNote> notes;
-    switch (pattern) {
-      case PatternKind::kScalarWave: {
-        const int phase_rotation =
-            static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
-        const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
-        appendScalarWaveCycle(notes, block_start, cycle_bar_plan, band_lo, band_hi, phase_rotation,
-                              descending_start, notes_per_beat, mode);
-        break;
+    int register_shift = point.register_shift;
+    const auto build_variant = [&](std::vector<MaterialNote>& dst) {
+      const int band_lo = cycle_bar_plan.front().low_tone + register_shift;
+      const int band_hi = band_lo + 19;
+      switch (pattern) {
+        case PatternKind::kScalarWave: {
+          const int phase_rotation =
+              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 5);
+          const bool descending_start = ((req.seed + static_cast<std::uint32_t>(cycle)) % 2) == 1;
+          appendScalarWaveCycle(dst, block_start, cycle_bar_plan, band_lo, band_hi, phase_rotation,
+                                descending_start, notes_per_beat, mode);
+          break;
+        }
+        case PatternKind::kArpeggio:
+          appendArpeggioCycle(dst, block_start, cycle_bar_plan, band_lo, band_hi,
+                              static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
+                              notes_per_beat, mode);
+          break;
+        case PatternKind::kFiguraCorta:
+          appendFiguraCortaCycle(dst, block_start, cycle_bar_plan, register_shift, anchor_rotation,
+                                 mode);
+          break;
+        case PatternKind::kSawtooth:
+        default:
+          appendSawtoothCycle(dst, block_start, cycle_bar_plan, register_shift, anchor_rotation,
+                              notes_per_beat, mode);
+          break;
       }
-      case PatternKind::kArpeggio:
-        appendArpeggioCycle(notes, block_start, cycle_bar_plan, band_lo, band_hi,
-                            static_cast<int>((req.seed + static_cast<std::uint32_t>(cycle)) % 4),
-                            notes_per_beat, mode);
-        break;
-      case PatternKind::kFiguraCorta:
-        appendFiguraCortaCycle(notes, block_start, cycle_bar_plan, point.register_shift,
-                               anchor_rotation, mode);
-        break;
-      case PatternKind::kSawtooth:
-      default:
-        appendSawtoothCycle(notes, block_start, cycle_bar_plan, point.register_shift,
-                            anchor_rotation, notes_per_beat, mode);
-        break;
+    };
+    std::vector<MaterialNote> notes;
+    build_variant(notes);
+    // A statement the arc would carry past the ceiling is taken an octave lower
+    // as a whole; one that still overshoots is lowered by the overshoot.
+    if (highest(notes) > variation_ceiling && register_shift > 0) {
+      register_shift = std::max(register_shift - interval::kOctave, 0);
+      notes.clear();
+      build_variant(notes);
+    }
+    while (highest(notes) > variation_ceiling && register_shift > 0) {
+      register_shift = std::max(register_shift - (highest(notes) - variation_ceiling), 0);
+      notes.clear();
+      build_variant(notes);
     }
 
     const std::size_t beat_base = static_cast<std::size_t>(cycle * cycle_bars) * 3;
@@ -2061,9 +2277,9 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
         ground_beats.begin() +
             static_cast<std::ptrdiff_t>(beat_base + static_cast<std::size_t>(cycle_bars) * 3));
     scrubGroundParallels(
-        notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, previous_v0_bar_head,
-        cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1, previous_v0_last,
-        kV0RepairFloor, string_range::kViolinHigh, /*every_voice_placed=*/true);
+        notes, block_start, cycle_beats, cycle_bar_plan, out.harmony, FormType::Chaconne,
+        previous_v0_bar_head, cycle > 0 ? static_cast<int>(ground_beats[beat_base - 1]) : -1,
+        previous_v0_last, kV0RepairFloor, variation_ceiling, /*every_voice_placed=*/true);
 
     // Compact cadential landing on the piece's final bar. The chaconne coda
     // replaces the repeating dominant bass with a tonic, so its upper voice
@@ -2357,8 +2573,10 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   // written after both outer lines so every tone is chosen against them. ---
   std::vector<bool> middle_present(static_cast<std::size_t>(cycles), false);
   std::vector<MaterialNote> middle_notes;
-  appendChaconneMiddleVoice(middle_notes, out.material.variations, ground, cycle_bar_plan,
-                            variation_notes_per_beat, mode, middle_present);
+  // The cadence takes the line over on the penultimate bar's closing beat.
+  appendChaconneMiddleVoice(
+      middle_notes, out.material.variations, ground, cycle_bar_plan, variation_notes_per_beat, mode,
+      static_cast<Tick>(total_bars - 1) * kTicksPerBar34 - kTicksPerBeat, req.seed, middle_present);
   if (!out.material.variations.empty()) {
     // The coda holds the support tone through the penultimate bar, steps to
     // its dominant on that bar's closing beat and states the tonic under the
@@ -2574,6 +2792,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
                             /*triad_only_bars=*/{kPassacagliaCycleBars - 2});
 
   HarnessFixture out = buildPassacagliaThreeVoice(req, kPassacagliaCycleBars, ground_pitch, plan);
+  const int manual_ceiling = std::min(static_cast<int>(organ_range::kManualHigh),
+                                      upperVoiceCeiling(FormType::Passacaglia, req, ground_pitch));
 
   // Cadential 4-3 in the middle counter-line, with a one-beat preparation,
   // one-beat resolution, and one-beat rest. The immutable ground supplies the bass at
@@ -2775,7 +2995,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
       for (int displacement = 1; displacement <= 12; ++displacement) {
         for (int direction : {1, -1}) {
           const int candidate = original_upper_prep + direction * displacement;
-          if (candidate < 60 || candidate > organ_range::kManualHigh)
+          if (candidate < 60 || candidate > manual_ceiling)
             continue;
           const int pitch_class = ((candidate % 12) + 12) % 12;
           bool chord_tone = false;
@@ -2805,8 +3025,8 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
             const int landing = original_upper_res + landing_offset;
             const int final_tone = original_final + landing_offset;
             const int trill_upper = landing + trill_reach;
-            if (landing < 60 || landing > organ_range::kManualHigh || final_tone < 60 ||
-                final_tone > organ_range::kManualHigh || trill_upper > organ_range::kManualHigh)
+            if (landing < 60 || landing > manual_ceiling || final_tone < 60 ||
+                final_tone > manual_ceiling || trill_upper > manual_ceiling)
               continue;
             attempts.push_back({preparation_pitch, landing_offset, kClosingPasses[0], true});
           }
@@ -2922,7 +3142,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
           const bool chord_tone =
               closing_cadence ? (suspension_chord_pcs & detail::pcBit(pc)) != 0
                               : (pc == chord_pcs[0] || pc == chord_pcs[1] || pc == chord_pcs[2]);
-          if (upper_sus < 60 || upper_sus > organ_range::kManualHigh || !chord_tone)
+          if (upper_sus < 60 || upper_sus > manual_ceiling || !chord_tone)
             continue;
           if (attempt.clean_joint && preceding_prep_upper >= 0 && preceding_prep_ground >= 0 &&
               (formsPerfectParallel(preceding_prep_upper, upper_prep, preceding_prep_ground,
