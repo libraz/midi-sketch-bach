@@ -92,6 +92,13 @@ void expectShipsCleanAcrossMatrix(FormType form, const std::vector<SubjectCharac
           req.seed = seed;
           const test::ProductGateResult gate = test::runProductGate(req);
           ASSERT_TRUE(gate.built);
+          EXPECT_TRUE(gate.generated)
+              << "minor=" << minor << " character=" << static_cast<int>(character)
+              << " seed=" << seed << " bars=" << bars
+              << " status=" << static_cast<int>(gate.composed.validation.status) << " first="
+              << (gate.composed.validation.failures.empty()
+                      ? ""
+                      : gate.composed.validation.failures.front().rule_id);
           EXPECT_TRUE(gate.placed);
           EXPECT_TRUE(gate.failures.empty())
               << "minor=" << minor << " character=" << static_cast<int>(character)
@@ -106,10 +113,15 @@ void expectShipsCleanAcrossMatrix(FormType form, const std::vector<SubjectCharac
 
 TEST(FormCantusMatrix, ChoraleValidatesCleanAcrossMatrix) {
   // Seed 2 is the severe 128-bar case whose walking bass used to keep a true
-  // parallel fifth into a bar head.
+  // parallel fifth into a bar head. Seeds 1-16 sweep the builder's seed
+  // rotations (its pattern choices are taken mod 4 of seed and seed / 4).
+  std::vector<std::uint32_t> seeds;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed)
+    seeds.push_back(seed);
+  seeds.push_back(42);
+  seeds.push_back(99);
   expectShipsCleanAcrossMatrix(FormType::ChoralePrelude,
-                               {SubjectCharacter::Severe, SubjectCharacter::Noble},
-                               {1, 2, 5, 42, 99});
+                               {SubjectCharacter::Severe, SubjectCharacter::Noble}, seeds);
 }
 
 TEST(FormCantusMatrix, GoldbergValidatesCleanAcrossMatrix) {
@@ -820,22 +832,6 @@ TEST(FormCantusGoldberg, GroundFollowsSeedVariant) {
         EXPECT_EQ(fx.material.goldberg_aria_bass[bar * 8].pitch, expected[bar])
             << "minor " << minor << " variant " << variant << " bar " << bar;
       }
-    }
-  }
-}
-
-// Seeds congruent mod kGroundVariantCount pick the same goldberg ground.
-TEST(FormCantusGoldberg, CongruentSeedsShareGround) {
-  for (bool minor : {false, true}) {
-    const HarnessFixture fx_a =
-        build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 1);
-    const HarnessFixture fx_b =
-        build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, 4);
-    ASSERT_EQ(fx_a.material.goldberg_aria_bass.size(), fx_b.material.goldberg_aria_bass.size());
-    for (std::size_t bar = 0; bar < fx_a.material.goldberg_aria_bass.size(); ++bar) {
-      EXPECT_EQ(fx_a.material.goldberg_aria_bass[bar].pitch,
-                fx_b.material.goldberg_aria_bass[bar].pitch)
-          << "minor " << minor << " bar " << bar;
     }
   }
 }

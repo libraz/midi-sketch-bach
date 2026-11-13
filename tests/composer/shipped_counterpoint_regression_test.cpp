@@ -1379,7 +1379,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // spelled under V and searched two bars further back: hidden 33 -> 38 (worst
     // cell 2 -> 3), fourths 31 -> 28.
     // Walking-bass bar-head repair: hidden 38 -> 39, battuta 17 -> 19, fourths 18 -> 16.
-    {FormType::ChoralePrelude, 0, 0, 39, 19, 0, 0, 3, 2, 0, 17845, 16},
+    // A bar-head bass repair keeping a parallel class only takes a parallel-free tone:
+    // hidden 39 -> 41, battuta 19 -> 15, fourths 16 -> 14.
+    {FormType::ChoralePrelude, 0, 0, 41, 15, 0, 0, 3, 2, 0, 17845, 14},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of

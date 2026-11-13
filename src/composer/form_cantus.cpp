@@ -493,9 +493,13 @@ void appendWalkingBass(std::vector<MaterialNote>& out_notes, ThemeToneRegistry& 
                 continue;
               // Strictly fewer faults, and never a class the standing tone did
               // not already form: the displacement can only empty columns, so
-              // no fault this guard removes reappears as another.
+              // no fault this guard removes reappears as another. A standing
+              // parallel must be the column that empties: the set is per class,
+              // not per voice, so a candidate that keeps the class may only have
+              // moved the parallel to another voice.
               const unsigned candidate = faultClasses(cand);
-              if (candidate != standing && (candidate & ~standing) == 0u) {
+              if (candidate != standing && (candidate & ~standing) == 0u &&
+                  (candidate & standing & kStrictClass) == 0u) {
                 pitch = cand;
                 placed = true;
                 break;
