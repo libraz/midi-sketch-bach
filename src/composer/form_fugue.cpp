@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #include "composer/cadenced_progression.h"
@@ -291,25 +292,6 @@ std::vector<DevelopmentWindow> buildDevelopmentWindows(int dev_start, int fugue_
   }
   return windows;
 }
-
-// ---------------------------------------------------------------------------
-// FugueAssembly: the per-section accumulator the internal builders write into.
-// The same assembly is used for a standalone fugue (first_bar = 0) and for the
-// fugue half of a prelude+fugue pair (first_bar = prelude length). Span ids and
-// the next-id counter are shared so concatenated sections stay unique.
-// ---------------------------------------------------------------------------
-struct FugueAssembly {
-  HarnessFixture* out = nullptr;
-  SpanId* next_id = nullptr;
-  // Registry of every already-placed note (thematic statements AND figuration
-  // accompaniment), so a line built later in the deterministic voice order can
-  // read what every earlier voice is sounding at a given tick. This drives two
-  // things: (1) the consonance-aware figuration anchor picks a chord tone that
-  // is consonant with the concurrent theme tone, and (2) the parallel-aware
-  // anchor avoids same-direction arrivals on interval class 0/7 against any
-  // earlier voice (the cardinal Bach prohibition on parallel 5ths/8ths).
-  ThemeToneRegistry theme_tones;
-};
 
 // The fugue family is built as a strict three-voice texture.
 constexpr VoiceId kFugueVoices = 3;
@@ -723,6 +705,8 @@ RomanNumeral relatedKeyDegree(std::uint8_t key_pc, Mode mode) {
   }
 }
 
+}  // namespace
+
 // ---------------------------------------------------------------------------
 // appendFugueSection: assemble a complete fugue (exposition + development
 // cycles + coda) starting at `first_bar`, spanning `bars` bars. Reused by the
@@ -747,11 +731,15 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   HarnessFixture& out = *asm_ctx.out;
   const Mode mode = req.mode;
   const int fig_offset = static_cast<int>(req.seed % 4);
+  // One subject period per ordinal, so sibling forms draw different layouts at one seed.
+  const std::uint32_t section_seed =
+      req.seed +
+      detail::kSubjectSeedPeriod * static_cast<std::uint32_t>(fugueSectionOrdinal(req.form));
 
   // Qualified-catalog subject index (character class + seed) -> the V0-band
   // subject pattern and its paired rhythm row.
   const bool minor_mode = (mode == Mode::Minor);
-  const std::uint8_t slot = subjectIndexFor(req.character, minor_mode, req.seed);
+  const std::uint8_t slot = subjectIndexFor(req.character, minor_mode, section_seed);
   const std::array<std::uint8_t, 16>& subj_pat =
       minor_mode ? kSubjectCatalogMinor[slot] : kSubjectCatalogMajor[slot];
   const std::array<Tick, 16>& subj_rhythm =
@@ -760,14 +748,14 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // --- Length partition. ---
   // Exposition: 12 bars normally, compressed to 8 only below the public
   // 20-bar minimum. Every shipped fugue therefore contains all three entries.
-  const bool short_form = bars < 20;
+  const bool short_form = bars < kMinFugueSectionBars;
   const int exposition_bars = short_form ? 8 : 12;
   constexpr int coda_bars = 4;
 
   const int development_bars = bars - exposition_bars - coda_bars;
   const std::vector<DevelopmentWindow> development_windows =
       development_bars > 0
-          ? buildDevelopmentWindows(exposition_bars, bars, coda_bars, short_form, req.seed)
+          ? buildDevelopmentWindows(exposition_bars, bars, coda_bars, short_form, section_seed)
           : std::vector<DevelopmentWindow>{};
   std::vector<int> entry_cycles;
   for (std::size_t i = 0; i < development_windows.size(); ++i) {
@@ -910,7 +898,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // climax below has to leave it to state its stretto.
   std::vector<int> carry_voices(development_windows.size());
   for (std::size_t cycle = 0; cycle < carry_voices.size(); ++cycle) {
-    carry_voices[cycle] = carryVoiceFor(static_cast<int>(cycle), pedal_cycle, req.seed);
+    carry_voices[cycle] = carryVoiceFor(static_cast<int>(cycle), pedal_cycle, section_seed);
   }
   const auto carry_voice_of = [&](int cycle) {
     return carry_voices[static_cast<std::size_t>(cycle)];
@@ -980,7 +968,7 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   // before pedal_cycle and never coincides with the climax or inverted cycle.
   int second_stretto_cycle = -1;
   if (entry_cycles.size() >= 4 &&
-      static_cast<int>(req.seed % 23) < static_cast<int>(kStrettoRate * 23)) {
+      static_cast<int>(section_seed % 23) < static_cast<int>(kStrettoRate * 23)) {
     for (int idx = static_cast<int>(entry_cycles.size()) - 1; idx >= 0; --idx) {
       const int cyc = entry_cycles[static_cast<std::size_t>(idx)];
       if (pedal_cycle >= 0 && cyc >= pedal_cycle) {
@@ -2605,6 +2593,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   }
 }
 
+namespace {
+
 /// @brief One tone moved after the span holding it was built.
 struct PlacedTone {
   Tick start = 0;
@@ -2632,9 +2622,10 @@ struct PlacedTone {
 /// around it would manufacture the very clash this pass exists to remove.
 ///
 /// @param asm_ctx Assembly whose material is re-spelled in place.
+/// @param section_start Tones starting before this tick are left as their builder wrote them.
 /// @return Every tone this pass moved, so a later pass reading the placement
 ///         registry (which keeps the authored tone) can see the current one.
-std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
+std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx, Tick section_start) {
   HarnessFixture& out = *asm_ctx.out;
   const HarmonicPlan& plan = out.harmony;
   std::vector<PlacedTone> respelled;
@@ -2816,6 +2807,9 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
       if (note.start_tick < area.start || note.start_tick >= area.end) {
         return;
       }
+      if (note.start_tick < section_start) {
+        return;
+      }
       const int pitch = static_cast<int>(note.pitch);
       // The area's key as spelled under the chord at the note, so a passing
       // tone over the local dominant takes its leading tone.
@@ -2937,9 +2931,10 @@ std::vector<PlacedTone> spellFreeLinesInLocalKey(FugueAssembly& asm_ctx) {
 /// chord is not taken.
 ///
 /// @param asm_ctx Assembly whose figuration is re-spelled in place.
+/// @param section_start Tones starting before this tick are left as their builder wrote them.
 /// @param replaced Tones already moved after their span was built.
 /// @return Every tone moved so far, this pass's included.
-std::vector<PlacedTone> agreeWithThemeInflections(FugueAssembly& asm_ctx,
+std::vector<PlacedTone> agreeWithThemeInflections(FugueAssembly& asm_ctx, Tick section_start,
                                                   std::vector<PlacedTone> replaced) {
   HarnessFixture& out = *asm_ctx.out;
   const HarmonicPlan& plan = out.harmony;
@@ -2993,7 +2988,7 @@ std::vector<PlacedTone> agreeWithThemeInflections(FugueAssembly& asm_ctx,
       const KeyContext key = rule_helpers::keyAt(plan, start);
       const int pitch = static_cast<int>(note.pitch);
       const int theme_pitch = clashing_theme(pitch, start, end, key);
-      if (theme_pitch < 0 || start == 0)
+      if (theme_pitch < 0 || start == 0 || start < section_start)
         continue;
       const int prev = sounding(voice, start - 1);
       const int next = sounding(voice, end);
@@ -3565,7 +3560,7 @@ IncomingFreeHead findIncomingFreeHead(Material& material, const VoicePlan& voice
   return incoming;
 }
 
-std::vector<PlacedTone> relieveFigurationHandoffsTwoSlot(FugueAssembly& asm_ctx,
+std::vector<PlacedTone> relieveFigurationHandoffsTwoSlot(FugueAssembly& asm_ctx, Tick section_start,
                                                          std::vector<PlacedTone> replaced) {
   Material& material = asm_ctx.out->material;
   const std::vector<FigurationHandoff> handoffs = findFigurationHandoffs(asm_ctx);
@@ -3576,6 +3571,8 @@ std::vector<PlacedTone> relieveFigurationHandoffsTwoSlot(FugueAssembly& asm_ctx,
     FigurationSection& bass_section = material.figuration_sections[handoff.bass_section];
     MaterialNote& tail = outgoing.notes.back();
     MaterialNote& bass_head = bass_section.notes.front();
+    if (tail.start_tick < section_start)
+      continue;
     std::array<HandoffToneSlot, 4> slots{};
     setHandoffSlot(&slots[1], &tail, outgoing.voice, asm_ctx.out->harmony);
     setHandoffSlot(&slots[3], &bass_head, bass_section.voice, asm_ctx.out->harmony);
@@ -3621,6 +3618,7 @@ std::vector<PlacedTone> relieveFigurationHandoffsTwoSlot(FugueAssembly& asm_ctx,
 }
 
 std::vector<PlacedTone> relieveFigurationHandoffsFourSlot(FugueAssembly& asm_ctx,
+                                                          Tick section_start,
                                                           std::vector<PlacedTone> replaced) {
   Material& material = asm_ctx.out->material;
   const std::vector<FigurationHandoff> handoffs = findFigurationHandoffs(asm_ctx);
@@ -3634,7 +3632,8 @@ std::vector<PlacedTone> relieveFigurationHandoffsFourSlot(FugueAssembly& asm_ctx
     MaterialNote& tail = outgoing.notes.back();
     MaterialNote& penultimate = outgoing.notes[outgoing.notes.size() - 2];
     MaterialNote& bass_head = bass_section.notes.front();
-    if (penultimate.start_tick + penultimate.duration != tail.start_tick)
+    if (penultimate.start_tick + penultimate.duration != tail.start_tick ||
+        penultimate.start_tick < section_start)
       continue;
     const IncomingFreeHead incoming = findIncomingFreeHead(
         material, asm_ctx.out->voice_plan, handoff.seam, outgoing.voice, &bass_section, &outgoing);
@@ -3709,11 +3708,12 @@ std::vector<PlacedTone> relieveFigurationHandoffsFourSlot(FugueAssembly& asm_ctx
 /// The free figuration tail and bass head are tried together first, since
 /// moving either alone can exchange a battuta for a standing fourth (or vice
 /// versa); the penultimate tail tone and the other upper voice's head join when
-/// that is not enough. The theme entry itself is never changed.
-std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx,
+/// that is not enough. The theme entry itself is never changed, nor a tone
+/// starting before `section_start`.
+std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx, Tick section_start,
                                                   std::vector<PlacedTone> replaced) {
-  replaced = relieveFigurationHandoffsTwoSlot(asm_ctx, replaced);
-  return relieveFigurationHandoffsFourSlot(asm_ctx, replaced);
+  replaced = relieveFigurationHandoffsTwoSlot(asm_ctx, section_start, replaced);
+  return relieveFigurationHandoffsFourSlot(asm_ctx, section_start, replaced);
 }
 
 /// @brief Re-aim the tone an accompaniment span hands over with.
@@ -3740,11 +3740,12 @@ std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx,
 /// accompaniment's own anchor guard uses one layer down.
 ///
 /// @param asm_ctx Assembly whose figuration tails are re-aimed in place.
+/// @param section_start Tones starting before this tick are left as their builder wrote them.
 /// @param replaced Tones already moved after their span was built (the local-key
 ///        respelling), seeded into the read-back list below for the same reason
 ///        the pass keeps its own: the registry cannot be amended in place.
 /// @return Every tone moved so far, this pass's included.
-std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx,
+std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx, Tick section_start,
                                                std::vector<PlacedTone> replaced) {
   // A figuration tone authored on a bar downbeat is the bar's harmonic anchor
   // and may only be exchanged for another tone of the same chord; anywhere else
@@ -3780,6 +3781,9 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx,
       continue;
     }
     MaterialNote& tail = section.notes.back();
+    if (tail.start_tick < section_start) {
+      continue;
+    }
     const VoiceId voice = section.voice;
     const Tick seam = tail.start_tick + tail.duration;
     const int original = static_cast<int>(tail.pitch);
@@ -3892,8 +3896,10 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx,
 /// and parallel-free on both sides. Anything else is left as placed.
 ///
 /// @param asm_ctx Assembly whose figuration is re-aimed in place.
+/// @param section_start Tones starting before this tick are left as their builder wrote them.
 /// @param replaced Tones already moved after their span was built.
-void relieveFigurationParallels(FugueAssembly& asm_ctx, std::vector<PlacedTone> replaced) {
+void relieveFigurationParallels(FugueAssembly& asm_ctx, Tick section_start,
+                                std::vector<PlacedTone> replaced) {
   const HarmonicPlan& plan = asm_ctx.out->harmony;
   auto sounding = [&](VoiceId voice, Tick tick) {
     for (auto rep = replaced.rbegin(); rep != replaced.rend(); ++rep) {
@@ -3907,7 +3913,7 @@ void relieveFigurationParallels(FugueAssembly& asm_ctx, std::vector<PlacedTone> 
     for (MaterialNote& note : section.notes) {
       const Tick onset = note.start_tick;
       const Tick release = note.start_tick + note.duration;
-      if (onset == 0) {
+      if (onset == 0 || onset < section_start) {
         continue;
       }
       const int own_prev = sounding(voice, onset - 1);
@@ -3985,10 +3991,13 @@ void relieveFigurationParallels(FugueAssembly& asm_ctx, std::vector<PlacedTone> 
 /// A figuration voice sounding the seventh is left alone: that tone WAS chosen
 /// against the spelling, and retracting it underneath would strand the bar head
 /// off its own chord.
-void retractUnsupportedSevenths(FugueAssembly& asm_ctx) {
+///
+/// @param asm_ctx Assembly whose harmony is re-read in place.
+/// @param section_start Chords starting before this tick are left as their builder wrote them.
+void retractUnsupportedSevenths(FugueAssembly& asm_ctx, Tick section_start) {
   const std::vector<FigurationSection>& sections = asm_ctx.out->material.figuration_sections;
   for (ChordEvent& chord : asm_ctx.out->harmony.chords) {
-    if (!hasSeventh(chord.quality)) {
+    if (chord.start_tick < section_start || !hasSeventh(chord.quality)) {
       continue;
     }
     const int seventh_pc = (chord.root_pc + seventhOffset(chord.quality)) % 12;
@@ -4028,18 +4037,34 @@ bool relatedKeyApproachClearsExposition(int entry_bar, int exposition_end_bar) {
   return entry_bar - kRelatedKeyApproachBars >= exposition_end_bar;
 }
 
+int fugueSectionOrdinal(FormType form) {
+  switch (form) {
+    case FormType::ToccataAndFugue:
+      return 1;
+    case FormType::FantasiaAndFugue:
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+void settleFugueSection(FugueAssembly& asm_ctx, int first_bar) {
+  const Tick section_start = barTick(first_bar);
+  std::vector<PlacedTone> replaced = spellFreeLinesInLocalKey(asm_ctx, section_start);
+  replaced = agreeWithThemeInflections(asm_ctx, section_start, std::move(replaced));
+  replaced = relieveFigurationHandoffs(asm_ctx, section_start, std::move(replaced));
+  replaced = relieveFigurationSeams(asm_ctx, section_start, std::move(replaced));
+  relieveFigurationParallels(asm_ctx, section_start, std::move(replaced));
+  retractUnsupportedSevenths(asm_ctx, section_start);
+}
+
 HarnessFixture buildFugueForm(const ResolvedRequest& req) {
   HarnessFixture out;
   out.voice_plan.num_voices = 3;
   SpanId next_id = 0;
   FugueAssembly asm_ctx{&out, &next_id, {}};
   appendFugueSection(asm_ctx, /*first_bar=*/0, static_cast<int>(req.bars), req);
-  relieveFigurationParallels(
-      asm_ctx, relieveFigurationSeams(
-                   asm_ctx, relieveFigurationHandoffs(
-                                asm_ctx, agreeWithThemeInflections(
-                                             asm_ctx, spellFreeLinesInLocalKey(asm_ctx)))));
-  retractUnsupportedSevenths(asm_ctx);
+  settleFugueSection(asm_ctx, /*first_bar=*/0);
   return out;
 }
 
@@ -4051,11 +4076,11 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
 
   const int total = static_cast<int>(req.bars);
   // Prelude length = N/3 rounded to 4, clamped to [4, 32]; the rest is fugue
-  // (kept >= 20 so the fugue half always carries all three entries + coda).
+  // (kept >= kMinFugueSectionBars so the fugue half always carries all three entries + coda).
   int prelude_bars = ((total / 3 + 2) / 4) * 4;
   prelude_bars = std::clamp(prelude_bars, 4, 32);
-  if (total - prelude_bars < 20) {
-    prelude_bars = total - 20;
+  if (total - prelude_bars < kMinFugueSectionBars) {
+    prelude_bars = total - kMinFugueSectionBars;
     prelude_bars = std::max(4, (prelude_bars / 4) * 4);
   }
   const int fugue_bars = total - prelude_bars;
@@ -4114,12 +4139,8 @@ HarnessFixture buildPreludeAndFugueForm(const ResolvedRequest& req) {
   // --- FUGUE (bars prelude_bars .. total-1). Reuse the full fugue assembly at
   //     a bar offset; span ids continue from the prelude (shared next_id). ---
   appendFugueSection(asm_ctx, prelude_bars, fugue_bars, req);
-  relieveFigurationParallels(
-      asm_ctx, relieveFigurationSeams(
-                   asm_ctx, relieveFigurationHandoffs(
-                                asm_ctx, agreeWithThemeInflections(
-                                             asm_ctx, spellFreeLinesInLocalKey(asm_ctx)))));
-  retractUnsupportedSevenths(asm_ctx);
+  // The prelude is fugue-idiom figuration in the same registry, so it is settled with the fugue.
+  settleFugueSection(asm_ctx, /*first_bar=*/0);
 
   // Keep the concatenated HarmonicPlan chords in tick order.
   std::stable_sort(

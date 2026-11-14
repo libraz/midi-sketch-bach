@@ -349,6 +349,7 @@ ResolvedRequest resolveRequest(const ComposeRequest& req) {
       req.seed,
       req.is_minor ? detail::Mode::Minor : detail::Mode::Major,
       req.character,
+      req.form,
       spec,
       cycle_count,
       keyTranspositionSemitones(req.tonic),

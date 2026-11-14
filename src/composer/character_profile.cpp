@@ -107,7 +107,7 @@ std::uint8_t figureChoice(SubjectCharacter character, std::uint8_t palette_size,
 std::uint8_t subjectIndexFor(SubjectCharacter character, bool minor_mode, std::uint32_t seed) {
   const SubjectClass& cls =
       (minor_mode ? kClassesMinor : kClassesMajor)[static_cast<std::uint8_t>(character)];
-  const std::size_t pick = static_cast<std::size_t>(seed / 4u) % cls.size;
+  const std::size_t pick = static_cast<std::size_t>(seed / kSubjectSeedPeriod) % cls.size;
   return cls.data[pick];
 }
 

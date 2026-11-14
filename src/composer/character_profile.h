@@ -25,6 +25,9 @@ struct CharacterProfile {
  */
 const CharacterProfile& characterProfile(SubjectCharacter character);
 
+/// @brief Consecutive seeds that draw the same subject from a character's class.
+inline constexpr std::uint32_t kSubjectSeedPeriod = 4;
+
 /**
  * @brief Deterministically pick a qualified-catalog subject index for a character.
  *

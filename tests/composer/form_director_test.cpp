@@ -765,6 +765,14 @@ TEST(FormDirectorKey, ResolvedOffsetMatchesKeyTranspositionForEveryTonic) {
   EXPECT_EQ(resolveRequest(g_request).key_transposition_semitones, -5);
 }
 
+TEST(FormDirectorResolve, ResolvedRequestCarriesTheRequestedForm) {
+  for (FormType form : kAllForms) {
+    ComposeRequest request;
+    request.form = form;
+    EXPECT_EQ(resolveRequest(request).form, form) << "form " << static_cast<int>(form);
+  }
+}
+
 TEST(FormDirectorKey, DefaultRequestHasNoKeyOffset) {
   const ComposeRequest request;
   EXPECT_EQ(request.tonic, Key::C);

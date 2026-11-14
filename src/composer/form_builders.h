@@ -22,6 +22,7 @@ struct ResolvedRequest {
   std::uint32_t seed;
   detail::Mode mode;  // Major / Minor scale selector
   SubjectCharacter character;
+  FormType form;  // requested form; selects the fugue-section seed rotation
   const FormSpec& spec;
   std::size_t cycle_count;  // arc cycles for this piece (>= 1)
 

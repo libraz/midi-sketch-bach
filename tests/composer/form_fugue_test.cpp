@@ -22,6 +22,8 @@
 //     opens with the three-entry exposition at the section boundary, and every
 //     prelude bar's downbeat figuration note is a chord tone.
 
+#include "composer/form_fugue.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -178,6 +180,36 @@ TEST(FormFugueTest, ExpositionHasThreeStaggeredEntries) {
   EXPECT_TRUE(v0_subject_bar0) << "missing V0 subject at bar 0";
   EXPECT_TRUE(v1_answer_bar4) << "missing V1 answer at bar 4";
   EXPECT_TRUE(v2_subject_bar8) << "missing V2 third entry at bar 8";
+}
+
+TEST(FormFugueTest, FugueSectionOrdinalSeparatesTheSectionalForms) {
+  EXPECT_EQ(fugueSectionOrdinal(FormType::Fugue), 0);
+  EXPECT_EQ(fugueSectionOrdinal(FormType::PreludeAndFugue), 0);
+  EXPECT_EQ(fugueSectionOrdinal(FormType::ToccataAndFugue), 1);
+  EXPECT_EQ(fugueSectionOrdinal(FormType::FantasiaAndFugue), 2);
+  for (FormType form : {FormType::TrioSonata, FormType::ChoralePrelude, FormType::Passacaglia,
+                        FormType::CelloPrelude, FormType::Chaconne, FormType::GoldbergVariations}) {
+    EXPECT_EQ(fugueSectionOrdinal(form), 0) << "form " << static_cast<int>(form);
+  }
+}
+
+TEST(FormFugueTest, MinimumLengthFugueSectionIsTheSectionFloor) {
+  // The section runs from the first subject statement to the end of the piece.
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    const HarnessFixture fx =
+        buildFixture(form, /*seed=*/42, /*is_minor=*/false, formSpec(form).min_bars);
+    Tick section_start = std::numeric_limits<Tick>::max();
+    Tick piece_end = 0;
+    for (const Span& span : fx.voice_plan.spans) {
+      if (span.intent == VoiceIntent::SubjectCarrier) {
+        section_start = std::min(section_start, span.start_tick);
+      }
+      piece_end = std::max(piece_end, span.end_tick);
+    }
+    ASSERT_LT(section_start, piece_end) << "form " << static_cast<int>(form);
+    EXPECT_EQ(static_cast<int>((piece_end - section_start) / kBar), kMinFugueSectionBars)
+        << "form " << static_cast<int>(form);
+  }
 }
 
 TEST(FormFugueTest, MinimumPublicLengthsKeepTheThirdExpositionEntry) {
