@@ -855,6 +855,19 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     next_chord.root_pc = next_plan.root_pc;
     next_chord.minor = next_plan.minor;
     next_chord.seventh = next_plan.seventh;
+    // Whether a tone closing this bar forms a cross relation with a tone of the
+    // next bar's chord: the same degree inflected the other way.
+    const detail::PcMask next_tones = detail::chordPcMaskInKey(next_chord, 0, mode);
+    auto contradicted_next = [&](int cand) {
+      for (int pcl = 0; pcl < 12; ++pcl) {
+        if ((next_tones & detail::pcBit(pcl)) != 0 &&
+            rule_helpers::isCrossRelationPc(static_cast<std::uint8_t>(cand),
+                                            static_cast<std::uint8_t>(pcl), 0,
+                                            mode == detail::Mode::Minor))
+          return true;
+      }
+      return false;
+    };
     // Nearest DIFFERENT chord tone in band (prefer above): shared by the
     // anti-stall escape and the off-beat oscillation below. A triad tone the
     // scale does not spell under this chord flattens onto it (the V0 anchor
@@ -986,8 +999,10 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         return -1;
       // A landing that closes the bar is left by a tone the next bar chooses
       // freely from its own scale, so none of those may lie an augmented second
-      // from it.
+      // from it, and none of the next chord's tones may respell it.
       if (land_closes_bar) {
+        if (contradicted_next(land))
+          return -1;
         for (int reach : {land - 3, land + 3}) {
           if (detail::inScale(reach, mode, &next_chord) &&
               detail::isAugmentedSecond(land, reach, 0, mode))
@@ -1268,6 +1283,20 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             walk_dir = reversed;
           }
         }
+        // The tone closing the bar forms no cross relation with the next bar's
+        // chord: a lowered seventh left for the dominant's raised one.
+        const bool closes_bar = sub > 0 && beat == 2 && sub + 1 == notes_per_beat;
+        const auto respelled = [&](int cand) { return closes_bar && contradicted_next(cand); };
+        if (!in_figure && respelled(pitch)) {
+          int reversed = -walk_dir;
+          const int other = walk_step(prev_emitted, reversed);
+          if (!respelled(other) && !augmentedFrom(prev_emitted, other)) {
+            pitch = other;
+            walk_dir = reversed;
+          } else if (!respelled(prev_emitted)) {
+            pitch = prev_emitted;
+          }
+        }
         // Every off-beat tone moves concurrently with the V0 sixteenths, so all
         // of them need the same audible-grain parallel re-check as the beat
         // anchor: when the tone lands a parallel against a concurrently moving
@@ -1318,7 +1347,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                              nearest_other_chord_tone(pitch), prev_emitted}) {
               if (cand < 0 || cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
-              if (!clean_over_ground(cand))
+              if (!clean_over_ground(cand) || respelled(cand))
                 continue;
               if (osc_fault_rank(cand) > accept)
                 continue;

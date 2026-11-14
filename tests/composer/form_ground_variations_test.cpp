@@ -1663,6 +1663,65 @@ TEST(GroundVariationPassacaglia, BarClosingLandingIsLeftWithoutAugmentedSecond) 
   expectBarClosingLandingIsLeftWithoutAugmentedSecond(FormType::Passacaglia);
 }
 
+// A middle-line tone closing the bar off the beat forms no cross relation with the
+// next bar's chord: no chord tone there inflects the same degree the other way.
+// `pins_kept_leading_tone` also asserts the leading tone closing a bar before the minor
+// tonic still occurs; both forms share the walk, and only the chaconne closes on it often.
+void expectBarClosingToneIsNotRespelledByTheNextChord(FormType form, bool pins_kept_leading_tone) {
+  std::size_t closings = 0;
+  std::size_t kept_leading_tones = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      ASSERT_EQ(r.provenance.size(), r.notes.size());
+      const detail::Mode mode = c.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      // The approach and final bars take cadence spellings of their own.
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      for (const NoteEvent& note : middleLine(r)) {
+        const Tick end = note.start_tick + note.duration;
+        if (end % kTicksPerBar34 != 0 || note.start_tick % kTicksPerBeat == 0 || end >= fill_end)
+          continue;
+        const ChordEvent* next = rule_helpers::chordAt(fx.harmony, end);
+        ASSERT_NE(next, nullptr);
+        const bool minor_third =
+            next->quality == ChordQuality::Minor || next->quality == ChordQuality::Minor7;
+        const bool seventh =
+            next->quality == ChordQuality::Minor7 || next->quality == ChordQuality::Dominant7;
+        const detail::ChordSpec spec{next->root_pc, minor_third, seventh};
+        const detail::PcMask tones = detail::chordPcMaskInKey(spec, fx.harmony.tonic_pc, mode);
+        ++closings;
+        const int leading_pc = (fx.harmony.tonic_pc + interval::kMajor7th) % 12;
+        if (c.is_minor && next->root_pc == fx.harmony.tonic_pc && note.pitch % 12 == leading_pc)
+          ++kept_leading_tones;
+        for (int pcl = 0; pcl < 12; ++pcl) {
+          if ((tones & detail::pcBit(pcl)) == 0)
+            continue;
+          EXPECT_FALSE(rule_helpers::isCrossRelationPc(
+              note.pitch, static_cast<std::uint8_t>(pcl),
+              static_cast<std::uint8_t>(fx.harmony.tonic_pc), c.is_minor))
+              << "form " << static_cast<int>(form) << " character " << static_cast<int>(character)
+              << " seed " << c.seed << " minor " << c.is_minor << " bars " << c.target_bars
+              << " tick " << note.start_tick << " pitch " << static_cast<int>(note.pitch)
+              << " next chord tone " << pcl;
+        }
+      }
+    }
+  }
+  EXPECT_GT(closings, 0u);
+  if (pins_kept_leading_tone)
+    EXPECT_GT(kept_leading_tones, 0u);
+}
+
+TEST(GroundVariationChaconne, BarClosingToneIsNotRespelledByTheNextChord) {
+  expectBarClosingToneIsNotRespelledByTheNextChord(FormType::Chaconne, true);
+}
+
+TEST(GroundVariationPassacaglia, BarClosingToneIsNotRespelledByTheNextChord) {
+  expectBarClosingToneIsNotRespelledByTheNextChord(FormType::Passacaglia, false);
+}
+
 // --- 9. Passacaglia terraced growth schedule (period-derived) ---------------
 //
 // The 3-voice passacaglia derives its per-cycle voice-presence schedule purely
