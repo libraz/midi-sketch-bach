@@ -1111,7 +1111,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 56051 -> 51624, fourths 172 -> 184.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 42 -> 41, anti 6 -> 2, successions 51624 -> 51630.
-    {FormType::Fugue, 0, 0, 21, 41, 2, 0, 2, 3, 1, 51630, 184},
+    // A cadential six-four trill holds the fourth, then steps off it: successions 51630 -> 51390.
+    {FormType::Fugue, 0, 0, 21, 41, 2, 0, 2, 3, 1, 51390, 184},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1214,7 +1215,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // anti 3 -> 0 (worst cell 1 -> 0); lines re-drawn after a refused escape hold faults the old
     // walk left: hidden 17 -> 21, battuta 22 -> 27, successions 32088 -> 32112.
-    {FormType::PreludeAndFugue, 0, 0, 21, 27, 0, 0, 3, 2, 0, 32112, 96},
+    // A cadential six-four trill holds the fourth, then steps off it: successions 32112 -> 31968.
+    {FormType::PreludeAndFugue, 0, 0, 21, 27, 0, 0, 3, 2, 0, 31968, 96},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -2199,7 +2201,8 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Consecutive same-voice middle entries take the other subdivision for their free line:
     // hidden 201 -> 206, battuta 233 -> 246, anti 24 -> 12, worst-cell hidden 4 -> 6,
     // worst-cell anti 2 -> 1, successions 491619 -> 506777, fourths 1270 -> 1159.
-    {FormType::Fugue, 0, 0, 206, 246, 12, 0, 6, 4, 1, 506777, 1159},
+    // A cadential six-four trill holds the fourth, then steps off it: successions 506777 -> 505961.
+    {FormType::Fugue, 0, 0, 206, 246, 12, 0, 6, 4, 1, 505961, 1159},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2308,7 +2311,8 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Consecutive same-voice middle entries take the other subdivision for their free line:
     // hidden 163 -> 179, battuta 201 -> 203, anti 22 -> 24, worst-cell hidden 3 -> 4,
     // successions 641329 -> 648541, fourths 1000 -> 945.
-    {FormType::PreludeAndFugue, 0, 0, 179, 203, 24, 0, 4, 5, 2, 648541, 945},
+    // A cadential six-four trill holds the fourth, then steps off it: successions 648541 -> 647533.
+    {FormType::PreludeAndFugue, 0, 0, 179, 203, 24, 0, 4, 5, 2, 647533, 945},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

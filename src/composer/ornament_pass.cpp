@@ -400,6 +400,18 @@ std::vector<VoiceId> voicesForIntent(const VoicePlan& plan,
   return voices;
 }
 
+// Whether `tick` is where a declared cadential six-four resolves: the tone there
+// is approached from the fourth, its own upper auxiliary.
+bool resolvesCadentialSixFour(const HarmonicPlan* plan, Tick tick) {
+  if (plan == nullptr)
+    return false;
+  return std::any_of(plan->cadential_six_fours.begin(), plan->cadential_six_fours.end(),
+                     [&](const CadentialSixFour& six_four) {
+                       return six_four.type == SixFourType::Cadential &&
+                              six_four.resolution_tick == tick;
+                     });
+}
+
 }  // namespace
 
 void resolveFixtureOrnamentContext(const HarnessFixture& fixture, FormType form,
@@ -1175,11 +1187,14 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
             // (appuy); at the cadence the placement hash deterministically
             // mixes in the von-unten doppelt-cadence opening so closing
             // formulas are not all identical. Short trills alternate plain
-            // from the upper tone.
+            // from the upper tone. The resolution of a cadential six-four keeps
+            // the appuy: a lower prefix would leave the fourth by a third.
+            const bool resolves_six_four =
+                resolvesCadentialSixFour(params.harmonic_plan, note.start_tick);
             TrillOnset onset = TrillOnset::UpperStart;
             if (note.duration >= kHalf) {
-              const bool von_unten =
-                  in_cadence_window && cadenceTrillOpensVonUnten(params.seed, bar, note.voice);
+              const bool von_unten = in_cadence_window && !resolves_six_four &&
+                                     cadenceTrillOpensVonUnten(params.seed, bar, note.voice);
               onset = von_unten ? TrillOnset::VonUnten : TrillOnset::Appuy;
             }
             // Long trills (longer than a quarter) pace at sixteenths: a
@@ -1189,7 +1204,7 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
                                  ? std::max(trill_sub, duration::kSixteenthNote)
                                  : trill_sub;
             exp = buildTrill(note, upper, lower, sub, onset);
-            if (mandatory && onset != TrillOnset::UpperStart) {
+            if (mandatory && onset != TrillOnset::UpperStart && !resolves_six_four) {
               cadence_fallback =
                   buildTrill(note, upper, lower, sub,
                              onset == TrillOnset::Appuy ? TrillOnset::VonUnten : TrillOnset::Appuy);

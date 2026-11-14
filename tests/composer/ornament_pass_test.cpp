@@ -35,6 +35,7 @@
 #include "composer/voice_onset_index.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
@@ -2028,6 +2029,68 @@ TEST(OrnamentPassTest, DeclaredChainStaysPlainEndToEnd) {
     EXPECT_EQ(after[i].duration, before[i].duration);
     EXPECT_NE(after[i].source, BachNoteSource::Ornament);
   }
+}
+
+namespace {
+
+// Signed step from the pitch `voice` sounds at `tick` to its next different
+// pitch; 0 when the voice never changes pitch after `tick`.
+int firstPitchChangeAfter(const std::vector<NoteEvent>& notes, VoiceId voice, Tick tick) {
+  std::vector<NoteEvent> line;
+  for (const NoteEvent& note : notes) {
+    if (note.voice == voice)
+      line.push_back(note);
+  }
+  std::sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
+  int held = -1;
+  for (const NoteEvent& note : line) {
+    if (note.start_tick <= tick) {
+      if (tick < note.start_tick + note.duration)
+        held = note.pitch;
+      continue;
+    }
+    if (held >= 0 && note.pitch != held)
+      return static_cast<int>(note.pitch) - held;
+  }
+  return 0;
+}
+
+}  // namespace
+
+// The resolution tone of a declared cadential six-four is approached from its
+// own upper auxiliary, so its trill keeps the appuy opening. On the composed
+// and the shipped array alike the fourth's first pitch change is the step down
+// to the third, including where the cadence hash would pick the von-unten.
+TEST(OrnamentPassTest, CadentialSixFourTrillLeavesTheFourthByStep) {
+  constexpr VoiceId kTop = 0;
+  int von_unten_sites = 0;
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
+    for (bool minor : {false, true}) {
+      for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+        ComposeRequest request;
+        request.form = form;
+        request.is_minor = minor;
+        request.character = SubjectCharacter::Severe;
+        request.seed = seed;
+        const test::ProductGateResult gate = test::runProductGate(request);
+        const std::string cell = std::to_string(static_cast<int>(form)) +
+                                 (minor ? " minor" : " major") + " seed " + std::to_string(seed);
+        ASSERT_TRUE(gate.built) << cell;
+        ASSERT_FALSE(gate.fixture.harmony.cadential_six_fours.empty()) << cell;
+        const CadentialSixFour& six_four = gate.fixture.harmony.cadential_six_fours.back();
+        const int bar = static_cast<int>(six_four.resolution_tick / kTicksPerBar);
+        if (cadenceTrillOpensVonUnten(seed, bar, kTop))
+          ++von_unten_sites;
+        const int composed = firstPitchChangeAfter(gate.composed.notes, kTop, six_four.tick);
+        const int shipped = firstPitchChangeAfter(gate.shipped.notes, kTop, six_four.tick);
+        EXPECT_TRUE(composed == -1 || composed == -2) << cell << " composed step " << composed;
+        EXPECT_TRUE(shipped == -1 || shipped == -2) << cell << " shipped step " << shipped;
+      }
+    }
+  }
+  EXPECT_GT(von_unten_sites, 0) << "no cell reached the von-unten hash at the six-four";
 }
 
 }  // namespace bach::composer
