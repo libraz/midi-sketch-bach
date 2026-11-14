@@ -249,6 +249,16 @@ class ThemeToneRegistry {
   void concurrentMotions(Tick prev_tick, Tick tick, VoiceId voice, VoiceId num_voices,
                          std::vector<ConcurrentMotion>& out_motions) const;
 
+  /// @brief Gather each other voice's motion into an arrival of `voice` at `tick`.
+  ///
+  /// Each voice is read one sixteenth before the arrival, the union-onset pairing
+  /// the parallel checks apply: a figuration's last running tone into the beat is
+  /// the tone it pairs with, not the one at the previous beat. Every judgement of
+  /// a perfect approach into an arrival reads through here, so the stage that
+  /// places a tone and the stage that repairs it see the same pair.
+  void arrivalMotions(Tick tick, VoiceId voice, VoiceId num_voices,
+                      std::vector<ConcurrentMotion>& out_motions) const;
+
  private:
   std::vector<ThemeTone> tones_;
 };

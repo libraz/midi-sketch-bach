@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <cstdlib>
 
-#include "composer/bar_material.h"
 #include "composer/material_pair_guard.h"
 #include "composer/rule_helpers.h"
 
@@ -72,8 +71,7 @@ void relieveRunningArrival(const std::vector<MaterialNote*>& line, std::size_t a
   if (arrival_idx + 1 < line.size()) {
     const MaterialNote& next = *line[arrival_idx + 1];
     next_pitch = static_cast<int>(next.pitch);
-    registry.concurrentMotions(next.start_tick - kSixteenth, next.start_tick, voice, num_voices,
-                               out_of_arrival);
+    registry.arrivalMotions(next.start_tick, voice, num_voices, out_of_arrival);
   }
   const int exit_ceiling =
       next_pitch < 0 ? 0 : perfectFaultRank(original, next_pitch, out_of_arrival);
@@ -214,10 +212,7 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
     const int original = static_cast<int>(approach.pitch);
     const int own_prev = approach_idx > 0 ? static_cast<int>(line[approach_idx - 1]->pitch) : -1;
 
-    // Sampled one sixteenth back, the grain at which a union-onset reading pairs
-    // an arrival with each other voice's last preceding onset.
-    into_head.clear();
-    registry.concurrentMotions(head - kSixteenth, head, voice, num_voices, into_head);
+    registry.arrivalMotions(head, voice, num_voices, into_head);
     const int original_rank = perfectFaultRank(original, arrival, into_head);
     if (original_rank == 0)
       continue;
@@ -236,9 +231,7 @@ void relieveArrivals(const std::vector<MaterialNote*>& line, const ThemeToneRegi
       continue;
     }
 
-    into_onset.clear();
-    registry.concurrentMotions(approach.start_tick - kSixteenth, approach.start_tick, voice,
-                               num_voices, into_onset);
+    registry.arrivalMotions(approach.start_tick, voice, num_voices, into_onset);
     const int onset_ceiling = perfectFaultRank(own_prev, original, into_onset);
     at_onset.clear();
     registry.concurrentMotions(approach.start_tick - 1, approach.start_tick, voice, num_voices,

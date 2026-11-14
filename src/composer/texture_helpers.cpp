@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "composer/bar_material.h"
 #include "composer/material_pair_guard.h"
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
@@ -292,6 +293,11 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
     const int prev = (prev_tick >= 0) ? soundingPitchInVoice(other, prev_tick) : -1;
     out_motions.push_back(ConcurrentMotion{other, prev, curr});
   }
+}
+
+void ThemeToneRegistry::arrivalMotions(Tick tick, VoiceId voice, VoiceId num_voices,
+                                       std::vector<ConcurrentMotion>& out_motions) const {
+  concurrentMotions(tick - kSixteenth, tick, voice, num_voices, out_motions);
 }
 
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
