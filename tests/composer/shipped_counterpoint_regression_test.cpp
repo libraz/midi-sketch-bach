@@ -56,6 +56,7 @@
 #include <vector>
 
 #include "composer/provenance.h"
+#include "composer/rule_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -380,26 +381,21 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
         sounding.begin(), sounding.end(),
         [](const Sample& left, const Sample& right) { return left.pitch < right.pitch; });
     const std::uint8_t bass = bass_iter->pitch;
-    const bool bass_holds = next_bass == bass;
     const bool over_pedal = isPedalNote(provenance, bass_iter->note_index);
     for (const Sample& sample : sounding) {
       if (sample.pitch == bass)
         continue;
       ++counts.upper_samples;
-      if ((sample.pitch - bass) % 12 != 5)
-        continue;
-      if (!bass_holds)
-        continue;  // the bass steps away: the fourth was passing.
-      if (over_pedal)
-        continue;  // a fourth standing over a held pedal is licensed.
       // The fourth-bearing voice must resolve directly while the bass holds.
       // A trill can do so before the next beat and return to its upper note
       // there; the repeated auxiliary does not erase the intervening resolution.
-      Tick resolution_tick = 0;
-      const bool resolves = index.immediateDownwardResolution(
-                                sample.voice, tick, tick + kTicksPerBeat, &resolution_tick) &&
-                            index.lowestPitchHolds(tick, resolution_tick, bass);
-      if (!resolves)
+      const auto resolves = [&] {
+        Tick resolution_tick = 0;
+        return index.immediateDownwardResolution(sample.voice, tick, tick + kTicksPerBeat,
+                                                 &resolution_tick) &&
+               index.lowestPitchHolds(tick, resolution_tick, bass);
+      };
+      if (rule_helpers::isUnresolvedBassFourth(sample.pitch, bass, next_bass, over_pedal, resolves))
         ++counts.unresolved;
     }
   }

@@ -116,6 +116,20 @@ bool isConsonantInterval(int semitones);
 bool isConsonantAboveBass(std::uint8_t pitch, std::uint8_t bass_pitch);
 bool isBassSensitiveConsonance(std::uint8_t pitch_a, std::uint8_t pitch_b, std::uint8_t bass_pitch);
 
+// A fourth over the bass that stands as a fault on a beat: the upper tone is a
+// fourth (any octave) above the lowest sounding pitch, that bass holds into the
+// next beat, it is not a declared pedal, and the upper tone has not resolved by
+// a step down over it. A bass that steps away makes the fourth a passing one.
+// `next_bass` is the lowest pitch one beat later; `over_pedal` is false where
+// the caller cannot know; `resolves()` is the caller's read of the upper voice,
+// called only for a fourth the other clauses already count.
+template <typename Resolves>
+bool isUnresolvedBassFourth(int upper, int bass, int next_bass, bool over_pedal,
+                            const Resolves& resolves) {
+  return upper > bass && (upper - bass) % 12 == 5 && next_bass == bass && !over_pedal &&
+         !resolves();
+}
+
 // A cross relation is the SAME scale degree sounding with two different
 // chromatic inflections, so the verdict depends on the key rather than on the
 // bare semitone distance: D/Eb are two adjacent degrees of C minor but a
