@@ -24,6 +24,7 @@
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
@@ -188,6 +189,44 @@ void appendFigurationBar(FigurationSection& section, int bar, const BarChord& ch
         section.notes.push_back(materialNote(start, dur, pitch));
       },
       figure, leap_fill);
+}
+
+// Every quarter line a bar of the quarter tier may take from its chord-tone
+// start: each move a diatonic step or third (at most one third, no repeated
+// tone, no a-b-a-b pendulum), a chord tone on beat 3, nothing below `floor`, and
+// an end between the start and the chord tone above it -- the span the anchored
+// contours end in, so the next bar head is reached without a leap. Enumeration
+// order is fixed, so a draw indexes it.
+std::vector<std::array<int, 4>> quarterLineMembers(int start, int floor, const BarChord& chord,
+                                                   Mode mode) {
+  const detail::ChordSpec harmony = spellingOf(chord);
+  auto move = [&](int pitch, int degrees) {
+    for (int count = 0; count < std::abs(degrees); ++count)
+      pitch = detail::melodicScaleStep(pitch, degrees > 0 ? 1 : -1, mode, &harmony);
+    return pitch;
+  };
+  const int ceiling = chordToneAbove(start, chord.root_pc, chord.minor);
+  static constexpr int kMoves[4] = {-2, -1, 1, 2};
+  std::vector<std::array<int, 4>> members;
+  for (const int first : kMoves) {
+    for (const int second : kMoves) {
+      for (const int last : kMoves) {
+        if ((std::abs(first) == 2) + (std::abs(second) == 2) + (std::abs(last) == 2) > 1)
+          continue;
+        std::array<int, 4> line{start, 0, 0, 0};
+        line[1] = move(line[0], first);
+        line[2] = move(line[1], second);
+        line[3] = move(line[2], last);
+        if (!isChordTone(line[2], chord.root_pc, chord.minor) ||
+            *std::min_element(line.begin(), line.end()) < floor || line[3] < start ||
+            line[3] > ceiling || (line[2] == line[0] && line[3] == line[1])) {
+          continue;
+        }
+        members.push_back(line);
+      }
+    }
+  }
+  return members;
 }
 
 // ----- Chorale prelude walking-bass (Schubler BWV645 model) ----------------
@@ -709,6 +748,25 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                               chord.minor),
             detail::ChordSpec{chord.root_pc, chord.minor}, mode, corta_figure,
             profile.prefer_dotted);
+      } else if (notes_per_beat == 1) {
+        // The quarter tier has no fill between its anchors, so it walks a
+        // stepwise line instead of the anchored contours. The draw is rotated
+        // by the bar so neighbouring quarter bars step through the set.
+        const int start = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
+                                            chord.root_pc, chord.minor);
+        const std::vector<std::array<int, 4>> members =
+            quarterLineMembers(start, kV1EmbellishCeiling, chord, mode);
+        // Never empty: start, step up, back, third up always qualifies.
+        const auto count = static_cast<std::uint32_t>(members.size());
+        const std::uint32_t pick =
+            (rng::seedChoice(req.seed, rng::SeedDecision::kChoraleQuarterContour, count) +
+             static_cast<std::uint32_t>(bar)) %
+            count;
+        const std::array<int, 4>& line = members[pick];
+        for (int beat = 0; beat < 4; ++beat) {
+          fig.notes.push_back(materialNote(barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat,
+                                           kQuarterDur, line[static_cast<std::size_t>(beat)]));
+        }
       } else {
         // Anchor-contour rotation, phased by the seed so the same section plan
         // lays the contours over different bars across seeds. The phase folds in
@@ -1280,109 +1338,119 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     const auto& cantus = out.material.cf_embellished;
     const auto& top = out.material.figuration_sections.front().notes;
     bool installed = false;
-    for (int bar_offset : {2, 3, 4, 5, 6, 7}) {
-      if (installed || bars <= bar_offset)
-        break;
-      const Tick suspension_tick = barTick(bars - bar_offset);
-      const Tick preparation_tick = suspension_tick - kTicksPerBeat;
-      const Tick resolution_tick = suspension_tick + kTicksPerBeat;
-      const BarChord& resolution_chord = bar_chords[static_cast<std::size_t>(bars - bar_offset)];
-      const detail::ChordSpec resolution_spec = spellingOf(resolution_chord);
-      const detail::ChordSpec preparation_spec =
-          spellingOf(bar_chords[static_cast<std::size_t>(bars - bar_offset - 1)]);
-      const int original_bass_prep = soundingMaterialPitch(bass, preparation_tick);
-      const int held_bass = soundingMaterialPitch(bass, suspension_tick);
-      const int cantus_prep = soundingMaterialPitch(cantus, preparation_tick);
-      const int cantus_sus = soundingMaterialPitch(cantus, suspension_tick);
-      const int cantus_res = soundingMaterialPitch(cantus, resolution_tick);
-      const int top_prep = soundingMaterialPitch(top, preparation_tick);
-      const int top_sus = soundingMaterialPitch(top, suspension_tick);
-      const int top_res = soundingMaterialPitch(top, resolution_tick);
-      const int band_hi = std::min(static_cast<int>(organ_range::kManualHigh),
-                                   std::max({top_prep, top_sus, top_res}) + 5);
-      // The tone the three lines were last read against, one sixteenth before
-      // each arrival -- the grain a union-onset reading pairs the voices at.
-      const int bass_before = soundingMaterialPitch(bass, preparation_tick - kSixteenth);
-      const int cantus_before = soundingMaterialPitch(cantus, preparation_tick - kSixteenth);
-      const int top_before = soundingMaterialPitch(top, preparation_tick - kSixteenth);
-      // The cantus may move again inside the preparation beat; the union-onset
-      // reading pairs that tone, not the beat's, with the bass arriving under
-      // the suspension -- and the bass there is the displaced preparation if its
-      // note still sounds.
-      const int cantus_late = soundingMaterialPitch(cantus, suspension_tick - kSixteenth);
-      const auto bass_late = [&](int displaced) {
-        for (const MaterialNote& note : bass) {
-          if (note.start_tick <= preparation_tick &&
-              preparation_tick < note.start_tick + note.duration &&
-              suspension_tick - kSixteenth < note.start_tick + note.duration)
-            return displaced;
-        }
-        return soundingMaterialPitch(bass, suspension_tick - kSixteenth);
-      };
-      // The figure also pins the bass under its resolution, which changes what
-      // the bass LEAVES that beat with. The top line rests immediately after, so
-      // the pair that carries the motion is the cantus over the bass -- and it
-      // does not depend on which preparation tone is picked below, so a bar
-      // whose exit cannot be answered is abandoned for the next candidate bar
-      // rather than searched.
-      const Tick departure_tick = resolution_tick + kTicksPerBeat;
-      if (formsStrictPerfectParallel(held_bass, soundingMaterialPitch(bass, departure_tick),
-                                     soundingMaterialPitch(cantus, departure_tick - kSixteenth),
-                                     soundingMaterialPitch(cantus, departure_tick)))
-        continue;
-      for (int distance = 0; distance <= 7 && !installed; ++distance) {
-        for (int direction : {1, -1}) {
-          if (distance == 0 && direction < 0)
-            continue;
-          const int bass_prep = original_bass_prep + direction * distance;
-          if (bass_prep < 30 || bass_prep >= cantus_prep ||
-              !detail::inScale(bass_prep, mode, &preparation_spec) ||
-              !isConsonantPair(cantus_prep, bass_prep))
-            continue;
-          for (SuspensionType type :
-               {SuspensionType::Sus7_6, SuspensionType::Sus4_3, SuspensionType::Sus9_8}) {
-            SuspensionPattern suspension;
-            if (!designUpperSuspension(
-                    type, preparation_tick, suspension_tick, resolution_tick,
-                    /*voice=*/0, static_cast<std::uint8_t>(bass_prep),
-                    static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
-                    static_cast<std::uint8_t>(cantus_prep), static_cast<std::uint8_t>(cantus_sus),
-                    static_cast<std::uint8_t>(cantus_res),
-                    /*band_lo=*/
-                    std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
-                    band_hi, mode, &suspension, &resolution_spec, &preparation_spec))
-              continue;
-            // Displacing the bass and installing the carrier are one choice: the
-            // carrier overwrites the top line across the whole figure, so what
-            // ships here is the designed suspension over the displaced bass, not
-            // the figuration either of them was read against. This is the last
-            // point at which the form touches any voice, so the three-line
-            // surface the pair produces is read once, whole, before either end
-            // is committed -- every arrival the figure creates, against every
-            // other line sounding into it.
-            const int prep_pitch = static_cast<int>(suspension.preparation_pitch);
-            const int sus_pitch = static_cast<int>(suspension.suspension_pitch);
-            const int res_pitch = static_cast<int>(suspension.resolution_pitch);
-            if (formsStrictPerfectParallel(top_before, prep_pitch, cantus_before, cantus_prep) ||
-                formsStrictPerfectParallel(top_before, prep_pitch, bass_before, bass_prep) ||
-                formsStrictPerfectParallel(cantus_before, cantus_prep, bass_before, bass_prep) ||
-                formsStrictPerfectParallel(cantus_prep, cantus_sus, bass_prep, held_bass) ||
-                formsStrictPerfectParallel(cantus_late, cantus_sus, bass_late(bass_prep),
-                                           held_bass) ||
-                formsStrictPerfectParallel(sus_pitch, res_pitch, cantus_sus, cantus_res))
-              continue;
-            for (MaterialNote& note : bass) {
-              if (note.start_tick <= preparation_tick &&
-                  preparation_tick < note.start_tick + note.duration)
-                note.pitch = static_cast<std::uint8_t>(bass_prep);
-              if (note.start_tick == resolution_tick)
-                note.pitch = static_cast<std::uint8_t>(held_bass);
-            }
-            installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
-            break;
+    // A design whose arrivals form no perfect interval by parallel or contrary
+    // motion is taken at any bar of the region before the contrary repeat is
+    // conceded at one; the true parallel is never conceded.
+    for (int rung = 0; rung < 2 && !installed; ++rung) {
+      for (int bar_offset : {2, 3, 4, 5, 6, 7}) {
+        if (installed || bars <= bar_offset)
+          break;
+        const Tick suspension_tick = barTick(bars - bar_offset);
+        const Tick preparation_tick = suspension_tick - kTicksPerBeat;
+        const Tick resolution_tick = suspension_tick + kTicksPerBeat;
+        const BarChord& resolution_chord = bar_chords[static_cast<std::size_t>(bars - bar_offset)];
+        const detail::ChordSpec resolution_spec = spellingOf(resolution_chord);
+        const detail::ChordSpec preparation_spec =
+            spellingOf(bar_chords[static_cast<std::size_t>(bars - bar_offset - 1)]);
+        const int original_bass_prep = soundingMaterialPitch(bass, preparation_tick);
+        const int held_bass = soundingMaterialPitch(bass, suspension_tick);
+        const int cantus_prep = soundingMaterialPitch(cantus, preparation_tick);
+        const int cantus_sus = soundingMaterialPitch(cantus, suspension_tick);
+        const int cantus_res = soundingMaterialPitch(cantus, resolution_tick);
+        const int top_prep = soundingMaterialPitch(top, preparation_tick);
+        const int top_sus = soundingMaterialPitch(top, suspension_tick);
+        const int top_res = soundingMaterialPitch(top, resolution_tick);
+        const int band_hi = std::min(static_cast<int>(organ_range::kManualHigh),
+                                     std::max({top_prep, top_sus, top_res}) + 5);
+        // The tone the three lines were last read against, one sixteenth before
+        // each arrival -- the grain a union-onset reading pairs the voices at.
+        const int bass_before = soundingMaterialPitch(bass, preparation_tick - kSixteenth);
+        const int cantus_before = soundingMaterialPitch(cantus, preparation_tick - kSixteenth);
+        const int top_before = soundingMaterialPitch(top, preparation_tick - kSixteenth);
+        // The cantus may move again inside the preparation beat; the union-onset
+        // reading pairs that tone, not the beat's, with the bass arriving under
+        // the suspension -- and the bass there is the displaced preparation if its
+        // note still sounds.
+        const int cantus_late = soundingMaterialPitch(cantus, suspension_tick - kSixteenth);
+        const auto bass_late = [&](int displaced) {
+          for (const MaterialNote& note : bass) {
+            if (note.start_tick <= preparation_tick &&
+                preparation_tick < note.start_tick + note.duration &&
+                suspension_tick - kSixteenth < note.start_tick + note.duration)
+              return displaced;
           }
-          if (installed)
-            break;
+          return soundingMaterialPitch(bass, suspension_tick - kSixteenth);
+        };
+        // The figure also pins the bass under its resolution, which changes what
+        // the bass LEAVES that beat with. The top line rests immediately after, so
+        // the pair that carries the motion is the cantus over the bass -- and it
+        // does not depend on which preparation tone is picked below, so a bar
+        // whose exit cannot be answered is abandoned for the next candidate bar
+        // rather than searched.
+        const Tick departure_tick = resolution_tick + kTicksPerBeat;
+        if (formsStrictPerfectParallel(held_bass, soundingMaterialPitch(bass, departure_tick),
+                                       soundingMaterialPitch(cantus, departure_tick - kSixteenth),
+                                       soundingMaterialPitch(cantus, departure_tick)))
+          continue;
+        for (int distance = 0; distance <= 7 && !installed; ++distance) {
+          for (int direction : {1, -1}) {
+            if (distance == 0 && direction < 0)
+              continue;
+            const int bass_prep = original_bass_prep + direction * distance;
+            if (bass_prep < 30 || bass_prep >= cantus_prep ||
+                !detail::inScale(bass_prep, mode, &preparation_spec) ||
+                !isConsonantPair(cantus_prep, bass_prep))
+              continue;
+            for (SuspensionType type :
+                 {SuspensionType::Sus7_6, SuspensionType::Sus4_3, SuspensionType::Sus9_8}) {
+              SuspensionPattern suspension;
+              if (!designUpperSuspension(
+                      type, preparation_tick, suspension_tick, resolution_tick,
+                      /*voice=*/0, static_cast<std::uint8_t>(bass_prep),
+                      static_cast<std::uint8_t>(held_bass), static_cast<std::uint8_t>(held_bass),
+                      static_cast<std::uint8_t>(cantus_prep), static_cast<std::uint8_t>(cantus_sus),
+                      static_cast<std::uint8_t>(cantus_res),
+                      /*band_lo=*/
+                      std::max({bass_prep, held_bass, cantus_prep, cantus_sus, cantus_res}) + 1,
+                      band_hi, mode, &suspension, &resolution_spec, &preparation_spec))
+                continue;
+              // Displacing the bass and installing the carrier are one choice: the
+              // carrier overwrites the top line across the whole figure, so what
+              // ships here is the designed suspension over the displaced bass, not
+              // the figuration either of them was read against. This is the last
+              // point at which the form touches any voice, so every arrival the
+              // figure creates is read against every other line sounding into it,
+              // once, before either end is committed: for a true parallel, and on
+              // the first rung for the contrary repeat of a perfect interval too.
+              const int prep_pitch = static_cast<int>(suspension.preparation_pitch);
+              const int sus_pitch = static_cast<int>(suspension.suspension_pitch);
+              const int res_pitch = static_cast<int>(suspension.resolution_pitch);
+              const auto faulty = [&](int line_prev, int line_curr, int other_prev,
+                                      int other_curr) {
+                return formsStrictPerfectParallel(line_prev, line_curr, other_prev, other_curr) ||
+                       (rung == 0 &&
+                        formsAntiParallelPerfect(line_prev, line_curr, other_prev, other_curr));
+              };
+              if (faulty(top_before, prep_pitch, cantus_before, cantus_prep) ||
+                  faulty(top_before, prep_pitch, bass_before, bass_prep) ||
+                  faulty(cantus_before, cantus_prep, bass_before, bass_prep) ||
+                  faulty(cantus_prep, cantus_sus, bass_prep, held_bass) ||
+                  faulty(cantus_late, cantus_sus, bass_late(bass_prep), held_bass) ||
+                  faulty(sus_pitch, res_pitch, cantus_sus, cantus_res))
+                continue;
+              for (MaterialNote& note : bass) {
+                if (note.start_tick <= preparation_tick &&
+                    preparation_tick < note.start_tick + note.duration)
+                  note.pitch = static_cast<std::uint8_t>(bass_prep);
+                if (note.start_tick == resolution_tick)
+                  note.pitch = static_cast<std::uint8_t>(held_bass);
+              }
+              installed = installSuspensionCarrier(out.material, out.voice_plan, suspension);
+              break;
+            }
+            if (installed)
+              break;
+          }
         }
       }
     }
