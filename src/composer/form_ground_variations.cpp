@@ -783,6 +783,46 @@ constexpr int kPassV0BandHi = 79;  // G5.
 constexpr int kPassV1BandLo = 48;  // C3.
 constexpr int kPassV1BandHi = 59;  // B3.
 
+/// @brief The harmony one ground bar gives the middle line, as the line spells it.
+///
+/// A triad tone the scale does not spell under the chord flattens onto it (the V0
+/// anchor policy in barAnchorPitchClasses); V0 spells the minor dominant with its
+/// leading tone, so this line does too. The declared seventh joins the set:
+/// reading a bare triad here while the beat anchor reads four tones would let the
+/// escape push the line off a seventh the selector deliberately placed, or judge
+/// the chord spent while one of its tones was still free.
+struct CounterBarHarmony {
+  detail::ChordSpec chord;
+  int chord_pc[4] = {0, 0, 0, 0};
+  int chord_tones = 3;
+
+  bool contains(int midi) const {
+    const int pcl = ((midi % 12) + 12) % 12;
+    for (int tone = 0; tone < chord_tones; ++tone) {
+      if (pcl == chord_pc[tone])
+        return true;
+    }
+    return false;
+  }
+};
+
+CounterBarHarmony counterBarHarmony(const CycleBar& plan, detail::Mode mode) {
+  CounterBarHarmony harmony;
+  detail::ChordSpec& chord = harmony.chord;
+  chord.root_pc = plan.root_pc;
+  chord.minor = plan.minor;
+  chord.seventh = plan.seventh;
+  const int chord_third = chord.minor ? 3 : 4;
+  const int tones[4] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
+                        (chord.root_pc + 7) % 12, detail::chordSeventhPc(chord)};
+  for (int tone = 0; tone < 4; ++tone) {
+    harmony.chord_pc[tone] =
+        detail::inScale(tones[tone], mode, &chord) ? tones[tone] : (tones[tone] + 11) % 12;
+  }
+  harmony.chord_tones = chord.seventh ? 4 : 3;
+  return harmony;
+}
+
 /**
  * @brief Build one cycle's V1 counter-figuration: a per-beat consonant,
  *        parallel-free middle line read back against V0 and the ground (V2).
@@ -843,18 +883,215 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
   std::vector<int> ahead_pitches;
   std::vector<ConcurrentMotion> ahead_motions;
 
+  // An augmented second, or the diminished seventh inverting it, from a tone.
+  const auto augmentedFrom = [mode](int from, int to) {
+    return from >= 0 && detail::isAugmentedSecondClass(from, to, 0, mode);
+  };
+  // The tone a beat sounds first, chosen against the voices already written:
+  // `resolving_to` is the landing a passing tone fixed for it, or -1.
+  auto choose_anchor = [&](const CounterBarHarmony& harmony, Tick beat_tick, int beat,
+                           int prev_emitted, int line_prev, int cursor, int resolving_to) {
+    const detail::ChordSpec& chord = harmony.chord;
+    auto is_chord_tone = [&](int midi) { return harmony.contains(midi); };
+    const Tick prev_tick = beat_tick - kTicksPerBeat;
+    theme_pitches.clear();
+    motions.clear();
+    registry.concurrentThemePitches(beat_tick, /*voice=*/1, theme_pitches);
+    registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/1, /*num_voices=*/3, motions);
+    // Consonance here is read with the upper-voice table, which admits the
+    // perfect fourth. Against the lowest sounding voice that reading is wrong:
+    // this ground holds one tone for a whole bar, so a fourth taken over it is
+    // neither left nor resolved. The line's own band sits above the ground by
+    // construction, so the lowest concurrent tone IS the bass whenever one
+    // sounds at all.
+    int bass_pitch = 128;
+    for (int upper : theme_pitches)
+      bass_pitch = std::min(bass_pitch, upper);
+    auto clean_over_bass = [&](int cand) {
+      return bass_pitch >= 128 ||
+             rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
+                                                static_cast<std::uint8_t>(bass_pitch));
+    };
+    // A beat a passing tone resolves onto is already chosen and already vetted
+    // against this onset; re-selecting it would strand the passing tone.
+    const bool resolving = resolving_to >= 0;
+    int anchor = resolving ? resolving_to
+                           : consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor,
+                                                theme_pitches, line_prev, motions, mode,
+                                                /*downbeat=*/beat == 0);
+    // Adjacent bars whose chords share a tone near the band centre can pin
+    // the nearest-tone anchor chain to ONE pitch for many beats. At the
+    // quarter-note tier that surfaces as a stalled repeated-note line; where
+    // the beat is subdivided it is worse, because every beat then restates
+    // the same two tones and whole bars settle onto one interval. Any
+    // repeated anchor is displaced to the nearest DIFFERENT triad tone in
+    // band that is ALSO consonant against every concurrently sounding voice
+    // (a triad tone is always consonant with the ground, but the V0 wave may
+    // sit on a non-chord tone -- a 6th over the ground -- that clashes with
+    // one triad member and not another): the reference corpus almost never
+    // repeats a pitch, so even a pair reads as a stall. When no admissible
+    // different tone exists the repeat stands -- a repeated consonance beats
+    // a fresh clash.
+    if (!resolving && anchor == line_prev) {
+      for (int dist = 1; dist <= 12; ++dist) {
+        bool placed = false;
+        for (int cand : {anchor + dist, anchor - dist}) {
+          if (cand < band_lo || cand > band_hi || !is_chord_tone(cand))
+            continue;
+          bool consonant = true;
+          for (int upper : theme_pitches) {
+            if (!isConsonantIc(cand - upper)) {
+              consonant = false;
+              break;
+            }
+          }
+          if (consonant) {
+            anchor = cand;
+            placed = true;
+            break;
+          }
+        }
+        if (placed)
+          break;
+      }
+    }
+    // An anchor the line would reach by an augmented second takes the nearest
+    // other chord tone consonant with every concurrent voice instead.
+    if (augmentedFrom(prev_emitted, anchor)) {
+      bool placed = false;
+      for (int dist = 1; dist <= 12 && !placed; ++dist) {
+        for (int cand : {anchor - dist, anchor + dist}) {
+          if (cand < band_lo || cand > band_hi || !is_chord_tone(cand) ||
+              augmentedFrom(prev_emitted, cand) || !clean_over_bass(cand) ||
+              std::any_of(theme_pitches.begin(), theme_pitches.end(),
+                          [cand](int upper) { return !isConsonantIc(cand - upper); }))
+            continue;
+          anchor = cand;
+          placed = true;
+          break;
+        }
+      }
+    }
+    // Audible-grain parallel re-check. consonantChordTone judged the anchor's
+    // parallel motion at QUARTER grain (previous beat -> this beat), but the
+    // union-onset sampling the gate (and the ear) uses pairs this anchor with
+    // V1's last EMITTED note and the other voices' last sub-beat onset --
+    // V0 runs eighths/sixteenths here, so the audible approach interval is a
+    // sixteenth window, not a beat. The anti-stall displacement above is also
+    // unvetted for parallels. Re-judge the chosen tone from the last emitted
+    // pitch at sixteenth grain and displace to a scale tone that is in band,
+    // consonant with every concurrent theme tone, and parallel-free; keep the
+    // anchor when no such tone exists (a consonant parallel beats a clash).
+    if (prev_emitted >= 0) {
+      motions.clear();
+      registry.concurrentMotions(beat_tick - kTicksPerBeat / 4, beat_tick, /*voice=*/1,
+                                 /*num_voices=*/3, motions);
+      // The five approach classes on one scale, not two boolean passes. A
+      // candidate here has to be inside the band, inside the scale, consonant
+      // with every sounding voice under the upper-voice table AND clean over
+      // the bass all at once, which against two concurrent lines regularly
+      // leaves one or two tones admissible; a guard that pooled the classes
+      // would step off the mildest onto the worst as soon as that set ran dry.
+      //
+      // The contrary classes are rungs of the same ladder rather than veto
+      // conditions. The displacement reaches its replacement by MOVING the
+      // tone, which regularly turns the motion round instead of removing it,
+      // so a ladder that stopped at the same-direction classes would answer a
+      // rising line by leaping down onto the perfect it had just left and
+      // score that clean. Their order is the reference corpus's: the contrary
+      // repeat sits worst of the three payable classes and the battuta
+      // cheapest.
+      constexpr int kAnchorClean = 0;
+      constexpr int kAnchorBattuta = 1;
+      constexpr int kAnchorAnti = 2;
+      constexpr int kAnchorHidden = 3;
+      constexpr int kAnchorParallel = 4;
+      auto anchor_fault_rank = [&](int cand) {
+        int worst = kAnchorClean;
+        for (const ConcurrentMotion& motion : motions) {
+          if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+            return kAnchorParallel;
+          if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
+            worst = std::max(worst, kAnchorHidden);
+          else if (formsAntiParallelPerfect(prev_emitted, cand, motion.prev, motion.curr))
+            worst = std::max(worst, kAnchorAnti);
+          else if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr))
+            worst = std::max(worst, kAnchorBattuta);
+        }
+        return worst;
+      };
+      const int design_rank = anchor_fault_rank(anchor);
+      if (design_rank != kAnchorClean) {
+        auto admissible = [&](int cand, bool allow_augmented) {
+          if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
+              !detail::inScale(cand, mode, &chord) ||
+              (!allow_augmented && augmentedFrom(prev_emitted, cand))) {
+            return false;
+          }
+          for (int upper : theme_pitches) {
+            if (!isConsonantIc(cand - upper))
+              return false;
+          }
+          return clean_over_bass(cand);
+        };
+        // Holding the tone that just sounded is oblique motion, which forms no
+        // approach fault of any class, so it is available exactly where the
+        // band is not. It is a rung of the same ladder rather than a last
+        // resort: the repeated tone is what the anti-stall displacement above
+        // exists to prevent, so it does not outrank a genuinely clean tone,
+        // but it does outrank every fault class -- a line that repeats a
+        // quarter is duller than one that does not, and that is a smaller
+        // matter than any way of arriving on a perfect interval.
+        auto hold_admissible = [&]() {
+          if (prev_emitted < band_lo || prev_emitted > band_hi)
+            return false;
+          for (int upper : theme_pitches) {
+            if (!isConsonantIc(prev_emitted - upper))
+              return false;
+          }
+          return clean_over_bass(prev_emitted);
+        };
+        bool displaced = false;
+        // An augmented second is refused first and conceded only where every
+        // other tone keeps the approach fault.
+        for (int allow_augmented = 0; allow_augmented < 2 && !displaced; ++allow_augmented) {
+          for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
+            // The band sweep reaches the whole band, not a fixed
+            // fifth-and-a-bit. Two of the tests in `admissible` are
+            // pitch-class shaped (scale membership, consonance against the
+            // concurrent tones), so the admissible set is sparse and its
+            // nearest member is regularly further than a fifth away; a short
+            // radius left the anchor sitting on a true parallel while a free
+            // tone waited an octave down.
+            for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
+              for (int dir : {1, -1}) {
+                const int cand = anchor + dir * dist;
+                if (!admissible(cand, allow_augmented == 1) || anchor_fault_rank(cand) > accept)
+                  continue;
+                anchor = cand;
+                displaced = true;
+                break;
+              }
+            }
+            if (!displaced && accept == kAnchorClean && hold_admissible()) {
+              anchor = prev_emitted;
+              displaced = true;
+            }
+          }
+        }
+      }
+    }
+    return anchor;
+  };
+
   for (int bar = 0; bar < cycle_bars; ++bar) {
     const CycleBar& plan = cycle_bar_plan[static_cast<std::size_t>(bar)];
-    detail::ChordSpec chord;
-    chord.root_pc = plan.root_pc;
-    chord.minor = plan.minor;
-    chord.seventh = plan.seventh;
+    const CounterBarHarmony harmony = counterBarHarmony(plan, mode);
+    const detail::ChordSpec& chord = harmony.chord;
     // The ground repeats, so the bar after the cycle's last is its first.
     const CycleBar& next_plan = cycle_bar_plan[static_cast<std::size_t>((bar + 1) % cycle_bars)];
-    detail::ChordSpec next_chord;
-    next_chord.root_pc = next_plan.root_pc;
-    next_chord.minor = next_plan.minor;
-    next_chord.seventh = next_plan.seventh;
+    const CounterBarHarmony next_harmony = counterBarHarmony(next_plan, mode);
+    const detail::ChordSpec& next_chord = next_harmony.chord;
     // Whether a tone closing this bar forms a cross relation with a tone of the
     // next bar's chord: the same degree inflected the other way.
     const detail::PcMask next_tones = detail::chordPcMaskInKey(next_chord, 0, mode);
@@ -869,29 +1106,8 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       return false;
     };
     // Nearest DIFFERENT chord tone in band (prefer above): shared by the
-    // anti-stall escape and the off-beat oscillation below. A triad tone the
-    // scale does not spell under this chord flattens onto it (the V0 anchor
-    // policy in barAnchorPitchClasses); V0 spells the minor dominant with its
-    // leading tone, so this line does too. The declared seventh joins the set:
-    // reading a bare triad here while the beat anchor reads four tones would let
-    // the escape push the line off a seventh the selector deliberately placed,
-    // or judge the chord spent while one of its tones was still free.
-    const int chord_third = chord.minor ? 3 : 4;
-    int chord_pc[4] = {chord.root_pc % 12, (chord.root_pc + chord_third) % 12,
-                       (chord.root_pc + 7) % 12, detail::chordSeventhPc(chord)};
-    for (int& pc : chord_pc) {
-      if (!detail::inScale(pc, mode, &chord))
-        pc = (pc + 11) % 12;
-    }
-    const int chord_tones = chord.seventh ? 4 : 3;
-    auto is_chord_tone = [&](int midi) {
-      const int pcl = ((midi % 12) + 12) % 12;
-      for (int tone = 0; tone < chord_tones; ++tone) {
-        if (pcl == chord_pc[tone])
-          return true;
-      }
-      return false;
-    };
+    // anti-stall escape and the off-beat oscillation below.
+    auto is_chord_tone = [&](int midi) { return harmony.contains(midi); };
     auto nearest_other_chord_tone = [&](int from) {
       for (int dist = 1; dist <= 12; ++dist) {
         const int above = from + dist;
@@ -1031,198 +1247,9 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
     for (int beat = 0; beat < 3; ++beat) {
       const Tick beat_tick = block_start + static_cast<Tick>(bar) * kTicksPerBar34 +
                              static_cast<Tick>(beat) * kTicksPerBeat;
-      const Tick prev_tick = beat_tick - kTicksPerBeat;
-      theme_pitches.clear();
-      motions.clear();
-      registry.concurrentThemePitches(beat_tick, /*voice=*/1, theme_pitches);
-      registry.concurrentMotions(prev_tick, beat_tick, /*voice=*/1, /*num_voices=*/3, motions);
-      // Consonance here is read with the upper-voice table, which admits the
-      // perfect fourth. Against the lowest sounding voice that reading is wrong:
-      // this ground holds one tone for a whole bar, so a fourth taken over it is
-      // neither left nor resolved. The line's own band sits above the ground by
-      // construction, so the lowest concurrent tone IS the bass whenever one
-      // sounds at all.
-      int bass_pitch = 128;
-      for (int upper : theme_pitches)
-        bass_pitch = std::min(bass_pitch, upper);
-      auto clean_over_bass = [&](int cand) {
-        return bass_pitch >= 128 ||
-               rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand),
-                                                  static_cast<std::uint8_t>(bass_pitch));
-      };
-      // A beat a passing tone resolves onto is already chosen and already vetted
-      // against this onset; re-selecting it would strand the passing tone.
-      const bool resolving = committed >= 0;
-      int anchor = resolving ? committed
-                             : consonantChordTone(chord, /*voice=*/1, band_lo, band_hi, cursor,
-                                                  theme_pitches, line_prev, motions, mode,
-                                                  /*downbeat=*/beat == 0);
+      const int anchor =
+          choose_anchor(harmony, beat_tick, beat, prev_emitted, line_prev, cursor, committed);
       committed = -1;
-      // Adjacent bars whose chords share a tone near the band centre can pin
-      // the nearest-tone anchor chain to ONE pitch for many beats. At the
-      // quarter-note tier that surfaces as a stalled repeated-note line; where
-      // the beat is subdivided it is worse, because every beat then restates
-      // the same two tones and whole bars settle onto one interval. Any
-      // repeated anchor is displaced to the nearest DIFFERENT triad tone in
-      // band that is ALSO consonant against every concurrently sounding voice
-      // (a triad tone is always consonant with the ground, but the V0 wave may
-      // sit on a non-chord tone -- a 6th over the ground -- that clashes with
-      // one triad member and not another): the reference corpus almost never
-      // repeats a pitch, so even a pair reads as a stall. When no admissible
-      // different tone exists the repeat stands -- a repeated consonance beats
-      // a fresh clash.
-      if (!resolving && anchor == line_prev) {
-        for (int dist = 1; dist <= 12; ++dist) {
-          bool placed = false;
-          for (int cand : {anchor + dist, anchor - dist}) {
-            if (cand < band_lo || cand > band_hi || !is_chord_tone(cand))
-              continue;
-            bool consonant = true;
-            for (int upper : theme_pitches) {
-              if (!isConsonantIc(cand - upper)) {
-                consonant = false;
-                break;
-              }
-            }
-            if (consonant) {
-              anchor = cand;
-              placed = true;
-              break;
-            }
-          }
-          if (placed)
-            break;
-        }
-      }
-      // An anchor the line would reach by an augmented second takes the nearest
-      // other chord tone consonant with every concurrent voice instead.
-      const auto augmentedFrom = [mode](int from, int to) {
-        return from >= 0 && detail::isAugmentedSecondClass(from, to, 0, mode);
-      };
-      if (augmentedFrom(prev_emitted, anchor)) {
-        bool placed = false;
-        for (int dist = 1; dist <= 12 && !placed; ++dist) {
-          for (int cand : {anchor - dist, anchor + dist}) {
-            if (cand < band_lo || cand > band_hi || !is_chord_tone(cand) ||
-                augmentedFrom(prev_emitted, cand) || !clean_over_bass(cand) ||
-                std::any_of(theme_pitches.begin(), theme_pitches.end(),
-                            [cand](int upper) { return !isConsonantIc(cand - upper); }))
-              continue;
-            anchor = cand;
-            placed = true;
-            break;
-          }
-        }
-      }
-      // Audible-grain parallel re-check. consonantChordTone judged the anchor's
-      // parallel motion at QUARTER grain (previous beat -> this beat), but the
-      // union-onset sampling the gate (and the ear) uses pairs this anchor with
-      // V1's last EMITTED note and the other voices' last sub-beat onset --
-      // V0 runs eighths/sixteenths here, so the audible approach interval is a
-      // sixteenth window, not a beat. The anti-stall displacement above is also
-      // unvetted for parallels. Re-judge the chosen tone from the last emitted
-      // pitch at sixteenth grain and displace to a scale tone that is in band,
-      // consonant with every concurrent theme tone, and parallel-free; keep the
-      // anchor when no such tone exists (a consonant parallel beats a clash).
-      if (prev_emitted >= 0) {
-        motions.clear();
-        registry.concurrentMotions(beat_tick - kTicksPerBeat / 4, beat_tick, /*voice=*/1,
-                                   /*num_voices=*/3, motions);
-        // The five approach classes on one scale, not two boolean passes. A
-        // candidate here has to be inside the band, inside the scale, consonant
-        // with every sounding voice under the upper-voice table AND clean over
-        // the bass all at once, which against two concurrent lines regularly
-        // leaves one or two tones admissible; a guard that pooled the classes
-        // would step off the mildest onto the worst as soon as that set ran dry.
-        //
-        // The contrary classes are rungs of the same ladder rather than veto
-        // conditions. The displacement reaches its replacement by MOVING the
-        // tone, which regularly turns the motion round instead of removing it,
-        // so a ladder that stopped at the same-direction classes would answer a
-        // rising line by leaping down onto the perfect it had just left and
-        // score that clean. Their order is the reference corpus's: the contrary
-        // repeat sits worst of the three payable classes and the battuta
-        // cheapest.
-        constexpr int kAnchorClean = 0;
-        constexpr int kAnchorBattuta = 1;
-        constexpr int kAnchorAnti = 2;
-        constexpr int kAnchorHidden = 3;
-        constexpr int kAnchorParallel = 4;
-        auto anchor_fault_rank = [&](int cand) {
-          int worst = kAnchorClean;
-          for (const ConcurrentMotion& motion : motions) {
-            if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
-              return kAnchorParallel;
-            if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kAnchorHidden);
-            else if (formsAntiParallelPerfect(prev_emitted, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kAnchorAnti);
-            else if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kAnchorBattuta);
-          }
-          return worst;
-        };
-        const int design_rank = anchor_fault_rank(anchor);
-        if (design_rank != kAnchorClean) {
-          auto admissible = [&](int cand, bool allow_augmented) {
-            if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-                !detail::inScale(cand, mode, &chord) ||
-                (!allow_augmented && augmentedFrom(prev_emitted, cand))) {
-              return false;
-            }
-            for (int upper : theme_pitches) {
-              if (!isConsonantIc(cand - upper))
-                return false;
-            }
-            return clean_over_bass(cand);
-          };
-          // Holding the tone that just sounded is oblique motion, which forms no
-          // approach fault of any class, so it is available exactly where the
-          // band is not. It is a rung of the same ladder rather than a last
-          // resort: the repeated tone is what the anti-stall displacement above
-          // exists to prevent, so it does not outrank a genuinely clean tone,
-          // but it does outrank every fault class -- a line that repeats a
-          // quarter is duller than one that does not, and that is a smaller
-          // matter than any way of arriving on a perfect interval.
-          auto hold_admissible = [&]() {
-            if (prev_emitted < band_lo || prev_emitted > band_hi)
-              return false;
-            for (int upper : theme_pitches) {
-              if (!isConsonantIc(prev_emitted - upper))
-                return false;
-            }
-            return clean_over_bass(prev_emitted);
-          };
-          bool displaced = false;
-          // An augmented second is refused first and conceded only where every
-          // other tone keeps the approach fault.
-          for (int allow_augmented = 0; allow_augmented < 2 && !displaced; ++allow_augmented) {
-            for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
-              // The band sweep reaches the whole band, not a fixed
-              // fifth-and-a-bit. Two of the tests in `admissible` are
-              // pitch-class shaped (scale membership, consonance against the
-              // concurrent tones), so the admissible set is sparse and its
-              // nearest member is regularly further than a fifth away; a short
-              // radius left the anchor sitting on a true parallel while a free
-              // tone waited an octave down.
-              for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
-                for (int dir : {1, -1}) {
-                  const int cand = anchor + dir * dist;
-                  if (!admissible(cand, allow_augmented == 1) || anchor_fault_rank(cand) > accept)
-                    continue;
-                  anchor = cand;
-                  displaced = true;
-                  break;
-                }
-              }
-              if (!displaced && accept == kAnchorClean && hold_admissible()) {
-                anchor = prev_emitted;
-                displaced = true;
-              }
-            }
-          }
-        }
-      }
       // Off-beat fills walk the ladder built above, one rung on from the tone
       // that just sounded, so the beat carries the line somewhere instead of
       // restating a pair. Where the next rung is a leap, the scale tone between
