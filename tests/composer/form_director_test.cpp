@@ -508,7 +508,20 @@ TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
           carried += carrier ? 1 : 0;
           if (carrier)
             continue;
-          // Only the passacaglia also declares holds its material authors in place: a
+          // A trio manual's 7-6 is hosted by the trio line that already forms it.
+          if (form == FormType::TrioSonata) {
+            EXPECT_TRUE(std::any_of(fixture.voice_plan.spans.begin(),
+                                    fixture.voice_plan.spans.end(),
+                                    [&](const Span& span) {
+                                      return span.intent == VoiceIntent::TrioVoiceCarrier &&
+                                             span.voice == pattern.voice &&
+                                             span.start_tick <= pattern.preparation_tick &&
+                                             pattern.resolution_tick < span.end_tick;
+                                    }))
+                << "suspension tick " << pattern.suspension_tick;
+            continue;
+          }
+          // Otherwise only the passacaglia declares holds its material authors in place: a
           // delayed resolution, an upper voice holding one tone over a bar head.
           const Tick bar_ticks = static_cast<Tick>(fixture.ts_numerator) * kTicksPerBeat;
           EXPECT_EQ(form, FormType::Passacaglia) << "suspension tick " << pattern.suspension_tick;

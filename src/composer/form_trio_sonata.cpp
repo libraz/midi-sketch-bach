@@ -12,6 +12,8 @@
 #include "composer/form_builders.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
+#include "composer/suspension_declaration.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -1640,6 +1642,79 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           tone.pitch = static_cast<std::uint8_t>(design + dist);
           break;
         }
+      }
+    }
+  }
+
+  // Declare the prepared suspensions the manuals already form, each as one held note.
+  {
+    // After the passes above, which treat every declared pattern as owning a two-beat window.
+    const std::size_t carrier_patterns = out.material.suspension_patterns.size();
+    // Material inside the cadential carrier's window is not what sounds there.
+    const auto inside_carrier_window = [&](Tick from, Tick to) {
+      for (std::size_t idx = 0; idx < carrier_patterns; ++idx) {
+        const SuspensionPattern& pattern = out.material.suspension_patterns[idx];
+        if (from < pattern.resolution_tick + 2 * kTicksPerBeat && to >= pattern.preparation_tick)
+          return true;
+      }
+      return false;
+    };
+    const auto lowest_other = [&](std::size_t manual, Tick tick) {
+      int lowest = -1;
+      for (std::size_t other = 0; other < out.material.trio_voices.size(); ++other) {
+        if (other == manual)
+          continue;
+        const int pitch = soundingMaterialPitch(out.material.trio_voices[other].notes, tick);
+        if (pitch >= 0 && (lowest < 0 || pitch < lowest))
+          lowest = pitch;
+      }
+      return lowest;
+    };
+    for (std::size_t manual = 0; manual < 2; ++manual) {
+      TrioVoiceLine& voice_line = out.material.trio_voices[manual];
+      std::vector<MaterialNote>& line = voice_line.notes;
+      for (std::size_t idx = 0; idx + 2 < line.size(); ++idx) {
+        const MaterialNote& prep = line[idx];
+        const MaterialNote& held = line[idx + 1];
+        const MaterialNote& res = line[idx + 2];
+        const Tick bar_offset = held.start_tick % kTicksPerBar;
+        if (prep.pitch != held.pitch || prep.start_tick + prep.duration != held.start_tick ||
+            held.start_tick + held.duration != res.start_tick ||
+            (bar_offset != 0 && bar_offset != kTicksPerBar / 2) ||
+            inside_carrier_window(prep.start_tick, res.start_tick)) {
+          continue;
+        }
+        DeclaredSuspensionReading reading;
+        reading.preparation_tick = prep.start_tick;
+        reading.suspension_tick = held.start_tick;
+        reading.resolution_tick = res.start_tick;
+        reading.held_pitch = static_cast<int>(held.pitch);
+        reading.resolution_pitch = static_cast<int>(res.pitch);
+        reading.lowest_other_at_preparation = lowest_other(manual, prep.start_tick);
+        reading.lowest_other_at_suspension = lowest_other(manual, held.start_tick);
+        reading.lowest_other_at_resolution = lowest_other(manual, res.start_tick);
+        SuspensionType type = SuspensionType::Sus4_3;
+        if (!classifyDeclaredSuspension(out.harmony, reading, &type))
+          continue;
+        // A re-struck chord root over a pedal fifth fits the table without being a dissonance.
+        const std::array<std::uint8_t, 3> triad =
+            rule_helpers::triadPitchClasses(*rule_helpers::chordAt(out.harmony, held.start_tick));
+        if (std::find(triad.begin(), triad.end(), static_cast<std::uint8_t>(held.pitch % 12)) !=
+            triad.end()) {
+          continue;
+        }
+        SuspensionPattern pattern;
+        pattern.type = type;
+        pattern.preparation_tick = prep.start_tick;
+        pattern.suspension_tick = held.start_tick;
+        pattern.resolution_tick = res.start_tick;
+        pattern.preparation_pitch = prep.pitch;
+        pattern.suspension_pitch = held.pitch;
+        pattern.resolution_pitch = res.pitch;
+        pattern.voice = voice_line.voice;
+        out.material.suspension_patterns.push_back(pattern);
+        line[idx].duration = pattern.resolution_tick - pattern.preparation_tick;
+        line.erase(line.begin() + static_cast<std::ptrdiff_t>(idx) + 1);
       }
     }
   }
