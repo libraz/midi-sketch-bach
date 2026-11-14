@@ -1042,8 +1042,9 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
             if (local > 0)
               travel += std::abs(tones[local] - tones[local - 1]);
           }
+          // The weaker perfect approaches by keyboard inner-voice rarity: anti, battuta, hidden.
           const std::array<int, 10> score = {faults[0], faults[1], repeated,  faults[2], faults[3],
-                                             faults[4], faults[5], faults[6], faults[7], travel};
+                                             faults[5], faults[6], faults[4], faults[7], travel};
           if (!have_best || score < best) {
             best = score;
             chosen = std::move(line);
