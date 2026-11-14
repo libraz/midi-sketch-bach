@@ -21,6 +21,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "composer/composer.h"
@@ -29,7 +30,9 @@
 #include "composer/harness_fixture.h"
 #include "composer/provenance.h"
 #include "composer/renderer.h"
+#include "composer/suspension_declaration.h"
 #include "composer/validator.h"
+#include "composer/voice_onset_index.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 
@@ -254,6 +257,102 @@ TEST(OrnamentPassTest, DeclaredSuspensionSpanIsNeverOrnamentedWithoutBits) {
     EXPECT_EQ(after[i].start_tick, before[i].start_tick);
     EXPECT_NE(after[i].source, BachNoteSource::Ornament);
   }
+}
+
+namespace {
+
+// Melody half notes on every downbeat over a bass that ties D3 across each even bar line
+// from bar 2 to bar 12 and resolves to C3 on beat 2: a 2-3 whose ninth and third are
+// measured against the half note, the tone a Noble downbeat turn decorates.
+ComposeResult bassSuspensionFixture(std::vector<SuspensionPattern>* patterns) {
+  constexpr int kBars = 16;
+  const auto declared = [](int bar) { return bar >= 2 && bar <= 12 && bar % 2 == 0; };
+  ComposeResult result;
+  const auto push = [&](Tick start, Tick dur, std::uint8_t pitch, VoiceId voice) {
+    result.notes.push_back(makeNote(start, dur, pitch, voice));
+    result.provenance.push_back(composeProv(voice));
+  };
+  for (int bar = 0; bar < kBars; ++bar) {
+    const Tick head = barToTick(bar);
+    if (declared(bar)) {
+      push(head + kTicksPerBeat, kTicksPerBar - kTicksPerBeat, 48, 1);
+    } else if (declared(bar + 1)) {
+      push(head, 3 * kTicksPerBeat, 36, 1);
+      push(head + 3 * kTicksPerBeat, 2 * kTicksPerBeat, 50, 1);
+      patterns->push_back({SuspensionType::Sus2_3, head + 3 * kTicksPerBeat, head + kTicksPerBar,
+                           head + kTicksPerBar + kTicksPerBeat, 50, 50, 48, 1});
+    } else {
+      push(head, kTicksPerBar, 36, 1);
+    }
+    push(head, 2 * kTicksPerBeat, 76, 0);
+    push(head + 2 * kTicksPerBeat, kTicksPerBeat, 72, 0);
+    push(head + 3 * kTicksPerBeat, kTicksPerBeat, 74, 0);
+  }
+  std::stable_sort(
+      result.notes.begin(), result.notes.end(),
+      [](const NoteEvent& lhs, const NoteEvent& rhs) { return lhs.start_tick < rhs.start_tick; });
+  result.tracks = Renderer{}.render(result.notes);
+  return result;
+}
+
+// The declared suspension as the Validator reads it from `notes`.
+DeclaredSuspensionReading readSuspension(const std::vector<NoteEvent>& notes,
+                                         const SuspensionPattern& pattern) {
+  const VoiceOnsetIndex index(notes);
+  const auto lowest = [&](Tick tick) {
+    return lowestOtherSoundingPitch(
+        index.activeVoices(), pattern.voice, tick,
+        [&](VoiceId voice, Tick at) { return index.pitchAt(voice, at); });
+  };
+  DeclaredSuspensionReading reading;
+  reading.preparation_tick = pattern.preparation_tick;
+  reading.suspension_tick = pattern.suspension_tick;
+  reading.resolution_tick = pattern.resolution_tick;
+  reading.held_pitch = index.pitchAt(pattern.voice, pattern.suspension_tick);
+  reading.resolution_pitch = index.pitchAt(pattern.voice, pattern.resolution_tick);
+  reading.lowest_other_at_preparation = lowest(pattern.preparation_tick);
+  reading.lowest_other_at_suspension = lowest(pattern.suspension_tick);
+  reading.lowest_other_at_resolution = lowest(pattern.resolution_tick);
+  return reading;
+}
+
+}  // namespace
+
+TEST(OrnamentPassTest, DeclaredSuspensionMeasuringToneStaysPlain) {
+  bool measuring_tone_decorable = false;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    OrnamentParams params = baseParams();
+    params.character = SubjectCharacter::Noble;
+    params.seed = seed;
+
+    std::vector<SuspensionPattern> patterns;
+    ComposeResult undeclared = bassSuspensionFixture(&patterns);
+    applyOrnamentPass(undeclared, params, kNoSuspensions);
+    for (const SuspensionPattern& pattern : patterns) {
+      for (const NoteEvent& note : undeclared.notes) {
+        measuring_tone_decorable = measuring_tone_decorable ||
+                                   (note.voice == 0 && note.source == BachNoteSource::Ornament &&
+                                    note.start_tick == pattern.suspension_tick && note.pitch != 76);
+      }
+    }
+
+    patterns.clear();
+    ComposeResult shipped = bassSuspensionFixture(&patterns);
+    const std::vector<NoteEvent> composed = shipped.notes;
+    applyOrnamentPass(shipped, params, patterns);
+    for (const SuspensionPattern& pattern : patterns) {
+      const DeclaredSuspensionReading before = readSuspension(composed, pattern);
+      const DeclaredSuspensionReading after = readSuspension(shipped.notes, pattern);
+      const std::string at =
+          "seed " + std::to_string(seed) + " tick " + std::to_string(pattern.suspension_tick);
+      EXPECT_TRUE(declaredSuspensionIntervals(before, SuspensionType::Sus2_3)) << at;
+      EXPECT_TRUE(declaredSuspensionIntervals(after, SuspensionType::Sus2_3)) << at;
+      EXPECT_EQ(after.lowest_other_at_preparation, before.lowest_other_at_preparation) << at;
+      EXPECT_EQ(after.lowest_other_at_suspension, before.lowest_other_at_suspension) << at;
+      EXPECT_EQ(after.lowest_other_at_resolution, before.lowest_other_at_resolution) << at;
+    }
+  }
+  EXPECT_TRUE(measuring_tone_decorable) << "no seed decorates the measuring tone undeclared";
 }
 
 TEST(OrnamentPassTest, DeclaredCadenceResolutionOnsetStaysPlain) {

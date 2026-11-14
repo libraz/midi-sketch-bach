@@ -851,6 +851,44 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
     return false;
   };
 
+  // Declared-suspension guard. The final validation measures each declared suspension
+  // against the lowest other voice at its three ticks; a figure that changes that tone
+  // (decorating it, or dropping below it) voids the declaration, so it stays plain.
+  std::vector<VoiceId> present_voices;
+  for (VoiceId voice = 0; voice < static_cast<VoiceId>(voice_present.size()); ++voice) {
+    if (voice_present[voice])
+      present_voices.push_back(voice);
+  }
+  auto expansion_moves_suspension_read = [&](const Expansion& cand_exp, const NoteEvent& base,
+                                             std::size_t idx) {
+    const Tick base_end = base.start_tick + base.duration;
+    for (const SuspensionPattern& pattern : declared_suspensions) {
+      if (pattern.voice == base.voice)
+        continue;
+      for (const Tick tick :
+           {pattern.preparation_tick, pattern.suspension_tick, pattern.resolution_tick}) {
+        if (tick < base.start_tick || tick >= base_end)
+          continue;
+        int figured = static_cast<int>(base.pitch);
+        for (const NoteEvent& sub : cand_exp.notes) {
+          if (sub.start_tick <= tick && tick < sub.start_tick + sub.duration)
+            figured = static_cast<int>(sub.pitch);
+        }
+        const auto read = [&](int own_pitch) {
+          return lowestOtherSoundingPitch(
+              present_voices, pattern.voice, tick, [&](VoiceId other, Tick at) {
+                if (other == base.voice)
+                  return own_pitch;
+                return std::max(sounding_in_voice(other, at, idx + 1), 0);
+              });
+        };
+        if (read(static_cast<int>(base.pitch)) != read(figured))
+          return true;
+      }
+    }
+    return false;
+  };
+
   for (std::size_t idx = 0; idx < result.notes.size(); ++idx) {
     const NoteEvent& note = result.notes[idx];
     const NoteProvenance& prov = result.provenance[idx];
@@ -1179,7 +1217,8 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
       return clashes_committed_ornament(note) ||
              expansion_forms_perfect_arrival(cand_exp, note, idx) ||
              expansion_sustains_dissonance(cand_exp, note, idx) ||
-             expansion_crosses_voice(cand_exp, note, idx);
+             expansion_crosses_voice(cand_exp, note, idx) ||
+             expansion_moves_suspension_read(cand_exp, note, idx);
     };
     if (!exp.notes.empty() && refused(exp)) {
       exp.notes.clear();
