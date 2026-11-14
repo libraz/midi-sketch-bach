@@ -1311,7 +1311,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // paid with fourths 5 -> 7 where a neighbour figure turns down from the top.
     // Leading tone in the pre-landing thread and suspension preparation: lowered
     // 7ths over V 8 -> 0, augmented seconds 5 -> 0; battuta 18 -> 20.
-    {FormType::TrioSonata, 0, 0, 116, 20, 4, 0, 5, 2, 1, 35177, 10},
+    // Chains of prepared suspensions in the sparse manual: hidden 116 -> 114,
+    // successions 35177 -> 35768.
+    {FormType::TrioSonata, 0, 0, 114, 20, 4, 0, 5, 2, 1, 35768, 10},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;

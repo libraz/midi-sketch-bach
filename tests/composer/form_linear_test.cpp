@@ -8,8 +8,9 @@
 //   - the build is deterministic (identical notes for identical inputs);
 //   - the note span ends at bars * kTicksPerBar;
 //   - cello stays monophonic (no overlapping onsets / single voice);
-//   - trio carries three distinct voices, the pedal voice is all-quarters in
-//     the low register, density rises toward the climax cycle, and its shipped
+//   - trio carries three distinct voices, the pedal voice walks in quarters
+//     and eighths in the low register (holding its root only under a declared
+//     suspension), density rises toward the climax cycle, and its shipped
 //     surface holds no true parallel perfect at any union onset;
 //   - the final bar's harmony is the tonic.
 
@@ -29,6 +30,7 @@
 #include "composer/figuration.h"
 #include "composer/form_director.h"
 #include "composer/rule_helpers.h"
+#include "composer/suspension_declaration.h"
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
@@ -675,7 +677,9 @@ TEST(FormLinearTrio, IsDeterministic) {
 // points: a chord-tone onset on every beat, and the gaps a single diatonic tone
 // bridges filled with a connecting eighth. So its rhythm is quarters plus
 // eighth pairs -- never anything longer inside the piece, never more than one
-// connecting tone in a beat, and never a beat without an onset of its own.
+// connecting tone in a beat, and never a beat without an onset of its own. The
+// one exception is a declared suspension resolving a quarter after the bar head:
+// the pedal holds that bar's root as a half note through the resolution.
 TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalWalksLow) {
   for (std::uint32_t seed : kSeeds) {
     for (bool minor : kMinorFlags) {
@@ -696,6 +700,12 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalWalksLow) {
         const int realized = realizedBars(fx);
         const Tick final_bar_tick = static_cast<Tick>(realized - 1) * kTicksPerBar;
         constexpr Tick kEighth = kTicksPerBeat / 2;
+        std::set<Tick> quarter_resolutions;
+        for (const SuspensionPattern& pattern : fx.material.suspension_patterns) {
+          if (pattern.resolution_tick - pattern.suspension_tick == kTicksPerBeat)
+            quarter_resolutions.insert(pattern.suspension_tick);
+        }
+        std::set<Tick> held_beats;
         std::map<Tick, int> onsets_at;
         int pedal_notes = 0;
         for (const NoteEvent& note : r.notes) {
@@ -706,6 +716,9 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalWalksLow) {
           if (note.start_tick >= final_bar_tick) {
             EXPECT_EQ(note.duration, static_cast<Tick>(kTicksPerBar))
                 << "pedal final note not held; seed=" << seed;
+          } else if (note.duration == 2 * kTicksPerBeat &&
+                     quarter_resolutions.count(note.start_tick) != 0) {
+            held_beats.insert(note.start_tick + kTicksPerBeat);
           } else {
             EXPECT_TRUE(note.duration == static_cast<Tick>(kTicksPerBeat) ||
                         note.duration == kEighth)
@@ -721,15 +734,16 @@ TEST(FormLinearTrio, ThreeDistinctVoicesAndPedalWalksLow) {
         for (Tick tick = 0; tick < final_bar_tick; tick += kEighth) {
           const int count = onsets_at.count(tick) ? onsets_at[tick] : 0;
           if (tick % kTicksPerBeat == 0) {
-            EXPECT_EQ(count, 1) << "beat without a single pedal onset at tick " << tick
-                                << "; seed=" << seed << " minor=" << minor << " bars=" << bars;
+            EXPECT_EQ(count, held_beats.count(tick) != 0 ? 0 : 1)
+                << "beat without a single pedal onset at tick " << tick << "; seed=" << seed
+                << " minor=" << minor << " bars=" << bars;
           } else {
             EXPECT_LE(count, 1) << "two pedal onsets on one off-beat at tick " << tick;
           }
         }
         // At least one per beat plus the held final bar, and at most one
         // connecting tone per beat on top of that.
-        EXPECT_GE(pedal_notes, 4 * (realized - 1) + 1)
+        EXPECT_GE(pedal_notes, 4 * (realized - 1) + 1 - static_cast<int>(held_beats.size()))
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
         EXPECT_LE(pedal_notes, 8 * (realized - 1) + 1)
             << "seed=" << seed << " minor=" << minor << " bars=" << bars;
@@ -1118,7 +1132,9 @@ TEST(FormLinearTrio, FinalBarHarmonyIsTonic) {
 // vertical sample (the scorer's vertical_dissonance_ratio) is consonant: at
 // each beat the sounding pitches form only consonant interval classes. This
 // guards the per-beat chord-tone anchoring of the two manual voices that drives
-// the dissonance ratio to ~0.
+// the dissonance ratio to ~0. A declared suspension is a dissonance by design, so
+// its held tone and its resolution onset are not sampled; a passing tone that
+// opens the beat after a resolution is.
 TEST(FormLinearTrio, BeatOnsetsAreVerticallyConsonant) {
   // Dissonant interval classes (mod 12): m2 M2 TT m7 M7.
   auto isDissonant = [](int interval_class) {
@@ -1138,7 +1154,8 @@ TEST(FormLinearTrio, BeatOnsetsAreVerticallyConsonant) {
         for (Tick tick = 0; tick < piece_end; tick += kTicksPerBeat) {
           std::vector<std::uint8_t> sounding;
           for (const NoteEvent& note : r.notes) {
-            if (note.start_tick <= tick && tick < note.start_tick + note.duration)
+            if (note.start_tick <= tick && tick < note.start_tick + note.duration &&
+                !isDeclaredSuspensionTone(fx.material.suspension_patterns, note.voice, tick))
               sounding.push_back(note.pitch);
           }
           if (sounding.size() < 2)

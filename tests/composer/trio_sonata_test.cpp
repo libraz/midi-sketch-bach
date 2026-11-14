@@ -18,16 +18,19 @@
 //      voices at the 16 / 8 / 4 notes-per-bar densities, every trio note stamps
 //      TrioVoiceIndependent, and voice_independence_threshold does NOT soft-fail
 //      the fixture.
-//   4. The trio form declares the prepared suspensions its manuals form: each is
-//      one note held from preparation to resolution, read by the shared
-//      declaration rules, on a tone outside the bar's triad, and stamped when it
-//      ships.
+//   4. The trio form declares the prepared suspensions its manuals form, and
+//      the chains of suspensions it writes into the sparse manual: each is one
+//      note held from preparation to resolution, read by the shared declaration
+//      rules, on a tone outside the bar's triad, and stamped when it ships.
+//      Every declaration, and the passing tone a chain resumes on, still holds
+//      on the final material the later passes leave.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 #include "composer/candidate_search.h"
@@ -406,8 +409,9 @@ TEST(TrioSonataTest, DeclaredSuspensionIsOneNoteHeldIntoItsResolution) {
 }
 
 // A declaration suspends a tone outside the bar's triad -- the dominant's seventh
-// before an internal cadence -- on beat one or three. A re-struck chord root over
-// a pedal fifth fits the interval table but is no dissonance and stays undeclared.
+// before an internal cadence, or the fourth, seventh or ninth a chain holds over
+// the bar's root -- on beat one or three. A re-struck chord root over a pedal
+// fifth fits the interval table but is no dissonance and stays undeclared.
 TEST(TrioSonataTest, DeclaredSuspensionHoldsAToneOutsideTheTriad) {
   for (SubjectCharacter character : kTrioCharacters) {
     for (bool minor : {false, true}) {
@@ -462,6 +466,80 @@ TEST(TrioSonataTest, DeclaredSuspensionsAreDeterministicPerSeed) {
       }
     }
   }
+}
+
+// Every declaration still describes the final material after the closing repair and the
+// bar-line pass have run: one held note from the preparation to the resolution, the
+// resolution tone starting there, and -- where the line resumes on a tone outside the bar's
+// triad, which only the chain's passing tone writes -- an eighth a step from the resolution,
+// left by step to the beat's own tone an eighth later. A weak-beat resume is the case
+// unprepared_dissonance reads; a strong-beat one is held to the same shape.
+TEST(TrioSonataTest, DeclaredSuspensionsSurviveTheLaterPassesExactly) {
+  constexpr Tick kEighth = kTicksPerBeat / 2;
+  const FormSpec& spec = formSpec(FormType::TrioSonata);
+  const std::array<std::uint16_t, 3> lengths = {
+      spec.natural_bars, static_cast<std::uint16_t>(spec.natural_bars * 2), kDeclarationBars};
+  std::size_t declared = 0;
+  std::size_t passing = 0;
+  for (std::uint32_t seed : {1u, 5u, 42u, 99u}) {
+    for (bool minor : {false, true}) {
+      for (std::uint16_t bars : lengths) {
+        ComposeRequest req;
+        req.form = FormType::TrioSonata;
+        req.seed = seed;
+        req.is_minor = minor;
+        req.target_bars = bars;
+        HarnessFixture fixture;
+        ASSERT_EQ(buildFormFixture(req, &fixture), FormDirectorStatus::Ok);
+        for (const SuspensionPattern& pattern : fixture.material.suspension_patterns) {
+          if (!isMaterialHosted(fixture, pattern))
+            continue;
+          ++declared;
+          const std::vector<MaterialNote>* line = trioLine(fixture, pattern.voice);
+          ASSERT_NE(line, nullptr);
+          const auto held = std::find_if(line->begin(), line->end(), [&](const MaterialNote& note) {
+            return note.start_tick == pattern.preparation_tick;
+          });
+          ASSERT_NE(held, line->end()) << "seed=" << seed << " minor=" << minor << " bars=" << bars
+                                       << " tick=" << pattern.preparation_tick;
+          EXPECT_EQ(held->start_tick + held->duration, pattern.resolution_tick)
+              << "seed=" << seed << " minor=" << minor << " bars=" << bars;
+          EXPECT_EQ(held->pitch, pattern.suspension_pitch) << "seed=" << seed;
+          ASSERT_NE(held + 1, line->end());
+          const MaterialNote& resolved = *(held + 1);
+          EXPECT_EQ(resolved.start_tick, pattern.resolution_tick) << "seed=" << seed;
+          EXPECT_EQ(resolved.pitch, pattern.resolution_pitch)
+              << "seed=" << seed << " minor=" << minor << " bars=" << bars
+              << " tick=" << pattern.resolution_tick;
+
+          const Tick resume =
+              pattern.resolution_tick + (pattern.resolution_tick - pattern.suspension_tick);
+          if (held + 2 == line->end() || (held + 2)->start_tick != resume)
+            continue;
+          const MaterialNote& resumed = *(held + 2);
+          const ChordEvent* chord = rule_helpers::chordAt(fixture.harmony, resume);
+          ASSERT_NE(chord, nullptr);
+          const std::array<std::uint8_t, 3> triad = rule_helpers::triadPitchClasses(*chord);
+          if (std::find(triad.begin(), triad.end(),
+                        static_cast<std::uint8_t>(resumed.pitch % 12)) != triad.end())
+            continue;
+          ++passing;
+          EXPECT_EQ(resumed.duration, kEighth) << "seed=" << seed << " tick=" << resume;
+          const int approach = std::abs(static_cast<int>(resumed.pitch) - resolved.pitch);
+          EXPECT_TRUE(approach >= 1 && approach <= 2)
+              << "seed=" << seed << " minor=" << minor << " bars=" << bars << " tick=" << resume;
+          ASSERT_NE(held + 3, line->end());
+          const MaterialNote& anchor = *(held + 3);
+          EXPECT_EQ(anchor.start_tick, resume + kEighth) << "seed=" << seed;
+          const int leave = std::abs(static_cast<int>(anchor.pitch) - resumed.pitch);
+          EXPECT_TRUE(leave >= 1 && leave <= 2)
+              << "seed=" << seed << " minor=" << minor << " bars=" << bars << " tick=" << resume;
+        }
+      }
+    }
+  }
+  EXPECT_GT(declared, 0u);
+  EXPECT_GT(passing, 0u);
 }
 
 // The held tone ships as one note carrying SuspensionPrepared, nothing in the

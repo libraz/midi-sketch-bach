@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
+#include <tuple>
 #include <vector>
 
 #include "composer/arrival_relief.h"
@@ -22,6 +24,626 @@ namespace bach::composer {
 
 using detail::ChordSpec;
 using detail::Mode;
+
+namespace {
+
+MaterialNote makeMaterialNote(Tick start, Tick duration, int pitch) {
+  MaterialNote note;
+  note.start_tick = start;
+  note.duration = duration;
+  note.pitch = static_cast<std::uint8_t>(pitch);
+  return note;
+}
+
+/// @brief The note sounding at `tick` in an onset-ordered line, or nullptr.
+const MaterialNote* noteSoundingAt(const std::vector<MaterialNote>& line, Tick tick) {
+  auto iter =
+      std::upper_bound(line.begin(), line.end(), tick,
+                       [](Tick at, const MaterialNote& note) { return at < note.start_tick; });
+  if (iter == line.begin())
+    return nullptr;
+  --iter;
+  return tick < iter->start_tick + iter->duration ? &*iter : nullptr;
+}
+
+int pitchSoundingAt(const std::vector<MaterialNote>& line, Tick tick) {
+  const MaterialNote* note = noteSoundingAt(line, tick);
+  return note == nullptr ? -1 : static_cast<int>(note->pitch);
+}
+
+/// @brief Index of the first note starting at or after `tick` (line.size() when none).
+std::size_t firstOnsetFrom(const std::vector<MaterialNote>& line, Tick tick) {
+  return static_cast<std::size_t>(
+      std::lower_bound(line.begin(), line.end(), tick,
+                       [](const MaterialNote& note, Tick at) { return note.start_tick < at; }) -
+      line.begin());
+}
+
+/// @brief Pitch of the latest note starting strictly before `tick`, or -1.
+int onsetPitchBeforeTick(const std::vector<MaterialNote>& line, Tick tick) {
+  const std::size_t idx = firstOnsetFrom(line, tick);
+  return idx == 0 ? -1 : static_cast<int>(line[idx - 1].pitch);
+}
+
+/// @brief Replaces [lo, hi) of an onset-ordered line: a note reaching into the span from
+///        before is cut at `lo`, every note starting inside it is dropped, and
+///        `replacement` is merged in.
+void spliceSpan(std::vector<MaterialNote>& line, Tick lo, Tick hi,
+                std::initializer_list<MaterialNote> replacement) {
+  std::vector<MaterialNote> kept;
+  kept.reserve(line.size() + replacement.size());
+  for (const MaterialNote& note : line) {
+    if (note.start_tick + note.duration <= lo || note.start_tick >= hi) {
+      kept.push_back(note);
+    } else if (note.start_tick < lo) {
+      kept.push_back(makeMaterialNote(note.start_tick, lo - note.start_tick, note.pitch));
+    }
+  }
+  kept.insert(kept.end(), replacement.begin(), replacement.end());
+  std::stable_sort(kept.begin(), kept.end(), [](const MaterialNote& lhs, const MaterialNote& rhs) {
+    return lhs.start_tick < rhs.start_tick;
+  });
+  line.swap(kept);
+}
+
+/// @brief Perfect-motion and spelled-leap faults arriving inside one window of the trio
+///        texture.
+///
+/// The first four classes are read at every union onset with the voices paired by index
+/// (lower index is the upper part); a rest in either voice breaks the succession, as the
+/// validator reads it. `manual_parallel` reads the two manuals note to note across a rest
+/// instead: a manual that attacks is paired from its latest earlier onset.
+/// `augmented_second` counts each voice's melodic augmented seconds, spelled in the key
+/// in effect at the second tone.
+struct WindowFaults {
+  int parallel = 0;
+  int anti_parallel = 0;
+  int hidden = 0;
+  int battuta = 0;
+  int manual_parallel = 0;
+  int augmented_second = 0;
+
+  bool worseThan(const WindowFaults& base) const {
+    return parallel > base.parallel || anti_parallel > base.anti_parallel || hidden > base.hidden ||
+           battuta > base.battuta || manual_parallel > base.manual_parallel ||
+           augmented_second > base.augmented_second;
+  }
+};
+
+WindowFaults windowFaults(const std::array<const std::vector<MaterialNote>*, 3>& lines,
+                          const HarmonicPlan& plan, Tick lo, Tick hi) {
+  const Tick reach = lo > kTicksPerBar ? lo - kTicksPerBar : 0;
+  std::array<std::vector<MaterialNote>, 3> near;
+  std::vector<Tick> ticks;
+  for (std::size_t voice = 0; voice < 3; ++voice) {
+    for (const MaterialNote& note : *lines[voice]) {
+      if (note.start_tick + note.duration > reach && note.start_tick <= hi) {
+        near[voice].push_back(note);
+        ticks.push_back(note.start_tick);
+      }
+    }
+  }
+  std::sort(ticks.begin(), ticks.end());
+  ticks.erase(std::unique(ticks.begin(), ticks.end()), ticks.end());
+
+  WindowFaults faults;
+  static constexpr std::array<std::array<std::size_t, 2>, 3> kPairs = {{{0, 1}, {0, 2}, {1, 2}}};
+  for (const auto& pair : kPairs) {
+    int upper_prev = -1;
+    int lower_prev = -1;
+    Tick upper_end = 0;
+    Tick lower_end = 0;
+    for (const Tick tick : ticks) {
+      const MaterialNote* upper = noteSoundingAt(near[pair[0]], tick);
+      const MaterialNote* lower = noteSoundingAt(near[pair[1]], tick);
+      if (upper == nullptr || lower == nullptr) {
+        upper_prev = -1;
+        lower_prev = -1;
+        continue;
+      }
+      if (upper_end < tick || lower_end < tick) {
+        upper_prev = -1;
+        lower_prev = -1;
+      }
+      const int upper_curr = static_cast<int>(upper->pitch);
+      const int lower_curr = static_cast<int>(lower->pitch);
+      if (upper_prev >= 0 && lower_prev >= 0 && tick >= lo) {
+        switch (classifyPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr)) {
+          case PerfectMotionKind::ParallelFifth:
+          case PerfectMotionKind::ParallelOctave:
+            ++faults.parallel;
+            break;
+          case PerfectMotionKind::HiddenFifth:
+          case PerfectMotionKind::HiddenOctave:
+            ++faults.hidden;
+            break;
+          case PerfectMotionKind::None:
+            break;
+        }
+        if (isAntiParallelPerfectMotion(upper_prev, upper_curr, lower_prev, lower_curr))
+          ++faults.anti_parallel;
+        if (isBattutaMotion(upper_prev, upper_curr, lower_prev, lower_curr))
+          ++faults.battuta;
+      }
+      upper_prev = upper_curr;
+      lower_prev = lower_curr;
+      upper_end = upper->start_tick + upper->duration;
+      lower_end = lower->start_tick + lower->duration;
+    }
+  }
+
+  for (const Tick tick : ticks) {
+    if (tick < lo)
+      continue;
+    const int top = pitchSoundingAt(near[0], tick);
+    const int mid = pitchSoundingAt(near[1], tick);
+    if (top < 0 || mid < 0)
+      continue;
+    const auto from_tone = [&](const std::vector<MaterialNote>& line, int sounding) {
+      const std::size_t idx = firstOnsetFrom(line, tick);
+      const bool attacks = idx < line.size() && line[idx].start_tick == tick;
+      return attacks ? onsetPitchBeforeTick(line, tick) : sounding;
+    };
+    if (formsStrictPerfectParallel(from_tone(near[1], mid), mid, from_tone(near[0], top), top))
+      ++faults.manual_parallel;
+  }
+
+  for (const std::vector<MaterialNote>& line : near) {
+    for (std::size_t idx = 1; idx < line.size(); ++idx) {
+      const MaterialNote& curr = line[idx];
+      if (curr.start_tick < lo || curr.start_tick > hi)
+        continue;
+      const KeyContext key = rule_helpers::keyAt(plan, curr.start_tick);
+      if (detail::isAugmentedSecond(line[idx - 1].pitch, curr.pitch, key.tonic_pc,
+                                    key.is_minor ? Mode::Minor : Mode::Major))
+        ++faults.augmented_second;
+    }
+  }
+  return faults;
+}
+
+/// @brief One prepared suspension in the sparse manual, with the pedal tones it re-chooses
+///        and the passing tone its resumed beat may open on.
+struct ChainLink {
+  Tick preparation = 0;
+  Tick suspension = 0;
+  Tick resolution = 0;
+  Tick resume = 0;
+  int held_pitch = 0;
+  int resolution_pitch = 0;
+  int root = 0;
+  int pedal_beat4 = -1;  // the walk's own tone stands when -1.
+  int pedal_beat3 = -1;  // the walk's own tone stands when -1.
+  bool passing = false;
+  int passing_pitch = 0;
+  int anchor_pitch = 0;
+  Tick passing_end = 0;
+};
+
+/// @brief Writes the held tone, its resolution and the optional passing resume into the
+///        holder's line.
+void writeHolderLink(std::vector<MaterialNote>& line, const ChainLink& link) {
+  spliceSpan(
+      line, link.preparation, link.resume,
+      {makeMaterialNote(link.preparation, link.resolution - link.preparation, link.held_pitch),
+       makeMaterialNote(link.resolution, link.resume - link.resolution, link.resolution_pitch)});
+  if (!link.passing)
+    return;
+  const Tick off_beat = link.resume + kTicksPerBeat / 2;
+  spliceSpan(line, link.resume, link.passing_end,
+             {makeMaterialNote(link.resume, off_beat - link.resume, link.passing_pitch),
+              makeMaterialNote(off_beat, link.passing_end - off_beat, link.anchor_pitch)});
+}
+
+/// @brief Writes the pedal under a link: the re-chosen beat-4 tone, the root held from the
+///        suspension to the resumed beat, and the re-chosen tone after a half-note root.
+/// @return False when the beat-3 tone to re-choose has no onset of its own.
+bool writePedalLink(std::vector<MaterialNote>& line, const ChainLink& link) {
+  if (link.pedal_beat4 >= 0) {
+    spliceSpan(
+        line, link.preparation, link.suspension,
+        {makeMaterialNote(link.preparation, link.suspension - link.preparation, link.pedal_beat4)});
+  }
+  spliceSpan(line, link.suspension, link.resume,
+             {makeMaterialNote(link.suspension, link.resume - link.suspension, link.root)});
+  if (link.pedal_beat3 < 0)
+    return true;
+  const std::size_t idx = firstOnsetFrom(line, link.resume);
+  if (idx >= line.size() || line[idx].start_tick != link.resume)
+    return false;
+  const Tick duration = line[idx].duration;
+  spliceSpan(line, link.resume, link.resume + duration,
+             {makeMaterialNote(link.resume, duration, link.pedal_beat3)});
+  return true;
+}
+
+std::vector<MaterialNote> lineSlice(const std::vector<MaterialNote>& line, Tick lo, Tick hi) {
+  std::vector<MaterialNote> slice;
+  for (const MaterialNote& note : line) {
+    if (note.start_tick + note.duration > lo && note.start_tick <= hi)
+      slice.push_back(note);
+  }
+  return slice;
+}
+
+/// @brief Declares prepared 7-6, 4-3 and 9-8 suspensions in the sparse manual of each
+///        4-bar cycle, at bar heads where the same manual stays sparse across the barline.
+///
+/// Runs on the finished three-voice texture, so every admission reads the tones that will
+/// sound. A link holds a tone prepared on beat 4 over the bar head and resolves it down by
+/// step an eighth or a quarter later; consecutive bars of one cycle chain into a line of
+/// suspensions a bar apart. The pedal holds the bar's root through the resolution and may
+/// re-choose the beat-4 tone that prepares the dissonance and, under a quarter resolution,
+/// the tone it walks on with. A resumed beat whose first tone is not a step from the
+/// resolution opens on a passing tone a step away, with the beat's own tone moved to the
+/// off-beat eighth. Nothing is admitted that adds a perfect-motion fault or a melodic
+/// augmented second anywhere between the preparation and one beat after the resumed beat, so
+/// the untied line stands wherever the tie would leave it worse, and the dissonance is formed
+/// against the pedal only. The 9-8 is admitted only where the walk already holds its root through
+/// an eighth resolution.
+///
+/// @param carrier_pattern_count The leading entries of the pattern list are the cadential
+///        carrier's; no link sits within two bars of one.
+/// @param[out] passing_resumes Per manual, the onset of every passing tone written.
+void placeSuspensionChains(HarnessFixture& out, const std::vector<ChordSpec>& chords, int bars,
+                           std::size_t carrier_pattern_count, int pedal_floor, int pedal_ceil,
+                           std::array<std::vector<Tick>, 2>* passing_resumes) {
+  constexpr Tick kEighth = kTicksPerBeat / 2;
+  constexpr int kWidestApproach = 7;
+  constexpr int kWidestExit = 5;
+  std::array<std::vector<MaterialNote>*, 3> lines = {&out.material.trio_voices[0].notes,
+                                                     &out.material.trio_voices[1].notes,
+                                                     &out.material.trio_voices[2].notes};
+  const std::vector<SuspensionPattern>& patterns = out.material.suspension_patterns;
+
+  // The pitch classes each bar sounds before any link is written stand in for its scale.
+  std::vector<std::uint16_t> bar_pcs(static_cast<std::size_t>(bars), 0);
+  for (const std::vector<MaterialNote>* line : lines) {
+    for (const MaterialNote& note : *line) {
+      const auto bar = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
+      if (bar < bar_pcs.size())
+        bar_pcs[bar] = static_cast<std::uint16_t>(bar_pcs[bar] | (1u << (note.pitch % 12)));
+    }
+  }
+  const auto bar_sounds = [&](int bar, int pitch) {
+    return (bar_pcs[static_cast<std::size_t>(bar)] >> (((pitch % 12) + 12) % 12) & 1u) != 0;
+  };
+
+  // Each manual's compass as it ships: the cadential carrier replaces its window.
+  std::array<int, 2> lowest = {127, 127};
+  std::array<int, 2> highest = {0, 0};
+  for (std::size_t manual = 0; manual < 2; ++manual) {
+    for (const MaterialNote& note : *lines[manual]) {
+      bool replaced = false;
+      for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
+        const SuspensionPattern& pattern = patterns[idx];
+        replaced =
+            replaced || (pattern.voice == manual && note.start_tick >= pattern.preparation_tick &&
+                         note.start_tick < pattern.resolution_tick + 2 * kTicksPerBeat);
+      }
+      if (replaced)
+        continue;
+      lowest[manual] = std::min(lowest[manual], static_cast<int>(note.pitch));
+      highest[manual] = std::max(highest[manual], static_cast<int>(note.pitch));
+    }
+  }
+  for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
+    const SuspensionPattern& pattern = patterns[idx];
+    if (pattern.voice >= 2)
+      continue;
+    for (const int pitch : {static_cast<int>(pattern.preparation_pitch),
+                            static_cast<int>(pattern.resolution_pitch)}) {
+      lowest[pattern.voice] = std::min(lowest[pattern.voice], pitch);
+      highest[pattern.voice] = std::max(highest[pattern.voice], pitch);
+    }
+  }
+
+  const auto stations = [&](int bar) {
+    const ChordSpec& chord = chords[static_cast<std::size_t>(bar)];
+    const int root_pc = chord.root_pc % 12;
+    const int third_pc = (root_pc + (chord.minor ? 3 : 4)) % 12;
+    const int fifth_pc = (root_pc + 7) % 12;
+    std::vector<int> tones;
+    for (int cand = pedal_floor; cand <= pedal_ceil; ++cand) {
+      const int pc = cand % 12;
+      if (pc == root_pc || pc == third_pc || pc == fifth_pc)
+        tones.push_back(cand);
+    }
+    return tones;
+  };
+  // The walk's own tone first, then the other stations nearest it.
+  const auto options = [](int own, std::vector<int> tones, int reach_a, int reach_b) {
+    std::vector<int> ordered = {own};
+    tones.erase(std::remove_if(tones.begin(), tones.end(),
+                               [&](int tone) {
+                                 return tone == own || std::abs(tone - reach_a) > 12 ||
+                                        std::abs(tone - reach_b) > 12;
+                               }),
+                tones.end());
+    std::stable_sort(tones.begin(), tones.end(),
+                     [&](int lhs, int rhs) { return std::abs(lhs - own) < std::abs(rhs - own); });
+    ordered.insert(ordered.end(), tones.begin(), tones.end());
+    return ordered;
+  };
+
+  struct Candidate {
+    int class_rank = 0;
+    int shape_rank = 0;
+    int exit_rank = 0;
+    bool wide_approach = false;
+    int motion = 0;
+    int held_pitch = 0;
+    int resolution_pitch = 0;
+    int exit = 0;
+    Tick shape = 0;
+    SuspensionType type = SuspensionType::Sus7_6;
+  };
+
+  for (int bar = 1; bar < bars - 8; ++bar) {
+    if (bar % 4 == 0)
+      continue;
+    const Tick suspension = static_cast<Tick>(bar) * kTicksPerBar;
+    bool near_carrier = false;
+    for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
+      const Tick carrier = patterns[idx].suspension_tick;
+      const Tick distance = carrier > suspension ? carrier - suspension : suspension - carrier;
+      near_carrier = near_carrier || distance <= 2 * kTicksPerBar;
+    }
+    if (near_carrier)
+      continue;
+    const std::size_t holder = ((bar / 4) % 2 == 0) ? 1 : 0;
+    const std::vector<MaterialNote>& held_line = *lines[holder];
+    const std::vector<MaterialNote>& other_line = *lines[1 - holder];
+    const std::vector<MaterialNote>& pedal_line = *lines[2];
+    const Tick preparation = suspension - kTicksPerBeat;
+    const int root = pitchSoundingAt(pedal_line, suspension);
+    const int pedal_beat3 = pitchSoundingAt(pedal_line, suspension - 2 * kTicksPerBeat);
+    const int pedal_beat4 = pitchSoundingAt(pedal_line, preparation);
+    const int other_at_prep = pitchSoundingAt(other_line, preparation);
+    const int other_at_sus = pitchSoundingAt(other_line, suspension);
+    const int approach_from = onsetPitchBeforeTick(held_line, preparation);
+    if (root < 0 || pedal_beat4 < 0 || other_at_prep < 0 || other_at_sus < 0 || approach_from < 0 ||
+        root > other_at_sus)
+      continue;
+    const std::size_t after_head = firstOnsetFrom(pedal_line, suspension + 1);
+    const bool walk_holds_eighth =
+        after_head >= pedal_line.size() || pedal_line[after_head].start_tick > suspension + kEighth;
+
+    std::vector<Candidate> candidates;
+    for (int held = lowest[holder]; held <= highest[holder]; ++held) {
+      if (!bar_sounds(bar - 1, held))
+        continue;
+      const int resolved =
+          bar_sounds(bar, held - 1) ? held - 1 : (bar_sounds(bar, held - 2) ? held - 2 : -1);
+      if (resolved < 0 || held <= root)
+        continue;
+      if (holder == 1 ? (held >= other_at_prep || held >= other_at_sus)
+                      : (held <= other_at_prep || held <= other_at_sus))
+        continue;
+      const int held_ic = (held - root) % 12;
+      SuspensionType type = SuspensionType::Sus7_6;
+      int class_rank = 0;
+      if (held_ic == 10 || held_ic == 11) {
+        type = SuspensionType::Sus7_6;
+        class_rank = 0;
+      } else if (held_ic == 1 || held_ic == 2) {
+        type = SuspensionType::Sus9_8;
+        class_rank = 1;
+      } else if (held_ic == 5) {
+        type = SuspensionType::Sus4_3;
+        class_rank = 2;
+      } else {
+        continue;
+      }
+      if (held % 12 == 11 && (other_at_sus % 12 == 11 || root % 12 == 11))
+        continue;
+      // One dissonance only: the held tone is consonant with the other manual.
+      const int manual_ic = std::abs(held - other_at_sus) % 12;
+      if (manual_ic == 1 || manual_ic == 2 || manual_ic == 6 || manual_ic == 10 || manual_ic == 11)
+        continue;
+      const int approach = held - approach_from;
+      if (std::abs(approach) >= kWidestApproach)
+        continue;
+      for (const Tick shape : {kEighth, kTicksPerBeat}) {
+        const Tick resolution = suspension + shape;
+        const Tick resume = suspension + 2 * shape;
+        if (type == SuspensionType::Sus9_8 && !(shape == kEighth && walk_holds_eighth))
+          continue;
+        const int other_at_res = pitchSoundingAt(other_line, resolution);
+        if (other_at_res < 0 || resolved <= root ||
+            (holder == 1 ? resolved >= other_at_res : resolved <= other_at_res))
+          continue;
+        if (!suspensionIntervalClassesHold(type, held_ic, (resolved - root) % 12))
+          continue;
+        const auto low = static_cast<std::uint8_t>(std::min({resolved, other_at_res, root}));
+        if (!rule_helpers::isBassSensitiveConsonance(static_cast<std::uint8_t>(resolved),
+                                                     static_cast<std::uint8_t>(other_at_res),
+                                                     low) ||
+            !rule_helpers::isBassSensitiveConsonance(static_cast<std::uint8_t>(resolved),
+                                                     static_cast<std::uint8_t>(root), low))
+          continue;
+        if (resolved % 12 == 11 && (other_at_res % 12 == 11 || root % 12 == 11))
+          continue;
+        const std::size_t next_idx = firstOnsetFrom(held_line, resume);
+        const int exit = next_idx < held_line.size()
+                             ? static_cast<int>(held_line[next_idx].pitch) - resolved
+                             : 0;
+        if (std::abs(exit) >= kWidestExit)
+          continue;
+        Candidate cand;
+        cand.class_rank = class_rank;
+        cand.shape_rank = shape == kEighth ? 0 : 1;
+        const int exit_size = std::abs(exit);
+        cand.exit_rank = (exit_size >= 1 && exit_size <= 2) ? 0 : (exit_size >= 3 ? 1 : 2);
+        cand.wide_approach = std::abs(approach) > 4;
+        cand.motion = std::abs(approach) + exit_size;
+        cand.held_pitch = held;
+        cand.resolution_pitch = resolved;
+        cand.exit = exit;
+        cand.shape = shape;
+        cand.type = type;
+        candidates.push_back(cand);
+      }
+    }
+    // Class (7-6, 9-8, 4-3), eighth resolution first, smoothest exit and approach, higher tone.
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
+      return std::make_tuple(lhs.class_rank, lhs.shape_rank, lhs.exit_rank, lhs.wide_approach,
+                             lhs.motion, -lhs.held_pitch) <
+             std::make_tuple(rhs.class_rank, rhs.shape_rank, rhs.exit_rank, rhs.wide_approach,
+                             rhs.motion, -rhs.held_pitch);
+    });
+
+    const std::vector<int> beat4_options =
+        options(pedal_beat4, stations(bar - 1), pedal_beat3 < 0 ? -1000 : pedal_beat3, root);
+    bool placed = false;
+    for (const Candidate& cand : candidates) {
+      if (placed)
+        break;
+      const Tick resolution = suspension + cand.shape;
+      const Tick resume = suspension + 2 * cand.shape;
+      const Tick window_hi = resume + 2 * kTicksPerBeat;
+      const Tick slice_lo = preparation > 2 * kTicksPerBar ? preparation - 2 * kTicksPerBar : 0;
+      const Tick slice_hi = window_hi + kTicksPerBar;
+      const std::vector<MaterialNote> held_before = lineSlice(held_line, slice_lo, slice_hi);
+      const std::vector<MaterialNote> other_slice = lineSlice(other_line, slice_lo, slice_hi);
+      const std::vector<MaterialNote> pedal_before = lineSlice(pedal_line, slice_lo, slice_hi);
+      const auto faults_of = [&](const std::vector<MaterialNote>& held,
+                                 const std::vector<MaterialNote>& pedal) {
+        std::array<const std::vector<MaterialNote>*, 3> view{};
+        view[holder] = &held;
+        view[1 - holder] = &other_slice;
+        view[2] = &pedal;
+        return windowFaults(view, out.harmony, preparation, window_hi);
+      };
+      const WindowFaults before = faults_of(held_before, pedal_before);
+
+      ChainLink link;
+      link.preparation = preparation;
+      link.suspension = suspension;
+      link.resolution = resolution;
+      link.resume = resume;
+      link.held_pitch = cand.held_pitch;
+      link.resolution_pitch = cand.resolution_pitch;
+      link.root = root;
+      const int pedal_resume = pitchSoundingAt(pedal_line, resume);
+      const std::vector<int> beat3_options = cand.shape == kTicksPerBeat
+                                                 ? options(pedal_resume, stations(bar), root, root)
+                                                 : std::vector<int>{-1};
+      for (const int beat4 : beat4_options) {
+        if (placed)
+          break;
+        if (!rule_helpers::isConsonantAboveBass(static_cast<std::uint8_t>(cand.held_pitch),
+                                                static_cast<std::uint8_t>(beat4)) ||
+            beat4 > std::min(cand.held_pitch, other_at_prep))
+          continue;
+        if (beat4 != pedal_beat4 &&
+            !rule_helpers::isBassSensitiveConsonance(static_cast<std::uint8_t>(other_at_prep),
+                                                     static_cast<std::uint8_t>(beat4),
+                                                     static_cast<std::uint8_t>(beat4)))
+          continue;
+        for (const int beat3 : beat3_options) {
+          link.pedal_beat4 = beat4 == pedal_beat4 ? -1 : beat4;
+          link.pedal_beat3 = (beat3 < 0 || beat3 == pedal_resume) ? -1 : beat3;
+          link.passing = false;
+          std::vector<MaterialNote> held_after = held_before;
+          std::vector<MaterialNote> pedal_after = pedal_before;
+          writeHolderLink(held_after, link);
+          if (!writePedalLink(pedal_after, link))
+            continue;
+          const WindowFaults after = faults_of(held_after, pedal_after);
+          if (after.worseThan(before))
+            continue;
+          // The reading the validator will take, judged before anything is written.
+          const auto lowest_other = [&](Tick tick) {
+            const int manual = pitchSoundingAt(other_slice, tick);
+            const int pedal = pitchSoundingAt(pedal_after, tick);
+            return manual < 0 ? pedal : (pedal < 0 ? manual : std::min(manual, pedal));
+          };
+          DeclaredSuspensionReading reading;
+          reading.preparation_tick = preparation;
+          reading.suspension_tick = suspension;
+          reading.resolution_tick = resolution;
+          reading.held_pitch = cand.held_pitch;
+          reading.resolution_pitch = cand.resolution_pitch;
+          reading.lowest_other_at_preparation = lowest_other(preparation);
+          reading.lowest_other_at_suspension = lowest_other(suspension);
+          reading.lowest_other_at_resolution = lowest_other(resolution);
+          if (!declaredSuspensionHolds(out.harmony, reading, cand.type))
+            continue;
+
+          const int exit_size = std::abs(cand.exit);
+          const std::size_t resumed_idx = firstOnsetFrom(held_after, resume);
+          const bool resumed_here =
+              resumed_idx < held_after.size() && held_after[resumed_idx].start_tick == resume;
+          if (!(exit_size >= 1 && exit_size <= 2) && resumed_here &&
+              held_after[resumed_idx].duration >= kEighth) {
+            const MaterialNote resumed = held_after[resumed_idx];
+            const int anchor = static_cast<int>(resumed.pitch);
+            const int other_at_resume = pitchSoundingAt(other_slice, resume);
+            const int toward = cand.exit > 0 ? 1 : -1;
+            const std::vector<int> passing_options =
+                exit_size >= 3
+                    ? std::vector<int>{cand.resolution_pitch + toward,
+                                       cand.resolution_pitch + 2 * toward}
+                    : std::vector<int>{cand.resolution_pitch + 1, cand.resolution_pitch + 2,
+                                       cand.resolution_pitch - 1, cand.resolution_pitch - 2};
+            // The beat's own tone takes the rest of the resumed note, or the next eighth.
+            Tick passing_end = 0;
+            if (resumed.duration > kEighth) {
+              passing_end = resume + resumed.duration;
+            } else if (resumed_idx + 1 < held_after.size() &&
+                       held_after[resumed_idx + 1].start_tick == resume + kEighth) {
+              passing_end = resume + kEighth + held_after[resumed_idx + 1].duration;
+            } else if (resumed_idx + 1 >= held_after.size() ||
+                       held_after[resumed_idx + 1].start_tick >= resume + kTicksPerBeat) {
+              passing_end = resume + kTicksPerBeat;
+            }
+            for (const int passing : passing_options) {
+              if (passing_end == 0)
+                break;
+              if (!bar_sounds(static_cast<int>(resume / kTicksPerBar), passing) ||
+                  std::abs(anchor - passing) < 1 || std::abs(anchor - passing) > 2)
+                continue;
+              if (other_at_resume >= 0 &&
+                  (holder == 1 ? passing >= other_at_resume : passing <= other_at_resume))
+                continue;
+              ChainLink with_passing = link;
+              with_passing.passing = true;
+              with_passing.passing_pitch = passing;
+              with_passing.anchor_pitch = anchor;
+              with_passing.passing_end = passing_end;
+              std::vector<MaterialNote> held_passing = held_before;
+              writeHolderLink(held_passing, with_passing);
+              if (faults_of(held_passing, pedal_after).worseThan(before))
+                continue;
+              link = with_passing;
+              break;
+            }
+          }
+
+          writeHolderLink(*lines[holder], link);
+          writePedalLink(*lines[2], link);
+          SuspensionPattern pattern;
+          pattern.type = cand.type;
+          pattern.preparation_tick = preparation;
+          pattern.suspension_tick = suspension;
+          pattern.resolution_tick = resolution;
+          pattern.preparation_pitch = static_cast<std::uint8_t>(cand.held_pitch);
+          pattern.suspension_pitch = static_cast<std::uint8_t>(cand.held_pitch);
+          pattern.resolution_pitch = static_cast<std::uint8_t>(cand.resolution_pitch);
+          pattern.voice = out.material.trio_voices[holder].voice;
+          out.material.suspension_patterns.push_back(pattern);
+          if (link.passing)
+            (*passing_resumes)[holder].push_back(resume);
+          placed = true;
+          break;
+        }
+      }
+    }
+  }
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // TrioSonata: three independent voices (V0 = RH/Great high, V1 = LH/Swell mid,
@@ -76,6 +698,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // The scalar figures walk the scale as spelled under the bar's chord
   // (detail::spellScale), so a minor dominant bar keeps its leading tone and
   // raised 6th in both directions.
+  // One exception is written later, once all three voices exist: where a
+  // declared suspension resolves in the sparse voice, the beat that voice
+  // resumes on may open on a passing tone a step from the resolution, with the
+  // beat's anchor moved to the off-beat eighth (placeSuspensionChains).
   // `shape` rotates the intra-beat figure VOCABULARY per bar (the beat anchors
   // themselves never change, so every contract -- per-beat chord-tone
   // consonance, conjunct off-beats, banded registers -- holds for every shape):
@@ -1442,6 +2068,24 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     }
   }
 
+  // Patterns declared so far are the cadential carrier's; the chains are held by the trio lines.
+  const std::size_t carrier_pattern_count = out.material.suspension_patterns.size();
+  std::array<std::vector<Tick>, 2> passing_resumes;
+  placeSuspensionChains(out, chords, bars, carrier_pattern_count, kPedalFloor, kPedalCeil,
+                        &passing_resumes);
+  const std::size_t chain_pattern_end = out.material.suspension_patterns.size();
+  // A chain owns the onsets of its held tone, its resolution and its passing resume.
+  const auto chain_owned = [&](std::size_t manual, Tick tick) {
+    for (std::size_t idx = carrier_pattern_count; idx < chain_pattern_end; ++idx) {
+      const SuspensionPattern& pattern = out.material.suspension_patterns[idx];
+      if (pattern.voice == manual && tick >= pattern.preparation_tick &&
+          tick <= pattern.resolution_tick)
+        return true;
+    }
+    const std::vector<Tick>& resumes = passing_resumes[manual];
+    return std::find(resumes.begin(), resumes.end(), tick) != resumes.end();
+  };
+
   // Closing-region parallel repair on the middle manual. Inside the bar loop V1
   // is judged against the V0 line as it stood then, but two later passes rewrite
   // exactly what it was judged against: the pre-landing thread plus
@@ -1495,9 +2139,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // the tone the resumed carrier is heard to follow is the pattern's
     // resolution. Step over the window and continue the chain from that
     // resolution, so the first repaired note after the splice is judged against
-    // what actually sounds.
+    // what actually sounds. A chain's tones ship as written and are stepped over the same way.
     const auto suspension_at = [&](Tick tick) -> const SuspensionPattern* {
-      for (const SuspensionPattern& pattern : out.material.suspension_patterns) {
+      for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
+        const SuspensionPattern& pattern = out.material.suspension_patterns[idx];
         if (pattern.voice != 1)
           continue;
         if (tick >= pattern.preparation_tick && tick < pattern.resolution_tick + 2 * kTicksPerBeat)
@@ -1511,6 +2156,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       const SuspensionPattern* suspended = suspension_at(note.start_tick);
       if (suspended != nullptr) {
         prev_pitch = static_cast<int>(suspended->resolution_pitch);
+        continue;
+      }
+      if (chain_owned(1, note.start_tick)) {
+        prev_pitch = static_cast<int>(note.pitch);
         continue;
       }
       const int design = static_cast<int>(note.pitch);
@@ -1594,12 +2243,13 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
       return motions;
     };
     const auto suspended = [&](Tick tick) {
-      for (const SuspensionPattern& pattern : out.material.suspension_patterns) {
+      for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
+        const SuspensionPattern& pattern = out.material.suspension_patterns[idx];
         if (pattern.voice == manual && tick >= pattern.preparation_tick &&
             tick < pattern.resolution_tick + 2 * kTicksPerBeat)
           return true;
       }
-      return false;
+      return chain_owned(manual, tick);
     };
     const int band_lo = manual == 0 ? kV0BandLo : kV1BandLo;
     const int band_hi = manual == 0 ? kV0BandHi : kV1BandHi;
@@ -1648,11 +2298,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
 
   // Declare the prepared suspensions the manuals already form, each as one held note.
   {
-    // After the passes above, which treat every declared pattern as owning a two-beat window.
-    const std::size_t carrier_patterns = out.material.suspension_patterns.size();
     // Material inside the cadential carrier's window is not what sounds there.
     const auto inside_carrier_window = [&](Tick from, Tick to) {
-      for (std::size_t idx = 0; idx < carrier_patterns; ++idx) {
+      for (std::size_t idx = 0; idx < carrier_pattern_count; ++idx) {
         const SuspensionPattern& pattern = out.material.suspension_patterns[idx];
         if (from < pattern.resolution_tick + 2 * kTicksPerBeat && to >= pattern.preparation_tick)
           return true;
@@ -1682,6 +2330,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
             held.start_tick + held.duration != res.start_tick ||
             (bar_offset != 0 && bar_offset != kTicksPerBar / 2) ||
             inside_carrier_window(prep.start_tick, res.start_tick)) {
+          continue;
+        }
+        // A chain's tones are already declared; none of them takes a second role here.
+        if (chain_owned(manual, prep.start_tick) || chain_owned(manual, held.start_tick) ||
+            chain_owned(manual, res.start_tick)) {
           continue;
         }
         DeclaredSuspensionReading reading;
