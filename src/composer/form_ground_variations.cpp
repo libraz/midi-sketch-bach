@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
@@ -20,11 +21,13 @@
 #include "composer/minor_material.h"
 #include "composer/rule_helpers.h"
 #include "composer/span.h"
+#include "composer/suspension_declaration.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/instrument_program.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
@@ -2841,6 +2844,277 @@ HarnessFixture buildGroundVariationForm(const ResolvedRequest& req, int cycle_ba
   return out;
 }
 
+// One voice of the finished texture: every material part it sounds from.
+struct TextureVoice {
+  VoiceId voice = 0;
+  std::vector<std::vector<MaterialNote>*> parts;
+};
+
+int soundingTexturePitch(const TextureVoice& line, Tick tick) {
+  for (const std::vector<MaterialNote>* part : line.parts) {
+    const int pitch = soundingMaterialPitch(*part, tick);
+    if (pitch >= 0)
+      return pitch;
+  }
+  return -1;
+}
+
+/// @brief Whether two voices form a true parallel fifth or octave at any union
+///        onset in [from_tick, to_tick], the pairing the counterpoint audit reads.
+bool formsStrictParallelBetween(const TextureVoice& line, const TextureVoice& other, Tick from_tick,
+                                Tick to_tick) {
+  std::vector<Tick> onsets;
+  for (const TextureVoice* voice : {&line, &other}) {
+    for (const std::vector<MaterialNote>* part : voice->parts) {
+      for (const MaterialNote& note : *part) {
+        if (note.start_tick >= from_tick && note.start_tick <= to_tick)
+          onsets.push_back(note.start_tick);
+      }
+    }
+  }
+  std::sort(onsets.begin(), onsets.end());
+  onsets.erase(std::unique(onsets.begin(), onsets.end()), onsets.end());
+  int prev_line = -1;
+  int prev_other = -1;
+  for (const Tick tick : onsets) {
+    const int line_now = soundingTexturePitch(line, tick);
+    const int other_now = soundingTexturePitch(other, tick);
+    if (isStrictParallelPerfect(prev_line, line_now, prev_other, other_now))
+      return true;
+    prev_line = line_now;
+    prev_other = other_now;
+  }
+  return false;
+}
+
+/// @brief Whether a voice sounds a pitch class anywhere in [from_tick, to_tick).
+bool soundsPitchClass(const TextureVoice& line, int pitch_class, Tick from_tick, Tick to_tick) {
+  for (const std::vector<MaterialNote>* part : line.parts) {
+    for (const MaterialNote& note : *part) {
+      if (note.start_tick < to_tick && note.start_tick + note.duration > from_tick &&
+          static_cast<int>(note.pitch) % 12 == pitch_class)
+        return true;
+    }
+  }
+  return false;
+}
+
+// A descending step onto a bar head whose upper tone is held over the bar line.
+struct DelayedResolutionSite {
+  MaterialNote* preparation = nullptr;
+  MaterialNote* resolution = nullptr;
+  SuspensionPattern pattern;
+};
+
+/// @brief Lengthen the preparation to the pattern's resolution tick and start the
+///        resolution there, so the held tone is one material note.
+void holdOverBarHead(const DelayedResolutionSite& site) {
+  const Tick hold = site.pattern.resolution_tick - site.pattern.suspension_tick;
+  site.preparation->duration += hold;
+  site.resolution->start_tick += hold;
+  site.resolution->duration -= hold;
+}
+
+/**
+ * @brief Admit the delayed resolution one upper voice offers at a bar head.
+ *
+ * The site is the voice's descending step onto `suspension_tick`. It is admitted
+ * when the held tone passes the declared-suspension rules against the sounding
+ * texture, resolves onto a consonance, doubles no leading tone, and the moved
+ * onset forms no true parallel with any other voice, the ground included.
+ *
+ * @param out The finished fixture; its spans bound what one replay can hold.
+ * @param plan The fixture's harmony with the form's metre stamped.
+ * @param texture Every voice's material, the ground last.
+ * @param held Index into `texture` of the voice offering the site.
+ * @param suspension_tick The bar head the preparation is held over.
+ * @param[out] site The two notes and the pattern declaring them.
+ * @return True when the site is admitted; the material is left unchanged.
+ */
+bool admitDelayedResolution(const HarnessFixture& out, const HarmonicPlan& plan,
+                            const std::array<TextureVoice, 3>& texture, std::size_t held,
+                            Tick suspension_tick, DelayedResolutionSite* site) {
+  const TextureVoice& line = texture[held];
+  const TextureVoice& ground = texture.back();
+  MaterialNote* preparation = nullptr;
+  MaterialNote* resolution = nullptr;
+  for (std::vector<MaterialNote>* part : line.parts) {
+    MaterialNote* ending = nullptr;
+    MaterialNote* starting = nullptr;
+    for (MaterialNote& note : *part) {
+      if (note.start_tick + note.duration == suspension_tick)
+        ending = &note;
+      if (note.start_tick == suspension_tick)
+        starting = &note;
+    }
+    if (ending != nullptr && starting != nullptr) {
+      preparation = ending;
+      resolution = starting;
+    }
+  }
+  if (preparation == nullptr)
+    return false;
+  // The longest hold the preparation can carry and the resolution outlasts.
+  Tick hold = 0;
+  for (const Tick value : {kTicksPerBeat, kTicksPerBeat / 2}) {
+    if (value <= preparation->duration && value < resolution->duration) {
+      hold = value;
+      break;
+    }
+  }
+  if (hold == 0)
+    return false;
+  const Tick preparation_tick = preparation->start_tick;
+  const Tick resolution_tick = suspension_tick + hold;
+  const Tick figure_end = resolution->start_tick + resolution->duration;
+
+  // One replay span holds the whole figure, and no installed carrier sounds in it.
+  bool contained = false;
+  for (const Span& span : out.voice_plan.spans) {
+    if (span.intent == VoiceIntent::SuspensionCarrier) {
+      if (span.start_tick < figure_end && span.end_tick > preparation_tick)
+        return false;
+      continue;
+    }
+    contained = contained || (span.voice == line.voice && span.start_tick <= preparation_tick &&
+                              span.end_tick >= figure_end);
+  }
+  // A resolution declared at the previous bar head may prepare this one: the chain is one note.
+  if (!contained)
+    return false;
+
+  const auto lowestOtherAt = [&](Tick tick) {
+    int lowest = -1;
+    for (std::size_t idx = 0; idx < texture.size(); ++idx) {
+      const int pitch = idx == held ? -1 : soundingTexturePitch(texture[idx], tick);
+      if (pitch >= 0 && (lowest < 0 || pitch < lowest))
+        lowest = pitch;
+    }
+    return lowest;
+  };
+  DeclaredSuspensionReading reading;
+  reading.preparation_tick = preparation_tick;
+  reading.suspension_tick = suspension_tick;
+  reading.resolution_tick = resolution_tick;
+  reading.held_pitch = static_cast<int>(preparation->pitch);
+  reading.resolution_pitch = static_cast<int>(resolution->pitch);
+  reading.lowest_other_at_preparation = lowestOtherAt(preparation_tick);
+  reading.lowest_other_at_suspension = lowestOtherAt(suspension_tick);
+  reading.lowest_other_at_resolution = lowestOtherAt(resolution_tick);
+  // The ground lies under every upper voice, so the held tone is never the lowest.
+  bool typed = false;
+  SuspensionType type = SuspensionType::Sus4_3;
+  for (const SuspensionType candidate :
+       {SuspensionType::Sus4_3, SuspensionType::Sus7_6, SuspensionType::Sus9_8}) {
+    if (!typed && declaredSuspensionHolds(plan, reading, candidate)) {
+      type = candidate;
+      typed = true;
+    }
+  }
+  if (!typed)
+    return false;
+
+  const int ground_at_resolution = soundingTexturePitch(ground, resolution_tick);
+  for (std::size_t idx = 0; idx < texture.size(); ++idx) {
+    if (idx == held)
+      continue;
+    const TextureVoice& other = texture[idx];
+    // The resolution is a consonance with every voice sounding under or over it.
+    const int other_at_resolution = soundingTexturePitch(other, resolution_tick);
+    if (other_at_resolution >= 0 &&
+        !rule_helpers::isBassSensitiveConsonance(resolution->pitch,
+                                                 static_cast<std::uint8_t>(other_at_resolution),
+                                                 static_cast<std::uint8_t>(ground_at_resolution)))
+      return false;
+    // Neither the held tone nor its resolution is a leading tone another voice sounds.
+    if ((rule_helpers::isLeadingTone(preparation->pitch, plan) &&
+         soundsPitchClass(other, preparation->pitch % 12, suspension_tick, resolution_tick)) ||
+        (rule_helpers::isLeadingTone(resolution->pitch, plan) &&
+         soundsPitchClass(other, resolution->pitch % 12, resolution_tick, figure_end)))
+      return false;
+    // The step the suspension masks is itself no true parallel with this voice.
+    if (isStrictParallelPerfect(reading.held_pitch, reading.resolution_pitch,
+                                soundingTexturePitch(other, suspension_tick - 1),
+                                other_at_resolution))
+      return false;
+  }
+
+  site->preparation = preparation;
+  site->resolution = resolution;
+  site->pattern.type = type;
+  site->pattern.preparation_tick = preparation_tick;
+  site->pattern.suspension_tick = suspension_tick;
+  site->pattern.resolution_tick = resolution_tick;
+  site->pattern.preparation_pitch = preparation->pitch;
+  site->pattern.suspension_pitch = preparation->pitch;
+  site->pattern.resolution_pitch = resolution->pitch;
+  site->pattern.voice = line.voice;
+
+  // Read the moved onset in place, then put the two notes back.
+  const MaterialNote preparation_before = *preparation;
+  const MaterialNote resolution_before = *resolution;
+  holdOverBarHead(*site);
+  bool parallel = false;
+  for (std::size_t idx = 0; idx < texture.size(); ++idx) {
+    if (idx != held)
+      parallel |= formsStrictParallelBetween(line, texture[idx], preparation_tick, figure_end);
+  }
+  *preparation = preparation_before;
+  *resolution = resolution_before;
+  return !parallel;
+}
+
+/**
+ * @brief Hold descending steps of the upper voices over their bar heads and
+ *        declare each as a suspension.
+ *
+ * Runs on the finished texture: every repair that may move an upper tone has
+ * already run, so a declared tone is never moved afterwards. The establishing
+ * cycle, the closing bar and every installed carrier's span are left alone, the
+ * ground is only read, and no span changes its intent.
+ *
+ * @param out The fixture; two notes move per taken site and one pattern is added.
+ * @param req The resolved request (bars, seed).
+ */
+void declareDelayedResolutions(HarnessFixture& out, const ResolvedRequest& req) {
+  // The accent rule reads the metre, which the form-director stamps only later.
+  HarmonicPlan plan = out.harmony;
+  plan.ts_numerator = 3;
+  plan.ts_denominator = 4;
+
+  std::array<TextureVoice, 3> texture;
+  texture[0].voice = 0;
+  for (PassacagliaVariation& variation : out.material.passacaglia_variations)
+    texture[0].parts.push_back(&variation.notes);
+  texture[1].voice = 1;
+  for (TrioVoiceLine& counter : out.material.trio_voices)
+    texture[1].parts.push_back(&counter.notes);
+  texture[2].voice = 2;
+  texture[2].parts.push_back(&out.material.passacaglia_ground);
+  const std::size_t upper_voices = texture.size() - 1;
+
+  // The closing tonic arrives on its bar head, so the last bar offers no site.
+  for (int bar = kPassacagliaCycleBars; bar + 1 < static_cast<int>(req.bars); ++bar) {
+    const Tick suspension_tick = static_cast<Tick>(bar) * kTicksPerBar34;
+    std::vector<DelayedResolutionSite> members;
+    for (std::size_t held = 0; held < upper_voices; ++held) {
+      DelayedResolutionSite site;
+      if (admitDelayedResolution(out, plan, texture, held, suspension_tick, &site))
+        members.push_back(site);
+    }
+    if (members.empty())
+      continue;
+    // One member per bar: the seed draws the offset, the cycle bar rotates it.
+    const auto count = static_cast<std::uint32_t>(members.size());
+    const std::uint32_t taken =
+        (rng::seedChoice(req.seed, rng::SeedDecision::kPassacagliaDelayedResolution, count) +
+         static_cast<std::uint32_t>(bar % kPassacagliaCycleBars)) %
+        count;
+    holdOverBarHead(members[taken]);
+    out.material.suspension_patterns.push_back(members[taken].pattern);
+  }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -3558,6 +3832,7 @@ HarnessFixture buildPassacagliaForm(const ResolvedRequest& req) {
     }
   }
 
+  declareDelayedResolutions(out, req);
   return out;
 }
 

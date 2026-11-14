@@ -38,6 +38,7 @@
 #include "composer/minor_material.h"
 #include "composer/provenance.h"
 #include "composer/rule_helpers.h"
+#include "composer/suspension_declaration.h"
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
@@ -2264,6 +2265,241 @@ TEST(GroundVariationChaconne, MultiWaveValidatesAcrossSeeds) {
 
 TEST(GroundVariationPassacaglia, MultiWaveValidatesAcrossSeeds) {
   expectMultiWaveValidatesOk(FormType::Passacaglia);
+}
+
+// --- Delayed resolutions declared in the passacaglia's upper voices ----------
+
+// A declared pattern no carrier span replays: a tone of the voice's own material
+// held over a bar head.
+bool isDelayedResolution(const HarnessFixture& fx, const SuspensionPattern& pattern) {
+  return std::none_of(
+      fx.voice_plan.spans.begin(), fx.voice_plan.spans.end(), [&](const Span& span) {
+        return span.intent == VoiceIntent::SuspensionCarrier && span.voice == pattern.voice &&
+               span.start_tick == pattern.preparation_tick;
+      });
+}
+
+// The material notes a passacaglia voice sounds from, in every part it owns.
+std::vector<MaterialNote> passacagliaVoiceMaterial(const HarnessFixture& fx, VoiceId voice) {
+  if (voice == 2)
+    return fx.material.passacaglia_ground;
+  std::vector<MaterialNote> notes;
+  if (voice == 0) {
+    for (const PassacagliaVariation& variation : fx.material.passacaglia_variations)
+      notes.insert(notes.end(), variation.notes.begin(), variation.notes.end());
+  } else {
+    for (const TrioVoiceLine& line : fx.material.trio_voices)
+      notes.insert(notes.end(), line.notes.begin(), line.notes.end());
+  }
+  return notes;
+}
+
+int lowestOtherMaterialPitch(const HarnessFixture& fx, VoiceId held, Tick tick) {
+  int lowest = -1;
+  for (VoiceId voice = 0; voice < 3; ++voice) {
+    if (voice == held)
+      continue;
+    const int pitch = soundingMaterialPitch(passacagliaVoiceMaterial(fx, voice), tick);
+    if (pitch >= 0 && (lowest < 0 || pitch < lowest))
+      lowest = pitch;
+  }
+  return lowest;
+}
+
+// Seeds reaching every ground variant, both modes, every character, three keys
+// and three lengths.
+template <typename Visit>
+void forEachPassacagliaFixture(Visit visit) {
+  for (std::uint32_t seed : {1u, 2u, 3u, 42u}) {
+    for (bool minor : {false, true}) {
+      for (SubjectCharacter character : kCharacters) {
+        for (int tonic_pc : {0, 5, 9}) {
+          for (std::uint16_t target_bars : {24, 72, 128}) {
+            ComposeRequest req =
+                requestFor({FormType::Passacaglia, seed, minor, target_bars}, character);
+            req.tonic = static_cast<Key>(tonic_pc);
+            HarnessFixture fx;
+            ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+            visit(fx, req,
+                  ::testing::Message() << "seed " << seed << " minor " << minor << " character "
+                                       << static_cast<int>(character) << " tonic " << tonic_pc
+                                       << " bars " << target_bars);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(GroundVariationPassacaglia, DelayedResolutionsHoldOneMaterialToneAndPassTheDeclaredRules) {
+  std::size_t delayed = 0;
+  forEachPassacagliaFixture(
+      [&](const HarnessFixture& fx, const ComposeRequest&, const ::testing::Message& where) {
+        for (const SuspensionPattern& pattern : fx.material.suspension_patterns) {
+          if (!isDelayedResolution(fx, pattern))
+            continue;
+          ++delayed;
+          const ::testing::Message at = ::testing::Message()
+                                        << where << " suspension tick " << pattern.suspension_tick;
+          ASSERT_NE(pattern.voice, 2) << at << ": the ground is never held";
+          EXPECT_EQ(pattern.preparation_pitch, pattern.suspension_pitch) << at;
+          EXPECT_EQ(pattern.suspension_tick % kTicksPerBar34, 0u) << at;
+          EXPECT_GE(pattern.resolution_tick - pattern.suspension_tick, kTicksPerBeat / 2) << at;
+
+          // The held tone is one note from the preparation to the resolution, and the
+          // voice starts nothing else until the resolution.
+          int held_notes = 0;
+          int resolution_notes = 0;
+          for (const MaterialNote& note : passacagliaVoiceMaterial(fx, pattern.voice)) {
+            if (note.start_tick == pattern.preparation_tick) {
+              ++held_notes;
+              EXPECT_EQ(note.pitch, pattern.suspension_pitch) << at;
+              EXPECT_EQ(note.duration, pattern.resolution_tick - pattern.preparation_tick) << at;
+            } else if (note.start_tick == pattern.resolution_tick) {
+              ++resolution_notes;
+              EXPECT_EQ(note.pitch, pattern.resolution_pitch) << at;
+            } else {
+              EXPECT_FALSE(note.start_tick > pattern.preparation_tick &&
+                           note.start_tick < pattern.resolution_tick)
+                  << at << ": an onset at " << note.start_tick << " inside the held tone";
+            }
+          }
+          EXPECT_EQ(held_notes, 1) << at;
+          EXPECT_EQ(resolution_notes, 1) << at;
+
+          DeclaredSuspensionReading reading;
+          reading.preparation_tick = pattern.preparation_tick;
+          reading.suspension_tick = pattern.suspension_tick;
+          reading.resolution_tick = pattern.resolution_tick;
+          reading.held_pitch = pattern.suspension_pitch;
+          reading.resolution_pitch = pattern.resolution_pitch;
+          reading.lowest_other_at_preparation =
+              lowestOtherMaterialPitch(fx, pattern.voice, pattern.preparation_tick);
+          reading.lowest_other_at_suspension =
+              lowestOtherMaterialPitch(fx, pattern.voice, pattern.suspension_tick);
+          reading.lowest_other_at_resolution =
+              lowestOtherMaterialPitch(fx, pattern.voice, pattern.resolution_tick);
+          EXPECT_TRUE(declaredSuspensionHolds(fx.harmony, reading, pattern.type)) << at;
+
+          // The span the figure sits in keeps the voice's own carrier intent.
+          const VoiceIntent expected = pattern.voice == 0 ? VoiceIntent::PassacagliaVariation
+                                                          : VoiceIntent::TrioVoiceCarrier;
+          bool contained = false;
+          for (const Span& span : fx.voice_plan.spans) {
+            if (span.voice == pattern.voice && span.start_tick <= pattern.preparation_tick &&
+                pattern.resolution_tick < span.end_tick) {
+              contained = true;
+              EXPECT_EQ(span.intent, expected) << at;
+            }
+          }
+          EXPECT_TRUE(contained) << at << ": the figure crosses a span seam";
+        }
+      });
+  EXPECT_GT(delayed, 0u) << "no delayed resolution in the sweep";
+}
+
+TEST(GroundVariationPassacaglia, DelayedResolutionsStayOutOfTheEstablishingCycle) {
+  const Tick first_cycle_end = 8 * kTicksPerBar34;
+  std::size_t delayed = 0;
+  forEachPassacagliaFixture(
+      [&](const HarnessFixture& fx, const ComposeRequest&, const ::testing::Message& where) {
+        for (const SuspensionPattern& pattern : fx.material.suspension_patterns) {
+          if (!isDelayedResolution(fx, pattern))
+            continue;
+          ++delayed;
+          EXPECT_GE(pattern.preparation_tick, first_cycle_end)
+              << where << " suspension tick " << pattern.suspension_tick;
+        }
+      });
+  EXPECT_GT(delayed, 0u) << "no delayed resolution in the sweep";
+}
+
+TEST(GroundVariationPassacaglia, DelayedResolutionRateClearsItsFloor) {
+  // Delayed resolutions per 100 bars over the whole matrix.
+  // floor set from the first build's measured value
+  constexpr double kDelayedResolutionFloor = 0.0;
+  std::size_t delayed = 0;
+  std::size_t bars = 0;
+  forEachPassacagliaFixture(
+      [&](const HarnessFixture& fx, const ComposeRequest&, const ::testing::Message&) {
+        bars += fx.material.passacaglia_ground.size();
+        for (const SuspensionPattern& pattern : fx.material.suspension_patterns)
+          delayed += isDelayedResolution(fx, pattern) ? 1u : 0u;
+      });
+  ASSERT_GT(bars, 0u);
+  EXPECT_GT(100.0 * static_cast<double>(delayed) / static_cast<double>(bars),
+            kDelayedResolutionFloor)
+      << delayed << " delayed resolutions in " << bars << " bars";
+}
+
+// The ground is the seed variant's table stated one whole-bar tone per bar,
+// which is what the form writes before any upper voice is held over a bar head.
+TEST(GroundVariationPassacaglia, DelayedResolutionsLeaveTheGroundAsStated) {
+  std::size_t delayed = 0;
+  forEachPassacagliaFixture(
+      [&](const HarnessFixture& fx, const ComposeRequest& req, const ::testing::Message& where) {
+        for (const SuspensionPattern& pattern : fx.material.suspension_patterns)
+          delayed += isDelayedResolution(fx, pattern) ? 1u : 0u;
+        const std::size_t variant = req.seed % detail::kGroundVariantCount;
+        const auto& pitches = req.is_minor ? detail::kPassacagliaGroundsMinor[variant]
+                                           : detail::kPassacagliaGroundsMajor[variant];
+        const std::vector<MaterialNote>& ground = fx.material.passacaglia_ground;
+        for (std::size_t bar = 0; bar < ground.size(); ++bar) {
+          EXPECT_EQ(ground[bar].start_tick, static_cast<Tick>(bar) * kTicksPerBar34)
+              << where << " bar " << bar;
+          EXPECT_EQ(ground[bar].duration, kTicksPerBar34) << where << " bar " << bar;
+          EXPECT_EQ(ground[bar].pitch, pitches[bar % pitches.size()]) << where << " bar " << bar;
+        }
+      });
+  EXPECT_GT(delayed, 0u) << "no delayed resolution in the sweep";
+}
+
+// Free counterpoint hands voice 1 to the search, so a delayed resolution declared on
+// it has no authored tone left: the director drops it, voice 0's stay, and the
+// product path reports no broken declared hold.
+TEST(GroundVariationPassacaglia, FreeCounterpointDropsSearchedVoiceDelayedResolutions) {
+  const auto reportsIntegrity = [](const std::vector<ValidationFailure>& failures) {
+    return std::any_of(failures.begin(), failures.end(), [](const ValidationFailure& failure) {
+      return failure.rule_id == "declared_suspension_integrity";
+    });
+  };
+  test::ShippedSurface slice;
+  slice.forms = {FormType::Passacaglia};
+  slice.lengths = test::LengthAxis::Natural;
+  slice.seed_count = 8;
+  std::size_t dropped = 0;
+  for (const test::ShippedCell& cell : test::shippedRequestCells(slice)) {
+    SCOPED_TRACE(test::cellName(cell));
+    HarnessFixture off_fx;
+    ASSERT_EQ(buildFormFixture(cell.request, &off_fx), FormDirectorStatus::Ok);
+    ComposeRequest on_req = cell.request;
+    on_req.enable_free_counterpoint = true;
+    const test::ProductGateResult gate = test::runProductGate(on_req, cell.tonic);
+    ASSERT_TRUE(gate.built);
+
+    std::vector<Tick> off_kept;
+    for (const SuspensionPattern& pattern : off_fx.material.suspension_patterns) {
+      if (!isDelayedResolution(off_fx, pattern))
+        continue;
+      if (pattern.voice == 1)
+        ++dropped;
+      else
+        off_kept.push_back(pattern.suspension_tick);
+    }
+    std::vector<Tick> on_kept;
+    for (const SuspensionPattern& pattern : gate.fixture.material.suspension_patterns) {
+      if (!isDelayedResolution(gate.fixture, pattern))
+        continue;
+      EXPECT_NE(pattern.voice, 1) << "suspension tick " << pattern.suspension_tick;
+      on_kept.push_back(pattern.suspension_tick);
+    }
+    EXPECT_EQ(on_kept, off_kept);
+
+    // Most free-counterpoint seeds fail elsewhere; only the integrity rule is read.
+    EXPECT_FALSE(reportsIntegrity(gate.composed.validation.failures));
+    EXPECT_FALSE(reportsIntegrity(gate.failures));
+  }
+  EXPECT_GT(dropped, 0u) << "no voice-1 delayed resolution in the slice";
 }
 
 }  // namespace

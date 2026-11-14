@@ -16,7 +16,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <tuple>
+#include <vector>
 
 #include "composer/arc.h"
 #include "composer/cadenced_progression.h"
@@ -487,6 +490,7 @@ TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
         // one: a check that reads only the first stops seeing the rest.
         ASSERT_FALSE(fixture.material.suspension_patterns.empty())
             << "form=" << static_cast<int>(form) << " minor=" << minor << " seed=" << seed;
+        std::size_t carried = 0;
         for (const SuspensionPattern& pattern : fixture.material.suspension_patterns) {
           EXPECT_NE(pattern.type, SuspensionType::Sus2_3);
           saw_four_three = saw_four_three || pattern.type == SuspensionType::Sus4_3;
@@ -495,13 +499,29 @@ TEST(FormDirectorBuild, CadentialSuspensionsShipInThreeTargetForms) {
                         rule_helpers::metricalStrengthAt(fixture.harmony, pattern.suspension_tick)),
                     static_cast<int>(rule_helpers::metricalStrengthAt(fixture.harmony,
                                                                       pattern.preparation_tick)));
-          EXPECT_TRUE(std::any_of(fixture.voice_plan.spans.begin(), fixture.voice_plan.spans.end(),
-                                  [&](const Span& span) {
-                                    return span.intent == VoiceIntent::SuspensionCarrier &&
-                                           span.voice == pattern.voice &&
-                                           span.start_tick == pattern.preparation_tick;
-                                  }));
+          const bool carrier = std::any_of(fixture.voice_plan.spans.begin(),
+                                           fixture.voice_plan.spans.end(), [&](const Span& span) {
+                                             return span.intent == VoiceIntent::SuspensionCarrier &&
+                                                    span.voice == pattern.voice &&
+                                                    span.start_tick == pattern.preparation_tick;
+                                           });
+          carried += carrier ? 1 : 0;
+          if (carrier)
+            continue;
+          // Only the passacaglia also declares holds its material authors in place: a
+          // delayed resolution, an upper voice holding one tone over a bar head.
+          const Tick bar_ticks = static_cast<Tick>(fixture.ts_numerator) * kTicksPerBeat;
+          EXPECT_EQ(form, FormType::Passacaglia) << "suspension tick " << pattern.suspension_tick;
+          EXPECT_NE(pattern.voice, 2) << "suspension tick " << pattern.suspension_tick;
+          EXPECT_EQ(pattern.preparation_pitch, pattern.suspension_pitch)
+              << "suspension tick " << pattern.suspension_tick;
+          EXPECT_EQ(pattern.suspension_tick % bar_ticks, 0u)
+              << "suspension tick " << pattern.suspension_tick;
+          EXPECT_GE(pattern.resolution_tick - pattern.suspension_tick, kTicksPerBeat / 2)
+              << "suspension tick " << pattern.suspension_tick;
         }
+        EXPECT_GT(carried, 0u) << "form=" << static_cast<int>(form) << " minor=" << minor
+                               << " seed=" << seed << ": no cadential carrier suspension";
 
         ComposeResult result =
             Composer{}.run(fixture.material, fixture.harmony, fixture.voice_plan);
@@ -650,32 +670,67 @@ TEST(FormDirectorFreeCounterpoint, OnReroutesInnerVoiceToSearch) {
   EXPECT_GT(rerouted, 0u);
 }
 
-// After the reroute no declared pattern of the searched voice is left without a
-// SuspensionCarrier span to synthesize it, and carrier-hosted patterns are untouched.
+// After the reroute every pattern left on the searched voice has a SuspensionCarrier
+// span to synthesize it, the patterns of every other voice are untouched, and the
+// searched voice did declare holds no carrier span starts (delayed resolutions).
 TEST(FormDirectorFreeCounterpoint, KeepsOnlyPatternsASuspensionCarrierStillSynthesizes) {
-  for (std::uint32_t seed = 1; seed <= 8; ++seed) {
-    SCOPED_TRACE(seed);
-    ComposeRequest req;
-    req.form = FormType::Passacaglia;
-    req.seed = seed;
-    HarnessFixture off_fx;
-    ASSERT_EQ(buildFormFixture(req, &off_fx), FormDirectorStatus::Ok);
-    req.enable_free_counterpoint = true;
-    HarnessFixture on_fx;
-    ASSERT_EQ(buildFormFixture(req, &on_fx), FormDirectorStatus::Ok);
-    for (const SuspensionPattern& pattern : on_fx.material.suspension_patterns) {
-      bool carried = false;
-      for (const Span& span : on_fx.voice_plan.spans) {
-        carried = carried ||
-                  (span.intent == VoiceIntent::SuspensionCarrier && span.voice == pattern.voice &&
-                   span.start_tick <= pattern.preparation_tick &&
-                   span.end_tick > pattern.resolution_tick);
-      }
-      EXPECT_TRUE(carried);
+  constexpr VoiceId kSearchedVoice = 1;
+  const auto carrierStartsAt = [](const HarnessFixture& fx, const SuspensionPattern& pattern) {
+    return std::any_of(
+        fx.voice_plan.spans.begin(), fx.voice_plan.spans.end(), [&](const Span& span) {
+          return span.intent == VoiceIntent::SuspensionCarrier && span.voice == pattern.voice &&
+                 span.start_tick == pattern.preparation_tick;
+        });
+  };
+  const auto fields = [](const SuspensionPattern& pattern) {
+    return std::make_tuple(pattern.type, pattern.preparation_tick, pattern.suspension_tick,
+                           pattern.resolution_tick, pattern.preparation_pitch,
+                           pattern.suspension_pitch, pattern.resolution_pitch, pattern.voice);
+  };
+  const auto otherVoices = [&](const HarnessFixture& fx) {
+    std::vector<decltype(fields(SuspensionPattern{}))> out;
+    for (const SuspensionPattern& pattern : fx.material.suspension_patterns) {
+      if (pattern.voice != kSearchedVoice)
+        out.push_back(fields(pattern));
     }
-    EXPECT_EQ(on_fx.material.suspension_patterns.size(),
-              off_fx.material.suspension_patterns.size());
+    return out;
+  };
+  std::size_t off_delayed = 0;
+  std::size_t on_surviving = 0;
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+      SCOPED_TRACE(::testing::Message() << "seed " << seed << (minor ? " minor" : " major"));
+      ComposeRequest req;
+      req.form = FormType::Passacaglia;
+      req.is_minor = minor;
+      req.seed = seed;
+      HarnessFixture off_fx;
+      ASSERT_EQ(buildFormFixture(req, &off_fx), FormDirectorStatus::Ok);
+      req.enable_free_counterpoint = true;
+      HarnessFixture on_fx;
+      ASSERT_EQ(buildFormFixture(req, &on_fx), FormDirectorStatus::Ok);
+      for (const SuspensionPattern& pattern : off_fx.material.suspension_patterns) {
+        if (pattern.voice == kSearchedVoice && !carrierStartsAt(off_fx, pattern))
+          ++off_delayed;
+      }
+      on_surviving += on_fx.material.suspension_patterns.size();
+      for (const SuspensionPattern& pattern : on_fx.material.suspension_patterns) {
+        if (pattern.voice != kSearchedVoice)
+          continue;
+        bool carried = false;
+        for (const Span& span : on_fx.voice_plan.spans) {
+          carried = carried ||
+                    (span.intent == VoiceIntent::SuspensionCarrier && span.voice == pattern.voice &&
+                     span.start_tick <= pattern.preparation_tick &&
+                     span.end_tick > pattern.resolution_tick);
+        }
+        EXPECT_TRUE(carried) << "suspension tick " << pattern.suspension_tick;
+      }
+      EXPECT_EQ(otherVoices(on_fx), otherVoices(off_fx));
+    }
   }
+  EXPECT_GT(off_delayed, 0u) << "no searched-voice delayed resolution in the sweep";
+  EXPECT_GT(on_surviving, 0u) << "free counterpoint left no declared pattern";
 }
 
 TEST(FormDirectorFreeCounterpoint, FormsWithoutAnEligibleSecondaryVoiceAreRejected) {

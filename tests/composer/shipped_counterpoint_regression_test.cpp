@@ -1676,8 +1676,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourths 128 -> 107, successions 28042 -> 28027 (fewer ornament notes on that line).
     // One anchor ladder ordered by how often the organ stratum writes each fault class: hidden
     // 14 -> 29, anti 3 -> 0 (worst cell 1 -> 0), worst-cell hidden 1 -> 2, successions
-    // 28027 -> 28066.
-    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28066, 107},
+    // 28027 -> 28066. Delayed resolutions in the upper voices: successions 28066 -> 28165.
+    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28165, 107},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
