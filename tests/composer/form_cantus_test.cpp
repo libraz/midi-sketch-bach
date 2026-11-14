@@ -622,9 +622,8 @@ TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelPerfects) {
   }
 }
 
-// The Goldberg variation line is asserted parallel-free against everything,
-// everywhere, and the inner line is asserted parallel-free off the bar head.
-// That is a stronger claim than the chorale prelude's above, and it rests on a
+// Every voice pair of the Goldberg texture is asserted parallel-free,
+// everywhere. That is a stronger claim than the chorale prelude's above, and it rests on a
 // different argument, because here almost nothing can be relieved after the
 // fact -- the aria bass is immutable by contract, and a canon's follower is the
 // exact imitation of a leader it cannot leave, so neither end of that pair may
@@ -637,18 +636,6 @@ TEST(FormCantusChorale, ShippedTextureIsFreeOfParallelPerfects) {
 // the whole three-voice surface can be assembled and read while that choice is
 // still open. The free figuration between those blocks has no such closed form
 // and is relieved arrival by arrival instead.
-//
-// What those two together cannot reach is the bar head of a wide canon, and the
-// reason is arithmetic rather than musical. The follower of such a canon sits
-// more than two octaves above its leader, so the pair is pinned from both ends
-// at once: the follower may not pass the top of the keyboard, and the leader may
-// not sink into the bass arpeggiating below it. That leaves the leader a window
-// of about a fifth, and a window that narrow holds only one tone of some triads.
-// Where two adjacent bars are both such triads the leader has no choice left to
-// make, and if the bass happens to step congruently underneath, the parallel
-// stands. It is bounded to one per piece because one canon in the scheme is that
-// wide, and it is held to that bound here so that a wider failure cannot hide
-// behind the exception.
 TEST(FormCantusGoldberg, ShippedTextureIsFreeOfParallelPerfects) {
   for (bool minor : {false, true}) {
     for (SubjectCharacter character : {SubjectCharacter::Severe, SubjectCharacter::Playful,
@@ -662,21 +649,15 @@ TEST(FormCantusGoldberg, ShippedTextureIsFreeOfParallelPerfects) {
                                     " character=" + std::to_string(static_cast<int>(character)) +
                                     " bars=" + std::to_string(bars) +
                                     " seed=" + std::to_string(seed);
-          int boxed_in = 0;
           forEachUnionMotion(result, [&](Tick curr, VoiceId upper, VoiceId lower, int up_prev,
                                          int up_curr, int lo_prev, int lo_curr) {
             if (!isParallelPerfectMotion(up_prev, up_curr, lo_prev, lo_curr))
               return;
-            if (upper == 1 && lower == 2 && curr % kTicksPerBar == 0) {
-              ++boxed_in;
-              return;
-            }
             ADD_FAILURE() << where << " v" << static_cast<int>(upper) << "/v"
                           << static_cast<int>(lower) << " parallel perfect at tick " << curr << " ("
                           << up_prev << "->" << up_curr << " over " << lo_prev << "->" << lo_curr
                           << ")";
           });
-          EXPECT_LE(boxed_in, 1) << where << " inner-line bar-head parallels over the aria bass";
         }
       }
     }
