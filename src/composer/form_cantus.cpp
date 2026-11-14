@@ -1006,6 +1006,39 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
     return cand;
   };
 
+  // A passing tone or neighbour on the bar's last quarter, stepping from `from` into the next
+  // skeleton tone `head`; -1 when none stays in the V1 window, avoids a falling leading tone
+  // and clears the passing-tone guard. The seed draws the side when both neighbours are clean.
+  // Plain bars whose last quarter can step into the next head: the index of that quarter in
+  // the cantus line and the step tone. Applied once the bass is final.
+  std::vector<std::pair<std::size_t, int>> last_quarter_steps;
+  auto stepIntoHead = [&](int from, int head, Tick onset, int bar_index) -> int {
+    const BarChord& chord = bar_chords[static_cast<std::size_t>(bar_index)];
+    auto clean = [&](int mid) {
+      const bool falling_leading_tone = ((mid % 12) + 12) % 12 == 11 && head < mid;
+      return mid != from && mid != head && std::abs(mid - from) <= 2 && std::abs(head - mid) <= 2 &&
+             mid > kBassBandHi && mid <= kV1EmbellishCeiling && !falling_leading_tone &&
+             guardV1Passing(mid, onset, from) == mid;
+    };
+    const int gap = std::abs(head - from);
+    if (gap >= 3 && gap <= 4) {
+      const int mid = stepToward(from, head, chord);
+      return clean(mid) ? mid : -1;
+    }
+    if (gap != 0)
+      return -1;
+    const int upper = stepToward(from, from + 2, chord);
+    const int lower = stepToward(from, from - 2, chord);
+    const bool upper_clean = clean(upper);
+    const bool lower_clean = clean(lower);
+    if (upper_clean && lower_clean)
+      return rng::seedChoice(req.seed, rng::SeedDecision::kChoraleNeighbourSide, 2,
+                             static_cast<std::uint32_t>(bar_index)) == 0
+                 ? upper
+                 : lower;
+    return upper_clean ? upper : (lower_clean ? lower : -1);
+  };
+
   for (int bar = 0; bar < bars; ++bar) {
     const int tone = skeleton[static_cast<std::size_t>(bar)].pitch;
     const BarChord& chord = bar_chords[static_cast<std::size_t>(bar)];
@@ -1097,14 +1130,21 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
       v1_run = (off3 == v1_prev) ? v1_run + 1 : 1;
       v1_prev = off3;
     } else {
-      // Plain: two quarter chord tones on beats 2 and 3, each run-break guarded so
-      // a same-degree run never exceeds four identical pitches.
+      // Plain: a quarter chord tone on beat 2, run-break guarded so a same-degree run never
+      // exceeds four identical pitches, and a guarded chord tone on beat 3. Where a clean passing
+      // tone or neighbour leads into the next skeleton tone it is held for beat 3 until the bass
+      // is final; the dominant approach owns the penultimate bar's beat 3.
       const int b2 = breakRun(guardV1Parallel(beat2, base + kHalf, chord), chord, base + kHalf);
       out.material.cf_embellished.push_back(materialNote(base + kHalf, kQuarterDur, b2));
-      const int b3 = breakRun(guardV1Parallel(beat3, base + kHalf + kQuarterDur, chord), chord,
-                              base + kHalf + kQuarterDur);
-      out.material.cf_embellished.push_back(
-          materialNote(base + kHalf + kQuarterDur, kQuarterDur, b3));
+      const Tick beat3_tick = base + kHalf + kQuarterDur;
+      const int b3 = breakRun(guardV1Parallel(beat3, beat3_tick, chord), chord, beat3_tick);
+      if (bar + 2 < bars) {
+        const int next_head = static_cast<int>(skeleton[static_cast<std::size_t>(bar + 1)].pitch);
+        const int step = stepIntoHead(b2, next_head, beat3_tick, bar);
+        if (step >= 0)
+          last_quarter_steps.emplace_back(out.material.cf_embellished.size(), step);
+      }
+      out.material.cf_embellished.push_back(materialNote(beat3_tick, kQuarterDur, b3));
     }
   }
   out.material.cf_is_embellished = true;
@@ -1157,6 +1197,40 @@ HarnessFixture buildChoralePreludeForm(const ResolvedRequest& req) {
                        [&](const MaterialNote& note) { return note.start_tick >= final_bar_tick; }),
         bass_notes.end());
     bass_notes.push_back(materialNote(final_bar_tick, kTicksPerBar, final_root));
+  }
+
+  // The held step tones go in where they form no perfect approach with the finished bass and
+  // figuration at either end and no fourth over the bass, so the bass was chosen under the
+  // chord tone and relief has no arrival of theirs to re-aim.
+  {
+    ThemeToneRegistry placed;
+    for (const MaterialNote& note : fig.notes)
+      placed.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
+    for (const MaterialNote& note : bass_notes)
+      placed.record(note.start_tick, /*voice=*/2, static_cast<int>(note.pitch), note.duration);
+    std::vector<ConcurrentMotion> motions;
+    std::vector<MaterialNote>& cantus = out.material.cf_embellished;
+    for (const std::pair<std::size_t, int>& held : last_quarter_steps) {
+      const std::size_t index = held.first;
+      const int step = held.second;
+      const MaterialNote& before = cantus[index - 1];
+      const MaterialNote& after = cantus[index + 1];
+      MaterialNote& quarter = cantus[index];
+      placed.arrivalMotions(quarter.start_tick, /*voice=*/1, /*num_voices=*/3, motions);
+      if (perfectFaultRank(static_cast<int>(before.pitch), step, motions) != 0)
+        continue;
+      // Nor a fourth over the bass, which a passing tone on the way out leaves unresolved.
+      const bool over_fourth = std::any_of(motions.begin(), motions.end(), [&](const auto& motion) {
+        return motion.voice == 2 && motion.curr >= 0 && (step - motion.curr) % 12 == 5;
+      });
+      if (over_fourth)
+        continue;
+      placed.arrivalMotions(after.start_tick, /*voice=*/1, /*num_voices=*/3, motions);
+      if (perfectFaultRank(step, static_cast<int>(after.pitch), motions) != 0)
+        continue;
+      quarter.pitch = static_cast<std::uint8_t>(step);
+      out.material.cf_last_quarter_steps.push_back(quarter.start_tick);
+    }
   }
 
   // Re-recorded from the finished lines: the two rewrites above (the pinned

@@ -33,6 +33,7 @@
 #include "composer/form_builders.h"
 #include "composer/form_director.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
 #include "product_gate_test_util.h"
@@ -777,6 +778,185 @@ TEST(FormCantusChorale, EmbellishedCantusFirmusKeepsItsBandAndStepwisePassing) {
               wide_passing);
   EXPECT_LE(under_band, 6u);
   EXPECT_LE(wide_passing, 8u);
+}
+
+// Whether a pitch class belongs to the chord the plan states at a tick.
+bool isPlannedChordTone(const HarmonicPlan& plan, Tick tick, int pitch) {
+  const ChordEvent* chord = rule_helpers::chordAt(plan, tick);
+  if (chord == nullptr)
+    return true;
+  int third = 4;
+  int fifth = 7;
+  int seventh = -1;
+  switch (chord->quality) {
+    case ChordQuality::Major:
+      break;
+    case ChordQuality::Minor:
+      third = 3;
+      break;
+    case ChordQuality::Diminished:
+      third = 3;
+      fifth = 6;
+      break;
+    case ChordQuality::Augmented:
+      fifth = 8;
+      break;
+    case ChordQuality::Dominant7:
+      seventh = 10;
+      break;
+    case ChordQuality::Minor7:
+      third = 3;
+      seventh = 10;
+      break;
+    case ChordQuality::Major7:
+      seventh = 11;
+      break;
+    case ChordQuality::Diminished7:
+      third = 3;
+      fifth = 6;
+      seventh = 9;
+      break;
+    case ChordQuality::HalfDiminished7:
+      third = 3;
+      fifth = 6;
+      seventh = 10;
+      break;
+  }
+  const int interval = ((pitch - static_cast<int>(chord->root_pc)) % 12 + 12) % 12;
+  return interval == 0 || interval == third || interval == fifth || interval == seventh;
+}
+
+// The plain bar's last quarter the builder writes as a passing tone or neighbour into the
+// next bar head is approached and left by step, never by an augmented interval, and a
+// leading tone on it never falls; read on the composed and the shipped arrays. Every other
+// plain last quarter that is a non-chord tone is held per class to the counts measured on the
+// line without the step tones, so the unit cannot add to them.
+TEST(FormCantusChorale, LastQuarterStepToneStepsInAndOut) {
+  enum Class { kStepIn, kStepOut, kAugmentedIn, kAugmentedOut, kLeadingToneFalls, kClasses };
+  constexpr std::array<int, kClasses> kOtherComposed = {{27, 34, 3, 3, 4}};
+  constexpr std::array<int, kClasses> kOtherShipped = {{23, 29, 3, 3, 4}};
+  std::array<int, kClasses> other_composed{};
+  std::array<int, kClasses> other_shipped{};
+  std::size_t steps = 0;
+  std::size_t non_chord_steps = 0;
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed : kSeeds) {
+      for (std::uint16_t bars : sweepBars(FormType::ChoralePrelude)) {
+        ComposeRequest req;
+        req.form = FormType::ChoralePrelude;
+        req.is_minor = minor;
+        req.character = choraleCharacter(minor);
+        req.target_bars = bars;
+        req.seed = seed;
+        const test::ProductGateResult gate = test::runProductGate(req);
+        ASSERT_TRUE(gate.built);
+        const HarmonicPlan& plan = gate.fixture.harmony;
+        const std::vector<Tick>& placed = gate.fixture.material.cf_last_quarter_steps;
+        steps += placed.size();
+        const auto bars_built = static_cast<Tick>(gate.fixture.material.cantus_firmus.size());
+        std::vector<Tick> distinct = placed;
+        std::sort(distinct.begin(), distinct.end());
+        EXPECT_EQ(std::unique(distinct.begin(), distinct.end()), distinct.end())
+            << "repeated step tick, seed=" << seed << " bars=" << bars;
+        for (const Tick tick : placed) {
+          EXPECT_EQ(tick % kTicksPerBar, 3 * kTicksPerBeat) << "step off the last quarter";
+          EXPECT_LT(tick / kTicksPerBar + 2, bars_built) << "step in the dominant-approach bar";
+        }
+        for (const ComposeResult* result : {&gate.composed, &gate.shipped}) {
+          const bool shipped = result == &gate.shipped;
+          std::vector<NoteEvent> line;
+          std::vector<NoteEvent> heard;
+          for (const NoteEvent& note : result->notes) {
+            if (note.voice != 1)
+              continue;
+            heard.push_back(note);
+            if (note.source != BachNoteSource::Ornament)
+              line.push_back(note);
+          }
+          std::sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
+            return lhs.start_tick < rhs.start_tick;
+          });
+          const std::string where =
+              std::string(shipped ? "shipped" : "composed") + " minor=" + std::to_string(minor) +
+              " seed=" + std::to_string(seed) + " bars=" + std::to_string(bars);
+          if (!shipped) {
+            for (const Tick tick : placed) {
+              const auto found = std::find_if(line.begin(), line.end(), [&](const NoteEvent& note) {
+                return note.start_tick == tick;
+              });
+              ASSERT_NE(found, line.end()) << where << " no cantus note at step tick " << tick;
+              ASSERT_NE(found, line.begin()) << where;
+              const NoteEvent& before = *(found - 1);
+              EXPECT_TRUE(found->duration == kTicksPerBeat && before.duration == kTicksPerBeat &&
+                          before.start_tick + kTicksPerBeat == tick)
+                  << where << " step tick " << tick << " is not a plain bar's last quarter";
+              non_chord_steps += isPlannedChordTone(plan, tick, found->pitch) ? 0 : 1;
+            }
+          }
+          std::array<int, kClasses>& other = shipped ? other_shipped : other_composed;
+          for (std::size_t idx = 1; idx + 1 < line.size(); ++idx) {
+            const NoteEvent& prev = line[idx - 1];
+            const NoteEvent& note = line[idx];
+            const NoteEvent& next = line[idx + 1];
+            const bool step_tone =
+                std::find(placed.begin(), placed.end(), note.start_tick) != placed.end();
+            const bool plain_last_quarter = note.start_tick % kTicksPerBar == 3 * kTicksPerBeat &&
+                                            prev.start_tick % kTicksPerBar == 2 * kTicksPerBeat &&
+                                            prev.duration == kTicksPerBeat &&
+                                            note.duration == kTicksPerBeat &&
+                                            next.start_tick % kTicksPerBar == 0;
+            if (!step_tone &&
+                (!plain_last_quarter ||
+                 isPlannedChordTone(plan, note.start_tick, static_cast<int>(note.pitch))))
+              continue;
+            // A step tone is approached from the tone heard last: an ornamented quarter before
+            // it is absent from the plain line, and every figure closes on the tone it decorates.
+            int approach = static_cast<int>(prev.pitch);
+            if (step_tone) {
+              Tick latest = 0;
+              for (const NoteEvent& sounded : heard) {
+                if (sounded.start_tick < note.start_tick && sounded.start_tick >= latest &&
+                    sounded.start_tick + sounded.duration >= note.start_tick) {
+                  latest = sounded.start_tick;
+                  approach = static_cast<int>(sounded.pitch);
+                }
+              }
+            }
+            const int step_in = static_cast<int>(note.pitch) - approach;
+            const int step_out = static_cast<int>(next.pitch) - static_cast<int>(note.pitch);
+            std::array<bool, kClasses> faults{};
+            faults[kStepIn] = std::abs(step_in) < 1 || std::abs(step_in) > 2;
+            faults[kStepOut] = std::abs(step_out) < 1 || std::abs(step_out) > 2;
+            faults[kAugmentedIn] = rule_helpers::isAugmentedMelodicInterval(
+                static_cast<std::uint8_t>(approach), note.pitch, plan);
+            faults[kAugmentedOut] =
+                rule_helpers::isAugmentedMelodicInterval(note.pitch, next.pitch, plan);
+            faults[kLeadingToneFalls] =
+                rule_helpers::isLeadingTone(note.pitch, plan) && step_out < 0;
+            for (int cls = 0; cls < kClasses; ++cls) {
+              if (!faults[static_cast<std::size_t>(cls)])
+                continue;
+              if (step_tone)
+                ADD_FAILURE() << where << " step tone class " << cls << " at tick "
+                              << note.start_tick << ": " << approach << " -> "
+                              << static_cast<int>(note.pitch) << " -> "
+                              << static_cast<int>(next.pitch);
+              else
+                ++other[static_cast<std::size_t>(cls)];
+            }
+          }
+        }
+      }
+    }
+  }
+  std::printf("[chorale-v1] step tones=%zu (non-chord %zu)\n", steps, non_chord_steps);
+  EXPECT_GT(steps, 0u);
+  EXPECT_GT(non_chord_steps, 0u);
+  for (int cls = 0; cls < kClasses; ++cls) {
+    const auto at = static_cast<std::size_t>(cls);
+    EXPECT_LE(other_composed[at], kOtherComposed[at]) << "composed class " << cls;
+    EXPECT_LE(other_shipped[at], kOtherShipped[at]) << "shipped class " << cls;
+  }
 }
 
 // --- Goldberg structural contracts ------------------------------------------

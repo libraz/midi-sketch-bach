@@ -662,10 +662,13 @@ struct Material {
   //   cf_placement: documentary CF voice placement (0=Soprano,1=Tenor,2=Bass).
   //   cf_is_embellished: when true the carrier replays `cf_embellished` and
   //     stamps CFEmbellishmentApplied.
+  //   cf_last_quarter_steps: documentary onsets of the plain bars' last quarters
+  //     written as a passing tone or neighbour into the next skeleton tone.
   std::vector<MaterialNote> cantus_firmus;   // skeleton, one tone per bar.
   std::vector<MaterialNote> cf_embellished;  // ornamented CF (downbeats == skeleton).
   bool cf_is_embellished = false;
-  std::uint8_t cf_placement = 0;  // documentary.
+  std::uint8_t cf_placement = 0;            // documentary.
+  std::vector<Tick> cf_last_quarter_steps;  // documentary.
   // Organ Passacaglia. The ground bass is immutable: PassacagliaGround replays
   // it tiled every
   // `passacaglia_ground_period` ticks; `passacaglia_variations`

@@ -1392,7 +1392,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Severe quarter line walks by step and the cadential suspension avoids parallel or
     // contrary perfect arrivals: hidden 41 -> 37, battuta 15 -> 12, fourths 14 -> 12,
     // successions 17845 -> 17807.
-    {FormType::ChoralePrelude, 0, 0, 37, 12, 0, 0, 3, 2, 0, 17807, 12},
+    // The last quarter of a plain bar takes a step tone in and out: hidden 37 -> 34,
+    // successions 17807 -> 17844.
+    {FormType::ChoralePrelude, 0, 0, 34, 12, 0, 0, 3, 2, 0, 17844, 12},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of

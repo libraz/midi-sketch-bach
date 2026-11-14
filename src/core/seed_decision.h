@@ -53,6 +53,7 @@ enum class SeedDecision : std::uint32_t {
   kPassacagliaDelayedResolution = 38,
   kEpisodeChainHost = 39,
   kEpisodeChainStart = 40,
+  kChoraleNeighbourSide = 41,
 };
 
 /// @brief Independent 32-bit draw for one decision of one piece.
