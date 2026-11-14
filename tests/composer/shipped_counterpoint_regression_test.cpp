@@ -2187,7 +2187,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // fourths 1203 -> 1270.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // hidden 203 -> 201, battuta 241 -> 233, anti 46 -> 24, successions 491595 -> 491619.
-    {FormType::Fugue, 0, 0, 201, 233, 24, 0, 4, 4, 2, 491619, 1270},
+    // Consecutive same-voice middle entries take the other subdivision for their free line:
+    // hidden 201 -> 206, battuta 233 -> 246, anti 24 -> 12, worst-cell hidden 4 -> 6,
+    // worst-cell anti 2 -> 1, successions 491619 -> 506777, fourths 1270 -> 1159.
+    {FormType::Fugue, 0, 0, 206, 246, 12, 0, 6, 4, 1, 506777, 1159},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2293,7 +2296,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // hidden 158 -> 163, battuta 219 -> 201, anti 36 -> 22, successions 641318 -> 641329,
     // fourths 1007 -> 1000.
-    {FormType::PreludeAndFugue, 0, 0, 163, 201, 22, 0, 3, 5, 2, 641329, 1000},
+    // Consecutive same-voice middle entries take the other subdivision for their free line:
+    // hidden 163 -> 179, battuta 201 -> 203, anti 22 -> 24, worst-cell hidden 3 -> 4,
+    // successions 641329 -> 648541, fourths 1000 -> 945.
+    {FormType::PreludeAndFugue, 0, 0, 179, 203, 24, 0, 4, 5, 2, 648541, 945},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

@@ -1789,6 +1789,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     return false;
   };
 
+  // Middle entries already stated per carrying voice.
+  std::array<int, 3> entries_by_voice{};
   for (int cycle = 0; cycle < static_cast<int>(development_windows.size()); ++cycle) {
     const DevelopmentWindow& window = development_windows[static_cast<std::size_t>(cycle)];
     const bool half_cycle = !window.has_entry;
@@ -1816,6 +1818,12 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       //     (V / vi / IV) and at the station's degree inside the home minor
       //     collection where it cannot (v / III / iv). ---
       const int me_start = first_bar + window.entry_start;  // absolute.
+      // The station key, the countersubject and the chord plan recur with the
+      // carrying voice, and against them a quarter-note free line differs only in
+      // its first tone, so every other entry in a voice takes the other subdivision.
+      const bool alternate_subdivision =
+          entries_by_voice[static_cast<std::size_t>(carry_voice)]++ % 2 == 1;
+      const int free_density = alternate_subdivision ? 3 - density : density;
       const std::uint8_t entry_key_pc = middleEntryKeyPc(carry_voice, mode);
       const StationRealization station = stationRealization(carry_voice, mode);
       const KeyContext& entry_key = station.key;
@@ -2135,17 +2143,18 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
       const bool fill_middle_voice =
           (carry_voice == 2 && cycle != pedal_cycle) && !second_stretto_placed;
       if (fill_middle_voice) {
-        addFigurationSpan(asm_ctx, 1, me_start, me_start + 3, plan, first_bar, mode, density,
+        addFigurationSpan(asm_ctx, 1, me_start, me_start + 3, plan, first_bar, mode, free_density,
                           fig_offset);
       }
       if (add_middle_bass_support) {
         // V2 bass support is a verbatim Material scalar-wave figuration (quarter
-        // notes, one chord-tone anchor per beat connected by scale steps), matching
+        // or eighth notes, one chord-tone anchor per beat connected by scale steps), matching
         // the episode-bass construction. A Material bass walks stepwise instead of
         // re-striking a single chord root, and because it is Material the Generation
         // validator does not repair parallels against the faster figuration above
         // it; band confinement keeps V0 >= V1 >= V2 so voice_crossing never fires.
-        addFigurationSpan(asm_ctx, 2, me_start, me_start + 3, plan, first_bar, mode, 1, fig_offset);
+        addFigurationSpan(asm_ctx, 2, me_start, me_start + 3, plan, first_bar, mode,
+                          alternate_subdivision ? 2 : 1, fig_offset);
       }
     }
 

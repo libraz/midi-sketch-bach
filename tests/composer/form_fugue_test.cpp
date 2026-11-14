@@ -3416,4 +3416,67 @@ TEST(FormFugueBoundaryTest, CodaAugmentedHeadIsDeclaredAsAnAugmentation) {
   }
 }
 
+namespace {
+
+// Full texture of the four bars from `start`: every voice's notes as
+// (voice, offset, duration, pitch relative to the carrying voice's first tone).
+std::vector<std::array<int, 4>> entryTexture(const std::vector<NoteEvent>& notes, Tick start,
+                                             VoiceId carry_voice) {
+  std::vector<const NoteEvent*> inside;
+  for (const NoteEvent& note : notes) {
+    if (note.start_tick >= start && note.start_tick < start + 4 * kBar) {
+      inside.push_back(&note);
+    }
+  }
+  std::sort(inside.begin(), inside.end(), [](const NoteEvent* lhs, const NoteEvent* rhs) {
+    return std::tie(lhs->start_tick, lhs->voice, lhs->pitch) <
+           std::tie(rhs->start_tick, rhs->voice, rhs->pitch);
+  });
+  int reference = 0;
+  for (const NoteEvent* note : inside) {
+    if (note->voice == carry_voice) {
+      reference = note->pitch;
+      break;
+    }
+  }
+  std::vector<std::array<int, 4>> texture;
+  for (const NoteEvent* note : inside) {
+    texture.push_back({static_cast<int>(note->voice), static_cast<int>(note->start_tick - start),
+                       static_cast<int>(note->duration),
+                       static_cast<int>(note->pitch) - reference});
+  }
+  return texture;
+}
+
+}  // namespace
+
+// Consecutive middle entries carried by the same voice take their free line at
+// different subdivisions, so the later one never restates the earlier texture.
+TEST(FormFugueTest, ConsecutiveSameVoiceMiddleEntriesDoNotRestateTheirTexture) {
+  const std::uint16_t bars = resolveBars(FormType::Fugue, DurationScale::Medium, 0);
+  int compared = 0;
+  for (std::uint32_t seed : {1u, 5u, 42u, 99u}) {
+    const HarnessFixture fx = buildFixture(FormType::Fugue, seed, /*is_minor=*/false, bars);
+    const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    std::map<VoiceId, std::vector<Tick>> starts_by_voice;
+    for (const auto& span : fx.voice_plan.spans) {
+      if (span.intent == VoiceIntent::MiddleEntryCarrier) {
+        starts_by_voice[span.voice].push_back(span.start_tick);
+      }
+    }
+    for (auto& [voice, starts] : starts_by_voice) {
+      std::sort(starts.begin(), starts.end());
+      starts.erase(std::unique(starts.begin(), starts.end()), starts.end());
+      for (std::size_t second = 1; second < starts.size(); ++second) {
+        ++compared;
+        EXPECT_NE(entryTexture(result.notes, starts[second - 1], voice),
+                  entryTexture(result.notes, starts[second], voice))
+            << "seed " << seed << " voice " << static_cast<int>(voice) << " entries at bars "
+            << starts[second - 1] / kBar << " and " << starts[second] / kBar;
+      }
+    }
+  }
+  EXPECT_GT(compared, 0);
+}
+
 }  // namespace bach::composer
