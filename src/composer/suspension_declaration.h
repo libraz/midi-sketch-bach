@@ -27,6 +27,25 @@ struct DeclaredSuspensionReading {
   int lowest_other_at_resolution = -1;
 };
 
+/// @brief The lowest pitch any voice of `voices` other than `voice` sounds at `tick`, or -1
+///        when none sounds: the operand of every `lowest_other_*` field.
+///
+/// `pitch_at(other, tick)` returns the pitch sounding in `other`, 0 when it is silent. A pass
+/// that changes the texture after a suspension is declared reads the operand through this
+/// same selection, so it guards exactly what the Validator measures.
+template <typename Voices, typename PitchAt>
+int lowestOtherSoundingPitch(const Voices& voices, VoiceId voice, Tick tick, PitchAt pitch_at) {
+  int lowest = -1;
+  for (const VoiceId other : voices) {
+    if (other == voice)
+      continue;
+    const int pitch = static_cast<int>(pitch_at(other, tick));
+    if (pitch != 0 && (lowest < 0 || pitch < lowest))
+      lowest = pitch;
+  }
+  return lowest;
+}
+
 /// @brief True when the readings are ordered preparation < suspension < resolution.
 bool declaredSuspensionOrdered(const DeclaredSuspensionReading& reading);
 

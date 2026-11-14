@@ -523,15 +523,9 @@ StrongBeatTally computeStrongBeatTally(const std::vector<NoteEvent>& notes,
   if (!suspension_patterns.empty()) {
     const VoiceOnsetIndex onset_index(notes);
     const auto lowestOtherPitch = [&](VoiceId voice, Tick at) {
-      int lowest = -1;
-      for (VoiceId other : onset_index.activeVoices()) {
-        if (other == voice)
-          continue;
-        const std::uint8_t pitch = onset_index.pitchAt(other, at);
-        if (pitch != 0 && (lowest < 0 || pitch < lowest))
-          lowest = pitch;
-      }
-      return lowest;
+      return lowestOtherSoundingPitch(
+          onset_index.activeVoices(), voice, at,
+          [&](VoiceId other, Tick tick) { return onset_index.pitchAt(other, tick); });
     };
     for (std::size_t idx = 0; idx < suspension_patterns.size(); ++idx) {
       const SuspensionPattern& sp = suspension_patterns[idx];
@@ -1716,30 +1710,20 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
     // Preparation: must be consonant against the lowest sounding voice at the
     // preparation tick (or be the declared chord's seventh) and repeat the same
     // pitch into the suspension.
-    const auto lowestOtherPitch = [&](Tick at) -> std::uint8_t {
-      std::uint8_t lowest = 0;
-      for (VoiceId other : voices) {
-        if (other == sp.voice)
-          continue;
-        const std::uint8_t pitch = onset_index.pitchAt(other, at);
-        if (pitch != 0 && (lowest == 0 || pitch < lowest))
-          lowest = pitch;
-      }
-      return lowest;
+    const auto lowestOtherPitch = [&](Tick at) {
+      return lowestOtherSoundingPitch(voices, sp.voice, at, [&](VoiceId other, Tick tick) {
+        return onset_index.pitchAt(other, tick);
+      });
     };
-    const std::uint8_t other_at_prep = lowestOtherPitch(sp.preparation_tick);
-    const std::uint8_t other_at_sus = lowestOtherPitch(sp.suspension_tick);
-    const std::uint8_t other_at_res = lowestOtherPitch(sp.resolution_tick);
-    const auto otherOrNone = [](std::uint8_t pitch) { return pitch == 0 ? -1 : int{pitch}; };
     DeclaredSuspensionReading reading;
     reading.preparation_tick = sp.preparation_tick;
     reading.suspension_tick = sp.suspension_tick;
     reading.resolution_tick = sp.resolution_tick;
     reading.held_pitch = sus_actual;
     reading.resolution_pitch = res_actual;
-    reading.lowest_other_at_preparation = otherOrNone(other_at_prep);
-    reading.lowest_other_at_suspension = otherOrNone(other_at_sus);
-    reading.lowest_other_at_resolution = otherOrNone(other_at_res);
+    reading.lowest_other_at_preparation = lowestOtherPitch(sp.preparation_tick);
+    reading.lowest_other_at_suspension = lowestOtherPitch(sp.suspension_tick);
+    reading.lowest_other_at_resolution = lowestOtherPitch(sp.resolution_tick);
     const bool prep_ok = ordered && prep_actual != 0 && prep_actual == sp.preparation_pitch &&
                          sus_actual == sp.suspension_pitch && res_actual == sp.resolution_pitch &&
                          prep_actual == sus_actual &&
@@ -1793,15 +1777,13 @@ ValidationReport Validator::validate(const std::vector<NoteEvent>& notes,
       const bool prepared = hasRuleBit(provenance, prep_index, RuleBit::SuspensionPrepared);
       const bool resolved = hasRuleBit(provenance, res_index, RuleBit::SuspensionResolved);
       if (prepared && resolved && sus_actual != 0 && res_actual != 0) {
-        const std::uint8_t bass_at_sus = lowestOtherPitch(sp.suspension_tick);
-        const std::uint8_t bass_at_res = lowestOtherPitch(sp.resolution_tick);
+        const int bass_at_sus = reading.lowest_other_at_suspension;
+        const int bass_at_res = reading.lowest_other_at_resolution;
         // Only evaluate when a lower voice actually sounds at both ticks;
         // a lone suspended voice has no interval to measure.
-        if (bass_at_sus != 0 && bass_at_res != 0) {
-          const int sus_ic =
-              ((static_cast<int>(sus_actual) - static_cast<int>(bass_at_sus)) % 12 + 12) % 12;
-          const int res_ic =
-              ((static_cast<int>(res_actual) - static_cast<int>(bass_at_res)) % 12 + 12) % 12;
+        if (bass_at_sus >= 0 && bass_at_res >= 0) {
+          const int sus_ic = ((static_cast<int>(sus_actual) - bass_at_sus) % 12 + 12) % 12;
+          const int res_ic = ((static_cast<int>(res_actual) - bass_at_res) % 12 + 12) % 12;
           const bool seventh = sus_ic == 10 || sus_ic == 11;
           const bool sixth = res_ic == 8 || res_ic == 9;
           if (!seventh || !sixth)
