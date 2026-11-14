@@ -1771,6 +1771,63 @@ TEST(GroundVariationPassacaglia, BarClosingToneLeadsIntoTheHeadWithoutAnExcluded
   expectBarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap(FormType::Passacaglia);
 }
 
+// How often Bach's minor-key inner lines step across a bar line by an augmented second
+// or fifth or a diminished third or seventh, per thousand notes of the line. Organ
+// three-line inner voices: aug2 0.20, aug5 0.33, dim3 0.07, dim7 0.33.
+constexpr double kOrganExcludedLeapsPerThousand = 0.93;
+// The same reading on the violin works' inner lines: aug2 0.32, aug5 0.48, dim3 0.48,
+// dim7 0.48.
+constexpr double kViolinExcludedLeapsPerThousand = 1.76;
+
+// The middle line reaches its beats by those leaps no more often than Bach's inner
+// lines do. The anchor ranks them just below the true parallel, so one ships only
+// where every other tone would form that parallel; the rate bounds how often.
+// Inside a statement and before the approach bars, as the head after a statement
+// belongs to the next.
+void expectBeatsReachedByExcludedLeapsAtBachsRate(FormType form, double per_thousand) {
+  // Ground bars per statement: the chaconne's ground is four bars, the passacaglia's eight.
+  const Tick statement = (form == FormType::Chaconne ? 4 : 8) * kTicksPerBar34;
+  std::size_t beats = 0;
+  std::size_t excluded_leaps = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const detail::Mode mode = c.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      const std::vector<NoteEvent> line = middleLine(r);
+      for (std::size_t idx = 0; idx + 1 < line.size(); ++idx) {
+        const NoteEvent& from = line[idx];
+        const NoteEvent& beat = line[idx + 1];
+        if (beat.start_tick % kTicksPerBeat != 0 || beat.start_tick >= fill_end ||
+            beat.start_tick % statement == 0 || from.start_tick + from.duration != beat.start_tick)
+          continue;
+        ++beats;
+        const detail::SpelledInterval leap =
+            detail::spelledInterval(from.pitch, beat.pitch, fx.harmony.tonic_pc, mode);
+        if ((leap.quality == detail::SpelledQuality::Augmented &&
+             (leap.number == 2 || leap.number == 5)) ||
+            (leap.quality == detail::SpelledQuality::Diminished &&
+             (leap.number == 3 || leap.number == 7)))
+          ++excluded_leaps;
+      }
+    }
+  }
+  ASSERT_GT(beats, 0u);
+  EXPECT_LE(static_cast<double>(excluded_leaps) * 1000.0 / static_cast<double>(beats), per_thousand)
+      << excluded_leaps << " excluded leaps into " << beats << " beats";
+}
+
+TEST(GroundVariationChaconne, BeatsAreReachedByExcludedLeapsAtBachsRate) {
+  expectBeatsReachedByExcludedLeapsAtBachsRate(FormType::Chaconne, kViolinExcludedLeapsPerThousand);
+}
+
+TEST(GroundVariationPassacaglia, BeatsAreReachedByExcludedLeapsAtBachsRate) {
+  expectBeatsReachedByExcludedLeapsAtBachsRate(FormType::Passacaglia,
+                                               kOrganExcludedLeapsPerThousand);
+}
+
 // --- 9. Passacaglia terraced growth schedule (period-derived) ---------------
 //
 // The 3-voice passacaglia derives its per-cycle voice-presence schedule purely

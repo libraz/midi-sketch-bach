@@ -1674,7 +1674,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // fourths 126 -> 128.
     // Counter-line over the ground moves by step: hidden 18 -> 14 (an upper-voice leap is gone),
     // fourths 128 -> 107, successions 28042 -> 28027 (fewer ornament notes on that line).
-    {FormType::Passacaglia, 0, 0, 14, 0, 3, 0, 1, 0, 1, 28027, 107},
+    // One anchor ladder ordered by how often the organ stratum writes each fault class: hidden
+    // 14 -> 29, anti 3 -> 0 (worst cell 1 -> 0), worst-cell hidden 1 -> 2, successions
+    // 28027 -> 28066.
+    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28066, 107},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1861,7 +1864,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Counter-line over the ground moves by step: fourths 12 -> 11, successions 18603 -> 18612.
     // A bar-closing tone that would leap into the next head is vetted with it: successions
     // 18612 -> 19166.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19166, 11},
+    // One anchor ladder ordered by how often the organ stratum writes each fault class:
+    // successions 19166 -> 19227.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19227, 11},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

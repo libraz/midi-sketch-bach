@@ -921,6 +921,20 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
   const auto augmentedFrom = [mode](int from, int to) {
     return from >= 0 && detail::isAugmentedSecondClass(from, to, 0, mode);
   };
+  // The melodic step into an anchor, ranked: 0 clean, 1 a leap Bach writes
+  // sparingly (augmented or diminished fourth), 2 one he does not (augmented
+  // second or fifth, diminished third or seventh). The diminished fifth he
+  // writes freely, so it ranks clean.
+  const auto leap_rank = [mode](int from, int to) {
+    if (from < 0 || to < 0 || from == to)
+      return 0;
+    const detail::SpelledInterval leap = detail::spelledInterval(from, to, 0, mode);
+    if (leap.quality == detail::SpelledQuality::Augmented)
+      return leap.number == 2 || leap.number == 5 ? 2 : leap.number == 4 ? 1 : 0;
+    if (leap.quality == detail::SpelledQuality::Diminished)
+      return leap.number == 3 || leap.number == 7 ? 2 : leap.number == 4 ? 1 : 0;
+    return 0;
+  };
   // The tone a beat sounds first, chosen against the voices already written:
   // `resolving_to` is the landing a passing tone fixed for it, or -1.
   auto choose_anchor = [&](const CounterBarHarmony& harmony, Tick beat_tick, int beat,
@@ -989,23 +1003,6 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           break;
       }
     }
-    // An anchor the line would reach by an augmented second takes the nearest
-    // other chord tone consonant with every concurrent voice instead.
-    if (augmentedFrom(prev_emitted, anchor)) {
-      bool placed = false;
-      for (int dist = 1; dist <= 12 && !placed; ++dist) {
-        for (int cand : {anchor - dist, anchor + dist}) {
-          if (cand < band_lo || cand > band_hi || !is_chord_tone(cand) ||
-              augmentedFrom(prev_emitted, cand) || !clean_over_bass(cand) ||
-              std::any_of(theme_pitches.begin(), theme_pitches.end(),
-                          [cand](int upper) { return !isConsonantIc(cand - upper); }))
-            continue;
-          anchor = cand;
-          placed = true;
-          break;
-        }
-      }
-    }
     // Audible-grain parallel re-check. consonantChordTone judged the anchor's
     // parallel motion at QUARTER grain (previous beat -> this beat), but the
     // union-onset sampling the gate (and the ear) uses pairs this anchor with
@@ -1020,27 +1017,28 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       motions.clear();
       registry.concurrentMotions(beat_tick - kTicksPerBeat / 4, beat_tick, /*voice=*/1,
                                  /*num_voices=*/3, motions);
-      // The five approach classes on one scale, not two boolean passes. A
-      // candidate here has to be inside the band, inside the scale, consonant
-      // with every sounding voice under the upper-voice table AND clean over
-      // the bass all at once, which against two concurrent lines regularly
-      // leaves one or two tones admissible; a guard that pooled the classes
-      // would step off the mildest onto the worst as soon as that set ran dry.
+      // The approach classes and the leap into the tone on one scale: separate
+      // passes undo each other, a tone moved off a leap landing on a parallel
+      // and moved back. A candidate has to be inside the band, inside the
+      // scale, consonant with every sounding voice under the upper-voice table
+      // AND clean over the bass, which against two concurrent lines regularly
+      // leaves one or two tones admissible.
       //
-      // The contrary classes are rungs of the same ladder rather than veto
-      // conditions. The displacement reaches its replacement by MOVING the
-      // tone, which regularly turns the motion round instead of removing it,
-      // so a ladder that stopped at the same-direction classes would answer a
-      // rising line by leaping down onto the perfect it had just left and
-      // score that clean. Their order is the reference corpus's: the contrary
-      // repeat sits worst of the three payable classes and the battuta
-      // cheapest.
+      // The contrary classes are rungs rather than vetoes: the displacement
+      // reaches its replacement by MOVING the tone, which regularly turns the
+      // motion round instead of removing it. The order follows how often the
+      // organ stratum writes each class: the true parallel, the leaps Bach
+      // does not write and the contrary repeat almost never, the augmented and
+      // diminished fourths about once per thousand notes, the battuta three
+      // times as often and the hidden perfect most of all.
       constexpr int kAnchorClean = 0;
-      constexpr int kAnchorBattuta = 1;
-      constexpr int kAnchorAnti = 2;
-      constexpr int kAnchorHidden = 3;
-      constexpr int kAnchorParallel = 4;
-      auto anchor_fault_rank = [&](int cand) {
+      constexpr int kAnchorHidden = 1;
+      constexpr int kAnchorBattuta = 2;
+      constexpr int kAnchorAdmissibleLeap = 3;
+      constexpr int kAnchorAnti = 4;
+      constexpr int kAnchorExcludedLeap = 5;
+      constexpr int kAnchorParallel = 6;
+      auto motion_rank = [&](int cand) {
         int worst = kAnchorClean;
         for (const ConcurrentMotion& motion : motions) {
           if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
@@ -1054,12 +1052,17 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         }
         return worst;
       };
+      auto anchor_fault_rank = [&](int cand) {
+        const int leap = leap_rank(prev_emitted, cand);
+        return std::max(motion_rank(cand), leap == 2   ? kAnchorExcludedLeap
+                                           : leap == 1 ? kAnchorAdmissibleLeap
+                                                       : kAnchorClean);
+      };
       const int design_rank = anchor_fault_rank(anchor);
       if (design_rank != kAnchorClean) {
-        auto admissible = [&](int cand, bool allow_augmented) {
+        auto admissible = [&](int cand) {
           if (cand < band_lo || cand > band_hi || cand == prev_emitted ||
-              !detail::inScale(cand, mode, &chord) ||
-              (!allow_augmented && augmentedFrom(prev_emitted, cand))) {
+              !detail::inScale(cand, mode, &chord)) {
             return false;
           }
           for (int upper : theme_pitches) {
@@ -1086,31 +1089,27 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           return clean_over_bass(prev_emitted);
         };
         bool displaced = false;
-        // An augmented second is refused first and conceded only where every
-        // other tone keeps the approach fault.
-        for (int allow_augmented = 0; allow_augmented < 2 && !displaced; ++allow_augmented) {
-          for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
-            // The band sweep reaches the whole band, not a fixed
-            // fifth-and-a-bit. Two of the tests in `admissible` are
-            // pitch-class shaped (scale membership, consonance against the
-            // concurrent tones), so the admissible set is sparse and its
-            // nearest member is regularly further than a fifth away; a short
-            // radius left the anchor sitting on a true parallel while a free
-            // tone waited an octave down.
-            for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
-              for (int dir : {1, -1}) {
-                const int cand = anchor + dir * dist;
-                if (!admissible(cand, allow_augmented == 1) || anchor_fault_rank(cand) > accept)
-                  continue;
-                anchor = cand;
-                displaced = true;
-                break;
-              }
-            }
-            if (!displaced && accept == kAnchorClean && hold_admissible()) {
-              anchor = prev_emitted;
+        for (int accept = kAnchorClean; accept < design_rank && !displaced; ++accept) {
+          // The band sweep reaches the whole band, not a fixed
+          // fifth-and-a-bit. Two of the tests in `admissible` are
+          // pitch-class shaped (scale membership, consonance against the
+          // concurrent tones), so the admissible set is sparse and its
+          // nearest member is regularly further than a fifth away; a short
+          // radius left the anchor sitting on a true parallel while a free
+          // tone waited an octave down.
+          for (int dist = 1; dist <= band_hi - band_lo && !displaced; ++dist) {
+            for (int dir : {1, -1}) {
+              const int cand = anchor + dir * dist;
+              if (!admissible(cand) || anchor_fault_rank(cand) > accept)
+                continue;
+              anchor = cand;
               displaced = true;
+              break;
             }
+          }
+          if (!displaced && accept == kAnchorClean && hold_admissible()) {
+            anchor = prev_emitted;
+            displaced = true;
           }
         }
       }
