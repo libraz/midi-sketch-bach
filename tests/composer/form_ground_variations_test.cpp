@@ -25,6 +25,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -1525,89 +1526,105 @@ TEST(GroundVariationPassacaglia, MiddleVoiceStepShareClearsTheBrokenChordFloor) 
 // Placement is asked for the octave and refused every note move, so a voice
 // that only fits once single bars are folded inward fails here rather than
 // being rescued. The ground itself is not read: it is not the builder's to move.
-void expectUpperVoicesSoundInsideCompassInEveryKey(FormType form) {
+void expectUpperVoicesSoundInsideCompass(FormType form, Key tonic) {
   const InstrumentType instrument = defaultInstrumentForForm(form);
   const InstrumentPitchRange range = pitchRangeFor(instrument);
-  for (int tonic_pc = 0; tonic_pc < 12; ++tonic_pc) {
-    const Key tonic = static_cast<Key>(tonic_pc);
-    for (bool minor : {false, true}) {
-      for (SubjectCharacter character : kCharacters) {
-        // Three consecutive seeds reach every ground variant.
-        for (std::uint32_t seed : {1u, 2u, 3u}) {
-          for (std::uint16_t target_bars : {std::uint16_t{0}, std::uint16_t{128}}) {
-            ComposeRequest req = requestFor({form, seed, minor, target_bars}, character);
-            req.tonic = tonic;
-            HarnessFixture fx;
-            ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
-            ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
-            const auto placement = placeInOutputCompass(&r, fx.material, fx.harmony, tonic,
-                                                        instrument, fx.harmony.ticksPerBar(),
-                                                        [](const ComposeResult&) { return false; });
-            ASSERT_TRUE(placement.has_value());
-            const int sounding = keyTranspositionSemitones(tonic) + placement->octave_shift;
-            int lowest = 127;
-            int highest = 0;
-            for (const NoteEvent& note : r.notes) {
-              if (note.voice == groundVoice(form))
-                continue;
-              lowest = std::min(lowest, static_cast<int>(note.pitch) + sounding);
-              highest = std::max(highest, static_cast<int>(note.pitch) + sounding);
-            }
-            const auto where = [&]() {
-              return ::testing::Message()
-                     << "form " << static_cast<int>(form) << " tonic " << tonic_pc << " minor "
-                     << minor << " character " << static_cast<int>(character) << " seed " << seed
-                     << " bars " << target_bars << " octave " << placement->octave_shift;
-            };
-            EXPECT_GE(lowest, static_cast<int>(range.low)) << where();
-            EXPECT_LE(highest, static_cast<int>(range.high)) << where();
+  const int tonic_pc = static_cast<int>(tonic);
+  for (bool minor : {false, true}) {
+    for (SubjectCharacter character : kCharacters) {
+      // Three consecutive seeds reach every ground variant.
+      for (std::uint32_t seed : {1u, 2u, 3u}) {
+        for (std::uint16_t target_bars : {std::uint16_t{0}, std::uint16_t{128}}) {
+          ComposeRequest req = requestFor({form, seed, minor, target_bars}, character);
+          req.tonic = tonic;
+          HarnessFixture fx;
+          ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+          ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          const auto placement = placeInOutputCompass(&r, fx.material, fx.harmony, tonic,
+                                                      instrument, fx.harmony.ticksPerBar(),
+                                                      [](const ComposeResult&) { return false; });
+          ASSERT_TRUE(placement.has_value());
+          const int sounding = keyTranspositionSemitones(tonic) + placement->octave_shift;
+          int lowest = 127;
+          int highest = 0;
+          for (const NoteEvent& note : r.notes) {
+            if (note.voice == groundVoice(form))
+              continue;
+            lowest = std::min(lowest, static_cast<int>(note.pitch) + sounding);
+            highest = std::max(highest, static_cast<int>(note.pitch) + sounding);
           }
+          const auto where = [&]() {
+            return ::testing::Message()
+                   << "form " << static_cast<int>(form) << " tonic " << tonic_pc << " minor "
+                   << minor << " character " << static_cast<int>(character) << " seed " << seed
+                   << " bars " << target_bars << " octave " << placement->octave_shift;
+          };
+          EXPECT_GE(lowest, static_cast<int>(range.low)) << where();
+          EXPECT_LE(highest, static_cast<int>(range.high)) << where();
         }
       }
     }
   }
-}
-
-TEST(GroundVariationChaconne, UpperVoicesSoundInsideTheCompassInEveryKey) {
-  expectUpperVoicesSoundInsideCompassInEveryKey(FormType::Chaconne);
-}
-
-TEST(GroundVariationPassacaglia, UpperVoicesSoundInsideTheCompassInEveryKey) {
-  expectUpperVoicesSoundInsideCompassInEveryKey(FormType::Passacaglia);
 }
 
 // Bounding the register by key narrows what a repair may reach, so a tone that
 // was clean in C can be out of reach a semitone lower. Every key therefore has
 // to ship at the longest length, where the arc lifts the variation highest: the
 // product gate is run as it is for a request, in the request's own key.
-void expectShipsInEveryKeyAtFullLength(FormType form) {
-  for (int tonic_pc = 0; tonic_pc < 12; ++tonic_pc) {
-    const Key tonic = static_cast<Key>(tonic_pc);
-    for (bool minor : {false, true}) {
-      for (SubjectCharacter character : kCharacters) {
-        for (std::uint32_t seed : {1u, 2u, 3u, 5u}) {
-          ComposeRequest req = requestFor({form, seed, minor, 128}, character);
-          req.tonic = tonic;
-          const test::ProductGateResult gate = test::runProductGate(req, tonic);
-          EXPECT_TRUE(gate.ships())
-              << "form " << static_cast<int>(form) << " tonic " << tonic_pc << " minor " << minor
-              << " character " << static_cast<int>(character) << " seed " << seed << " built "
-              << gate.built << " generated " << gate.generated << " placed " << gate.placed
-              << " first final failure "
-              << (gate.failures.empty() ? "none" : gate.failures.front().rule_id);
-        }
+void expectShipsAtFullLength(FormType form, Key tonic) {
+  const int tonic_pc = static_cast<int>(tonic);
+  for (bool minor : {false, true}) {
+    for (SubjectCharacter character : kCharacters) {
+      for (std::uint32_t seed : {1u, 2u, 3u, 5u}) {
+        ComposeRequest req = requestFor({form, seed, minor, 128}, character);
+        req.tonic = tonic;
+        const test::ProductGateResult gate = test::runProductGate(req, tonic);
+        EXPECT_TRUE(gate.ships()) << "form " << static_cast<int>(form) << " tonic " << tonic_pc
+                                  << " minor " << minor << " character "
+                                  << static_cast<int>(character) << " seed " << seed << " built "
+                                  << gate.built << " generated " << gate.generated << " placed "
+                                  << gate.placed << " first final failure "
+                                  << (gate.failures.empty() ? "none"
+                                                            : gate.failures.front().rule_id);
       }
     }
   }
 }
 
-TEST(GroundVariationChaconne, ShipsInEveryKeyAtFullLength) {
-  expectShipsInEveryKeyAtFullLength(FormType::Chaconne);
+// One case per key: the sweeps are the group's longest checks and every key is
+// independent, so the runner can spread them over cores.
+constexpr std::array<Key, 12> kEveryKey = {Key::C,  Key::Cs, Key::D,  Key::Eb, Key::E,  Key::F,
+                                           Key::Fs, Key::G,  Key::Ab, Key::A,  Key::Bb, Key::B};
+
+std::string keyCaseName(const ::testing::TestParamInfo<Key>& info) {
+  std::string name = keyToString(info.param);
+  std::replace(name.begin(), name.end(), '#', 's');
+  return name;
 }
 
-TEST(GroundVariationPassacaglia, ShipsInEveryKeyAtFullLength) {
-  expectShipsInEveryKeyAtFullLength(FormType::Passacaglia);
+class ChaconneInEveryKey : public ::testing::TestWithParam<Key> {};
+class PassacagliaInEveryKey : public ::testing::TestWithParam<Key> {};
+
+TEST_P(ChaconneInEveryKey, UpperVoicesSoundInsideTheCompass) {
+  expectUpperVoicesSoundInsideCompass(FormType::Chaconne, GetParam());
 }
+
+TEST_P(PassacagliaInEveryKey, UpperVoicesSoundInsideTheCompass) {
+  expectUpperVoicesSoundInsideCompass(FormType::Passacaglia, GetParam());
+}
+
+TEST_P(ChaconneInEveryKey, ShipsAtFullLength) {
+  expectShipsAtFullLength(FormType::Chaconne, GetParam());
+}
+
+TEST_P(PassacagliaInEveryKey, ShipsAtFullLength) {
+  expectShipsAtFullLength(FormType::Passacaglia, GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(GroundVariation, ChaconneInEveryKey, ::testing::ValuesIn(kEveryKey),
+                         keyCaseName);
+INSTANTIATE_TEST_SUITE_P(GroundVariation, PassacagliaInEveryKey, ::testing::ValuesIn(kEveryKey),
+                         keyCaseName);
 
 // A passing figure that lands on the last onset of a bar hands the line to a
 // tone the next bar chooses for itself. In minor that tone may not lie an
