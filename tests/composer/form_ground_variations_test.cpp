@@ -1722,6 +1722,55 @@ TEST(GroundVariationPassacaglia, BarClosingToneIsNotRespelledByTheNextChord) {
   expectBarClosingToneIsNotRespelledByTheNextChord(FormType::Passacaglia, false);
 }
 
+// A middle-line tone closing a bar off the beat leads into the next bar's head by no
+// augmented second or fifth and no diminished third or seventh. Inside a statement only:
+// the head after a statement's last bar belongs to the next statement's line.
+void expectBarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap(FormType form) {
+  // Ground bars per statement: the chaconne's ground is four bars, the passacaglia's eight.
+  const Tick statement = (form == FormType::Chaconne ? 4 : 8) * kTicksPerBar34;
+  std::size_t pairs = 0;
+  for (const Case& c : casesFor(form)) {
+    for (SubjectCharacter character : kCharacters) {
+      const HarnessFixture fx = build(c.form, c.seed, c.is_minor, c.target_bars, character);
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      const detail::Mode mode = c.is_minor ? detail::Mode::Minor : detail::Mode::Major;
+      const std::uint16_t bars = resolvedBars(c.form, c.target_bars);
+      // The approach and final bars take cadence spellings of their own.
+      const Tick fill_end = static_cast<Tick>(bars - 2) * kTicksPerBar34;
+      const std::vector<NoteEvent> line = middleLine(r);
+      for (std::size_t idx = 0; idx + 1 < line.size(); ++idx) {
+        const NoteEvent& close = line[idx];
+        const NoteEvent& head = line[idx + 1];
+        const Tick end = close.start_tick + close.duration;
+        if (end % kTicksPerBar34 != 0 || close.start_tick % kTicksPerBeat == 0 || end >= fill_end ||
+            end % statement == 0 || head.start_tick != end)
+          continue;
+        ++pairs;
+        const detail::SpelledInterval leap =
+            detail::spelledInterval(close.pitch, head.pitch, fx.harmony.tonic_pc, mode);
+        const bool excluded = (leap.quality == detail::SpelledQuality::Augmented &&
+                               (leap.number == 2 || leap.number == 5)) ||
+                              (leap.quality == detail::SpelledQuality::Diminished &&
+                               (leap.number == 3 || leap.number == 7));
+        EXPECT_FALSE(excluded) << "form " << static_cast<int>(form) << " character "
+                               << static_cast<int>(character) << " seed " << c.seed << " minor "
+                               << c.is_minor << " bars " << c.target_bars << " tick "
+                               << close.start_tick << " pitches " << static_cast<int>(close.pitch)
+                               << " -> " << static_cast<int>(head.pitch);
+      }
+    }
+  }
+  EXPECT_GT(pairs, 0u);
+}
+
+TEST(GroundVariationChaconne, BarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap) {
+  expectBarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap(FormType::Chaconne);
+}
+
+TEST(GroundVariationPassacaglia, BarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap) {
+  expectBarClosingToneLeadsIntoTheHeadWithoutAnExcludedLeap(FormType::Passacaglia);
+}
+
 // --- 9. Passacaglia terraced growth schedule (period-derived) ---------------
 //
 // The 3-voice passacaglia derives its per-cycle voice-presence schedule purely

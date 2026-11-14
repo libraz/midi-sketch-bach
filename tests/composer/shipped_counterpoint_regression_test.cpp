@@ -1859,7 +1859,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Ornament sites follow the cadence landing and the density floor: fourths 49 -> 46.
     // Same counter: fourths 46 -> 48, own-voice resolution only.
     // Counter-line over the ground moves by step: fourths 12 -> 11, successions 18603 -> 18612.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 18612, 11},
+    // A bar-closing tone that would leap into the next head is vetted with it: successions
+    // 18612 -> 19166.
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19166, 11},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled

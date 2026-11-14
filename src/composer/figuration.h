@@ -368,6 +368,43 @@ constexpr bool isAugmentedSecondClass(int from, int to, int tonic_pc, Mode mode)
   return isAugmentedSecond(from, folded, tonic_pc, mode);
 }
 
+/// Diatonic quality of an interval.
+enum class SpelledQuality : std::uint8_t { Diminished, Minor, Perfect, Major, Augmented };
+
+/// An interval as the key spells it: its simple number (1 unison ... 7 seventh,
+/// compounds reduced) and its quality.
+struct SpelledInterval {
+  int number = 1;
+  SpelledQuality quality = SpelledQuality::Perfect;
+};
+
+/// @brief Spell the interval between two pitches by their letters in a key
+///        (diatonicLetter), so B to E-flat in C minor is a diminished fourth up
+///        and an augmented fifth down.
+constexpr SpelledInterval spelledInterval(int from, int to, int tonic_pc, Mode mode) {
+  const int low = from < to ? from : to;
+  const int high = from < to ? to : from;
+  const int letters = diatonicLetter(high, tonic_pc, mode) - diatonicLetter(low, tonic_pc, mode);
+  const int number = letters % 7;
+  const int semitones = high - low - 12 * (letters / 7);
+  // Size of the perfect interval, or of the minor one, on each simple number.
+  constexpr int kSmaller[7] = {0, 1, 3, 5, 7, 8, 10};
+  const int excess = semitones - kSmaller[number];
+  SpelledInterval out;
+  out.number = number + 1;
+  if (number == 0 || number == 3 || number == 4) {
+    out.quality = excess == 0  ? SpelledQuality::Perfect
+                  : excess > 0 ? SpelledQuality::Augmented
+                               : SpelledQuality::Diminished;
+  } else {
+    out.quality = excess == 0   ? SpelledQuality::Minor
+                  : excess == 1 ? SpelledQuality::Major
+                  : excess > 1  ? SpelledQuality::Augmented
+                                : SpelledQuality::Diminished;
+  }
+  return out;
+}
+
 /**
  * @brief Step one letter up or down in a key as spelled under a harmony.
  *

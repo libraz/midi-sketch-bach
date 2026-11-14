@@ -155,6 +155,27 @@ TEST(SpellScale, AugmentedSecondIsReadByLetterInEitherOctave) {
   EXPECT_FALSE(detail::isAugmentedSecondClass(71, 72, 0, Mode::Minor));
 }
 
+// The quality follows the letters, so a pair of pitch classes reads differently up
+// and down, and a compound interval reads as its simple one.
+TEST(SpellScale, SpelledIntervalReadsQualityByLetter) {
+  using detail::SpelledQuality;
+  const auto spelled = [](int from, int to, int number, SpelledQuality quality) {
+    const detail::SpelledInterval interval = detail::spelledInterval(from, to, 0, Mode::Minor);
+    return interval.number == number && interval.quality == quality;
+  };
+  EXPECT_TRUE(spelled(59, 63, 4, SpelledQuality::Diminished));  // B up to E-flat
+  EXPECT_TRUE(spelled(59, 51, 5, SpelledQuality::Augmented));   // B down to E-flat
+  EXPECT_TRUE(spelled(51, 59, 5, SpelledQuality::Augmented));   // E-flat up to B
+  EXPECT_TRUE(spelled(56, 59, 2, SpelledQuality::Augmented));   // A-flat up to B
+  EXPECT_TRUE(spelled(59, 68, 7, SpelledQuality::Diminished));  // B up to A-flat
+  EXPECT_TRUE(spelled(56, 62, 4, SpelledQuality::Augmented));   // A-flat up to D
+  EXPECT_TRUE(spelled(62, 68, 5, SpelledQuality::Diminished));  // D up to A-flat
+  EXPECT_TRUE(spelled(58, 59, 1, SpelledQuality::Augmented));   // B-flat up to B
+  EXPECT_TRUE(spelled(60, 67, 5, SpelledQuality::Perfect));
+  EXPECT_TRUE(spelled(60, 63, 3, SpelledQuality::Minor));
+  EXPECT_TRUE(spelled(55, 71, 3, SpelledQuality::Major));  // G up to the B a tenth above
+}
+
 // --- Shipped-form sweep ------------------------------------------------------
 
 constexpr std::uint32_t kSeedCount = 6;

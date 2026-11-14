@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -823,6 +825,34 @@ CounterBarHarmony counterBarHarmony(const CycleBar& plan, detail::Mode mode) {
   return harmony;
 }
 
+/// The lines a form withdraws its middle voice against, bar by bar, once written.
+struct MiddleLineWithdrawal {
+  const std::vector<MaterialNote>* upper = nullptr;   ///< The variation over the line.
+  const std::vector<MaterialNote>* ground = nullptr;  ///< The ground's bar-head skeleton.
+};
+
+/// @brief Whether the middle line reaches a perfect interval by a forbidden motion
+///        against either neighbour anywhere in [from_tick, to_tick].
+bool withdrawsForMotion(const std::vector<MaterialNote>& line, const MiddleLineWithdrawal& gate,
+                        Tick from_tick, Tick to_tick) {
+  return formsPerfectMotionAgainst(line, *gate.upper, from_tick, to_tick) ||
+         formsPerfectMotionAgainst(*gate.ground, line, from_tick, to_tick);
+}
+
+/// @brief Whether the middle line may not leap from `from` into a bar head at `to`:
+///        the augmented second and fifth and the diminished third and seventh, which
+///        Bach's inner lines write at under one per thousand notes.
+bool isExcludedHeadLeap(int from, int to, detail::Mode mode) {
+  if (from < 0 || to < 0)
+    return false;
+  const detail::SpelledInterval leap = detail::spelledInterval(from, to, 0, mode);
+  if (leap.quality == detail::SpelledQuality::Augmented)
+    return leap.number == 2 || leap.number == 5;
+  if (leap.quality == detail::SpelledQuality::Diminished)
+    return leap.number == 3 || leap.number == 7;
+  return false;
+}
+
 /**
  * @brief Build one cycle's V1 counter-figuration: a per-beat consonant,
  *        parallel-free middle line read back against V0 and the ground (V2).
@@ -850,11 +880,14 @@ CounterBarHarmony counterBarHarmony(const CycleBar& plan, detail::Mode mode) {
  *        beat is likewise never a passing tone's landing.
  * @param rotation Seed-derived rotation (seed + cycle) that settles a passing
  *        figure's direction and slot wherever more than one is admissible.
+ * @param withdrawal The lines the form later withdraws this line against, bar by
+ *        bar, or null where the form keeps every bar it writes.
  */
 void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry& registry,
                              Tick block_start, const std::vector<CycleBar>& cycle_bar_plan,
                              int band_lo, int band_hi, int notes_per_beat, detail::Mode mode,
-                             Tick cadence_tick, int suspension_bar, std::uint32_t rotation) {
+                             Tick cadence_tick, int suspension_bar, std::uint32_t rotation,
+                             const MiddleLineWithdrawal* withdrawal) {
   const int cycle_bars = static_cast<int>(cycle_bar_plan.size());
   const Tick step = kTicksPerBeat / static_cast<Tick>(notes_per_beat);
 
@@ -882,6 +915,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
   int committed = -1;
   std::vector<int> ahead_pitches;
   std::vector<ConcurrentMotion> ahead_motions;
+  std::vector<ConcurrentMotion> escape_motions;
 
   // An augmented second, or the diminished seventh inverting it, from a tone.
   const auto augmentedFrom = [mode](int from, int to) {
@@ -1192,6 +1226,47 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       }
       return false;
     };
+    // The beat-2 anchor: the next bar's head is chosen with it as the line's last
+    // anchor once this bar is written.
+    int closing_anchor = -1;
+    // How a tone closes the bar, judged with the head the next bar's first beat
+    // takes after it: 0 clean, 1 an excluded leap into that head, 2 a motion the
+    // form's withdrawal gate would empty the bar for, 3 a cross relation with the
+    // next chord. The cross relation is never bought back with the bar: the gate
+    // withdraws a line the ear can lose, a misspelt degree it cannot. `pending`
+    // holds the tones still to sound through the close. Where the head is not
+    // chosen here -- the statement's last bar, or a head the cadence writes --
+    // only the cross relation is read.
+    const Tick head_tick = block_start + static_cast<Tick>(bar + 1) * kTicksPerBar34;
+    const bool head_known = bar + 1 < cycle_bars && head_tick < cadence_tick;
+    auto closing_fit = [&](std::initializer_list<std::pair<Tick, int>> pending) {
+      const int close = std::prev(pending.end())->second;
+      if (contradicted_next(close))
+        return 3;
+      if (!head_known)
+        return 0;
+      const int head = choose_anchor(next_harmony, head_tick, /*beat=*/0, close, closing_anchor,
+                                     closing_anchor, /*resolving_to=*/-1);
+      if (withdrawal != nullptr) {
+        const std::size_t emitted = notes.size();
+        MaterialNote probe;
+        probe.duration = step;
+        for (const auto& [tick, pitch] : pending) {
+          probe.start_tick = tick;
+          probe.pitch = static_cast<std::uint8_t>(pitch);
+          notes.push_back(probe);
+        }
+        probe.start_tick = head_tick;
+        probe.pitch = static_cast<std::uint8_t>(head);
+        notes.push_back(probe);
+        const bool withdrawn =
+            withdrawsForMotion(notes, *withdrawal, pending.begin()->first - step, head_tick);
+        notes.resize(emitted);
+        if (withdrawn)
+          return 2;
+      }
+      return isExcludedHeadLeap(close, head, mode) ? 1 : 0;
+    };
     // The passing tone one scale step from `from`, or -1. `landing` receives the
     // tone a further step on. The landing is vetted here against everything its
     // own onset meets, because the walk takes it without a second look.
@@ -1213,19 +1288,19 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       if (std::abs(beyond - from) == 6 && beyond >= band_lo && beyond <= band_hi &&
           clean_over_ground(beyond))
         return -1;
-      // A landing that closes the bar is left by a tone the next bar chooses
-      // freely from its own scale, so none of those may lie an augmented second
-      // from it, and none of the next chord's tones may respell it.
+      const Tick land_tick = tick + step;
+      // A landing that closes the bar must close it cleanly into the next head.
+      // Where that head is chosen elsewhere, none of the next scale's tones may
+      // lie an augmented second from the landing.
       if (land_closes_bar) {
-        if (contradicted_next(land))
+        if (closing_fit({{tick, pass}, {land_tick, land}}) != 0)
           return -1;
         for (int reach : {land - 3, land + 3}) {
-          if (detail::inScale(reach, mode, &next_chord) &&
+          if (!head_known && detail::inScale(reach, mode, &next_chord) &&
               detail::isAugmentedSecond(land, reach, 0, mode))
             return -1;
         }
       }
-      const Tick land_tick = tick + step;
       if (perfect_arrival(from, pass, tick) || perfect_arrival(pass, land, land_tick))
         return -1;
       if (lands_on_beat) {
@@ -1250,6 +1325,8 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
       const int anchor =
           choose_anchor(harmony, beat_tick, beat, prev_emitted, line_prev, cursor, committed);
       committed = -1;
+      if (beat == 2)
+        closing_anchor = anchor;
       // Off-beat fills walk the ladder built above, one rung on from the tone
       // that just sounded, so the beat carries the line somewhere instead of
       // restating a pair. Where the next rung is a leap, the scale tone between
@@ -1310,18 +1387,30 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
             walk_dir = reversed;
           }
         }
-        // The tone closing the bar forms no cross relation with the next bar's
-        // chord: a lowered seventh left for the dominant's raised one.
+        // The tone closing the bar takes the best-fitting pair with the next head,
+        // trying the walk's own rungs before a chord tone and the tone just sounded.
         const bool closes_bar = sub > 0 && beat == 2 && sub + 1 == notes_per_beat;
-        const auto respelled = [&](int cand) { return closes_bar && contradicted_next(cand); };
-        if (!in_figure && respelled(pitch)) {
+        int close_fit = 0;
+        if (closes_bar && !in_figure) {
+          close_fit = closing_fit({{mnote.start_tick, pitch}});
           int reversed = -walk_dir;
-          const int other = walk_step(prev_emitted, reversed);
-          if (!respelled(other) && !augmentedFrom(prev_emitted, other)) {
-            pitch = other;
-            walk_dir = reversed;
-          } else if (!respelled(prev_emitted)) {
-            pitch = prev_emitted;
+          const int back = walk_step(prev_emitted, reversed);
+          for (int cand : {back, rung_at(prev_emitted, 2 * walk_dir),
+                           nearest_other_chord_tone(pitch), prev_emitted}) {
+            if (close_fit == 0)
+              break;
+            if (cand < 0 || cand == pitch)
+              continue;
+            if (cand != prev_emitted &&
+                (augmentedFrom(prev_emitted, cand) || !clean_over_ground(cand)))
+              continue;
+            const int fit = closing_fit({{mnote.start_tick, cand}});
+            if (fit >= close_fit)
+              continue;
+            if (cand == back)
+              walk_dir = reversed;
+            pitch = cand;
+            close_fit = fit;
           }
         }
         // Every off-beat tone moves concurrently with the V0 sixteenths, so all
@@ -1335,9 +1424,9 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
         // group of parallel octaves this form produced. Only the beat head
         // itself is excluded, having just been judged above.
         if (sub > 0 && !in_figure && prev_emitted >= 0) {
-          motions.clear();
+          escape_motions.clear();
           registry.concurrentMotions(mnote.start_tick - kTicksPerBeat / 4, mnote.start_tick,
-                                     /*voice=*/1, /*num_voices=*/3, motions);
+                                     /*voice=*/1, /*num_voices=*/3, escape_motions);
           // The true parallel and the hidden perfect sit on separate rungs. The
           // vocabulary here is four tones wide and each must still be consonant
           // with the held ground, so demanding full freedom regularly rejects
@@ -1352,7 +1441,7 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           constexpr int kOscParallel = 2;
           auto osc_fault_rank = [&](int cand) {
             int worst = kOscClean;
-            for (const ConcurrentMotion& motion : motions) {
+            for (const ConcurrentMotion& motion : escape_motions) {
               if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
                 return kOscParallel;
               if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
@@ -1374,7 +1463,9 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
                              nearest_other_chord_tone(pitch), prev_emitted}) {
               if (cand < 0 || cand == pitch || cand < band_lo || cand > band_hi)
                 continue;
-              if (!clean_over_ground(cand) || respelled(cand))
+              if (!clean_over_ground(cand))
+                continue;
+              if (closes_bar && closing_fit({{mnote.start_tick, cand}}) > close_fit)
                 continue;
               if (osc_fault_rank(cand) > accept)
                 continue;
@@ -1477,6 +1568,7 @@ void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
     bar_tone.duration = kTicksPerBar34;
     structural_ground.push_back(bar_tone);
   }
+  const MiddleLineWithdrawal withdrawal{&variation_line, &structural_ground};
   for (std::size_t cycle = 1; cycle < cycles; ++cycle) {
     const Tick block_start = static_cast<Tick>(cycle) * period;
     const Tick block_end = block_start + period;
@@ -1527,7 +1619,8 @@ void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
     const std::size_t before = notes.size();
     appendCounterFiguration(notes, registry, block_start, cycle_bar_plan, band_lo, band_hi,
                             variation_rate > 1 ? variation_rate / 2 : 1, mode, cadence_tick,
-                            /*suspension_bar=*/-1, seed + static_cast<std::uint32_t>(cycle));
+                            /*suspension_bar=*/-1, seed + static_cast<std::uint32_t>(cycle),
+                            &withdrawal);
     // Bar by bar, the line is offered the statement and withdraws from what it
     // cannot hold. A bar is dropped when the line reaches a perfect interval
     // against either neighbour by a forbidden motion, or when its bar head --
@@ -1546,8 +1639,7 @@ void appendChaconneMiddleVoice(std::vector<MaterialNote>& notes,
       const Tick bar_start = block_start + static_cast<Tick>(bar) * kTicksPerBar34;
       const Tick bar_end = bar_start + kTicksPerBar34;
       const Tick from_tick = bar_start >= kTicksPerBeat ? bar_start - kTicksPerBeat : 0;
-      bool drop = formsPerfectMotionAgainst(notes, variation_line, from_tick, bar_end) ||
-                  formsPerfectMotionAgainst(structural_ground, notes, from_tick, bar_end);
+      bool drop = withdrawsForMotion(notes, withdrawal, from_tick, bar_end);
       if (!drop) {
         const int above = soundingMaterialPitch(variation_line, bar_start);
         const int head = soundingMaterialPitch(notes, bar_start);
@@ -1946,7 +2038,8 @@ HarnessFixture buildPassacagliaThreeVoice(const ResolvedRequest& req, int cycle_
           counter_notes, registry, block_start, cycle_bar_plan, kPassV1BandLo + v1_lift,
           kPassV1BandHi + v1_lift, notes_per_beat, mode,
           static_cast<Tick>(total_bars - 2) * kTicksPerBar34 + kTicksPerBeat,
-          /*suspension_bar=*/cycle_bars - 2, req.seed + static_cast<std::uint32_t>(cycle));
+          /*suspension_bar=*/cycle_bars - 2, req.seed + static_cast<std::uint32_t>(cycle),
+          /*withdrawal=*/nullptr);
     }
 
     carry_v0_valid = !v0_notes.empty();
