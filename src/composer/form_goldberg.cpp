@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <utility>
 #include <vector>
 
 #include "composer/arc.h"
@@ -654,6 +655,33 @@ std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
   return score;
 }
 
+// The melodic steps of a line, entry tone included, that the key spells as an
+// augmented second or fifth or a diminished third or seventh, and apart from
+// them its diminished fourths.
+struct AwkwardLeaps {
+  int spelled = 0;
+  int diminished_fourths = 0;
+};
+AwkwardLeaps countAwkwardLeaps(const std::vector<MaterialNote>& line, int entry_pitch, Mode mode) {
+  AwkwardLeaps out;
+  int prev = entry_pitch;
+  for (const MaterialNote& note : line) {
+    const int pitch = static_cast<int>(note.pitch);
+    if (prev >= 0 && prev != pitch) {
+      const detail::SpelledInterval step = detail::spelledInterval(prev, pitch, 0, mode);
+      const bool aug = step.quality == detail::SpelledQuality::Augmented;
+      const bool dim = step.quality == detail::SpelledQuality::Diminished;
+      if ((aug && (step.number == 2 || step.number == 5)) ||
+          (dim && (step.number == 3 || step.number == 7)))
+        ++out.spelled;
+      else if (dim && step.number == 4)
+        ++out.diminished_fourths;
+    }
+    prev = pitch;
+  }
+  return out;
+}
+
 // The tones and the cell shape a canon block is assembled from.
 struct CanonDesign {
   std::array<int, 4> assignment{};
@@ -993,16 +1021,23 @@ int innerExitTone(const std::array<int, 3>& candidates, int tone, int target) {
 // set failing at the one thing it is for -- then a voice touching the ground or
 // the figuration, the weaker perfect approaches, the dissonances, and last the
 // distance travelled, because the closest voice leading is the one an inner
-// voice is written with.
+// voice is written with. The line kept is then the one with the fewest awkward
+// leaps among those no worse than the best on any perfect-motion, crossing,
+// unison or repeat count and on diminished fourths.
 std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper, int ceiling,
                                           int block_start_bar, Mode mode,
                                           const std::array<std::uint8_t, 4>& ground,
                                           bool fill_thirds, const AriaBassTreatment& bass_treatment,
                                           InnerSurface surface, const std::array<int, 3>& entry) {
   const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
-  std::vector<MaterialNote> chosen;
-  std::array<int, 10> best{};
-  bool have_best = false;
+  struct Candidate {
+    std::array<int, 10> score;
+    AwkwardLeaps leaps;
+    std::vector<MaterialNote> line;
+  };
+  std::vector<Candidate> pool;
+  pool.reserve(81);
+  std::size_t best = 0;
   std::array<std::size_t, 4> pick{};
   for (pick[0] = 0; pick[0] < 3; ++pick[0]) {
     for (pick[1] = 0; pick[1] < 3; ++pick[1]) {
@@ -1045,16 +1080,28 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
           // The weaker perfect approaches by keyboard inner-voice rarity: anti, battuta, hidden.
           const std::array<int, 10> score = {faults[0], faults[1], repeated,  faults[2], faults[3],
                                              faults[5], faults[6], faults[4], faults[7], travel};
-          if (!have_best || score < best) {
-            best = score;
-            chosen = std::move(line);
-            have_best = true;
-          }
+          const AwkwardLeaps leaps = countAwkwardLeaps(line, entry[1], mode);
+          if (pool.empty() || score < pool[best].score)
+            best = pool.size();
+          pool.push_back({score, leaps, std::move(line)});
         }
       }
     }
   }
-  return chosen;
+  // Score columns 0-7 are the crossing, true parallel, repeat, unisons and the
+  // three weaker perfect approaches; dissonance and travel stay free.
+  const Candidate& ref = pool[best];
+  std::size_t kept = best;
+  for (std::size_t idx = 0; idx < pool.size(); ++idx) {
+    const Candidate& cand = pool[idx];
+    bool admitted = cand.leaps.diminished_fourths <= ref.leaps.diminished_fourths;
+    for (std::size_t col = 0; col < 8 && admitted; ++col)
+      admitted = cand.score[col] <= ref.score[col];
+    if (admitted && std::make_pair(cand.leaps.spelled, cand.score) <
+                        std::make_pair(pool[kept].leaps.spelled, pool[kept].score))
+      kept = idx;
+  }
+  return std::move(pool[kept].line);
 }
 
 // The kind a variation block is written as. A set too short for the da capo
