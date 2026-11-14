@@ -507,6 +507,98 @@ TEST(FormLinearCello, LongFormBigramSurfaceStaysSpread) {
   }
 }
 
+// Share of a line's bars whose exact pitch sequence another bar also states.
+double restatedBarShare(const std::vector<NoteEvent>& notes) {
+  std::map<Tick, std::vector<std::uint8_t>> bars;
+  for (const NoteEvent& note : notes)
+    bars[note.start_tick / kTicksPerBar].push_back(note.pitch);
+  std::map<std::vector<std::uint8_t>, int> statements;
+  for (const auto& [bar, pitches] : bars)
+    ++statements[pitches];
+  int restated = 0;
+  for (const auto& [bar, pitches] : bars) {
+    if (statements[pitches] > 1)
+      ++restated;
+  }
+  return bars.empty() ? 0.0 : static_cast<double>(restated) / static_cast<double>(bars.size());
+}
+
+// A piece rarely states the same bar twice. The solo-suite preludes restate
+// about a tenth of their bars, mostly as an echo of the bar just heard; a line
+// whose bar is fixed by its figure and one held anchor restates two thirds of a
+// 32-bar piece and nine tenths of a 128-bar one. The anchor moving through the
+// chord and the per-bar figure variants keep a 32-bar piece almost free of
+// restatement (worst piece 0.06, mean 0.01) and a 128-bar one near a quarter
+// (worst 0.50, mean 0.25); each ceiling sits just above those shares.
+TEST(FormLinearCello, BarsRarelyRestateWithinAPiece) {
+  struct Ceiling {
+    std::uint16_t bars;
+    double per_piece;
+    double mean;
+  };
+  for (const Ceiling& ceiling : {Ceiling{32, 0.125, 0.03}, Ceiling{128, 0.55, 0.30}}) {
+    double total = 0.0;
+    int pieces = 0;
+    for (SubjectCharacter character : kCharacters) {
+      for (std::uint32_t seed : kSeeds) {
+        for (bool minor : kMinorFlags) {
+          const double share = restatedBarShare(celloLine(character, seed, minor, ceiling.bars));
+          EXPECT_LE(share, ceiling.per_piece)
+              << "character=" << static_cast<int>(character) << " seed=" << seed
+              << " minor=" << minor << " bars=" << ceiling.bars;
+          total += share;
+          ++pieces;
+        }
+      }
+    }
+    EXPECT_LE(total / pieces, ceiling.mean) << "bars=" << ceiling.bars;
+  }
+}
+
+// The seed reaches the notes, not only the phase of one rotation: the figure
+// preference and the progression both turn on the seed modulo a divisor of 12,
+// so two seeds twelve apart share them and differ only through the anchor and
+// variant draws.
+TEST(FormLinearCello, SeedsTwelveApartComposeDifferentPieces) {
+  std::vector<std::vector<std::uint8_t>> lines;
+  for (std::uint32_t seed = 1; seed <= 24; ++seed) {
+    std::vector<std::uint8_t> pitches;
+    for (const NoteEvent& note : celloLine(SubjectCharacter::Severe, seed, /*minor=*/false, 32))
+      pitches.push_back(note.pitch);
+    ASSERT_FALSE(pitches.empty());
+    lines.push_back(pitches);
+  }
+  for (std::size_t idx = 0; idx + 12 < lines.size(); ++idx)
+    EXPECT_NE(lines[idx], lines[idx + 12]) << "seeds " << idx + 1 << " and " << idx + 13;
+  const std::set<std::vector<std::uint8_t>> distinct(lines.begin(), lines.end());
+  EXPECT_GE(distinct.size(), 20u) << "of " << lines.size() << " seeds";
+}
+
+// Every character composes its own line. The figure preference alone does not
+// guarantee that: where the vets reject a character's first figures, two
+// preference orders fall through to the same one, and a short piece can agree
+// bar for bar. The character also turns the variant rotations, so the pieces
+// differ at the default length for every pair.
+TEST(FormLinearCello, EveryCharacterComposesADifferentLine) {
+  const std::uint16_t bars = formSpec(FormType::CelloPrelude).natural_bars;
+  for (bool minor : kMinorFlags) {
+    for (std::uint32_t seed = 1; seed <= 64; ++seed) {
+      std::array<std::vector<std::uint8_t>, 4> lines;
+      for (std::size_t idx = 0; idx < kCharacters.size(); ++idx) {
+        for (const NoteEvent& note : celloLine(kCharacters[idx], seed, minor, bars))
+          lines[idx].push_back(note.pitch);
+        ASSERT_FALSE(lines[idx].empty());
+      }
+      for (std::size_t lhs = 0; lhs < lines.size(); ++lhs) {
+        for (std::size_t rhs = lhs + 1; rhs < lines.size(); ++rhs) {
+          EXPECT_NE(lines[lhs], lines[rhs])
+              << "seed=" << seed << " minor=" << minor << " characters " << lhs << " and " << rhs;
+        }
+      }
+    }
+  }
+}
+
 // A minor cello prelude never leaks an augmented second into the cadential
 // landing. The figuration loop stops two bars short of the appended landing,
 // and the final figuration bar's closing cell is vetted so its implicit

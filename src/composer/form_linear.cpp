@@ -13,11 +13,14 @@
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
 using detail::ChordSpec;
 using detail::Mode;
+using rng::seedChoice;
+using rng::SeedDecision;
 
 // ---------------------------------------------------------------------------
 // CelloPrelude (BWV1007 Prelude style): a single monophonic running line laid
@@ -36,6 +39,11 @@ using detail::Mode;
 // broken chords on every note. The register depth of the solo suites comes from
 // the bariolage bars, whose pedal can drop an octave to the low strings so the
 // bar spans an octave and implies a bass; no note-to-note leap exceeds an octave.
+//
+// A bar is its figure variant hung on an anchor. The anchor rotates through the
+// members of the bar's chord and each figure draws its variant per bar, so a
+// figure keeps its contour while its pitches move with the harmony; a bar the
+// piece has already stated ranks behind every fresh candidate.
 //
 // The validator reconstructs two implicit voices from the cell (per-beat) min
 // (bass stream) and max (top stream). For a scalar wave both streams move
@@ -153,11 +161,13 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     return tonic;
   };
 
-  // Voice-led anchor: each bar opens on the chord tone NEAREST the previous
-  // bar's closing register, so the implicit bass/top streams never jump an
-  // octave at the bar boundary (the failure mode of a fixed per-bar register).
-  // Seeded in the cello's tenor range (~C3).
+  // Voice-led anchor: each bar opens on a chord tone realized in the octave
+  // nearest the previous bar's anchor, so the implicit bass/top streams never
+  // jump an octave at the bar boundary (the failure mode of a fixed per-bar
+  // register). Seeded in the cello's tenor range (~C3).
   int prev_anchor = 48;
+  // Every figuration bar emitted so far, in order.
+  std::vector<std::array<int, 16>> stated_bars;
   // Implicit bass/top extremes of the previous bar's final cell (-1 before
   // the first bar), used to vet each bar figure across the bar seam.
   int prev_cell_lo = -1;
@@ -181,11 +191,15 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     int tier = static_cast<int>(arc.density_tier) + profile.density_bias;
     tier = std::max(0, std::min(3, tier));
     // Figure reach in scale degrees: the per-cell oscillation climbs `reach`
-    // degrees above the anchor before folding back. A third (2) at the calm
-    // tiers, a fourth (3) near the climax, so the line opens up toward the peak.
+    // degrees above the anchor before folding back. The seed draws it per bar:
+    // a fourth (3) at odds of three in four near the climax and one in four at
+    // the calm tiers, a third (2) otherwise, so the line opens up toward the peak.
     // Every cell uses the SAME reach, so the implicit bass/top streams stay
     // constant within the bar regardless of reach.
-    const int reach = (tier >= 2) ? 3 : 2;
+    const int reach = seedChoice(req.seed, SeedDecision::kLinearReach, 4u,
+                                 static_cast<std::uint32_t>(bar)) < (tier >= 2 ? 3u : 1u)
+                          ? 3
+                          : 2;
 
     const int root_pc = chords[static_cast<std::size_t>(bar)].root_pc % 12;
     const bool harmonic = (mode == Mode::Minor) && (root_pc == 7);  // V wants the leading tone.
@@ -198,26 +212,28 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     const int window_lo = 43 + oct_shift;  // ~G2 (+oct at climax).
 
     // Anchor candidates = the three triad tones realized in this bar's register
-    // window, each climbed to the octave nearest prev_anchor and ordered
-    // nearest-first by distance to prev_anchor. Mid-piece only the nearest is
-    // used (bass/top streams move by a small interval at every boundary); the
-    // final figuration bar tries them in order so it can voice-lead into the
-    // cadential landing without a forbidden seam.
+    // window, each climbed to the octave nearest prev_anchor. The seed rotates
+    // which chord member leads, so the figure moves with the harmony instead of
+    // resting on the tone two chords share; the nearest tone alone held one
+    // anchor through most progressions.
     int cand_anchors[3];
-    int cand_dist[3];
     realizedAnchorsForBar(bar, prev_anchor, cand_anchors);
-    for (int tone = 0; tone < 3; ++tone)
-      cand_dist[tone] = std::abs(cand_anchors[tone] - prev_anchor);
-    int anchor_order[3] = {0, 1, 2};
-    for (int aidx = 0; aidx < 3; ++aidx) {
-      for (int bidx = aidx + 1; bidx < 3; ++bidx) {
-        if (cand_dist[anchor_order[bidx]] < cand_dist[anchor_order[aidx]]) {
-          const int tmp = anchor_order[aidx];
-          anchor_order[aidx] = anchor_order[bidx];
-          anchor_order[bidx] = tmp;
-        }
-      }
-    }
+    const int anchor_turn =
+        static_cast<int>((seedChoice(req.seed, SeedDecision::kLinearAnchor, 3u) +
+                          static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)) %
+                         3u);
+    // How far a tone climbs out of the register: above the window's octave and
+    // above the previous anchor. Climbing tones go last, lowest first, and serve
+    // only a bar no other tone can hold cleanly.
+    const auto climb = [&](int tone) {
+      const int cand = cand_anchors[tone];
+      return cand > window_lo + 12 && cand > prev_anchor ? cand - prev_anchor : 0;
+    };
+    int anchor_order[3];
+    for (int turn = 0; turn < 3; ++turn)
+      anchor_order[turn] = (anchor_turn + turn) % 3;
+    std::stable_sort(anchor_order, anchor_order + 3,
+                     [&](int lhs, int rhs) { return climb(lhs) < climb(rhs); });
     int anchor = cand_anchors[anchor_order[0]];
     // Forward-seam pitches into the cadential landing, set only for the final
     // figuration bar's anchor candidate under test (< 0 skips the seam check).
@@ -240,8 +256,8 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         {0, -1, 1, -1},  // fold-back: anchor, reach, +1, reach.
         {0, 1, 0, -1},   // under-then-over: anchor, +1, anchor, reach.
     };
-    auto oscillation_at = [&](std::array<int, 16>& p, int cell_reach) {
-      // The shape rotates per CELL, not only per cycle: all three shapes share
+    auto oscillation_at = [&](std::array<int, 16>& p, int cell_reach, int phase) {
+      // The shape rotates per CELL from the bar's phase: all three shapes share
       // the same tone set {anchor, +1, reach}, so every cell's implicit
       // min/max extremes are identical regardless of shape and the validator
       // streams are unchanged -- but one shape looped four times per bar
@@ -249,23 +265,17 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       // exactly the pendulum concentration the corpus bigram surface never
       // reaches.
       for (int cell = 0; cell < 4; ++cell) {
-        // The rotation stays in unsigned space: casting the seed to int first
-        // makes every seed at or above 2^31 negative, and a negative remainder
-        // indexes outside the shape table.
-        const int* shape = kCellShapes[(req.seed + static_cast<std::uint32_t>(cycle) +
-                                        static_cast<std::uint32_t>(cell)) %
-                                       3u];
+        const int* shape = kCellShapes[(phase + cell) % 3];
         for (int idx = 0; idx < 4; ++idx) {
           const int degree = shape[idx] < 0 ? cell_reach : shape[idx];
           p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degree, harmonic);
         }
       }
     };
-    auto oscillation_bar = [&](std::array<int, 16>& p) { oscillation_at(p, reach); };
-    auto run_triangle_bar = [&](std::array<int, 16>& p) {
+    auto run_triangle_bar = [&](std::array<int, 16>& p, bool swap_halves) {
       // Two half-bar scale-run arches (climb four steps, fold back), the
-      // second shifted one scale degree above the first (order swapped on odd
-      // bars). The original full-bar arch climbed seven degrees, moving the
+      // second shifted one scale degree above the first (or the two swapped).
+      // The original full-bar arch climbed seven degrees, moving the
       // implicit cell extremes four degrees between cells -- enough to trip
       // the forbidden-leap vet on most anchors, so the figure was silently
       // rejected on two thirds of its turns and the rotation collapsed back
@@ -279,24 +289,29 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         arch_a[idx] = walk(anchor, degree, harmonic);
         arch_b[idx] = walk(anchor, degree + 1, harmonic);
       }
-      const bool swap_halves = ((bar + static_cast<int>(cycle)) & 1) != 0;
       for (int idx = 0; idx < 8; ++idx) {
         p[static_cast<std::size_t>(idx)] = swap_halves ? arch_b[idx] : arch_a[idx];
         p[static_cast<std::size_t>(8 + idx)] = swap_halves ? arch_a[idx] : arch_b[idx];
       }
     };
-    auto broken_thirds_bar = [&](std::array<int, 16>& p) {
+    auto broken_thirds_bar = [&](std::array<int, 16>& p, int row) {
       // Broken-third chains (c-e-d-f): each cell plays degrees
-      // (s, s+2, s+1, s+3) with the cell start s drifting 0,1,2,1 across the
-      // bar. This is the corpus's third-skip vocabulary -- the (third, -step)
+      // (s, s+2, s+1, s+3) with the cell start s drifting across the bar by
+      // one of four rows. This is the corpus's third-skip vocabulary -- the (third, -step)
       // / (step, -third) bigram families -- which the three stepwise figures
       // above cannot produce; without it the line's interval mass sits almost
       // entirely on seconds while the reference keeps the majority of its
-      // transitions on skips and leaps. Cell extremes are (s, s+3), so the
-      // implicit streams move at most one degree per cell seam.
-      static constexpr int kStarts[4] = {0, 1, 2, 1};
+      // transitions on skips and leaps. Cell extremes are (s, s+3) and every
+      // row moves s one degree per cell, so the implicit streams move at most
+      // one degree per cell seam; every row opens on the anchor.
+      static constexpr int kStartRows[4][4] = {
+          {0, 1, 2, 1},   // wave.
+          {0, 1, 2, 3},   // rising sequence.
+          {0, 1, 0, -1},  // wave dipping under the anchor.
+          {0, -1, 0, 1},  // dip first.
+      };
       for (int cell = 0; cell < 4; ++cell) {
-        const int s = kStarts[cell];
+        const int s = kStartRows[row][cell];
         const int degs[4] = {s, s + 2, s + 1, s + 3};
         for (int idx = 0; idx < 4; ++idx) {
           p[static_cast<std::size_t>(cell * 4 + idx)] = walk(anchor, degs[idx], harmonic);
@@ -367,27 +382,29 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       }
       return true;
     };
-    // Forbidden note-to-note leaps the line itself would sound: every step in
-    // the bar, the seam from the previous bar's last note, and (final
-    // figuration bar) the step into both the written leading tone and the
-    // trill's opening note.
+    // Forbidden note-to-note leaps the line itself would sound, and leaps
+    // wider than kMaxLineLeap: every step in the bar, the seam from the previous
+    // bar's last note, and (final figuration bar) the step into both the
+    // written leading tone and the trill's opening note.
     auto note_faults = [&](const std::array<int, 16>& p) {
       int faults = 0;
       const Tick bar_tick = static_cast<Tick>(bar) * kTicksPerBar;
       for (int slot = 0; slot < kNotesPerBar; ++slot) {
         const int from = slot == 0 ? prev_last : p[static_cast<std::size_t>(slot - 1)];
         const Tick to_tick = bar_tick + static_cast<Tick>(slot) * kSix;
-        if (from >= 0 && rule_helpers::isForbiddenMelodicLeap(
-                             static_cast<std::uint8_t>(from),
-                             static_cast<std::uint8_t>(p[static_cast<std::size_t>(slot)]),
-                             out.harmony, to_tick - kSix, to_tick)) {
+        const int to = p[static_cast<std::size_t>(slot)];
+        if (from >= 0 && (std::abs(to - from) > kMaxLineLeap ||
+                          rule_helpers::isForbiddenMelodicLeap(
+                              static_cast<std::uint8_t>(from), static_cast<std::uint8_t>(to),
+                              out.harmony, to_tick - kSix, to_tick))) {
           ++faults;
         }
       }
       if (landing_lo >= 0) {
         const Tick to_tick = bar_tick + kTicksPerBar;
         for (const int landing : {landing_hi - 1, landing_lo}) {
-          if (rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(p[15]),
+          if (std::abs(landing - p[15]) > kMaxLineLeap ||
+              rule_helpers::isForbiddenMelodicLeap(static_cast<std::uint8_t>(p[15]),
                                                    static_cast<std::uint8_t>(landing), out.harmony,
                                                    to_tick - kSix, to_tick)) {
             ++faults;
@@ -473,18 +490,48 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // rotation walks them, so the same bar reaches for a different texture
     // per character; the uniform sixteenth flow is the form's identity, so
     // texture is the only axis on which the characters can differ here.
-    // Unsigned arithmetic for the same reason as the cell rotation above: a
-    // negative preference would leave every figure branch unmatched.
+    // Unsigned arithmetic: a seed at or above 2^31 cast to int is negative, and
+    // a negative preference would leave every figure branch unmatched.
     const int pref = static_cast<int>(detail::figureChoice(
         req.character, 4,
         req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)));
-    // The cell-safe candidate with the fewest forbidden note steps, kept for
-    // the case where no candidate is clean.
+    // Per-bar variant rotations, each from its own seed-drawn offset. They walk
+    // bar alone, the anchor and the figure preference bar + cycle, so no two
+    // decisions of one bar turn together. The character offsets each rotation:
+    // independent draws from a few members coincide, the offset keeps them apart.
+    const auto rotation = [&](SeedDecision decision, std::uint32_t count) {
+      return static_cast<int>((seedChoice(req.seed, decision, count) +
+                               static_cast<std::uint32_t>(req.character) +
+                               static_cast<std::uint32_t>(bar)) %
+                              count);
+    };
+    const int osc_turn = rotation(SeedDecision::kLinearCellPhase, 3u);
+    const int arch_turn = rotation(SeedDecision::kLinearArchOrder, 2u);
+    const int row_turn = rotation(SeedDecision::kLinearThirdsRow, 4u);
+    const int pedal_turn = rotation(SeedDecision::kLinearPedalTurn, 2u);
+    // Whether the piece has already stated this bar. Two repeats stay fresh, as
+    // the idiom keeps them: an echo of the bar just heard, and the opening bar
+    // returning among the last four figuration bars.
+    auto already_stated = [&](const std::array<int, 16>& p) {
+      for (std::size_t idx = 0; idx < stated_bars.size(); ++idx) {
+        const bool echo = idx + 1 == stated_bars.size();
+        const bool reprise = idx == 0 && bar >= bars - 6;
+        if (stated_bars[idx] == p && !echo && !reprise)
+          return true;
+      }
+      return false;
+    };
+    // The cell-safe candidate with the fewest faulty note steps, kept for the
+    // case where none is both clean and fresh. A clean bar the piece has
+    // already stated is recorded here too, so restating ranks behind every
+    // fresh candidate and never leaves the bar empty.
     int best_faults = kNotesPerBar + 3;
     int best_oidx = -1;
     std::array<int, 16> best_pitches{};
     int anchor_idx = 0;
+    bool restated = false;  // the last candidate was clean but already stated.
     auto accept = [&]() {
+      restated = false;
       if (!cells_safe(pitches))
         return false;
       const int faults = note_faults(pitches);
@@ -493,39 +540,58 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         best_oidx = anchor_idx;
         best_pitches = pitches;
       }
-      return faults == 0;
+      restated = faults == 0 && already_stated(pitches);
+      return faults == 0 && !restated;
     };
-    // The pedal registers are walked in a seed-rotated order, as the cell shapes
-    // are, so which register a bar reaches varies by seed; every available one
-    // is still tried before the figure falls through.
-    const int pedal_turn = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) % 3u);
+    // The dropped pedal registers come first, in a seed-drawn order: they carry
+    // the line's depth and clear their seam vets least often. The anchor-level
+    // pedal follows, so every available register is tried before the figure
+    // falls through.
     auto try_bariolage = [&]() {
       for (int turn = 0; turn < 3; ++turn) {
-        if (pedal_bariolage_bar(pitches, (pedal_turn + turn) % 3) && accept())
+        const int variant = turn < 2 ? 1 + (pedal_turn + turn) % 2 : 0;
+        if (pedal_bariolage_bar(pitches, variant) && accept())
           return true;
       }
       return false;
     };
     // Bariolage follows the oscillation in the walk, so it is the first
-    // fallback of the plainest figure.
-    auto try_figures = [&]() {
+    // fallback of the plainest figure. Each figure offers its drawn variant and
+    // walks on to its others only past a bar already stated; `every_variant`
+    // walks them all regardless.
+    auto try_figures = [&](bool every_variant) {
+      auto try_variants = [&](int count, const auto& write) {
+        for (int turn = 0; turn < count; ++turn) {
+          write(turn);
+          if (accept())
+            return true;
+          if (!every_variant && !restated)
+            return false;
+        }
+        return false;
+      };
       for (int attempt = 0; attempt < 4; ++attempt) {
+        bool fresh = false;
         switch ((pref + attempt) % 4) {
           case 0:
-            oscillation_bar(pitches);
+            // Three cell phases at the drawn reach, then at the other one.
+            fresh = try_variants(6, [&](int turn) {
+              oscillation_at(pitches, turn < 3 ? reach : 5 - reach, (osc_turn + turn) % 3);
+            });
             break;
           case 1:
-            if (try_bariolage())
-              return true;
-            continue;
+            fresh = try_bariolage();
+            break;
           case 2:
-            run_triangle_bar(pitches);
+            fresh = try_variants(
+                2, [&](int turn) { run_triangle_bar(pitches, (arch_turn + turn) % 2 != 0); });
             break;
           default:
-            broken_thirds_bar(pitches);
+            fresh = try_variants(
+                4, [&](int turn) { broken_thirds_bar(pitches, (row_turn + turn) % 4); });
             break;
         }
-        if (accept())
+        if (fresh)
           return true;
       }
       return false;
@@ -551,18 +617,21 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         landing_lo = landing_hi - (opens_on_turn ? 3 : 1);
       }
     };
-    // Realized triad-tone anchors nearest-first, the four figures per anchor; a
-    // farther chord tone only when no figure on a nearer one is clean.
+    // Realized triad-tone anchors in the drawn order, the four figures per
+    // anchor; a later chord tone only when no figure on an earlier one is fresh.
+    // Restating a clean bar ranks ahead of climbing for a fresh one.
     for (int oidx = 0; oidx < 3 && !placed; ++oidx) {
+      if (best_faults == 0 && climb(anchor_order[oidx]) > 0)
+        break;
       use_anchor(oidx);
-      placed = try_figures();
+      placed = try_figures(/*every_variant=*/false);
     }
-    // A fourth-wide oscillation from the sixth degree outlines a tritone; the
-    // third-wide one cannot.
-    for (int oidx = 0; oidx < 3 && !placed && reach != 2; ++oidx) {
+    // No drawn variant is clean on any anchor: walk every variant. That reaches
+    // the third-wide oscillation, which cannot outline the tritone a fourth-wide
+    // one does from the sixth degree.
+    for (int oidx = 0; oidx < 3 && !placed && best_faults != 0; ++oidx) {
       use_anchor(oidx);
-      oscillation_at(pitches, 2);
-      placed = accept();
+      placed = try_figures(/*every_variant=*/true);
     }
     if (!placed && best_oidx >= 0) {
       use_anchor(best_oidx);
@@ -571,7 +640,7 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     }
     if (!placed) {
       use_anchor(0);
-      oscillation_bar(pitches);  // constant-stream fallback (prior behavior).
+      oscillation_at(pitches, reach, osc_turn);  // constant-stream fallback.
     }
     for (int slot = 0; slot < kNotesPerBar; ++slot) {
       MaterialNote mn;
@@ -584,6 +653,7 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     prev_cell_hi = std::max({pitches[12], pitches[13], pitches[14], pitches[15]});
     prev_last = pitches[15];
     prev_anchor = anchor;  // voice-lead the next bar from this bar's anchor.
+    stated_bars.push_back(pitches);
   }
 
   // Cadential landing: the final two bars stop the sixteenth flow with a
