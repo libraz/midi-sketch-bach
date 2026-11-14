@@ -1109,7 +1109,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Entries on the corpus 8-10 bar schedule at every length, a closing entry, the inverted
     // entry tied to the alto's station: hidden 26 -> 21, battuta 58 -> 42, anti 8 -> 6,
     // successions 56051 -> 51624, fourths 172 -> 184.
-    {FormType::Fugue, 0, 0, 21, 42, 6, 0, 2, 3, 1, 51624, 184},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // battuta 42 -> 41, anti 6 -> 2, successions 51624 -> 51630.
+    {FormType::Fugue, 0, 0, 21, 41, 2, 0, 2, 3, 1, 51630, 184},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1209,7 +1211,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Shared fugue builder changes: successions 31500 -> 32088, battuta 25 -> 22, anti 0 -> 3
     // (worst cell 0 -> 1), fourths 110 -> 96. Placed in the seed's rotated key instead of C,
     // a change of measurement: hidden 11 -> 17 (worst cell 1 -> 3).
-    {FormType::PreludeAndFugue, 0, 0, 17, 22, 3, 0, 3, 2, 1, 32088, 96},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // anti 3 -> 0 (worst cell 1 -> 0); lines re-drawn after a refused escape hold faults the old
+    // walk left: hidden 17 -> 21, battuta 22 -> 27, successions 32088 -> 32112.
+    {FormType::PreludeAndFugue, 0, 0, 21, 27, 0, 0, 3, 2, 0, 32112, 96},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1528,7 +1533,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Same counter: fourths 153 -> 13 (140 pedal-exempt, 14 an ornament's upper tone).
     // Every archetype draws on the shared free-bar devices: solo bars carry no pairs,
     // successions 29316 -> 25758.
-    {FormType::ToccataAndFugue, 84, 84, 11, 3, 0, 7, 2, 1, 0, 25758, 14},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // battuta 3 -> 1, successions 25758 -> 25752.
+    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, 14},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1751,7 +1758,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Same counter: fourths 214 -> 17 (197 pedal-exempt, 18 an ornament's upper tone).
     // Shared section builder: successions 30627 -> 30879. Placed in the seed's rotated key
     // instead of C, a change of measurement: hidden 14 -> 15.
-    {FormType::FantasiaAndFugue, 0, 0, 15, 3, 16, 0, 2, 1, 1, 30879, 20},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // battuta 3 -> 1, successions 30879 -> 30873.
+    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, 20},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -2176,7 +2185,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Corpus entry schedule at every length: hidden 230 -> 203, battuta 266 -> 241,
     // anti 48 -> 46, worst-cell hidden 7 -> 4, successions 496714 -> 491595,
     // fourths 1203 -> 1270.
-    {FormType::Fugue, 0, 0, 203, 241, 46, 0, 4, 4, 2, 491595, 1270},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // hidden 203 -> 201, battuta 241 -> 233, anti 46 -> 24, successions 491595 -> 491619.
+    {FormType::Fugue, 0, 0, 201, 233, 24, 0, 4, 4, 2, 491619, 1270},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2279,7 +2290,10 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // Corpus entry schedule at every length: hidden 192 -> 158, battuta 286 -> 219,
     // anti 37 -> 36, worst-cell hidden 5 -> 3, worst-cell battuta 4 -> 5,
     // successions 656886 -> 641318, fourths 1020 -> 1007.
-    {FormType::PreludeAndFugue, 0, 0, 158, 219, 36, 0, 3, 5, 2, 641318, 1007},
+    // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
+    // hidden 158 -> 163, battuta 219 -> 201, anti 36 -> 22, successions 641318 -> 641329,
+    // fourths 1007 -> 1000.
+    {FormType::PreludeAndFugue, 0, 0, 163, 201, 22, 0, 3, 5, 2, 641329, 1000},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

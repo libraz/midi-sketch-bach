@@ -1108,7 +1108,8 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       // most two values and the snapped anchor would stay on them, displace
       // the anchor to a farther chord tone -- order-safe against concurrent
       // voices, consonant with the sounding theme tones, clash-free in the
-      // sustain window, parallel-free -- so the bar states the chord in a new
+      // sustain window, parallel-free, and no worse on the fault ranking than
+      // staying, clean tones first -- so the bar states the chord in a new
       // register instead of wobbling.
       int bar_pitch_a = -1;
       int bar_pitch_b = -1;
@@ -1127,7 +1128,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         }
       }
       if (beat >= 2 && trailing_locked && (snapped == bar_pitch_a || snapped == bar_pitch_b)) {
-        auto escape_ok = [&](int cand) {
+        auto escape_ok = [&](int cand, int accept) {
           if (cand < band_lo || cand > band_hi || cand < order_floor || cand > order_ceiling) {
             return false;
           }
@@ -1155,22 +1156,26 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
               }
             }
           }
-          return true;
+          return anchor_fault_rank(cand) <= accept;
         };
-        for (int dist = 3; dist <= 12; ++dist) {
-          bool placed = false;
-          for (const int sgn : {1, -1}) {
-            const int cand = snapped + sgn * dist;
-            if (escape_ok(cand)) {
-              snapped = cand;
-              placed = true;
-              break;
+        // The escape may not carry a fault the anchor it replaces does not; a
+        // contrary arrival at a perfect interval is no cure for a shake.
+        const int stay_rank = anchor_fault_rank(snapped);
+        bool placed = false;
+        for (int accept = kAnchorClean; accept <= stay_rank && !placed; ++accept) {
+          for (int dist = 3; dist <= 12 && !placed; ++dist) {
+            for (const int sgn : {1, -1}) {
+              const int cand = snapped + sgn * dist;
+              if (escape_ok(cand, accept)) {
+                snapped = cand;
+                placed = true;
+                break;
+              }
             }
           }
-          if (placed) {
-            ++waveVetoStats().wobble_breaker_fired;
-            break;
-          }
+        }
+        if (placed) {
+          ++waveVetoStats().wobble_breaker_fired;
         }
       }
     }
