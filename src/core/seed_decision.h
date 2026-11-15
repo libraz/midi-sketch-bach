@@ -3,8 +3,10 @@
 #ifndef BACH_CORE_SEED_DECISION_H
 #define BACH_CORE_SEED_DECISION_H
 
+#include <array>
 #include <cassert>
 #include <cstdint>
+#include <numeric>
 
 namespace bach {
 namespace rng {
@@ -144,6 +146,109 @@ constexpr std::uint32_t seedBlockChoice(std::uint32_t seed, SeedDecision tag, st
   if (position == 0)
     return repeats ? detail::blockShuffleAt(block, tag, modulus, index, 1) : first;
   return repeats ? first : detail::blockShuffleAt(block, tag, modulus, index, 1);
+}
+
+/// Most width-`width` coordinates seedTupleChoice draws with its last coordinate.
+inline constexpr std::uint32_t kMaxTupleWide = 4;
+
+/// @brief A tuple drawn by seedTupleChoice: `wide_count` values in [0, width), then `last`.
+struct TupleChoice {
+  std::array<std::uint32_t, kMaxTupleWide> wide = {};
+  std::uint32_t last = 0;
+};
+
+namespace detail {
+
+/// @brief Smallest multiplier keeping the last coordinate of seedTupleChoice a bijection whose
+/// value changes at every step of a block.
+constexpr std::uint32_t tupleMultiplier(std::uint32_t width, std::uint32_t wide_count,
+                                        std::uint32_t size) {
+  std::uint32_t wide_span = 1;
+  for (std::uint32_t coord = 0; coord < wide_count; ++coord)
+    wide_span *= width;
+  for (std::uint32_t mult = 1; mult < size; ++mult) {
+    if (mult == size - 1 || std::gcd(mult, size) != 1)
+      continue;
+    if (std::gcd((1 + mult * (wide_span % size)) % size, size) == 1)
+      return mult;
+  }
+  assert(false && "width and size admit no multiplier");
+  return 1;
+}
+
+/// @brief Label of raw value `raw` of coordinate `coord` in block `block`: the block's salted
+/// shuffle, with the block's first label traded away when it repeats the previous block's last.
+constexpr std::uint32_t tupleLabel(std::uint32_t block, SeedDecision tag, std::uint32_t modulus,
+                                   std::uint32_t index, std::uint32_t first_raw,
+                                   std::uint32_t last_raw, std::uint32_t raw) {
+  const std::uint32_t first = blockShuffleAt(block, tag, modulus, index, first_raw);
+  if (block == 0 || first != blockShuffleAt(block - 1, tag, modulus, index, last_raw))
+    return blockShuffleAt(block, tag, modulus, index, raw);
+  std::uint32_t other = 0;
+  while (other == first_raw || other == last_raw)
+    ++other;
+  if (raw == first_raw)
+    return blockShuffleAt(block, tag, modulus, index, other);
+  if (raw == other)
+    return first;
+  return blockShuffleAt(block, tag, modulus, index, raw);
+}
+
+}  // namespace detail
+
+/// @brief `wide_count` choices in [0, width) and one in [0, size), drawn jointly without
+/// replacement over each block of seeds.
+///
+/// Position p in an aligned block of M = width^wide_count * size seeds has base-width digits
+/// d_0.. and a last digit d_s = (p / width^wide_count) % size; wide coordinate 0 is d_0, wide
+/// coordinate i is (d_0 + d_i) % width, and the last is (d_s + m * p) % size with
+/// m = detail::tupleMultiplier. Every coordinate is relabelled by its block's salted shuffle,
+/// and a first label repeating the previous block's last is traded for one no edge position
+/// uses. Properties:
+/// - every aligned block of M seeds takes every tuple once;
+/// - consecutive seeds differ in every coordinate, across block edges as well;
+/// - every wide coordinate takes each value once over every aligned block of `width` seeds;
+/// - a lookup reads its own block's shuffles and the previous block's only.
+/// @param seed The resolved request seed.
+/// @param tag The decision being drawn.
+/// @param width Alternatives of each wide coordinate, in [3, kMaxBlockChoice]; with `size` it
+/// must admit a multiplier, which every width-4 draw does.
+/// @param wide_count Number of wide coordinates, in [1, kMaxTupleWide].
+/// @param size Alternatives of the last coordinate, in [3, kMaxBlockChoice].
+/// @param index Distinguishes draws of one decision; below 2^22.
+/// @return The drawn tuple; `wide` entries past `wide_count` stay 0.
+constexpr TupleChoice seedTupleChoice(std::uint32_t seed, SeedDecision tag, std::uint32_t width,
+                                      std::uint32_t wide_count, std::uint32_t size,
+                                      std::uint32_t index = 0) {
+  assert(width >= 3 && width <= kMaxBlockChoice);
+  assert(wide_count >= 1 && wide_count <= kMaxTupleWide);
+  assert(size >= 3 && size <= kMaxBlockChoice);
+  std::uint32_t wide_span = 1;
+  for (std::uint32_t coord = 0; coord < wide_count; ++coord)
+    wide_span *= width;
+  const std::uint32_t block_size = wide_span * size;
+  const std::uint32_t block = seed / block_size;
+  const std::uint32_t position = seed % block_size;
+  const std::uint32_t mult = detail::tupleMultiplier(width, wide_count, size);
+
+  std::uint32_t digits[kMaxTupleWide] = {};
+  std::uint32_t rest = position;
+  for (std::uint32_t coord = 0; coord < wide_count; ++coord) {
+    digits[coord] = rest % width;
+    rest /= width;
+  }
+  TupleChoice out;
+  for (std::uint32_t coord = 0; coord < wide_count; ++coord) {
+    const std::uint32_t raw = coord == 0 ? digits[0] : (digits[0] + digits[coord]) % width;
+    // The block's last position has every digit at width - 1.
+    const std::uint32_t last_raw = coord == 0 ? width - 1 : width - 2;
+    out.wide[coord] = detail::tupleLabel(block, tag, width, (index << 4) | coord, 0, last_raw, raw);
+  }
+  const auto last_raw_value = static_cast<std::uint32_t>(
+      (rest % size + static_cast<std::uint64_t>(mult) * position) % size);
+  const std::uint32_t last_edge = (size - 1 + size - mult % size) % size;
+  out.last = detail::tupleLabel(block, tag, size, (index << 4) | 15u, 0, last_edge, last_raw_value);
+  return out;
 }
 
 }  // namespace rng

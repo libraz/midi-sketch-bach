@@ -186,5 +186,149 @@ TEST(SeedBlockChoice, IndexSeparatesRepeatedDrawsOfOneDecision) {
   EXPECT_GT(differ, 32);
 }
 
+// The (width, wide coordinates, last size) shapes the fugue-family forms draw.
+struct TupleShape {
+  std::uint32_t width;
+  std::uint32_t wide_count;
+  std::uint32_t size;
+};
+constexpr std::array<TupleShape, 12> kTupleShapes = {{{4, 1, 3},
+                                                      {4, 1, 4},
+                                                      {4, 1, 7},
+                                                      {4, 1, 10},
+                                                      {4, 2, 3},
+                                                      {4, 2, 4},
+                                                      {4, 2, 7},
+                                                      {4, 2, 10},
+                                                      {4, 4, 3},
+                                                      {4, 4, 4},
+                                                      {4, 4, 7},
+                                                      {4, 4, 10}}};
+
+std::uint32_t blockSizeOf(const TupleShape& shape) {
+  std::uint32_t span = shape.size;
+  for (std::uint32_t coord = 0; coord < shape.wide_count; ++coord)
+    span *= shape.width;
+  return span;
+}
+
+std::vector<std::uint32_t> tupleAt(std::uint32_t seed, const TupleShape& shape,
+                                   std::uint32_t index) {
+  const TupleChoice choice = seedTupleChoice(seed, SeedDecision::kSubject, shape.width,
+                                             shape.wide_count, shape.size, index);
+  std::vector<std::uint32_t> values(choice.wide.begin(),
+                                    choice.wide.begin() + static_cast<int>(shape.wide_count));
+  values.push_back(choice.last);
+  return values;
+}
+
+TEST(SeedTupleChoice, MatchesGoldenValues) {
+  const TupleChoice first = seedTupleChoice(0u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
+  EXPECT_EQ(first.wide[0], 3u);
+  EXPECT_EQ(first.wide[1], 2u);
+  EXPECT_EQ(first.last, 2u);
+  const TupleChoice second = seedTupleChoice(1u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
+  EXPECT_EQ(second.wide[0], 0u);
+  EXPECT_EQ(second.wide[1], 1u);
+  EXPECT_EQ(second.last, 0u);
+  const TupleChoice block_end = seedTupleChoice(47u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
+  EXPECT_EQ(block_end.wide[0], 1u);
+  EXPECT_EQ(block_end.wide[1], 0u);
+  EXPECT_EQ(block_end.last, 0u);
+  const TupleChoice next_block = seedTupleChoice(48u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
+  EXPECT_EQ(next_block.wide[0], 2u);
+  EXPECT_EQ(next_block.wide[1], 3u);
+  EXPECT_EQ(next_block.last, 2u);
+  const TupleChoice wide = seedTupleChoice(12345u, SeedDecision::kSubject, 4u, 4u, 10u, 11u);
+  EXPECT_EQ(wide.wide, (std::array<std::uint32_t, kMaxTupleWide>{2u, 1u, 1u, 0u}));
+  EXPECT_EQ(wide.last, 7u);
+  const TupleChoice large = seedTupleChoice(0x0FFFFFFFu, SeedDecision::kSubject, 4u, 1u, 7u);
+  EXPECT_EQ(large.wide[0], 0u);
+  EXPECT_EQ(large.last, 2u);
+  static_assert(seedTupleChoice(1u, SeedDecision::kSubject, 4u, 2u, 3u, 4u).wide[1] == 1u,
+                "seedTupleChoice must be a constant expression");
+}
+
+TEST(SeedTupleChoice, EachAlignedBlockTakesEveryTupleOnce) {
+  for (const TupleShape& shape : kTupleShapes) {
+    const std::uint32_t block_size = blockSizeOf(shape);
+    for (std::uint32_t block = 0; block < 3; ++block) {
+      std::set<std::vector<std::uint32_t>> seen;
+      for (std::uint32_t pos = 0; pos < block_size; ++pos)
+        seen.insert(tupleAt(block * block_size + pos, shape, 3u));
+      EXPECT_EQ(seen.size(), block_size)
+          << "size " << shape.size << " wide " << shape.wide_count << " block " << block;
+    }
+  }
+}
+
+TEST(SeedTupleChoice, ConsecutiveSeedsDifferInEveryCoordinate) {
+  for (const TupleShape& shape : kTupleShapes) {
+    const std::uint32_t block_size = blockSizeOf(shape);
+    std::vector<std::uint32_t> prev = tupleAt(0u, shape, 5u);
+    // Three blocks and two edges, plus a far block edge.
+    for (std::uint32_t seed = 1; seed < 3 * block_size + 2; ++seed) {
+      const std::vector<std::uint32_t> curr = tupleAt(seed, shape, 5u);
+      for (std::size_t coord = 0; coord < curr.size(); ++coord)
+        EXPECT_NE(prev[coord], curr[coord]) << "size " << shape.size << " seed " << seed;
+      prev = curr;
+    }
+    const std::uint32_t far_edge = 1000u * block_size;
+    const std::vector<std::uint32_t> before = tupleAt(far_edge - 1, shape, 5u);
+    const std::vector<std::uint32_t> after = tupleAt(far_edge, shape, 5u);
+    for (std::size_t coord = 0; coord < after.size(); ++coord)
+      EXPECT_NE(before[coord], after[coord]) << "size " << shape.size << " far edge";
+  }
+}
+
+TEST(SeedTupleChoice, EveryWideCoordinatePermutesEachBlockOfItsWidth) {
+  for (const TupleShape& shape : kTupleShapes) {
+    for (std::uint32_t first = 0; first < 2 * blockSizeOf(shape); first += shape.width) {
+      for (std::uint32_t coord = 0; coord < shape.wide_count; ++coord) {
+        std::set<std::uint32_t> values;
+        for (std::uint32_t seed = first; seed < first + shape.width; ++seed)
+          values.insert(tupleAt(seed, shape, 7u)[coord]);
+        EXPECT_EQ(values.size(), shape.width) << "size " << shape.size << " seed " << first;
+      }
+    }
+  }
+}
+
+// The edge trade never reaches a block's last position: there every coordinate reads its
+// block's plain shuffle, so a lookup needs one previous block and never the chain before it.
+TEST(SeedTupleChoice, ABlocksLastTupleIsItsPlainShuffle) {
+  for (const TupleShape& shape : kTupleShapes) {
+    const std::uint32_t block_size = blockSizeOf(shape);
+    const std::uint32_t mult = detail::tupleMultiplier(shape.width, shape.wide_count, shape.size);
+    for (std::uint32_t block = 0; block < 6; ++block) {
+      const TupleChoice last =
+          seedTupleChoice(block * block_size + block_size - 1, SeedDecision::kSubject, shape.width,
+                          shape.wide_count, shape.size, 9u);
+      for (std::uint32_t coord = 0; coord < shape.wide_count; ++coord) {
+        const std::uint32_t last_raw = coord == 0 ? shape.width - 1 : shape.width - 2;
+        EXPECT_EQ(last.wide[coord],
+                  detail::blockShuffleAt(block, SeedDecision::kSubject, shape.width,
+                                         (9u << 4) | coord, last_raw))
+            << "size " << shape.size << " block " << block;
+      }
+      const std::uint32_t last_raw = (shape.size - 1 + shape.size - mult % shape.size) % shape.size;
+      EXPECT_EQ(last.last, detail::blockShuffleAt(block, SeedDecision::kSubject, shape.size,
+                                                  (9u << 4) | 15u, last_raw))
+          << "size " << shape.size << " block " << block;
+    }
+  }
+}
+
+TEST(SeedTupleChoice, IndexSeparatesRepeatedDrawsOfOneDecision) {
+  const TupleShape shape{4, 2, 3};
+  int same = 0;
+  for (std::uint32_t seed = 0; seed < 480; ++seed) {
+    if (tupleAt(seed, shape, 0u) == tupleAt(seed, shape, 1u))
+      ++same;
+  }
+  // Two independent draws over 48 tuples coincide at about one seed in 48.
+  EXPECT_LT(same, 40);
+}
+
 }  // namespace
 }  // namespace bach::rng
