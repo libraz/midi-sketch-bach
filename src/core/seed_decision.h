@@ -194,25 +194,49 @@ constexpr std::uint32_t tupleLabel(std::uint32_t block, SeedDecision tag, std::u
   return blockShuffleAt(block, tag, modulus, index, raw);
 }
 
+/// @brief Raw value of seedTupleChoice coordinate `coord` (wide_count = the last) at `position`
+/// of a block, before relabelling. Position p has base-width digits d_0.., a w-block index
+/// p / width, and a last digit d_s = (p / width^wide_count) % size.
+constexpr std::uint32_t tupleRaw(std::uint32_t position, std::uint32_t width,
+                                 std::uint32_t wide_count, std::uint32_t size, std::uint32_t mult,
+                                 std::uint32_t coord) {
+  std::uint32_t digits[kMaxTupleWide] = {};
+  std::uint32_t rest = position;
+  for (std::uint32_t idx = 0; idx < wide_count; ++idx) {
+    digits[idx] = rest % width;
+    rest /= width;
+  }
+  const std::uint32_t w_block = position / width;
+  // Coordinate 0 takes a permutation of d_0 that changes from one w-block to the next.
+  std::uint32_t first = (digits[0] + 2 * digits[wide_count > 1 ? 1 : 0]) % width;
+  if (wide_count == 1)
+    first = (w_block % 2 == 1 && digits[0] >= width - 2) ? 2 * width - 3 - digits[0] : digits[0];
+  if (coord == 0)
+    return first;
+  if (coord < wide_count)
+    return (digits[0] + digits[coord]) % width;
+  if (wide_count == 1)
+    return (w_block + first) % size;
+  return static_cast<std::uint32_t>((rest % size + static_cast<std::uint64_t>(mult) * position) %
+                                    size);
+}
+
 }  // namespace detail
 
 /// @brief `wide_count` choices in [0, width) and one in [0, size), drawn jointly without
 /// replacement over each block of seeds.
 ///
-/// Position p in an aligned block of M = width^wide_count * size seeds has base-width digits
-/// d_0.. and a last digit d_s = (p / width^wide_count) % size; wide coordinate 0 is d_0, wide
-/// coordinate i is (d_0 + d_i) % width, and the last is (d_s + m * p) % size with
-/// m = detail::tupleMultiplier. Every coordinate is relabelled by its block's salted shuffle,
-/// and a first label repeating the previous block's last is traded for one no edge position
-/// uses. Properties:
+/// Seeds fall into aligned blocks of M = width^wide_count * size; each coordinate's raw value
+/// (detail::tupleRaw) is relabelled by its block's salted shuffle, and a first label repeating
+/// the previous block's last is traded for one no edge position uses. Properties:
 /// - every aligned block of M seeds takes every tuple once;
 /// - consecutive seeds differ in every coordinate, across block edges as well;
 /// - every wide coordinate takes each value once over every aligned block of `width` seeds;
+/// - no coordinate is a function of seed % width over a block;
 /// - a lookup reads its own block's shuffles and the previous block's only.
 /// @param seed The resolved request seed.
 /// @param tag The decision being drawn.
-/// @param width Alternatives of each wide coordinate, in [3, kMaxBlockChoice]; with `size` it
-/// must admit a multiplier, which every width-4 draw does.
+/// @param width Alternatives of each wide coordinate; the properties are proved for 4 only.
 /// @param wide_count Number of wide coordinates, in [1, kMaxTupleWide].
 /// @param size Alternatives of the last coordinate, in [3, kMaxBlockChoice].
 /// @param index Distinguishes draws of one decision; below 2^22.
@@ -220,34 +244,32 @@ constexpr std::uint32_t tupleLabel(std::uint32_t block, SeedDecision tag, std::u
 constexpr TupleChoice seedTupleChoice(std::uint32_t seed, SeedDecision tag, std::uint32_t width,
                                       std::uint32_t wide_count, std::uint32_t size,
                                       std::uint32_t index = 0) {
-  assert(width >= 3 && width <= kMaxBlockChoice);
+  assert(width == 4);
   assert(wide_count >= 1 && wide_count <= kMaxTupleWide);
   assert(size >= 3 && size <= kMaxBlockChoice);
-  std::uint32_t wide_span = 1;
+  std::uint32_t block_size = size;
   for (std::uint32_t coord = 0; coord < wide_count; ++coord)
-    wide_span *= width;
-  const std::uint32_t block_size = wide_span * size;
+    block_size *= width;
   const std::uint32_t block = seed / block_size;
   const std::uint32_t position = seed % block_size;
-  const std::uint32_t mult = detail::tupleMultiplier(width, wide_count, size);
-
-  std::uint32_t digits[kMaxTupleWide] = {};
-  std::uint32_t rest = position;
-  for (std::uint32_t coord = 0; coord < wide_count; ++coord) {
-    digits[coord] = rest % width;
-    rest /= width;
-  }
+  // The one-coordinate form reads no multiplier.
+  const std::uint32_t mult = wide_count == 1 ? 0 : detail::tupleMultiplier(width, wide_count, size);
+  // Raw value of `coord` at a block position; coordinate wide_count is the last.
+  const auto raw_at = [&](std::uint32_t pos, std::uint32_t coord) {
+    return detail::tupleRaw(pos, width, wide_count, size, mult, coord);
+  };
   TupleChoice out;
-  for (std::uint32_t coord = 0; coord < wide_count; ++coord) {
-    const std::uint32_t raw = coord == 0 ? digits[0] : (digits[0] + digits[coord]) % width;
-    // The block's last position has every digit at width - 1.
-    const std::uint32_t last_raw = coord == 0 ? width - 1 : width - 2;
-    out.wide[coord] = detail::tupleLabel(block, tag, width, (index << 4) | coord, 0, last_raw, raw);
+  for (std::uint32_t coord = 0; coord <= wide_count; ++coord) {
+    const std::uint32_t modulus = coord < wide_count ? width : size;
+    const std::uint32_t salt = (index << 4) | (coord < wide_count ? coord : 15u);
+    const std::uint32_t label =
+        detail::tupleLabel(block, tag, modulus, salt, raw_at(0, coord),
+                           raw_at(block_size - 1, coord), raw_at(position, coord));
+    if (coord < wide_count)
+      out.wide[coord] = label;
+    else
+      out.last = label;
   }
-  const auto last_raw_value = static_cast<std::uint32_t>(
-      (rest % size + static_cast<std::uint64_t>(mult) * position) % size);
-  const std::uint32_t last_edge = (size - 1 + size - mult % size) % size;
-  out.last = detail::tupleLabel(block, tag, size, (index << 4) | 15u, 0, last_edge, last_raw_value);
   return out;
 }
 

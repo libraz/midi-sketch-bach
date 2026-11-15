@@ -232,7 +232,7 @@ TEST(SeedTupleChoice, MatchesGoldenValues) {
   EXPECT_EQ(second.wide[1], 1u);
   EXPECT_EQ(second.last, 0u);
   const TupleChoice block_end = seedTupleChoice(47u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
-  EXPECT_EQ(block_end.wide[0], 1u);
+  EXPECT_EQ(block_end.wide[0], 0u);
   EXPECT_EQ(block_end.wide[1], 0u);
   EXPECT_EQ(block_end.last, 0u);
   const TupleChoice next_block = seedTupleChoice(48u, SeedDecision::kSubject, 4u, 2u, 3u, 4u);
@@ -243,8 +243,8 @@ TEST(SeedTupleChoice, MatchesGoldenValues) {
   EXPECT_EQ(wide.wide, (std::array<std::uint32_t, kMaxTupleWide>{2u, 1u, 1u, 0u}));
   EXPECT_EQ(wide.last, 7u);
   const TupleChoice large = seedTupleChoice(0x0FFFFFFFu, SeedDecision::kSubject, 4u, 1u, 7u);
-  EXPECT_EQ(large.wide[0], 0u);
-  EXPECT_EQ(large.last, 2u);
+  EXPECT_EQ(large.wide[0], 3u);
+  EXPECT_EQ(large.last, 0u);
   static_assert(seedTupleChoice(1u, SeedDecision::kSubject, 4u, 2u, 3u, 4u).wide[1] == 1u,
                 "seedTupleChoice must be a constant expression");
 }
@@ -299,24 +299,62 @@ TEST(SeedTupleChoice, EveryWideCoordinatePermutesEachBlockOfItsWidth) {
 TEST(SeedTupleChoice, ABlocksLastTupleIsItsPlainShuffle) {
   for (const TupleShape& shape : kTupleShapes) {
     const std::uint32_t block_size = blockSizeOf(shape);
-    const std::uint32_t mult = detail::tupleMultiplier(shape.width, shape.wide_count, shape.size);
+    std::uint32_t mult = 0;
+    if (shape.wide_count > 1)
+      mult = detail::tupleMultiplier(shape.width, shape.wide_count, shape.size);
     for (std::uint32_t block = 0; block < 6; ++block) {
       const TupleChoice last =
           seedTupleChoice(block * block_size + block_size - 1, SeedDecision::kSubject, shape.width,
                           shape.wide_count, shape.size, 9u);
+      const auto last_raw = [&](std::uint32_t coord) {
+        return detail::tupleRaw(block_size - 1, shape.width, shape.wide_count, shape.size, mult,
+                                coord);
+      };
       for (std::uint32_t coord = 0; coord < shape.wide_count; ++coord) {
-        const std::uint32_t last_raw = coord == 0 ? shape.width - 1 : shape.width - 2;
         EXPECT_EQ(last.wide[coord],
                   detail::blockShuffleAt(block, SeedDecision::kSubject, shape.width,
-                                         (9u << 4) | coord, last_raw))
+                                         (9u << 4) | coord, last_raw(coord)))
             << "size " << shape.size << " block " << block;
       }
-      const std::uint32_t last_raw = (shape.size - 1 + shape.size - mult % shape.size) % shape.size;
       EXPECT_EQ(last.last, detail::blockShuffleAt(block, SeedDecision::kSubject, shape.size,
-                                                  (9u << 4) | 15u, last_raw))
+                                                  (9u << 4) | 15u, last_raw(shape.wide_count)))
           << "size " << shape.size << " block " << block;
     }
   }
+}
+
+// No coordinate is a function of seed % width over a block, so no choice repeats with the
+// width's period. The other properties are read over the same shapes: every wide count, and
+// every size a draw class may have.
+TEST(SeedTupleChoice, NoCoordinateFollowsTheSeedResidueOverABlock) {
+  int shapes = 0;
+  for (std::uint32_t wide_count = 1; wide_count <= kMaxTupleWide; ++wide_count) {
+    for (std::uint32_t size = 3; size <= 12; ++size) {
+      const TupleShape shape{4, wide_count, size};
+      const std::uint32_t block_size = blockSizeOf(shape);
+      for (std::uint32_t block = 0; block < 2; ++block) {
+        std::set<std::vector<std::uint32_t>> seen;
+        std::vector<std::vector<std::uint32_t>> tuples;
+        for (std::uint32_t pos = 0; pos < block_size; ++pos)
+          tuples.push_back(tupleAt(block * block_size + pos, shape, 2u));
+        seen.insert(tuples.begin(), tuples.end());
+        EXPECT_EQ(seen.size(), block_size) << "wide " << wide_count << " size " << size;
+        for (std::size_t coord = 0; coord <= wide_count; ++coord) {
+          bool follows = true;
+          for (std::uint32_t pos = shape.width; pos < block_size && follows; ++pos)
+            follows = tuples[pos][coord] == tuples[pos % shape.width][coord];
+          EXPECT_FALSE(follows) << "wide " << wide_count << " size " << size << " coord " << coord;
+        }
+        for (std::uint32_t pos = 1; pos < block_size; ++pos) {
+          for (std::size_t coord = 0; coord <= wide_count; ++coord)
+            EXPECT_NE(tuples[pos - 1][coord], tuples[pos][coord])
+                << "wide " << wide_count << " size " << size << " pos " << pos;
+        }
+      }
+      ++shapes;
+    }
+  }
+  EXPECT_EQ(shapes, 40);
 }
 
 TEST(SeedTupleChoice, IndexSeparatesRepeatedDrawsOfOneDecision) {
