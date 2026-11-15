@@ -187,16 +187,19 @@ TEST(CompassPlacementTest, PreferredCompassLeavesAFittingScoreUntouched) {
     EXPECT_EQ(result.notes[idx].pitch, before.notes[idx].pitch);
 }
 
-// The chaconne spans 56 semitones at 128 bars, which no whole octave fits
-// inside the violin compass in G, D or F minor; every note of the placed piece
-// must still sound inside it.
+// Composed in the key it is placed in, as the product does, the chaconne at 128
+// bars spans 48-56 semitones and every note sounds inside the violin compass.
 TEST(CompassPlacementTest, ChaconneSoundsInsideTheViolinCompassInEveryKey) {
   const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Violin);
-  for (Key key : {Key::C, Key::G, Key::D, Key::F}) {
-    for (std::uint32_t seed : {1u, 2u, 4u}) {
+  constexpr std::uint32_t kSeeds[3] = {1u, 2u, 4u};
+  for (int tonic = 0; tonic < 12; ++tonic) {
+    const Key key = static_cast<Key>(tonic);
+    const std::uint32_t seed = kSeeds[tonic % 3];
+    for (bool minor : {false, true}) {
       ComposeRequest request;
       request.form = FormType::Chaconne;
-      request.is_minor = key != Key::C;
+      request.is_minor = minor;
+      request.tonic = key;
       request.character = SubjectCharacter::Noble;
       request.target_bars = 128;
       request.seed = seed;
@@ -228,9 +231,9 @@ TEST(CompassPlacementTest, ChaconneSoundsInsideTheViolinCompassInEveryKey) {
         const int sounding =
             static_cast<int>(note.pitch) + keyTranspositionSemitones(key) + placement->octave_shift;
         EXPECT_GE(sounding, static_cast<int>(range.low))
-            << "key " << static_cast<int>(key) << " seed " << seed;
+            << "key " << tonic << " minor " << minor << " seed " << seed;
         EXPECT_LE(sounding, static_cast<int>(range.high))
-            << "key " << static_cast<int>(key) << " seed " << seed;
+            << "key " << tonic << " minor " << minor << " seed " << seed;
       }
     }
   }
