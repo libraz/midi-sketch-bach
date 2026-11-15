@@ -68,8 +68,8 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
                         const ResolvedRequest& req);
 
 /// @brief Settle the free lines against the statements: local-key spelling,
-///        theme inflections, handoffs, seams, parallels, unsupported sevenths
-///        and strong-beat suspensions.
+///        theme inflections, handoffs, seams, parallels and unsupported
+///        sevenths.
 ///
 /// @param asm_ctx Assembly whose free lines and harmony are settled in place.
 /// @param first_bar Material and chords starting before this bar are left as
