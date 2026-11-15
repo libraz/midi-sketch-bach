@@ -37,8 +37,9 @@ using rng::SeedDecision;
 // -- the line opens on a chord tone, runs scalewise up the diatonic scale and
 // folds back down, predominantly by step -- rather than wide bass-fifth-third
 // broken chords on every note. The register depth of the solo suites comes from
-// the bariolage bars, whose pedal can drop an octave to the low strings so the
-// bar spans an octave and implies a bass; no note-to-note leap exceeds an octave.
+// the open chord outline, whose bass sits on the low strings under the chord
+// spread to the tenth, from the across-bar run sequences, and from the bariolage
+// pedal dropped an octave; no note-to-note leap exceeds an octave.
 //
 // A bar is its figure variant hung on an anchor. The anchor rotates through the
 // members of the bar's chord and each figure draws its variant per bar, so a
@@ -240,10 +241,11 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     int landing_lo = -1;  // the landing leading tone (implicit bass of the trill).
     int landing_hi = -1;  // the landing tonic (implicit top of the trill).
 
-    // The bar figure rotates per BAR among three textures the real solo-cello
-    // prelude mixes: the small oscillation cell, a scale-run triangle, and a
-    // pedal-point bariolage. A single oscillation cell looped all piece long
-    // concentrated the interval-bigram surface on a handful of pendulum
+    // The bar figure rotates per BAR among five textures the solo-cello
+    // prelude mixes: the small oscillation cell, scale runs, broken thirds, a
+    // pedal-point bariolage and an open chord outline. A single oscillation
+    // cell looped all piece long concentrated the interval-bigram surface on a
+    // handful of pendulum
     // bigrams (x|-x); the corpus bigram mass lives on step chains and varied
     // figures, so the rotation is what restores it. Each candidate's implicit
     // bass/top streams (per-cell min/max, including the boundary to the
@@ -292,6 +294,61 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
       for (int idx = 0; idx < 8; ++idx) {
         p[static_cast<std::size_t>(idx)] = swap_halves ? arch_b[idx] : arch_a[idx];
         p[static_cast<std::size_t>(8 + idx)] = swap_halves ? arch_a[idx] : arch_b[idx];
+      }
+    };
+    // The low bass the outline and the run sequence start from: pitch class
+    // `pc` at or above an octave under the anchor, lifted an octave below the floor.
+    const auto low_tone = [&](int pc) {
+      const int base = anchor - 12;
+      const int bass = base + ((pc - base) % 12 + 12) % 12;
+      return bass < line_floor ? bass + 12 : bass;
+    };
+    auto run_sequence_bar = [&](std::array<int, 16>& p, bool falling) {
+      // A scale across the bar from the low root, rising (or falling) in four-note
+      // runs that each start two degrees past the last. The bar spans nine
+      // degrees while every step is a second, and the cell extremes advance a
+      // third per cell, so neither implied stream leaps by a fifth or a tritone.
+      const int bass = low_tone(root_pc);
+      for (int slot = 0; slot < kNotesPerBar; ++slot) {
+        const int degree = (slot / 4) * 2 + slot % 4;
+        p[static_cast<std::size_t>(slot)] = walk(bass, falling ? 9 - degree : degree, harmonic);
+      }
+    };
+    // Open chord outline: a bass on the low strings and the bar's chord spread
+    // above it to the tenth, with the step under the tenth as a neighbour. Each
+    // two-beat unit pairs a cell rising from the bass with one falling back, so a
+    // beat spans more than an octave, no step exceeds kMaxLineLeap and no cell
+    // ends on the tenth. The cell extremes are the implied bass and top streams.
+    // Slots are chord members over the bass: 0 bass, 3 third, 5 fifth (the sixth
+    // over a first-inversion bass), 8 octave, 9 the step under the tenth, 10 tenth.
+    static constexpr int kOutlineCells[2][2][4] = {
+        {{0, 5, 10, 9}, {8, 5, 3, 5}},   // the top falls a third, the bass a third.
+        {{0, 5, 10, 9}, {10, 9, 8, 5}},  // the top steps back down to the fifth.
+    };
+    // The outline's bass, or -1 for a chord the scale does not spell (left to
+    // the other figures). A diminished triad takes its third as the bass, since
+    // root to fifth is a diminished fifth.
+    auto outline_bass = [&]() {
+      const int root = low_tone(root_pc);
+      const int third = walk(root, 2, harmonic);
+      if (third - root != (chords[static_cast<std::size_t>(bar)].minor ? 3 : 4))
+        return -1;
+      return walk(root, 4, harmonic) - root == 6 ? low_tone(third % 12) : root;
+    };
+    auto outline_bar = [&](std::array<int, 16>& p, int bass, int variant) {
+      const bool diminished = bass % 12 != root_pc;
+      const auto member = [&](int slot) {
+        if (slot == 0)
+          return bass;
+        const int steps = slot == 3 ? 2 : slot == 5 ? (diminished ? 5 : 4) : slot - 1;
+        return walk(bass, steps, harmonic);
+      };
+      const int shape = variant / 2;
+      const int lead = variant % 2;  // 1: the falling cell opens the bar.
+      for (int cell = 0; cell < 4; ++cell) {
+        const int* cells = kOutlineCells[shape][(cell + lead) % 2];
+        for (int idx = 0; idx < 4; ++idx)
+          p[static_cast<std::size_t>(cell * 4 + idx)] = member(cells[idx]);
       }
     };
     auto broken_thirds_bar = [&](std::array<int, 16>& p, int row) {
@@ -486,14 +543,15 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
     // The figure preference walks with bar AND cycle: a plain bar % 4 stride
     // is 4-periodic and would hand every cycle's first bar (the 4-bar grid)
     // the same figure, freezing the cycle-opening contour the rotation
-    // exists to vary. The character orders the four figures before the
-    // rotation walks them, so the same bar reaches for a different texture
+    // exists to vary. The character orders the first four figures before the
+    // rotation walks them (the outline follows them in every order), so the same
+    // bar reaches for a different texture
     // per character; the uniform sixteenth flow is the form's identity, so
     // texture is the only axis on which the characters can differ here.
     // Unsigned arithmetic: a seed at or above 2^31 cast to int is negative, and
     // a negative preference would leave every figure branch unmatched.
     const int pref = static_cast<int>(detail::figureChoice(
-        req.character, 4,
+        req.character, 5,
         req.seed + static_cast<std::uint32_t>(bar) + static_cast<std::uint32_t>(cycle)));
     // Per-bar variant rotations, each from its own seed-drawn offset. They walk
     // bar alone, the anchor and the figure preference bar + cycle, so no two
@@ -506,9 +564,10 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
                               count);
     };
     const int osc_turn = rotation(SeedDecision::kLinearCellPhase, 3u);
-    const int arch_turn = rotation(SeedDecision::kLinearArchOrder, 2u);
+    const int arch_turn = rotation(SeedDecision::kLinearArchOrder, 4u);
     const int row_turn = rotation(SeedDecision::kLinearThirdsRow, 4u);
     const int pedal_turn = rotation(SeedDecision::kLinearPedalTurn, 2u);
+    const int outline_turn = rotation(SeedDecision::kLinearOutlineTurn, 4u);
     // Whether the piece has already stated this bar. Two repeats stay fresh, as
     // the idiom keeps them: an echo of the bar just heard, and the opening bar
     // returning among the last four figuration bars.
@@ -570,9 +629,9 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
         }
         return false;
       };
-      for (int attempt = 0; attempt < 4; ++attempt) {
+      for (int attempt = 0; attempt < 5; ++attempt) {
         bool fresh = false;
-        switch ((pref + attempt) % 4) {
+        switch ((pref + attempt) % 5) {
           case 0:
             // Three cell phases at the drawn reach, then at the other one.
             fresh = try_variants(6, [&](int turn) {
@@ -583,13 +642,26 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
             fresh = try_bariolage();
             break;
           case 2:
-            fresh = try_variants(
-                2, [&](int turn) { run_triangle_bar(pitches, (arch_turn + turn) % 2 != 0); });
+            // The two half-bar arches, then the rising and falling sequences.
+            fresh = try_variants(4, [&](int turn) {
+              const int variant = (arch_turn + turn) % 4;
+              if (variant < 2)
+                run_triangle_bar(pitches, variant != 0);
+              else
+                run_sequence_bar(pitches, variant == 3);
+            });
             break;
-          default:
+          case 3:
             fresh = try_variants(
                 4, [&](int turn) { broken_thirds_bar(pitches, (row_turn + turn) % 4); });
             break;
+          default: {
+            const int bass = outline_bass();
+            fresh = bass >= 0 && try_variants(4, [&](int turn) {
+                      outline_bar(pitches, bass, (outline_turn + turn) % 4);
+                    });
+            break;
+          }
         }
         if (fresh)
           return true;

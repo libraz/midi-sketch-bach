@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -325,9 +326,10 @@ constexpr std::array<SubjectCharacter, 4> kCharacters = {
      SubjectCharacter::Restless}};
 
 // The solo-suite preludes span an octave or more in most bars and reach the
-// low strings; the bariolage pedal dropped an octave is what gives this line
-// that depth. Across the sweep a share of the sixteenth bars spans an octave,
-// and most pieces reach below B2 without leaving the cello's compass.
+// low strings; the chord outline, the across-bar runs and the bariolage pedal
+// dropped an octave give this line that depth. Across the sweep a share of the
+// sixteenth bars spans an octave, and most pieces reach below B2 without
+// leaving the cello's compass.
 TEST(FormLinearCello, BariolagePedalReachesTheLowStrings) {
   int wide_bars = 0;
   int figuration_bars = 0;
@@ -367,6 +369,94 @@ TEST(FormLinearCello, BariolagePedalReachesTheLowStrings) {
   EXPECT_GE(static_cast<double>(wide_bars) / static_cast<double>(figuration_bars), 0.05)
       << wide_bars << "/" << figuration_bars << " bars span an octave";
   EXPECT_GE(low_pieces * 4, pieces * 3) << low_pieces << "/" << pieces << " pieces go below B2";
+}
+
+// The sixteenth bars of a piece: sixteen pitches per bar, the held landing left out.
+std::vector<std::vector<int>> figurationBars(const std::vector<NoteEvent>& notes) {
+  std::map<Tick, std::vector<int>> bars;
+  for (const NoteEvent& note : notes)
+    bars[note.start_tick / kTicksPerBar].push_back(note.pitch);
+  std::vector<std::vector<int>> out;
+  for (const auto& [bar, pitches] : bars) {
+    if (pitches.size() == 16)
+      out.push_back(pitches);
+  }
+  return out;
+}
+
+// The step contour of a chord-outline bar's two-beat unit, or empty when the bar
+// is no outline: an outline repeats its two-beat unit and spans more than an
+// octave within a beat.
+std::vector<int> outlineContour(const std::vector<int>& bar) {
+  bool beat_wide = false;
+  for (std::size_t cell = 0; cell < 4; ++cell) {
+    const auto first = bar.begin() + static_cast<std::ptrdiff_t>(cell * 4);
+    const auto [lo, hi] = std::minmax_element(first, first + 4);
+    beat_wide = beat_wide || *hi - *lo > 12;
+  }
+  if (!beat_wide || !std::equal(bar.begin(), bar.begin() + 8, bar.begin() + 8))
+    return {};
+  std::vector<int> contour;
+  for (std::size_t idx = 1; idx < 8; ++idx)
+    contour.push_back(bar[idx] > bar[idx - 1] ? 1 : bar[idx] < bar[idx - 1] ? -1 : 0);
+  return contour;
+}
+
+// Every character in both modes reaches a bar wider than an octave at medium
+// length, the span the solo-suite preludes take in most of their wide bars.
+TEST(FormLinearCello, EveryCharacterSpansMoreThanAnOctave) {
+  for (SubjectCharacter character : kCharacters) {
+    for (bool minor : kMinorFlags) {
+      int widest = 0;
+      for (std::uint32_t seed : kSeeds) {
+        for (const std::vector<int>& bar : figurationBars(celloLine(character, seed, minor, 32))) {
+          const auto [lo, hi] = std::minmax_element(bar.begin(), bar.end());
+          widest = std::max(widest, *hi - *lo);
+        }
+      }
+      EXPECT_GT(widest, 12) << "character=" << static_cast<int>(character) << " minor=" << minor;
+    }
+  }
+}
+
+// A cell wider than an octave never ends on its top note (the outline's tenth),
+// so the cell that follows opens within an octave of where it ends.
+TEST(FormLinearCello, NoWideCellEndsOnItsTop) {
+  for (SubjectCharacter character : kCharacters) {
+    for (std::uint32_t seed : kSeeds) {
+      for (bool minor : kMinorFlags) {
+        for (const std::vector<int>& bar : figurationBars(celloLine(character, seed, minor, 32))) {
+          for (std::size_t cell = 0; cell < 4; ++cell) {
+            const auto first = bar.begin() + static_cast<std::ptrdiff_t>(cell * 4);
+            const auto [lo, hi] = std::minmax_element(first, first + 4);
+            if (*hi - *lo > 12) {
+              EXPECT_LT(bar[cell * 4 + 3], *hi) << "character=" << static_cast<int>(character)
+                                                << " seed=" << seed << " minor=" << minor;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// The seed reaches the outline itself: across the seeds of one character and
+// mode the outline bars take more than one shape or order.
+TEST(FormLinearCello, SeedsVaryTheOutline) {
+  for (SubjectCharacter character : kCharacters) {
+    for (bool minor : kMinorFlags) {
+      std::set<std::vector<int>> contours;
+      for (std::uint32_t seed : kSeeds) {
+        for (const std::vector<int>& bar : figurationBars(celloLine(character, seed, minor, 32))) {
+          std::vector<int> contour = outlineContour(bar);
+          if (!contour.empty())
+            contours.insert(std::move(contour));
+        }
+      }
+      EXPECT_GE(contours.size(), 2u)
+          << "character=" << static_cast<int>(character) << " minor=" << minor;
+    }
+  }
 }
 
 // No note-to-note leap of the line, bar seams and the cadential landing
