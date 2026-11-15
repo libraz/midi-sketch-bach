@@ -56,6 +56,7 @@
 #include <optional>
 #include <vector>
 
+#include "composer/harmonic_plan.h"
 #include "composer/provenance.h"
 #include "composer/rule_helpers.h"
 #include "composer/voice_intent.h"
@@ -331,6 +332,10 @@ struct BassFourthCounts {
   std::size_t short_leap = 0;
   std::size_t short_other = 0;
 
+  // Fourths of a declared cadential six-four whose composed line resolves them,
+  // by the same kinds: left out of every column above.
+  std::array<std::size_t, 4> six_four_exempt{};
+
   void add(const BassFourthCounts& other) {
     upper_samples += other.upper_samples;
     unresolved += other.unresolved;
@@ -338,6 +343,15 @@ struct BassFourthCounts {
     short_step += other.short_step;
     short_leap += other.short_leap;
     short_other += other.short_other;
+    for (std::size_t kind = 0; kind < six_four_exempt.size(); ++kind)
+      six_four_exempt[kind] += other.six_four_exempt[kind];
+  }
+
+  std::size_t sixFourExempted() const {
+    std::size_t total = 0;
+    for (std::size_t count : six_four_exempt)
+      total += count;
+    return total;
   }
 
   void count(rule_helpers::BassFourthKind kind) {
@@ -395,11 +409,39 @@ bool isPedalNote(const std::vector<NoteProvenance>& provenance, std::size_t note
          (entry.satisfied_rules & pedal_bits) != RuleIdMask{};
 }
 
+// A cadential six-four the plan declares is a dissonance by design: its fourth is
+// judged by the composed line, which must step it down by the declared
+// resolution. The decorated surface may ornament that step without un-licensing
+// it, so the read is on the composed array.
+struct SixFourJudgement {
+  const std::vector<CadentialSixFour>& six_fours;
+  const std::vector<NoteEvent>& composed;
+};
+
 BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
-                                            const std::vector<NoteProvenance>& provenance = {}) {
+                                            const std::vector<NoteProvenance>& provenance = {},
+                                            const SixFourJudgement* six_four = nullptr) {
   BassFourthCounts counts;
   if (notes.empty())
     return counts;
+  std::optional<SoundingPitchIndex> composed_index;
+  if (six_four != nullptr)
+    composed_index.emplace(six_four->composed);
+  // True when `voice` bears the fourth of a declared cadential six-four at `tick`
+  // and the composed line steps it down by the resolution.
+  const auto resolvesDeclaredSixFour = [&](VoiceId voice, Tick tick) {
+    if (six_four == nullptr)
+      return false;
+    for (const CadentialSixFour& declared : six_four->six_fours) {
+      if (declared.type != SixFourType::Cadential || tick < declared.tick ||
+          tick >= declared.resolution_tick)
+        continue;
+      const int fourth = composed_index->pitchAt(voice, tick);
+      const int resolution = composed_index->pitchAt(voice, declared.resolution_tick);
+      return fourth != 0 && resolution != 0 && fourth - resolution >= 1 && fourth - resolution <= 2;
+    }
+    return false;
+  };
 
   Tick end = 0;
   std::vector<VoiceId> voices;
@@ -474,8 +516,14 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
                                                  &resolution_tick) &&
                index.lowestPitchHolds(tick, resolution_tick, bass);
       };
-      if (rule_helpers::isUnresolvedBassFourth(sample.pitch, bass, next_bass, over_pedal, resolves))
-        counts.count(kindOf(sample.note_index));
+      if (!rule_helpers::isUnresolvedBassFourth(sample.pitch, bass, next_bass, over_pedal,
+                                                resolves))
+        continue;
+      const rule_helpers::BassFourthKind kind = kindOf(sample.note_index);
+      if (resolvesDeclaredSixFour(sample.voice, tick))
+        ++counts.six_four_exempt[static_cast<std::size_t>(kind)];
+      else
+        counts.count(kind);
     }
   }
   return counts;
@@ -655,6 +703,43 @@ TEST(BassFourthCounter, ReportsAFourthTheBassParksUnder) {
   EXPECT_EQ(counts.unresolved, 2u);
   EXPECT_EQ(counts.upper_samples, 3u);
   EXPECT_EQ(counts.held, 2u);
+}
+
+TEST(BassFourthCounter, ADeclaredSixFourIsJudgedByItsComposedResolution) {
+  // C3 held under F4; the shipped line turns up to G before it reaches E, the
+  // composed line steps F to E on beat two.
+  const std::vector<NoteEvent> composed = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 480, 65),
+      makeNote(0, 480, 960, 64),
+  };
+  const std::vector<NoteEvent> shipped = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 240, 65),
+      makeNote(0, 240, 240, 67),
+      makeNote(0, 480, 960, 64),
+  };
+  EXPECT_EQ(countUnresolvedBassFourths(shipped).unresolved, 1u);
+
+  std::vector<CadentialSixFour> declared(1);
+  declared[0].tick = 0;
+  declared[0].resolution_tick = 480;
+  const SixFourJudgement judged{declared, composed};
+  const BassFourthCounts counts = countUnresolvedBassFourths(shipped, {}, &judged);
+  EXPECT_EQ(counts.unresolved, 0u);
+  EXPECT_EQ(counts.sixFourExempted(), 1u);
+
+  // A composed line that holds the fourth through the resolution is still counted.
+  const std::vector<NoteEvent> held_composed = {
+      makeNote(1, 0, 1440, 48),
+      makeNote(0, 0, 1440, 65),
+  };
+  const SixFourJudgement unresolved{declared, held_composed};
+  EXPECT_EQ(countUnresolvedBassFourths(shipped, {}, &unresolved).unresolved, 1u);
+
+  // Only a Cadential six-four is judged this way.
+  declared[0].type = SixFourType::Passing;
+  EXPECT_EQ(countUnresolvedBassFourths(shipped, {}, &judged).unresolved, 1u);
 }
 
 TEST(BassFourthCounter, ShortFourthsAreSortedByHowTheirLineMoves) {
@@ -1217,7 +1302,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 21 -> 20,
     // battuta 41 -> 26, anti 2 -> 0, worst-cell battuta 3 -> 2, anti 1 -> 0, fourths 184 -> 178,
     // successions 51390 -> 51369.
-    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, {152, 14, 5, 7}},
+    // A declared cadential six-four is judged by its composed resolution: held 152 -> 88
+    // (64 exempt).
+    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, {88, 14, 5, 7}},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1324,7 +1411,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Figuration lines and seams relieved by the shared perfect-motion rank, never arriving
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 21 -> 18,
     // battuta 27 -> 12.
-    {FormType::PreludeAndFugue, 0, 0, 18, 12, 0, 0, 3, 2, 0, 31968, {88, 4, 4, 0}},
+    // A declared cadential six-four is judged by its composed resolution: held 88 -> 24
+    // (64 exempt).
+    {FormType::PreludeAndFugue, 0, 0, 18, 12, 0, 0, 3, 2, 0, 31968, {24, 4, 4, 0}},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -2072,7 +2161,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
           worst_hidden = std::max(worst_hidden, cell.hidden());
           worst_battuta = std::max(worst_battuta, cell.battuta);
           worst_anti = std::max(worst_anti, cell.anti_parallel);
-          bass_fourths.add(countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance));
+          const SixFourJudgement six_four{gate.fixture.harmony.cadential_six_fours,
+                                          gate.composed.notes};
+          bass_fourths.add(
+              countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance, &six_four));
         });
 
     // Emitted on every run so the current measurement is visible when the
@@ -2085,10 +2177,12 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
         worst_hidden, worst_battuta, worst_anti, total.successions);
     std::printf(
         "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
-        "upper-samples=%zu\n",
+        "upper-samples=%zu | six-four exempt=%zu (%zu/%zu/%zu/%zu)\n",
         formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
         bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
-        bass_fourths.upper_samples);
+        bass_fourths.upper_samples, bass_fourths.sixFourExempted(), bass_fourths.six_four_exempt[0],
+        bass_fourths.six_four_exempt[1], bass_fourths.six_four_exempt[2],
+        bass_fourths.six_four_exempt[3]);
     EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint changed "
@@ -2319,7 +2413,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 206 -> 138,
     // battuta 246 -> 176, anti 12 -> 0, worst-cell hidden 6 -> 4, battuta 4 -> 3, anti 1 -> 0,
     // successions 505961 -> 505835, fourths 1159 -> 1153.
-    {FormType::Fugue, 0, 0, 138, 176, 0, 0, 4, 3, 0, 505835, {924, 92, 73, 64}},
+    // A declared cadential six-four is judged by its composed resolution: held 924 -> 668
+    // (256 exempt).
+    {FormType::Fugue, 0, 0, 138, 176, 0, 0, 4, 3, 0, 505835, {668, 92, 73, 64}},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2433,7 +2529,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 179 -> 131,
     // battuta 203 -> 113, anti 24 -> 0, worst-cell battuta 5 -> 3, anti 2 -> 0,
     // fourths 945 -> 939.
-    {FormType::PreludeAndFugue, 0, 0, 131, 113, 0, 0, 4, 3, 0, 647533, {752, 60, 86, 41}},
+    // A declared cadential six-four is judged by its composed resolution: held 752 -> 432
+    // (320 exempt).
+    {FormType::PreludeAndFugue, 0, 0, 131, 113, 0, 0, 4, 3, 0, 647533, {432, 60, 86, 41}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {
@@ -2459,7 +2557,10 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) 
           worst_hidden = std::max(worst_hidden, cell.hidden());
           worst_battuta = std::max(worst_battuta, cell.battuta);
           worst_anti = std::max(worst_anti, cell.anti_parallel);
-          bass_fourths.add(countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance));
+          const SixFourJudgement six_four{gate.fixture.harmony.cadential_six_fours,
+                                          gate.composed.notes};
+          bass_fourths.add(
+              countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance, &six_four));
         });
     std::printf(
         "[counterpoint/length] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu "
@@ -2470,10 +2571,12 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) 
         worst_hidden, worst_battuta, worst_anti, total.successions);
     std::printf(
         "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
-        "upper-samples=%zu\n",
+        "upper-samples=%zu | six-four exempt=%zu (%zu/%zu/%zu/%zu)\n",
         formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
         bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
-        bass_fourths.upper_samples);
+        bass_fourths.upper_samples, bass_fourths.sixFourExempted(), bass_fourths.six_four_exempt[0],
+        bass_fourths.six_four_exempt[1], bass_fourths.six_four_exempt[2],
+        bass_fourths.six_four_exempt[3]);
     EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint changed "
