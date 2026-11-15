@@ -202,6 +202,25 @@ WindowFaults windowFaults(const std::array<const std::vector<MaterialNote>*, 3>&
   return faults;
 }
 
+/// @brief Whether `line` strikes, while `held` is suspended over [from, to), the other
+///        inflection of the held tone's letter: a minor key's lowered against raised 6th or 7th.
+bool inflectsHeldLetter(const std::vector<MaterialNote>& line, const HarmonicPlan& plan, int held,
+                        Tick from, Tick to) {
+  for (const MaterialNote& note : line) {
+    if (note.start_tick + note.duration <= from || note.start_tick >= to)
+      continue;
+    const KeyContext key = rule_helpers::keyAt(plan, std::max(note.start_tick, from));
+    if (!key.is_minor)
+      continue;
+    const int held_degree = ((held - key.tonic_pc) % 12 + 12) % 12;
+    const int struck_degree = ((static_cast<int>(note.pitch) - key.tonic_pc) % 12 + 12) % 12;
+    const int low = std::min(held_degree, struck_degree);
+    if (std::max(held_degree, struck_degree) == low + 1 && (low == 8 || low == 10))
+      return true;
+  }
+  return false;
+}
+
 /// @brief One prepared suspension in the sparse manual, with the pedal tones it re-chooses
 ///        and the passing tone its resumed beat may open on.
 struct ChainLink {
@@ -450,6 +469,8 @@ void placeSuspensionChains(HarnessFixture& out, const std::vector<ChordSpec>& ch
         if (type == SuspensionType::Sus9_8 && !(shape == kEighth && walk_holds_eighth))
           continue;
         const int other_at_res = pitchSoundingAt(other_line, resolution);
+        if (inflectsHeldLetter(other_line, out.harmony, held, suspension, resolution))
+          continue;
         if (other_at_res < 0 || resolved <= root ||
             (holder == 1 ? resolved >= other_at_res : resolved <= other_at_res))
           continue;

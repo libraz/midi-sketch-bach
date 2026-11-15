@@ -385,8 +385,9 @@ TEST(MinorSpellingSweep, DominantSpansKeepTheLeadingTone) {
 
 // The trio is written bar by bar against its own plan with no verbatim
 // material, so no voice has a reason to contradict the leading tone: across
-// seeds and lengths no lowered 7th sounds over V and no line steps by a
-// chromatic semitone through it. RATCHET: the augmented seconds left are the
+// seeds and lengths no lowered 7th sounds over V, no line steps by a
+// chromatic semitone through it, and no voice there strikes the other
+// inflection of a letter another voice sounds. RATCHET: the augmented seconds left are the
 // pedal's leading tone into a deceptive root where no other tone in reach
 // clears a perfect-motion fault, and the middle manual's beat into that bar.
 // The 48- and 128-bar requests joined the sweep as a change of measurement: 17 -> 56.
@@ -405,6 +406,7 @@ TEST(MinorSpellingSweep, TrioSonataKeepsTheLeadingToneAtEveryLength) {
               total.augmented_second_over_dominant, total.false_relation_over_dominant);
   EXPECT_EQ(total.lowered_seventh_over_dominant, 0u);
   EXPECT_EQ(total.same_letter_step_over_dominant, 0u);
+  EXPECT_EQ(total.false_relation_over_dominant, 0u);
   EXPECT_LE(total.augmented_second_over_dominant, 56u);
 }
 
