@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -560,6 +562,28 @@ TEST(CompositionServiceTest, ChaconneVelocityFollowsSarabandeMeterInJsonAndMidi)
 // chain of separate strokes. The notated lengths survive in the exported
 // report, so a lift is read exactly rather than inferred from the gap, which
 // on its own cannot be told from a rest.
+// True when a voice of `product` strikes one pitch twice in a row with nothing
+// between the notated notes: the re-strike the touch has to part.
+bool hasStruckRepeat(const CompositionProduct& product, const std::vector<Tick>& notated) {
+  const auto& notes = product.composition.notes;
+  std::map<VoiceId, std::vector<std::size_t>> by_voice;
+  for (std::size_t idx = 0; idx < notes.size(); ++idx)
+    by_voice[notes[idx].voice].push_back(idx);
+  for (auto& [voice, line] : by_voice) {
+    std::sort(line.begin(), line.end(), [&notes](std::size_t lhs, std::size_t rhs) {
+      return notes[lhs].start_tick < notes[rhs].start_tick;
+    });
+    for (std::size_t pos = 0; pos + 1 < line.size(); ++pos) {
+      const std::size_t here = line[pos];
+      const std::size_t next = line[pos + 1];
+      if (notes[here].pitch == notes[next].pitch &&
+          notes[here].start_tick + notated[here] >= notes[next].start_tick)
+        return true;
+    }
+  }
+  return false;
+}
+
 TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
   constexpr std::array<FormType, 10> kAllForms = {{
       FormType::Fugue,
@@ -577,18 +601,46 @@ TEST(CompositionServiceTest, EveryShippedFormIsArticulated) {
     CompositionRequest request;
     request.form = form;
     request.character = SubjectCharacter::Severe;
-    // The cello prelude is an unbroken sixteenth flow, so a stroke has something
-    // to part only where the figuration repeats a pitch; seed 42 composes a
-    // piece with no such repeat, which says nothing about the touch itself.
-    request.seed = form == FormType::CelloPrelude ? 43 : 42;
+    request.seed = 42;
     request.bpm = 100;
     CompositionProduct product;
     ASSERT_EQ(compose(request, &product), CompositionStatus::Ok)
         << "form " << static_cast<int>(form);
-
-    const std::vector<Tick> notated = jsonDurations(product.generated_json);
+    std::vector<Tick> notated = jsonDurations(product.generated_json);
     ASSERT_EQ(notated.size(), product.composition.notes.size())
         << "form " << static_cast<int>(form);
+
+    // The cello prelude is an unbroken sixteenth flow, so a stroke has something
+    // to part only where the figuration repeats a pitch: the piece is the first of
+    // a fixed seed range that has such a repeat, and a range with none is itself
+    // the finding that repeated tones have become too rare.
+    if (form == FormType::CelloPrelude) {
+      constexpr std::uint32_t kFirstSeed = 1;
+      constexpr std::uint32_t kSeedRange = 16;
+      bool found = false;
+      std::size_t qualifying = 0;
+      CompositionProduct candidate;
+      for (std::uint32_t seed = kFirstSeed; seed < kFirstSeed + kSeedRange; ++seed) {
+        request.seed = seed;
+        ASSERT_EQ(compose(request, &candidate), CompositionStatus::Ok) << "cello seed " << seed;
+        const std::vector<Tick> candidate_notated = jsonDurations(candidate.generated_json);
+        ASSERT_EQ(candidate_notated.size(), candidate.composition.notes.size())
+            << "cello seed " << seed;
+        if (!hasStruckRepeat(candidate, candidate_notated))
+          continue;
+        ++qualifying;
+        if (!found) {
+          found = true;
+          product = candidate;
+          notated = candidate_notated;
+        }
+      }
+      std::printf("[articulation] cello seeds with a struck repeat: %zu of %u\n", qualifying,
+                  kSeedRange);
+      ASSERT_TRUE(found) << "no cello piece in seeds " << kFirstSeed << ".."
+                         << kFirstSeed + kSeedRange - 1
+                         << " repeats a pitch for the stroke to part";
+    }
 
     std::size_t lifted = 0;
     std::size_t joined_steps = 0;
