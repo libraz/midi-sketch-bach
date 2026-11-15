@@ -4,6 +4,10 @@
 
 #include <array>
 #include <cstdint>
+#include <set>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace bach::rng {
 namespace {
@@ -87,6 +91,99 @@ TEST(SeedDecision, IndexSeparatesRepeatedDrawsOfOneDecision) {
     }
   }
   EXPECT_EQ(differ, 64);
+}
+
+// Golden values from an independent model of the block shuffle, as for seedDraw above.
+TEST(SeedBlockChoice, MatchesGoldenValues) {
+  EXPECT_EQ(seedBlockChoice(0u, SeedDecision::kSubject, 3u), 0u);
+  EXPECT_EQ(seedBlockChoice(1u, SeedDecision::kSubject, 3u), 1u);
+  EXPECT_EQ(seedBlockChoice(5u, SeedDecision::kSubject, 4u), 1u);
+  EXPECT_EQ(seedBlockChoice(42u, SeedDecision::kToccataArchetype, 4u, 2u), 3u);
+  EXPECT_EQ(seedBlockChoice(12345u, SeedDecision::kSubject, 10u, 1u), 8u);
+  EXPECT_EQ(seedBlockChoice(0xFFFFFFFFu, SeedDecision::kPedalWalk, 7u), 4u);
+  static_assert(seedBlockChoice(42u, SeedDecision::kToccataArchetype, 4u, 2u) == 3u,
+                "constexpr block choice");
+}
+
+constexpr std::array<std::uint32_t, 4> kBlockModuli = {{3u, 4u, 7u, 10u}};
+constexpr std::array<SeedDecision, 2> kBlockTags = {
+    {SeedDecision::kSubject, SeedDecision::kToccataArchetype}};
+constexpr std::array<std::uint32_t, 2> kBlockIndices = {{0u, 3u}};
+constexpr std::uint32_t kBlockSeeds = 2000;
+
+TEST(SeedBlockChoice, NeighbouringSeedsNeverShareAValue) {
+  for (const std::uint32_t modulus : kBlockModuli) {
+    for (const SeedDecision tag : kBlockTags) {
+      for (const std::uint32_t index : kBlockIndices) {
+        for (std::uint32_t seed = 0; seed + 1 < kBlockSeeds; ++seed) {
+          EXPECT_NE(seedBlockChoice(seed, tag, modulus, index),
+                    seedBlockChoice(seed + 1, tag, modulus, index))
+              << "modulus " << modulus << " seed " << seed;
+        }
+      }
+    }
+  }
+}
+
+TEST(SeedBlockChoice, EachAlignedBlockUsesEveryValueOnce) {
+  for (const std::uint32_t modulus : kBlockModuli) {
+    for (const SeedDecision tag : kBlockTags) {
+      for (std::uint32_t start = 0; start + modulus <= kBlockSeeds; start += modulus) {
+        std::set<std::uint32_t> values;
+        for (std::uint32_t seed = start; seed < start + modulus; ++seed) {
+          const std::uint32_t value = seedBlockChoice(seed, tag, modulus);
+          EXPECT_LT(value, modulus);
+          values.insert(value);
+        }
+        EXPECT_EQ(values.size(), modulus) << "modulus " << modulus << " block at " << start;
+      }
+    }
+  }
+}
+
+// The swap never reaches a block's last position, so reading one previous shuffle equals
+// carrying the whole chain of blocks from the first.
+TEST(SeedBlockChoice, OnePreviousBlockEqualsTheWholeChain) {
+  for (const std::uint32_t modulus : kBlockModuli) {
+    for (const std::uint32_t index : kBlockIndices) {
+      std::vector<std::uint32_t> previous;
+      for (std::uint32_t block = 0; block * modulus < kBlockSeeds; ++block) {
+        std::vector<std::uint32_t> current;
+        for (std::uint32_t pos = 0; pos < modulus; ++pos) {
+          current.push_back(
+              detail::blockShuffleAt(block, SeedDecision::kSubject, modulus, index, pos));
+        }
+        if (!previous.empty() && current.front() == previous.back())
+          std::swap(current[0], current[1]);
+        for (std::uint32_t pos = 0; pos < modulus; ++pos) {
+          EXPECT_EQ(seedBlockChoice(block * modulus + pos, SeedDecision::kSubject, modulus, index),
+                    current[pos])
+              << "modulus " << modulus << " block " << block;
+        }
+        previous = current;
+      }
+    }
+  }
+}
+
+// No lockstep with the raw residues other sites still read: the smallest family meets every
+// (value, seed % 4, seed % 9) pairing, which a `(seed / 4) % 3` draw reaches only a third of.
+TEST(SeedBlockChoice, SmallestFamilyMeetsEveryResiduePairing) {
+  std::set<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>> met;
+  for (std::uint32_t seed = 1; seed <= 1000; ++seed)
+    met.insert({seedBlockChoice(seed, SeedDecision::kSubject, 3u), seed % 4, seed % 9});
+  EXPECT_EQ(met.size(), 3u * 4u * 9u);
+}
+
+TEST(SeedBlockChoice, IndexSeparatesRepeatedDrawsOfOneDecision) {
+  int differ = 0;
+  for (std::uint32_t seed = 0; seed < 64; ++seed) {
+    if (seedBlockChoice(seed, SeedDecision::kSubject, 7u, 0u) !=
+        seedBlockChoice(seed, SeedDecision::kSubject, 7u, 1u)) {
+      ++differ;
+    }
+  }
+  EXPECT_GT(differ, 32);
 }
 
 }  // namespace
