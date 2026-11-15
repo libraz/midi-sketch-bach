@@ -53,6 +53,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <vector>
 
 #include "composer/provenance.h"
@@ -324,12 +325,62 @@ struct BassFourthCounts {
   // count below had. Same role as PerfectMotionCounts::successions.
   std::size_t upper_samples = 0;
   std::size_t unresolved = 0;
+  // `unresolved` split by the shape of the upper note (rule_helpers::BassFourthKind).
+  std::size_t held = 0;
+  std::size_t short_step = 0;
+  std::size_t short_leap = 0;
+  std::size_t short_other = 0;
 
   void add(const BassFourthCounts& other) {
     upper_samples += other.upper_samples;
     unresolved += other.unresolved;
+    held += other.held;
+    short_step += other.short_step;
+    short_leap += other.short_leap;
+    short_other += other.short_other;
+  }
+
+  void count(rule_helpers::BassFourthKind kind) {
+    ++unresolved;
+    switch (kind) {
+      case rule_helpers::BassFourthKind::Held:
+        ++held;
+        break;
+      case rule_helpers::BassFourthKind::ShortStepwise:
+        ++short_step;
+        break;
+      case rule_helpers::BassFourthKind::ShortLeapOut:
+        ++short_leap;
+        break;
+      case rule_helpers::BassFourthKind::ShortOther:
+        ++short_other;
+        break;
+    }
   }
 };
+
+// Per-kind pins for the bass-fourth column.
+struct BassFourthPins {
+  std::size_t held;
+  std::size_t short_step;
+  std::size_t short_leap;
+  std::size_t short_other;
+
+  std::size_t total() const { return held + short_step + short_leap + short_other; }
+};
+
+void expectBassFourthPins(const BassFourthCounts& counts, const BassFourthPins& pins, FormType form,
+                          const char* what) {
+  EXPECT_EQ(counts.held, pins.held) << formTypeToString(form) << ": " << what << " (held)";
+  EXPECT_EQ(counts.short_step, pins.short_step)
+      << formTypeToString(form) << ": " << what << " (short, stepwise)";
+  EXPECT_EQ(counts.short_leap, pins.short_leap)
+      << formTypeToString(form) << ": " << what << " (short, left by leap)";
+  EXPECT_EQ(counts.short_other, pins.short_other)
+      << formTypeToString(form) << ": " << what << " (short, other)";
+  EXPECT_EQ(counts.unresolved, pins.total()) << formTypeToString(form) << ": " << what
+                                             << " (upper samples=" << counts.upper_samples << ")";
+}
 
 // True for a note the composer stamped as a held pedal. Provenance is
 // index-parallel to the note array; without it (hand-built arrays) nothing is
@@ -358,6 +409,34 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
       voices.push_back(note.voice);
   }
   const SoundingPitchIndex index(notes);
+  // Each voice's notes in (start, pitch) order, and every note's place in it: the
+  // neighbours a counted fourth's kind is read from.
+  std::vector<std::size_t> line_order(notes.size());
+  for (std::size_t idx = 0; idx < notes.size(); ++idx)
+    line_order[idx] = idx;
+  std::stable_sort(line_order.begin(), line_order.end(), [&](std::size_t lhs, std::size_t rhs) {
+    const NoteEvent& left = notes[lhs];
+    const NoteEvent& right = notes[rhs];
+    if (left.voice != right.voice)
+      return left.voice < right.voice;
+    if (left.start_tick != right.start_tick)
+      return left.start_tick < right.start_tick;
+    return left.pitch < right.pitch;
+  });
+  std::vector<std::size_t> line_position(notes.size());
+  for (std::size_t pos = 0; pos < line_order.size(); ++pos)
+    line_position[line_order[pos]] = pos;
+  const auto kindOf = [&](std::size_t note_index) {
+    const NoteEvent& note = notes[note_index];
+    const std::size_t pos = line_position[note_index];
+    std::optional<int> approach;
+    std::optional<int> leave;
+    if (pos > 0 && notes[line_order[pos - 1]].voice == note.voice)
+      approach = static_cast<int>(note.pitch) - static_cast<int>(notes[line_order[pos - 1]].pitch);
+    if (pos + 1 < line_order.size() && notes[line_order[pos + 1]].voice == note.voice)
+      leave = static_cast<int>(notes[line_order[pos + 1]].pitch) - static_cast<int>(note.pitch);
+    return rule_helpers::classifyBassFourth(note.duration, approach, leave);
+  };
   struct Sample {
     VoiceId voice;
     std::uint8_t pitch;
@@ -396,7 +475,7 @@ BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
                index.lowestPitchHolds(tick, resolution_tick, bass);
       };
       if (rule_helpers::isUnresolvedBassFourth(sample.pitch, bass, next_bass, over_pedal, resolves))
-        ++counts.unresolved;
+        counts.count(kindOf(sample.note_index));
     }
   }
   return counts;
@@ -575,6 +654,30 @@ TEST(BassFourthCounter, ReportsAFourthTheBassParksUnder) {
   const BassFourthCounts counts = countUnresolvedBassFourths(notes);
   EXPECT_EQ(counts.unresolved, 2u);
   EXPECT_EQ(counts.upper_samples, 3u);
+  EXPECT_EQ(counts.held, 2u);
+}
+
+TEST(BassFourthCounter, ShortFourthsAreSortedByHowTheirLineMoves) {
+  // C3 held under an eighth-note F4 on beat two; only the F's neighbours change.
+  const auto countsFor = [](std::uint8_t before, std::uint8_t after) {
+    const std::vector<NoteEvent> notes = {
+        makeNote(1, 0, 1920, 48),
+        makeNote(0, 240, 240, before),
+        makeNote(0, 480, 240, 65),
+        makeNote(0, 720, 240, after),
+    };
+    return countUnresolvedBassFourths(notes);
+  };
+  const BassFourthCounts stepwise = countsFor(67, 67);
+  EXPECT_EQ(stepwise.unresolved, 1u);
+  EXPECT_EQ(stepwise.short_step, 1u);
+  const BassFourthCounts leap_out = countsFor(67, 72);
+  EXPECT_EQ(leap_out.unresolved, 1u);
+  EXPECT_EQ(leap_out.short_leap, 1u);
+  const BassFourthCounts repeated_in = countsFor(65, 67);
+  EXPECT_EQ(repeated_in.unresolved, 1u);
+  EXPECT_EQ(repeated_in.short_other, 1u);
+  EXPECT_EQ(repeated_in.held + repeated_in.short_step + repeated_in.short_leap, 0u);
 }
 
 TEST(BassFourthCounter, AResolvingFourthIsLicensed) {
@@ -753,8 +856,10 @@ struct FormCeiling {
   // columns above are all motions between two onsets; this one is a vertical,
   // and no amount of clean motion says anything about it. Its own denominator
   // is the beat samples of a voice sounding above the lowest one, which moves
-  // with pin_successions closely enough that the floor above guards both.
-  std::size_t pin_bass_fourth;
+  // with pin_successions closely enough that the floor above guards both. Pinned
+  // per kind of upper note, since the kinds sit at different distances from the
+  // literature and a single sum lets one trade for another unseen.
+  BassFourthPins pin_bass_fourth;
 };
 
 // Per-form ceilings on perfect-motion events found across the whole
@@ -1112,7 +1217,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 21 -> 20,
     // battuta 41 -> 26, anti 2 -> 0, worst-cell battuta 3 -> 2, anti 1 -> 0, fourths 184 -> 178,
     // successions 51390 -> 51369.
-    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, 178},
+    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, {152, 14, 5, 7}},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1219,7 +1324,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Figuration lines and seams relieved by the shared perfect-motion rank, never arriving
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 21 -> 18,
     // battuta 27 -> 12.
-    {FormType::PreludeAndFugue, 0, 0, 18, 12, 0, 0, 3, 2, 0, 31968, 96},
+    {FormType::PreludeAndFugue, 0, 0, 18, 12, 0, 0, 3, 2, 0, 31968, {88, 4, 4, 0}},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1316,7 +1421,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 7ths over V 8 -> 0, augmented seconds 5 -> 0; battuta 18 -> 20.
     // Chains of prepared suspensions in the sparse manual: hidden 116 -> 114,
     // successions 35177 -> 35768.
-    {FormType::TrioSonata, 0, 0, 114, 20, 4, 0, 5, 2, 1, 35768, 10},
+    {FormType::TrioSonata, 0, 0, 114, 20, 4, 0, 5, 2, 1, 35768, {1, 8, 0, 1}},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;
@@ -1401,7 +1506,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 17845 -> 17807.
     // The last quarter of a plain bar takes a step tone in and out: hidden 37 -> 34,
     // successions 17807 -> 17844.
-    {FormType::ChoralePrelude, 0, 0, 34, 12, 0, 0, 3, 2, 0, 17844, 12},
+    {FormType::ChoralePrelude, 0, 0, 34, 12, 0, 0, 3, 2, 0, 17844, {6, 0, 2, 4}},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1544,7 +1649,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 29316 -> 25758.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 25758 -> 25752.
-    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, 14},
+    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, {9, 5, 0, 0}},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1686,7 +1791,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // One anchor ladder ordered by how often the organ stratum writes each fault class: hidden
     // 14 -> 29, anti 3 -> 0 (worst cell 1 -> 0), worst-cell hidden 1 -> 2, successions
     // 28027 -> 28066. Delayed resolutions in the upper voices: successions 28066 -> 28165.
-    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28165, 107},
+    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28165, {14, 59, 7, 27}},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1772,8 +1877,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // instead of C, a change of measurement: hidden 14 -> 15.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 30879 -> 30873.
-    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, 20},
-    {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, {12, 8, 0, 0}},
+    {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0}},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
     // survives; the remaining ways in are upward leaps, which is ordinary
@@ -1875,7 +1980,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 18612 -> 19166.
     // One anchor ladder ordered by how often the organ stratum writes each fault class:
     // successions 19166 -> 19227.
-    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19227, 11},
+    {FormType::Chaconne, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19227, {4, 7, 0, 0}},
     // Nothing here is repaired after the fact: the aria bass is immutable by
     // contract and a canon's two lines cannot be re-aimed one end at a time. The
     // strict columns are zero because the imitative blocks are instead assembled
@@ -1936,7 +2041,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // that used to sound above it is placed down an octave: hidden 8 -> 10.
     // Seeded aria-bass contours and V0 contour figures: battuta 15 -> 9, anti 8 -> 9,
     // successions 30669 -> 30687.
-    {FormType::GoldbergVariations, 0, 0, 10, 9, 9, 0, 1, 1, 1, 30687, 16},
+    {FormType::GoldbergVariations, 0, 0, 10, 9, 9, 0, 1, 1, 1, 30687, {0, 0, 0, 16}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
@@ -1978,8 +2083,12 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
         total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
         worst_hidden, worst_battuta, worst_anti, total.successions);
-    std::printf("[bass-fourth] %-20s unresolved=%zu / upper-samples=%zu\n",
-                formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.upper_samples);
+    std::printf(
+        "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
+        "upper-samples=%zu\n",
+        formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
+        bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
+        bass_fourths.upper_samples);
     EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint changed "
@@ -2001,10 +2110,9 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
     EXPECT_EQ(total.anti_parallel, entry.pin_anti)
         << formTypeToString(entry.form)
         << ": anti-parallel perfect intervals in shipped output differ from the pinned count";
-    EXPECT_EQ(bass_fourths.unresolved, entry.pin_bass_fourth)
-        << formTypeToString(entry.form)
-        << ": fourths above a bass that then parks under them differ from the "
-        << "pinned count (upper samples=" << bass_fourths.upper_samples << ")";
+    expectBassFourthPins(bass_fourths, entry.pin_bass_fourth, entry.form,
+                         "fourths above a bass that then parks under them differ from the "
+                         "pinned count");
     // The worst single configuration, held beside the totals above. A change
     // that leaves a total where it was while moving findings between cells is a
     // redistribution, not a repair, and only this reads it.
@@ -2056,7 +2164,7 @@ struct LengthCeiling {
   // The pair successions examined, for the reason given on FormCeiling.
   std::size_t pin_successions;
   // Second inversions the bass parks on, for the reason given on FormCeiling.
-  std::size_t pin_bass_fourth;
+  BassFourthPins pin_bass_fourth;
 };
 
 // RATCHET: as above, pinned exactly. Measured across every distinct shipped
@@ -2211,7 +2319,7 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 206 -> 138,
     // battuta 246 -> 176, anti 12 -> 0, worst-cell hidden 6 -> 4, battuta 4 -> 3, anti 1 -> 0,
     // successions 505961 -> 505835, fourths 1159 -> 1153.
-    {FormType::Fugue, 0, 0, 138, 176, 0, 0, 4, 3, 0, 505835, 1153},
+    {FormType::Fugue, 0, 0, 138, 176, 0, 0, 4, 3, 0, 505835, {924, 92, 73, 64}},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2325,7 +2433,7 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // contrary on their perfect class, never leaving a fourth over a held bass: hidden 179 -> 131,
     // battuta 203 -> 113, anti 24 -> 0, worst-cell battuta 5 -> 3, anti 2 -> 0,
     // fourths 945 -> 939.
-    {FormType::PreludeAndFugue, 0, 0, 131, 113, 0, 0, 4, 3, 0, 647533, 939},
+    {FormType::PreludeAndFugue, 0, 0, 131, 113, 0, 0, 4, 3, 0, 647533, {752, 60, 86, 41}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {
@@ -2360,8 +2468,12 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) 
         formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
         total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
         worst_hidden, worst_battuta, worst_anti, total.successions);
-    std::printf("[bass-fourth] %-20s unresolved=%zu / upper-samples=%zu\n",
-                formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.upper_samples);
+    std::printf(
+        "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
+        "upper-samples=%zu\n",
+        formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
+        bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
+        bass_fourths.upper_samples);
     EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
         << formTypeToString(entry.form)
         << ": parallel perfect intervals in the composed counterpoint changed "
@@ -2378,10 +2490,8 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) 
         << formTypeToString(entry.form) << ": hidden changed";
     EXPECT_EQ(total.anti_parallel, entry.pin_anti)
         << formTypeToString(entry.form) << ": anti-parallel changed";
-    EXPECT_EQ(bass_fourths.unresolved, entry.pin_bass_fourth)
-        << formTypeToString(entry.form)
-        << ": fourths above a parked bass changed at some length (upper samples="
-        << bass_fourths.upper_samples << ")";
+    expectBassFourthPins(bass_fourths, entry.pin_bass_fourth, entry.form,
+                         "fourths above a parked bass changed at some length");
     EXPECT_EQ(worst_strict, entry.pin_cell_strict)
         << formTypeToString(entry.form) << ": one stretched configuration's parallel count changed";
     EXPECT_EQ(worst_hidden, entry.pin_cell_hidden)

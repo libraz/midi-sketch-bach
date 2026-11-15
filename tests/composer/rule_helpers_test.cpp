@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -749,6 +750,19 @@ TEST(RuleHelpersTest, UnresolvedBassFourthReadsTheResolutionOnlyForACountedFourt
   EXPECT_EQ(reads, 0);
   EXPECT_TRUE(isUnresolvedBassFourth(65, 48, 48, false, counted));
   EXPECT_EQ(reads, 1);
+}
+
+TEST(RuleHelpersTest, BassFourthKindReadsTheBearingNotesDurationThenItsLine) {
+  EXPECT_EQ(classifyBassFourth(kTicksPerBeat, 7, 7), BassFourthKind::Held);
+  EXPECT_EQ(classifyBassFourth(kTicksPerBeat - 1, -2, 1), BassFourthKind::ShortStepwise);
+  // A leap out wins whatever the approach, and needs no previous note.
+  EXPECT_EQ(classifyBassFourth(240, -1, 3), BassFourthKind::ShortLeapOut);
+  EXPECT_EQ(classifyBassFourth(240, std::nullopt, -5), BassFourthKind::ShortLeapOut);
+  EXPECT_EQ(classifyBassFourth(240, 0, 2), BassFourthKind::ShortOther);
+  EXPECT_EQ(classifyBassFourth(240, 4, 1), BassFourthKind::ShortOther);
+  EXPECT_EQ(classifyBassFourth(240, 2, 0), BassFourthKind::ShortOther);
+  EXPECT_EQ(classifyBassFourth(240, std::nullopt, 1), BassFourthKind::ShortOther);
+  EXPECT_EQ(classifyBassFourth(240, 1, std::nullopt), BassFourthKind::ShortOther);
 }
 
 }  // namespace bach::composer::rule_helpers

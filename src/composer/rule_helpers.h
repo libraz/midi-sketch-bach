@@ -4,6 +4,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
 #include <vector>
 
 #include "composer/figuration.h"
@@ -128,6 +130,26 @@ bool isUnresolvedBassFourth(int upper, int bass, int next_bass, bool over_pedal,
                             const Resolves& resolves) {
   return upper > bass && (upper - bass) % 12 == 5 && next_bass == bass && !over_pedal &&
          !resolves();
+}
+
+// The shape of the upper note that bears an unresolved bass fourth. A note that
+// lasts a beat or more is held; a shorter one is read by how its own line moves
+// through it: left by a leap of three semitones or more, passed through by step
+// on both sides, or anything else (a repeat, a leap in, or a missing neighbour).
+enum class BassFourthKind { Held, ShortStepwise, ShortLeapOut, ShortOther };
+
+// `approach` is the bearing note minus the previous note of its line and `leave`
+// the next note minus it, each absent where the line has no such note.
+inline BassFourthKind classifyBassFourth(Tick upper_duration, std::optional<int> approach,
+                                         std::optional<int> leave) {
+  if (upper_duration >= kTicksPerBeat)
+    return BassFourthKind::Held;
+  const auto is_step = [](int interval) { return interval != 0 && std::abs(interval) <= 2; };
+  if (leave && std::abs(*leave) >= 3)
+    return BassFourthKind::ShortLeapOut;
+  if (approach && leave && is_step(*approach) && is_step(*leave))
+    return BassFourthKind::ShortStepwise;
+  return BassFourthKind::ShortOther;
 }
 
 // A cross relation is the SAME scale degree sounding with two different
