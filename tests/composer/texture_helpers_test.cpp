@@ -290,6 +290,60 @@ TEST(TextureHelpersTest, FormsPerfectParallelNeedsBothVoicesTwoOnsets) {
                                     /*other_curr=*/-1));
 }
 
+// One example per class, written as (line_prev, cand, other_prev, other_curr).
+TEST(TextureHelpersTest, PerfectMotionRankNamesEachClass) {
+  // Both rise a step from a fifth into a fifth.
+  EXPECT_EQ(perfectMotionRank(60, 62, 67, 69), kMotionRankParallel);
+  // Contrary motion from a fifth onto a compound fifth.
+  EXPECT_EQ(perfectMotionRank(60, 53, 67, 72), kMotionRankAntiParallel);
+  // Same direction from a major third into a fifth, the upper voice leaping.
+  EXPECT_EQ(perfectMotionRank(60, 62, 64, 69), kMotionRankHidden);
+  // Contrary motion from a twelfth onto an octave, the upper voice leaping down.
+  EXPECT_EQ(perfectMotionRank(57, 60, 76, 72), kMotionRankBattuta);
+  // The same octave reached by a step down in the upper voice.
+  EXPECT_EQ(perfectMotionRank(57, 60, 74, 72), kMotionRankClean);
+  // Same direction onto a third.
+  EXPECT_EQ(perfectMotionRank(60, 62, 64, 66), kMotionRankClean);
+}
+
+TEST(TextureHelpersTest, PerfectMotionRankIsCleanWhenEitherVoiceIsSilent) {
+  EXPECT_EQ(perfectMotionRank(-1, 62, 67, 69), kMotionRankClean);
+  EXPECT_EQ(perfectMotionRank(60, 62, -1, 69), kMotionRankClean);
+  EXPECT_EQ(perfectMotionRank(60, 62, 67, -1), kMotionRankClean);
+}
+
+TEST(TextureHelpersTest, PerfectMotionRankReadsThePairNotTheArgumentOrder) {
+  EXPECT_EQ(perfectMotionRank(67, 69, 60, 62), kMotionRankParallel);
+  EXPECT_EQ(perfectMotionRank(67, 72, 60, 53), kMotionRankAntiParallel);
+  EXPECT_EQ(perfectMotionRank(64, 69, 60, 62), kMotionRankHidden);
+  EXPECT_EQ(perfectMotionRank(76, 72, 57, 60), kMotionRankBattuta);
+}
+
+TEST(TextureHelpersTest, PerfectMotionRanksAscendFromCleanToParallel) {
+  EXPECT_LT(kMotionRankClean, kMotionRankBattuta);
+  EXPECT_LT(kMotionRankBattuta, kMotionRankHidden);
+  EXPECT_LT(kMotionRankHidden, kMotionRankAntiParallel);
+  EXPECT_LT(kMotionRankAntiParallel, kMotionRankParallel);
+}
+
+TEST(TextureHelpersTest, WorstPerfectMotionRankTakesTheWorstOtherVoice) {
+  const auto motion = [](VoiceId voice, int prev, int curr) {
+    ConcurrentMotion out;
+    out.voice = voice;
+    out.prev = prev;
+    out.curr = curr;
+    return out;
+  };
+  EXPECT_EQ(worstPerfectMotionRank(60, 62, {}), kMotionRankClean);
+  // From 60 to 62: a third (clean), a leap onto a fifth (hidden), a step-wise fifth (parallel).
+  EXPECT_EQ(worstPerfectMotionRank(60, 62, {motion(1, 64, 66), motion(2, 64, 69)}),
+            kMotionRankHidden);
+  EXPECT_EQ(worstPerfectMotionRank(60, 62, {motion(1, 64, 69), motion(2, 67, 69)}),
+            kMotionRankParallel);
+  EXPECT_EQ(worstPerfectMotionRank(60, 62, {motion(1, 67, 69), motion(2, 64, 69)}),
+            kMotionRankParallel);
+}
+
 TEST(TextureHelpersTest, ThemeToneRegistryRecordAndLookup) {
   ThemeToneRegistry registry;
   registry.record(/*tick=*/480, /*voice=*/0, /*pitch=*/72, /*duration=*/480);

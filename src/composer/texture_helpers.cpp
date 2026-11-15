@@ -614,6 +614,28 @@ bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr) {
   return isBattutaMotion(other_prev, other_curr, line_prev, cand);
 }
 
+int perfectMotionRank(int line_prev, int cand, int other_prev, int other_curr) {
+  if (formsStrictPerfectParallel(line_prev, cand, other_prev, other_curr))
+    return kMotionRankParallel;
+  if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
+    return kMotionRankHidden;
+  if (formsAntiParallelPerfect(line_prev, cand, other_prev, other_curr))
+    return kMotionRankAntiParallel;
+  if (formsBattuta(line_prev, cand, other_prev, other_curr))
+    return kMotionRankBattuta;
+  return kMotionRankClean;
+}
+
+int worstPerfectMotionRank(int line_prev, int cand, const std::vector<ConcurrentMotion>& motions) {
+  int worst = kMotionRankClean;
+  for (const ConcurrentMotion& motion : motions) {
+    worst = std::max(worst, perfectMotionRank(line_prev, cand, motion.prev, motion.curr));
+    if (worst == kMotionRankParallel)
+      break;
+  }
+  return worst;
+}
+
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,

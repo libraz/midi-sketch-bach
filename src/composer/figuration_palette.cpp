@@ -958,29 +958,11 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
       // three payable classes and the battuta cheapest, which is the order the
       // reference corpus gives them once each overshoot is scaled by the spread
       // its class occupies there.
-      constexpr int kAnchorClean = 0;
-      constexpr int kAnchorBattuta = 1;
-      constexpr int kAnchorHidden = 2;
-      constexpr int kAnchorAntiParallel = 3;
-      constexpr int kAnchorParallel = 4;
       auto anchor_fault_rank = [&](int cand) {
-        int worst = kAnchorClean;
-        for (const ConcurrentMotion& motion : motions) {
-          if (formsStrictPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
-            return kAnchorParallel;
-          }
-          if (formsPerfectParallel(audible_from, cand, motion.prev, motion.curr)) {
-            worst = std::max(worst, kAnchorHidden);
-          } else if (formsAntiParallelPerfect(audible_from, cand, motion.prev, motion.curr)) {
-            worst = std::max(worst, kAnchorAntiParallel);
-          } else if (formsBattuta(audible_from, cand, motion.prev, motion.curr)) {
-            worst = std::max(worst, kAnchorBattuta);
-          }
-        }
-        return worst;
+        return worstPerfectMotionRank(audible_from, cand, motions);
       };
       const int snapped_rank = anchor_fault_rank(snapped);
-      if (snapped_rank != kAnchorClean) {
+      if (snapped_rank != kMotionRankClean) {
         auto admissible = [&](int cand, int accept) {
           if (cand < band_lo || cand > band_hi || cand == snapped || !within_order(cand)) {
             return false;
@@ -1005,7 +987,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         };
         // Accept levels ascend, so a fully clean tone anywhere in reach beats a
         // hidden one that happens to sit closer.
-        for (int accept = kAnchorClean; accept < snapped_rank; ++accept) {
+        for (int accept = kMotionRankClean; accept < snapped_rank; ++accept) {
           bool placed = false;
           for (int dist = 1; dist <= 7 && !placed; ++dist) {
             for (const int sgn : {-1, 1}) {
@@ -1031,7 +1013,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // diatonic tone instead, but only after a full-band scan proves no triad
         // tone would do: the exemption this records is a proof of exhaustion,
         // not a general licence to leave the chord.
-        if (beat == 0 && anchor_fault_rank(snapped) == kAnchorParallel) {
+        if (beat == 0 && anchor_fault_rank(snapped) == kMotionRankParallel) {
           auto anchor_free = [&](int cand) {
             if (cand < band_lo || cand > band_hi || !within_order(cand)) {
               return false;
@@ -1041,7 +1023,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
                 return false;
               }
             }
-            return anchor_fault_rank(cand) == kAnchorClean;
+            return anchor_fault_rank(cand) == kMotionRankClean;
           };
           bool chord_tone_available = false;
           for (int cand = band_lo; cand <= band_hi && !chord_tone_available; ++cand) {
@@ -1096,7 +1078,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // Both displacements are allowed to come back empty, and when they do the
         // onset ships the fault they were called to remove. That is the one
         // outcome the intervention counters cannot show, so it is counted here.
-        if (anchor_fault_rank(snapped) != kAnchorClean) {
+        if (anchor_fault_rank(snapped) != kMotionRankClean) {
           ++waveVetoStats().anchor_fault_held;
         }
       }
@@ -1162,7 +1144,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // contrary arrival at a perfect interval is no cure for a shake.
         const int stay_rank = anchor_fault_rank(snapped);
         bool placed = false;
-        for (int accept = kAnchorClean; accept <= stay_rank && !placed; ++accept) {
+        for (int accept = kMotionRankClean; accept <= stay_rank && !placed; ++accept) {
           for (int dist = 3; dist <= 12 && !placed; ++dist) {
             for (const int sgn : {1, -1}) {
               const int cand = snapped + sgn * dist;
@@ -1360,27 +1342,9 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // spread each class occupies there it costs several times what they do,
         // and a wave that steps off a hidden perfect onto a contrary arrival has
         // paid more than it saved.
-        constexpr int kStepClean = 0;
-        constexpr int kStepBattuta = 1;
-        constexpr int kStepHidden = 2;
-        constexpr int kStepAntiParallel = 3;
-        constexpr int kStepParallel = 4;
-        auto step_rank = [&](int cand) {
-          int worst = kStepClean;
-          for (const ConcurrentMotion& motion : motions) {
-            if (formsStrictPerfectParallel(from, cand, motion.prev, motion.curr))
-              return kStepParallel;
-            if (formsPerfectParallel(from, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kStepHidden);
-            else if (formsAntiParallelPerfect(from, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kStepAntiParallel);
-            else if (formsBattuta(from, cand, motion.prev, motion.curr))
-              worst = std::max(worst, kStepBattuta);
-          }
-          return worst;
-        };
+        auto step_rank = [&](int cand) { return worstPerfectMotionRank(from, cand, motions); };
         const int next_rank = step_rank(next);
-        if (next_rank != kStepClean) {
+        if (next_rank != kMotionRankClean) {
           ++waveVetoStats().step_parallel_adjusted;
           // The reversed step first, then a third-skip in either direction --
           // two diatonic stepwise lines in rhythmic lockstep fault on both
@@ -1400,7 +1364,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
           const int skip_up = detail::scaleUp(from, 2, mode, &chord);
           const int skip_down = detail::scaleDown(from, 2, mode, &chord);
           bool escaped = false;
-          for (int accept = kStepClean; accept < next_rank && !escaped; ++accept) {
+          for (int accept = kMotionRankClean; accept < next_rank && !escaped; ++accept) {
             if (step_rank(reversed) <= accept && !completes_shake(reversed)) {
               dir = -dir;
               next = reversed;
@@ -1490,7 +1454,7 @@ void appendFigurationWaveBar(ThemeToneRegistry& registry, FigurationSection& sec
         // already carries a fault, a replacement carrying no more than the same
         // one is still available, so the constrained onsets keep their escape.
         const int harsh_rank = step_rank(next);
-        if (harsh_rank < kStepHidden && wave_is_harsh(next)) {
+        if (harsh_rank < kMotionRankHidden && wave_is_harsh(next)) {
           ++waveVetoStats().step_harsh_adjusted;
           const int reversed = step_from(-dir);
           const bool reversed_ok = step_rank(reversed) <= harsh_rank && !wave_is_harsh(reversed);

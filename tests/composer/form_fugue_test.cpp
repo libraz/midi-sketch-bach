@@ -56,6 +56,7 @@
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "product_gate_test_util.h"
 
 namespace bach::composer {
 namespace {
@@ -3509,6 +3510,137 @@ TEST(FormFugueTest, ConsecutiveSameVoiceMiddleEntriesDoNotRestateTheirTexture) {
     }
   }
   EXPECT_GT(compared, 0);
+}
+
+// Two figuration lines are both free material, so neither may arrive at a perfect
+// class by contrary motion from that same class against the other. At the
+// twenty-bar floor the climax stretto's waiting follower and the bass under it
+// are both figuration, each laid without reading the other; the seeds below
+// placed exactly that arrival on the downbeat after the follower's first bar.
+TEST(FormFugueTest, FigurationLinesNeverArriveContraryOnTheirPerfectClass) {
+  int figuration_successions = 0;
+  for (SubjectCharacter character : {SubjectCharacter::Playful, SubjectCharacter::Restless}) {
+    for (std::uint32_t seed : {9u, 10u, 11u, 13u}) {
+      ComposeRequest req;
+      req.form = FormType::Fugue;
+      req.seed = seed;
+      req.character = character;
+      req.target_bars = 20;
+      HarnessFixture fx;
+      ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok) << seed;
+      const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+      constexpr std::size_t kSilent = static_cast<std::size_t>(-1);
+      const auto sounding = [&](VoiceId voice, Tick tick) {
+        std::size_t found = kSilent;
+        for (std::size_t idx = 0; idx < r.notes.size(); ++idx) {
+          const NoteEvent& note = r.notes[idx];
+          if (note.voice == voice && note.start_tick <= tick &&
+              tick < note.start_tick + note.duration &&
+              (found == kSilent || note.start_tick >= r.notes[found].start_tick))
+            found = idx;
+        }
+        return found;
+      };
+      const auto figuration = [&](std::size_t idx) {
+        return r.provenance[idx].voice_intent == VoiceIntent::FigurationCarrier;
+      };
+      std::set<Tick> onsets;
+      for (const NoteEvent& note : r.notes)
+        onsets.insert(note.start_tick);
+      for (VoiceId upper = 0; upper < 3; ++upper) {
+        for (VoiceId lower = upper + 1; lower < 3; ++lower) {
+          std::size_t prev_upper = kSilent;
+          std::size_t prev_lower = kSilent;
+          for (Tick tick : onsets) {
+            const std::size_t now_upper = sounding(upper, tick);
+            const std::size_t now_lower = sounding(lower, tick);
+            const auto reaches = [&](std::size_t idx) {
+              return idx != kSilent && r.notes[idx].start_tick + r.notes[idx].duration >= tick;
+            };
+            if (now_upper != kSilent && now_lower != kSilent && reaches(prev_upper) &&
+                reaches(prev_lower) && figuration(now_upper) && figuration(now_lower) &&
+                r.notes[now_upper].start_tick == tick && r.notes[now_lower].start_tick == tick) {
+              ++figuration_successions;
+              EXPECT_FALSE(
+                  isAntiParallelPerfectMotion(r.notes[prev_upper].pitch, r.notes[now_upper].pitch,
+                                              r.notes[prev_lower].pitch, r.notes[now_lower].pitch))
+                  << subjectCharacterToString(character) << " seed " << seed << " voices "
+                  << static_cast<int>(upper) << "-" << static_cast<int>(lower) << " bar "
+                  << (tick / kTicksPerBar);
+            }
+            prev_upper = now_upper;
+            prev_lower = now_lower;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_GT(figuration_successions, 0);
+}
+
+// A figuration tail handing over into a statement head once lost its only relief
+// to the bass-fourth guard: the relieving tone stood a fourth over a bass that
+// stepped away on the next beat, a passing fourth the shipped count never reads.
+// The seam kept its parallel fifth and the request failed to generate. Each case
+// is a handover that reached it; the seam must ship free of the parallel.
+TEST(FormFugueTest, SeamReliefIsNotRefusedForAPassingFourthOverTheBass) {
+  struct Case {
+    FormType form;
+    SubjectCharacter character;
+    bool minor;
+    std::uint16_t bars;
+    std::uint32_t seed;
+    Key tonic;
+    VoiceId voice;
+    Tick seam;
+  };
+  const std::uint16_t fugue_short = resolveBars(FormType::Fugue, DurationScale::Short, 0);
+  const std::uint16_t prelude_short =
+      resolveBars(FormType::PreludeAndFugue, DurationScale::Short, 0);
+  const Case cases[] = {
+      {FormType::Fugue, SubjectCharacter::Restless, false, fugue_short, 1, Key::G, 0, 42240},
+      {FormType::Fugue, SubjectCharacter::Severe, false, fugue_short, 4, Key::E, 0, 42240},
+      {FormType::PreludeAndFugue, SubjectCharacter::Playful, true, prelude_short, 3, Key::A, 1,
+       42240},
+      {FormType::PreludeAndFugue, SubjectCharacter::Restless, false, 128, 1, Key::C, 0, 201600},
+  };
+  for (const Case& entry : cases) {
+    ComposeRequest req;
+    req.form = entry.form;
+    req.character = entry.character;
+    req.is_minor = entry.minor;
+    req.target_bars = entry.bars;
+    req.seed = entry.seed;
+    SCOPED_TRACE(std::string(formTypeToString(entry.form)) + " " +
+                 subjectCharacterToString(entry.character) + " seed " + std::to_string(entry.seed));
+    const test::ProductGateResult gate = test::runProductGate(req, entry.tonic);
+    ASSERT_TRUE(gate.ships());
+    const std::vector<NoteEvent>& notes = gate.composed.notes;
+    const auto sounding = [&](VoiceId voice, Tick tick) {
+      int pitch = -1;
+      Tick latest = 0;
+      for (const NoteEvent& note : notes) {
+        if (note.voice == voice && note.start_tick <= tick &&
+            tick < note.start_tick + note.duration && (pitch < 0 || note.start_tick >= latest)) {
+          pitch = note.pitch;
+          latest = note.start_tick;
+        }
+      }
+      return pitch;
+    };
+    const int tail = sounding(entry.voice, entry.seam - 1);
+    const int head = sounding(entry.voice, entry.seam);
+    ASSERT_GE(tail, 0);
+    ASSERT_GE(head, 0);
+    for (VoiceId other = 0; other < 3; ++other) {
+      if (other == entry.voice)
+        continue;
+      EXPECT_LT(perfectMotionRank(tail, head, sounding(other, entry.seam - 1),
+                                  sounding(other, entry.seam)),
+                kMotionRankParallel)
+          << "against voice " << static_cast<int>(other);
+    }
+  }
 }
 
 }  // namespace bach::composer

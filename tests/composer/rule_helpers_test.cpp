@@ -723,4 +723,32 @@ TEST(ProvenanceBitPredicateTest, ParallelCheckBitsNeedAnAnchor) {
   EXPECT_TRUE(hasBit(anchored_bits, RuleBit::CrossRelationChecked));
 }
 
+TEST(RuleHelpersTest, UnresolvedBassFourthCountsOnlyAHeldUnresolvedFourth) {
+  const auto never = [] { return false; };
+  const auto always = [] { return true; };
+  EXPECT_TRUE(isUnresolvedBassFourth(53, 48, 48, false, never));
+  // A compound fourth counts the same.
+  EXPECT_TRUE(isUnresolvedBassFourth(65, 48, 48, false, never));
+  // The bass steps away on the next beat: a passing fourth.
+  EXPECT_FALSE(isUnresolvedBassFourth(65, 48, 50, false, never));
+  EXPECT_FALSE(isUnresolvedBassFourth(65, 48, 48, /*over_pedal=*/true, never));
+  EXPECT_FALSE(isUnresolvedBassFourth(65, 48, 48, false, always));
+  EXPECT_FALSE(isUnresolvedBassFourth(64, 48, 48, false, never));
+  EXPECT_FALSE(isUnresolvedBassFourth(48, 48, 48, false, never));
+}
+
+TEST(RuleHelpersTest, UnresolvedBassFourthReadsTheResolutionOnlyForACountedFourth) {
+  int reads = 0;
+  const auto counted = [&reads] {
+    ++reads;
+    return false;
+  };
+  EXPECT_FALSE(isUnresolvedBassFourth(64, 48, 48, false, counted));
+  EXPECT_FALSE(isUnresolvedBassFourth(65, 48, 50, false, counted));
+  EXPECT_FALSE(isUnresolvedBassFourth(65, 48, 48, true, counted));
+  EXPECT_EQ(reads, 0);
+  EXPECT_TRUE(isUnresolvedBassFourth(65, 48, 48, false, counted));
+  EXPECT_EQ(reads, 1);
+}
+
 }  // namespace bach::composer::rule_helpers

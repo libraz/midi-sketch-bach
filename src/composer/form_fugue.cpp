@@ -3716,6 +3716,56 @@ std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx, Tick s
   return relieveFigurationHandoffsFourSlot(asm_ctx, section_start, replaced);
 }
 
+/// @brief Whether a relief tone leaves a fourth over the bass on a beat it spans.
+///
+/// Every beat the tone sounds on is read with the tone in place, by the shared
+/// rule the shipped bass-fourth count applies: the tone a fourth over the bass,
+/// or another voice a fourth over the tone as the bass. The upper line's
+/// resolution is read at the sixteenth grain, as its first change within the
+/// beat over the held bass. The pass carries no pedal declaration, so no bass
+/// counts as a pedal here.
+template <typename Sounding>
+bool leavesBassFourth(const Sounding& sounding, VoiceId voice, int cand, Tick onset, Tick release) {
+  constexpr Tick kResolutionGrain = kTicksPerBeat / 4;
+  const auto pitch_at = [&](VoiceId line, Tick tick) {
+    return line == voice && tick >= onset && tick < release ? cand : sounding(line, tick);
+  };
+  const auto lowest_at = [&](Tick tick) {
+    int lowest = -1;
+    for (VoiceId line = 0; line < kFugueVoices; ++line) {
+      const int pitch = pitch_at(line, tick);
+      if (pitch >= 0 && (lowest < 0 || pitch < lowest))
+        lowest = pitch;
+    }
+    return lowest;
+  };
+  const Tick first_beat = (onset + kTicksPerBeat - 1) / kTicksPerBeat * kTicksPerBeat;
+  for (Tick beat = first_beat; beat < release; beat += kTicksPerBeat) {
+    const int bass = lowest_at(beat);
+    const int next_bass = lowest_at(beat + kTicksPerBeat);
+    for (VoiceId line = 0; line < kFugueVoices; ++line) {
+      const int upper = pitch_at(line, beat);
+      if (upper < 0 || (line != voice && bass != cand))
+        continue;  // a pair the tone is not part of.
+      const auto resolves = [&] {
+        for (Tick tick = beat + kResolutionGrain; tick <= beat + kTicksPerBeat;
+             tick += kResolutionGrain) {
+          if (lowest_at(tick) != bass)
+            return false;
+          const int pitch = pitch_at(line, tick);
+          if (pitch != upper)
+            return pitch >= 0 && (upper - pitch == 1 || upper - pitch == 2);
+        }
+        return false;
+      };
+      if (rule_helpers::isUnresolvedBassFourth(upper, bass, next_bass, /*over_pedal=*/false,
+                                               resolves))
+        return true;
+    }
+  }
+  return false;
+}
+
 /// @brief Re-aim the tone an accompaniment span hands over with.
 ///
 /// A span boundary is the one place in this form where two voices can both
@@ -3727,17 +3777,18 @@ std::vector<PlacedTone> relieveFigurationHandoffs(FugueAssembly& asm_ctx, Tick s
 /// here rather than while the span is built, because the boundary's other side
 /// does not exist until every voice is placed.
 ///
-/// Two classes are repaired, ranked: the TRUE parallel, and the contrary
-/// arrival at the perfect class the pair had just left. The hidden approach is
-/// not among them -- it is what a re-aim over fixed heads trades into, and
-/// paying for one with another buys nothing -- but the contrary arrival does not
-/// belong in that group. The reference corpus writes it far more sparingly than
-/// the hidden approach, and scaled by the spread each class occupies there it
-/// costs several times as much. The replacement keeps the span's band and its
-/// scale, and holds to the leaps the displaced tone already spanned; it may take
-/// a dissonance only where the tone it replaces was consonant and no consonant
-/// tone improves on the fault, which is the same order of preference the
-/// accompaniment's own anchor guard uses one layer down.
+/// Every perfect-motion class is repaired, on the shared rank (true parallel,
+/// contrary arrival at the same class, hidden perfect, battuta) and only onto a
+/// strictly lower one, so a re-aim never pays for one class with its equal. The
+/// lesser classes matter most where a span hands over to designed tones: the
+/// coda's cadence doubles the dominant in the inner voice and the bass, and a
+/// tail falling into that octave from above arrives on it as a battuta or a
+/// hidden octave that no later pass reads. The replacement keeps the span's
+/// band and its scale, and holds to the leaps the displaced tone already
+/// spanned; it may take a dissonance only where the tone it replaces was
+/// consonant and no consonant tone improves on the fault, which is the same
+/// order of preference the accompaniment's own anchor guard uses one layer down.
+/// Nor may it leave a fourth over the bass the displaced tone did not.
 ///
 /// @param asm_ctx Assembly whose figuration tails are re-aimed in place.
 /// @param section_start Tones starting before this tick are left as their builder wrote them.
@@ -3795,33 +3846,20 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx, Tick sect
       continue;  // the voice rests after the span: nothing hands over.
     }
 
-    // How badly the handover reads, ranked rather than pooled. The true parallel
-    // is the cardinal prohibition; the contrary arrival at the same perfect class
-    // is the next thing down, and the reference corpus prices it at several times
-    // a hidden approach because the works write it far more sparingly. Ranking
-    // the two is what lets a parallel seam still be relieved onto a contrary
-    // arrival -- strictly better than what it replaces -- while a contrary seam
-    // may only be relieved onto a tone free of both. Pooling them would let a
-    // parallel go unrelieved whenever the only escape was a contrary one.
-    constexpr int kSeamClean = 0;
-    constexpr int kSeamAntiParallel = 1;
-    constexpr int kSeamParallel = 2;
+    // How badly the handover reads, ranked rather than pooled, so a parallel
+    // seam may still be relieved onto a lesser class while a lesser seam is
+    // relieved only onto a tone better than itself.
     auto seam_fault = [&](int cand) {
-      int worst = kSeamClean;
+      int worst = kMotionRankClean;
       for (VoiceId other = 0; other < kFugueVoices; ++other) {
-        if (other == voice)
-          continue;
-        const int other_prev = sounding(other, seam - 1);
-        const int other_curr = sounding(other, seam);
-        if (formsStrictPerfectParallel(cand, own_next, other_prev, other_curr))
-          return kSeamParallel;
-        if (formsAntiParallelPerfect(cand, own_next, other_prev, other_curr))
-          worst = std::max(worst, kSeamAntiParallel);
+        if (other != voice)
+          worst = std::max(worst, perfectMotionRank(cand, own_next, sounding(other, seam - 1),
+                                                    sounding(other, seam)));
       }
       return worst;
     };
     const int original_fault = seam_fault(original);
-    if (original_fault == kSeamClean) {
+    if (original_fault == kMotionRankClean) {
       continue;
     }
 
@@ -3841,6 +3879,8 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx, Tick sect
     // one everywhere except inside a stated key area: a seam relieved onto a
     // home-scale tone there would undo the area's spelling one note at a time.
     const KeyContext seam_key = localKeyAt(asm_ctx.out->harmony, tail.start_tick);
+    const bool original_bass_fourth =
+        leavesBassFourth(sounding, voice, original, tail.start_tick, seam);
     auto admissible = [&](int cand, bool allow_dissonance) {
       if (cand < kBandLo[voice] || cand > kBandHi[voice] || !inKey(cand, seam_key))
         return false;
@@ -3861,7 +3901,10 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx, Tick sect
                                        at_tail))
           return false;
       }
-      return seam_fault(cand) < original_fault;
+      if (seam_fault(cand) >= original_fault)
+        return false;
+      return original_bass_fourth ||
+             !leavesBassFourth(sounding, voice, cand, tail.start_tick, seam);
     };
 
     const int reach = std::max(entry_ceiling, exit_ceiling);
@@ -3885,15 +3928,21 @@ std::vector<PlacedTone> relieveFigurationSeams(FugueAssembly& asm_ctx, Tick sect
   return replaced;
 }
 
-/// @brief Re-aim any figuration tone that moves into or out of a true parallel.
+/// @brief Re-aim any figuration tone that moves into or out of a true parallel,
+///        or into or out of the contrary arrival at the same perfect class.
 ///
 /// The accompaniment's anchor guard reads the other voices one sixteenth before
 /// its onset, so a line attacking between sixteenths -- a diminished entry --
-/// can step into a parallel with it unseen. This reads every motion at the
-/// onset itself, the grain the validator reads, and moves only a tone that
-/// sounds a true parallel: to the nearest tone of its band and local scale (a
-/// chord tone on a bar downbeat) that is consonant wherever the original was
-/// and parallel-free on both sides. Anything else is left as placed.
+/// can step into a parallel with it unseen, and a line laid before another
+/// figuration never reads it at all. This reads every motion at the onset
+/// itself, the grain the validator reads, and moves only a tone that sounds one
+/// of the two: to the nearest tone of its band and local scale (a chord tone on
+/// a bar downbeat) that is consonant wherever the original was and strictly
+/// better on both sides. The parallel ranks above the contrary arrival, as the
+/// seam relief ranks them, so a parallel may still be relieved onto a contrary
+/// arrival while a contrary arrival is relieved only onto a tone free of both.
+/// Nor may it leave a fourth over the bass the original did not. Anything else is
+/// left as placed.
 ///
 /// @param asm_ctx Assembly whose figuration is re-aimed in place.
 /// @param section_start Tones starting before this tick are left as their builder wrote them.
@@ -3918,22 +3967,24 @@ void relieveFigurationParallels(FugueAssembly& asm_ctx, Tick section_start,
       }
       const int own_prev = sounding(voice, onset - 1);
       const int own_next = sounding(voice, release);
-      const auto parallel = [&](int cand) {
+      // Only the two contrary-or-parallel ranks are relieved here; the lesser
+      // classes rank the replacement but do not call for one.
+      const auto motion_fault = [&](int cand) {
+        int worst = kMotionRankClean;
         for (VoiceId other = 0; other < kFugueVoices; ++other) {
           if (other == voice)
             continue;
-          if (formsStrictPerfectParallel(own_prev, cand, sounding(other, onset - 1),
-                                         sounding(other, onset)))
-            return true;
-          if (own_next >= 0 &&
-              formsStrictPerfectParallel(cand, own_next, sounding(other, release - 1),
-                                         sounding(other, release)))
-            return true;
+          worst = std::max(worst, perfectMotionRank(own_prev, cand, sounding(other, onset - 1),
+                                                    sounding(other, onset)));
+          if (own_next >= 0)
+            worst = std::max(worst, perfectMotionRank(cand, own_next, sounding(other, release - 1),
+                                                      sounding(other, release)));
         }
-        return false;
+        return worst;
       };
       const int original = static_cast<int>(note.pitch);
-      if (!parallel(original)) {
+      const int original_fault = motion_fault(original);
+      if (original_fault < kMotionRankAntiParallel) {
         continue;
       }
       const auto consonant_with_others = [&](int cand) {
@@ -3945,6 +3996,7 @@ void relieveFigurationParallels(FugueAssembly& asm_ctx, Tick section_start,
         return true;
       };
       const bool original_consonant = consonant_with_others(original);
+      const bool original_bass_fourth = leavesBassFourth(sounding, voice, original, onset, release);
       const KeyContext key = localKeyAt(plan, onset);
       const ChordEvent* chord =
           onset % kTicksPerBar == 0 ? rule_helpers::chordAt(plan, onset) : nullptr;
@@ -3963,7 +4015,9 @@ void relieveFigurationParallels(FugueAssembly& asm_ctx, Tick section_start,
           const int cand = original + sgn * dist;
           if (cand < kBandLo[voice] || cand > kBandHi[voice] || !inKey(cand, key) ||
               (chord != nullptr && !chord_tone(cand)) ||
-              (original_consonant && !consonant_with_others(cand)) || parallel(cand)) {
+              (original_consonant && !consonant_with_others(cand)) ||
+              motion_fault(cand) >= original_fault ||
+              (!original_bass_fourth && leavesBassFourth(sounding, voice, cand, onset, release))) {
             continue;
           }
           note.pitch = static_cast<std::uint8_t>(cand);

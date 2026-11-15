@@ -175,6 +175,23 @@ struct ConcurrentMotion {
   int curr = -1;      // sounding pitch at the current onset (-1 = silent).
 };
 
+/// @brief Perfect-motion fault ranks a moving line can form against another,
+///        clean to worst: battuta, hidden perfect, contrary arrival at the same
+///        perfect class, true parallel. Callers relieve a fault only onto a
+///        strictly lower rank, so no fault is traded for its equal.
+inline constexpr int kMotionRankClean = 0;
+inline constexpr int kMotionRankBattuta = 1;
+inline constexpr int kMotionRankHidden = 2;
+inline constexpr int kMotionRankAntiParallel = 3;
+inline constexpr int kMotionRankParallel = 4;
+
+/// @brief Rank of the motion (line_prev -> cand) against (other_prev -> other_curr).
+/// @return kMotionRankClean when either voice is silent at either onset.
+int perfectMotionRank(int line_prev, int cand, int other_prev, int other_curr);
+
+/// @brief Worst rank the motion (line_prev -> cand) forms against any of `motions`.
+int worstPerfectMotionRank(int line_prev, int cand, const std::vector<ConcurrentMotion>& motions);
+
 /// @brief Registry of every already-placed note (theme AND figuration).
 ///
 /// A line built later in the deterministic voice order reads this registry to
