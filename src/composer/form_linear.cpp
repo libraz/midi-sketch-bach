@@ -467,6 +467,9 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
             ++faults;
           }
         }
+        // An octave onto the held leading tone ranks behind every other approach.
+        if (std::abs(p[15] - (landing_hi - 1)) == 12)
+          ++faults;
       }
       return faults;
     };

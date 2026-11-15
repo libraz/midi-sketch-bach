@@ -481,6 +481,54 @@ TEST(FormLinearCello, NoLeapIsWiderThanAnOctave) {
   }
 }
 
+// The held leading tone of the landing is never approached from its own
+// octave: the landing vet ranks that closing behind every other approach, so
+// the ornament pass cannot turn the seam into a seventh.
+TEST(FormLinearCello, NoOctaveDropIntoTheLanding) {
+  struct Cell {
+    SubjectCharacter character;
+    Key tonic;
+    bool minor;
+    std::uint16_t bars;
+    std::uint32_t seed;
+  };
+  std::vector<Cell> cells = {
+      {SubjectCharacter::Noble, Key::C, false, 24, 4},
+      {SubjectCharacter::Noble, Key::F, false, 24, 4},
+      {SubjectCharacter::Noble, Key::C, false, 128, 2},
+      {SubjectCharacter::Playful, Key::F, false, 128, 2},
+      {SubjectCharacter::Restless, Key::F, false, 128, 2},
+      {SubjectCharacter::Severe, Key::F, false, 128, 2},
+  };
+  for (SubjectCharacter character : kCharacters)
+    for (std::uint32_t seed : kSeeds)
+      for (bool minor : kMinorFlags)
+        for (std::uint16_t bars : testLengths(FormType::CelloPrelude))
+          cells.push_back({character, Key::C, minor, bars, seed});
+  for (const Cell& cell : cells) {
+    ComposeRequest req;
+    req.form = FormType::CelloPrelude;
+    req.character = cell.character;
+    req.tonic = cell.tonic;
+    req.is_minor = cell.minor;
+    req.target_bars = cell.bars;
+    req.seed = cell.seed;
+    HarnessFixture fx;
+    ASSERT_EQ(buildFormFixture(req, &fx), FormDirectorStatus::Ok);
+    std::vector<NoteEvent> notes = Composer{}.run(fx.material, fx.harmony, fx.voice_plan).notes;
+    std::sort(notes.begin(), notes.end(),
+              [](const NoteEvent& x, const NoteEvent& y) { return x.start_tick < y.start_tick; });
+    const auto held = std::find_if(notes.begin(), notes.end(), [](const NoteEvent& note) {
+      return note.duration >= kTicksPerBar;
+    });
+    ASSERT_TRUE(held != notes.end() && held != notes.begin());
+    EXPECT_NE(std::abs(static_cast<int>(held->pitch) - static_cast<int>((held - 1)->pitch)), 12)
+        << "character=" << static_cast<int>(cell.character)
+        << " tonic=" << static_cast<int>(cell.tonic) << " minor=" << cell.minor
+        << " bars=" << cell.bars << " seed=" << cell.seed;
+  }
+}
+
 // The line sounds inside the solo cello compass in every output key: the
 // builder bounds its register by the key's transposition, so the lowest and
 // highest sounding pitches (composed pitch plus that offset; the output octave
