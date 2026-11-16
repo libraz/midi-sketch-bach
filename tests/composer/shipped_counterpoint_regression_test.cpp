@@ -2415,7 +2415,8 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // successions 505961 -> 505835, fourths 1159 -> 1153.
     // A declared cadential six-four is judged by its composed resolution: held 924 -> 668
     // (256 exempt).
-    {FormType::Fugue, 0, 0, 138, 176, 0, 0, 4, 3, 0, 505835, {668, 92, 73, 64}},
+    // A unison is a battuta whichever line falls into it, as the validator reads the pair.
+    {FormType::Fugue, 0, 0, 138, 168, 0, 0, 4, 3, 0, 505829, {668, 92, 73, 64}},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the

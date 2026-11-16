@@ -319,6 +319,13 @@ TEST(TextureHelpersTest, PerfectMotionRankReadsThePairNotTheArgumentOrder) {
   EXPECT_EQ(perfectMotionRank(76, 72, 57, 60), kMotionRankBattuta);
 }
 
+// At a unison either line may be the upper one in voice order, so the arrival from above counts
+// whichever line is the candidate.
+TEST(TextureHelpersTest, FormsBattutaReadsAUnisonInEitherOrder) {
+  EXPECT_TRUE(formsBattuta(60, 62, 67, 62));
+  EXPECT_TRUE(formsBattuta(67, 62, 60, 62));
+}
+
 TEST(TextureHelpersTest, PerfectMotionRanksAscendFromCleanToParallel) {
   EXPECT_LT(kMotionRankClean, kMotionRankBattuta);
   EXPECT_LT(kMotionRankBattuta, kMotionRankHidden);

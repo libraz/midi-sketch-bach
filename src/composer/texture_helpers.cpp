@@ -606,10 +606,13 @@ bool formsBattuta(int line_prev, int cand, int other_prev, int other_curr) {
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.
   }
-  // isBattutaMotion reads the upper line from the arrival, so this ordering only
-  // settles an exact unison; it matches the sibling predicates so all three
-  // describe the same pair of lines.
-  if (cand >= other_curr)
+  // At an exact unison pitch names no upper line and the validator reads the pair in voice
+  // order, which this predicate is not given, so either reading counts.
+  if (cand == other_curr) {
+    return isBattutaMotion(line_prev, cand, other_prev, other_curr) ||
+           isBattutaMotion(other_prev, other_curr, line_prev, cand);
+  }
+  if (cand > other_curr)
     return isBattutaMotion(line_prev, cand, other_prev, other_curr);
   return isBattutaMotion(other_prev, other_curr, line_prev, cand);
 }
