@@ -36,6 +36,7 @@
 #include "composer/rule_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 #include "product_gate_test_util.h"
 
 namespace bach::composer {
@@ -1040,24 +1041,30 @@ TEST(FormCantusGoldberg, TerminalCadenceResolvesAllActiveVoicesToTonic) {
   }
 }
 
-// The ground table is a seed-selected design variant (seed % kGroundVariantCount,
-// fixed for the whole piece). Probe one seed per variant: seed 3 -> variant 0
-// (the historical table; seed 0 is reserved for CLI auto so the variant-0 probe
-// uses 3), seed 1 -> variant 1, seed 2 -> variant 2.
-TEST(FormCantusGoldberg, GroundFollowsSeedVariant) {
-  const std::array<std::uint32_t, 3> probe_seed = {3u, 1u, 2u};
+// The ground table is a seed-drawn design variant, fixed for the whole piece: the
+// aria bass states exactly one table's bar heads, and a span of seeds reaches every
+// table. Each seed is read by what it states, not by a fixed seed-to-variant map.
+TEST(FormCantusGoldberg, EverySeedStatesOneGroundTable) {
   for (bool minor : {false, true}) {
-    for (std::size_t variant = 0; variant < detail::kGroundVariantCount; ++variant) {
-      const HarnessFixture fx = build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe,
-                                      0, probe_seed[variant]);
+    const auto& tables = minor ? detail::kGoldbergGroundsMinor : detail::kGoldbergGroundsMajor;
+    std::array<bool, detail::kGroundVariantCount> reached{};
+    for (std::uint32_t seed = 1; seed <= 24; ++seed) {
+      const HarnessFixture fx =
+          build(FormType::GoldbergVariations, minor, SubjectCharacter::Severe, 0, seed);
       ASSERT_GE(fx.material.goldberg_aria_bass.size(), 32u);
-      const auto& expected =
-          minor ? detail::kGoldbergGroundsMinor[variant] : detail::kGoldbergGroundsMajor[variant];
-      for (std::size_t bar = 0; bar < 4; ++bar) {
-        EXPECT_EQ(fx.material.goldberg_aria_bass[bar * 8].pitch, expected[bar])
-            << "minor " << minor << " variant " << variant << " bar " << bar;
+      int matched = -1;
+      for (std::size_t variant = 0; variant < tables.size(); ++variant) {
+        bool same = true;
+        for (std::size_t bar = 0; bar < 4; ++bar)
+          same = same && fx.material.goldberg_aria_bass[bar * 8].pitch == tables[variant][bar];
+        if (same)
+          matched = static_cast<int>(variant);
       }
+      ASSERT_GE(matched, 0) << "minor " << minor << " seed " << seed;
+      reached[static_cast<std::size_t>(matched)] = true;
     }
+    for (std::size_t variant = 0; variant < reached.size(); ++variant)
+      EXPECT_TRUE(reached[variant]) << "minor " << minor << " variant " << variant;
   }
 }
 
@@ -1306,6 +1313,32 @@ TEST(FormCantusGoldberg, FigurationBlocksAlternatePatterns) {
                                  << ": no scalar-wave block in the rotation";
     }
   }
+}
+
+// The palette rotation is tied to the bass contour phase, so seeds whose bass layout
+// draws contour phases of one parity open their first variation on one idiom.
+TEST(FormCantusGoldberg, FirstVariationIdiomFollowsTheContourPhaseParity) {
+  std::array<int, 2> idiom_of_parity = {-1, -1};
+  for (std::uint32_t seed = 1; seed <= 24; ++seed) {
+    const std::uint32_t layout =
+        rng::seedBlockChoice(seed, rng::SeedDecision::kGoldbergBassLayout, 12, 0, /*clear=*/3);
+    const std::size_t parity = (layout / 3u) % 2u;
+    const HarnessFixture fx =
+        build(FormType::GoldbergVariations, false, SubjectCharacter::Severe, /*bars=*/128, seed);
+    ASSERT_GE(fx.material.goldberg_variations.size(), 2u);
+    const auto& notes = fx.material.goldberg_variations[1].notes;
+    const int figura_corta =
+        std::any_of(notes.begin(), notes.end(),
+                    [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 2; }) &&
+        std::any_of(notes.begin(), notes.end(),
+                    [](const MaterialNote& n) { return n.duration == kTicksPerBeat / 4; });
+    if (idiom_of_parity[parity] < 0)
+      idiom_of_parity[parity] = figura_corta;
+    EXPECT_EQ(idiom_of_parity[parity], figura_corta) << "seed " << seed;
+  }
+  EXPECT_GE(idiom_of_parity[0], 0);
+  EXPECT_GE(idiom_of_parity[1], 0);
+  EXPECT_NE(idiom_of_parity[0], idiom_of_parity[1]);
 }
 
 // --- Registral continuity: keyboard compass + no cliff at the close ---------

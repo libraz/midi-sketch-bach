@@ -2299,7 +2299,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The closing block read against the coda and the close that sound there: anti 9 -> 8,
     // hidden 10 -> 11, fourths 16 -> 11, successions 30687 -> 30693.
     // Ornament groups read as their authored tone: fourths 11 -> 0.
-    {FormType::GoldbergVariations, 0, 0, 11, 9, 8, 0, 1, 1, 1, 30693, {0, 0, 0, 0}},
+    // The first variation's layout, figure phase and offset are drawn per seed, so the grid
+    // samples other pieces: hidden 11 -> 18, battuta 9 -> 12, anti 8 -> 4, worst-cell hidden
+    // 1 -> 2, successions 30693 -> 30595.
+    {FormType::GoldbergVariations, 0, 0, 18, 12, 4, 0, 2, 1, 1, 30595, {0, 0, 0, 0}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {

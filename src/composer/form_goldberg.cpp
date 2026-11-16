@@ -23,6 +23,7 @@
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
@@ -81,8 +82,8 @@ struct GoldbergCodaBass {
 // consonant and the ground tiles exactly).
 
 // Goldberg figuration palette (design table): the pattern idiom each
-// non-climax figuration variation block takes, rotated by (seed +
-// variation_index) so consecutive variations alternate idioms. The climax
+// non-climax figuration variation block takes, rotated by (the bass contour
+// phase + variation_index) so consecutive variations alternate idioms. The climax
 // block and variation 30 are design values (the densest anchored scalar wave)
 // and bypass the rotation; aria and canon blocks have their own layouts.
 // No kArpeggio here: broken-chord blocks raise the melodic-interval cost (the
@@ -1222,6 +1223,12 @@ bool closeGoldbergOnCoda(std::vector<MaterialNote>& variation, std::vector<Mater
                                    /*fallback_previous=*/kInnerBandCeiling);
 }
 
+// The member of an admission set a rotation index in [0, 4) picks. The index is
+// scaled rather than folded, so two indices two apart pick apart in a two-member set.
+std::size_t admittedMember(std::uint32_t rotation, std::size_t size) {
+  return static_cast<std::size_t>(rotation) * size / 4u;
+}
+
 }  // namespace
 
 HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
@@ -1229,7 +1236,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   constexpr int kCycleBars = 4;
   const int bars = static_cast<int>(req.bars);
   const Mode mode = req.mode;
-  const int offset = static_cast<int>(req.seed % 4u);
+  // The scale step every bar's upper line starts above the register base, drawn per piece.
+  const int offset =
+      static_cast<int>(rng::seedBlockChoice(req.seed, rng::SeedDecision::kGoldbergOffset, 4u));
   const detail::CharacterProfile& profile = detail::characterProfile(req.character);
 
   // Block layout: block 0 (bars 0-3) is the aria; blocks 1..K are 4-bar
@@ -1257,7 +1266,21 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   // material. It is written block by block in the loop below, because the order
   // a variation's bass walks its tones in is admitted against the voices that
   // block has already settled.
-  const std::size_t ground_variant = detail::groundVariantIndex(req.seed);
+  // The bass a listener hears -- ground variant and contour phase -- is one draw
+  // over blocks of twelve seeds, so a seed's three nearest neighbours never share
+  // it. The palette rotation takes the contour phase's parity, so each bass order
+  // meets the figuration idiom its upper line is admitted against.
+  static_assert(kAriaBassContours.count == 4 && detail::kGroundVariantCount == 3,
+                "the bass layout draw covers four contour phases over three ground variants");
+  constexpr std::uint32_t kBassLayouts = 12;
+  const std::uint32_t bass_layout = rng::seedBlockChoice(
+      req.seed, rng::SeedDecision::kGoldbergBassLayout, kBassLayouts, 0, /*clear=*/3);
+  const std::uint32_t contour_phase = bass_layout / 3u;
+  const std::uint32_t palette_phase = contour_phase % 2u;
+  const std::size_t ground_variant = bass_layout % 3u;
+  // Where each bar's figure rotation starts, drawn apart from the bass layout.
+  const std::uint32_t figure_phase =
+      rng::seedBlockChoice(req.seed, rng::SeedDecision::kGoldbergFigure, 4u);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
   const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground);
@@ -1276,17 +1299,17 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                         treatment);
     }
   };
-  // The member of the contour family a block asks for first, rotated by the
-  // seed so the same block layout meets the orders in a different place.
+  // Which member of a block's admissible contours it takes, rotated by the drawn
+  // contour phase so the same block layout meets the orders in a different place.
   auto first_bass_contour_of_block = [&](int blk) {
-    return static_cast<std::size_t>((req.seed + static_cast<std::uint32_t>(blk)) %
+    return static_cast<std::size_t>((contour_phase + static_cast<std::uint32_t>(blk)) %
                                     static_cast<std::uint32_t>(kAriaBassContours.count));
   };
   const std::vector<MaterialNote> no_inner_line;
-  // The order a free block's bass walks its bars in: the first member, in
-  // rotation, that reads no worse against the block's settled upper line than
-  // the reference order does. The reference is in the rotation, so one always
-  // passes; a plain bass has a single order.
+  // The order a free block's bass walks its bars in: one member of the orders
+  // that read no worse against the block's settled upper line than the reference
+  // order does, picked by the seed's rotation. The reference is always admissible;
+  // a plain bass has a single order.
   auto admit_bass_contour = [&](const std::vector<MaterialNote>& upper, int blk) {
     AriaBassTreatment admitted{bass_surface_of_block(blk), kAriaBassReferenceContour};
     if (!fill_thirds)
@@ -1294,21 +1317,19 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     const std::array<int, 8> reference_faults =
         goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
                             admitted, {-1, -1, -1}, coda_bass);
-    const std::size_t first = first_bass_contour_of_block(blk);
-    for (std::size_t turn = 0; turn < kAriaBassContours.count; ++turn) {
-      const std::size_t contour = (first + turn) % kAriaBassContours.count;
-      if (contour == kAriaBassReferenceContour)
-        break;
-      if (!ariaBassContourSuitsSurface(contour, admitted.surface))
+    std::vector<std::size_t> admissible = {kAriaBassReferenceContour};
+    for (std::size_t contour = 0; contour < kAriaBassContours.count; ++contour) {
+      if (contour == kAriaBassReferenceContour ||
+          !ariaBassContourSuitsSurface(contour, admitted.surface))
         continue;
-      const std::array<int, 8> faults =
-          goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
-                              {admitted.surface, contour}, {-1, -1, -1}, coda_bass);
-      if (faults <= reference_faults) {
-        admitted.contour = contour;
-        break;
-      }
+      if (goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
+                              {admitted.surface, contour}, {-1, -1, -1},
+                              coda_bass) <= reference_faults)
+        admissible.push_back(contour);
     }
+    std::sort(admissible.begin(), admissible.end());
+    admitted.contour = admissible[admittedMember(
+        static_cast<std::uint32_t>(first_bass_contour_of_block(blk)), admissible.size())];
     return admitted;
   };
   // One statement, so the period spans the whole declaration: the carrier lays
@@ -1517,7 +1538,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         // idioms (the BWV988 figuration-type rotation).
         const PatternKind pattern = design_peak
                                         ? PatternKind::kScalarWave
-                                        : kGoldbergPalette[(req.seed + variation_index) % 2];
+                                        : kGoldbergPalette[(palette_phase + variation_index) % 2];
         using BlockFigures = std::array<int, kCycleBars>;
         auto lay_out_block = [&](const BlockFigures& figures) {
           PassacagliaVariation laid;
@@ -1542,11 +1563,10 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           return laid.notes;
         };
         // Every bar opens on the plain anchor contour, and a peak block keeps it:
-        // the peak is a design value. Elsewhere each bar in turn asks for the
-        // contour the seed rotates to it and takes the first, in rotation, that
-        // stays inside the keyboard and leaves the block reading no worse
-        // against the reference bass than it already did. The plain contour is
-        // in the rotation, so a bar with no admissible departure keeps it.
+        // the peak is a design value. Elsewhere each bar in turn takes one of the
+        // contours that stay inside the keyboard and leave the block reading no
+        // worse against the reference bass than it already did, picked by the
+        // seed's rotation. The plain contour is always admissible.
         BlockFigures figures{};
         std::vector<MaterialNote> settled = lay_out_block(figures);
         if (!design_peak) {
@@ -1556,11 +1576,11 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                                   fill_thirds, probe_bass, {-1, -1, -1}, coda_bass);
           for (int local = 0; local < kCycleBars; ++local) {
             const std::uint32_t bar = static_cast<std::uint32_t>(blk * kCycleBars + local);
-            const std::uint32_t first = (req.seed + req.seed / 4u + bar) % 4u;
-            for (std::uint32_t turn = 0; turn < 4u; ++turn) {
-              const int figure = static_cast<int>((first + turn) % 4u);
-              if (figure == 0)
-                break;
+            const std::uint32_t first = (figure_phase + bar) % 4u;
+            std::vector<int> admissible = {0};
+            std::array<std::vector<MaterialNote>, 4> laid_by_figure;
+            std::array<std::array<int, 8>, 4> faults_by_figure{};
+            for (int figure = 1; figure < 4; ++figure) {
               BlockFigures trial_figures = figures;
               trial_figures[static_cast<std::size_t>(local)] = figure;
               std::vector<MaterialNote> trial = lay_out_block(trial_figures);
@@ -1574,11 +1594,16 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   goldbergBlockFaults(trial, no_inner_line, blk * kCycleBars, ground, mode,
                                       fill_thirds, probe_bass, {-1, -1, -1}, coda_bass);
               if (faults <= settled_faults) {
-                figures = trial_figures;
-                settled = std::move(trial);
-                settled_faults = faults;
-                break;
+                admissible.push_back(figure);
+                laid_by_figure[static_cast<std::size_t>(figure)] = std::move(trial);
+                faults_by_figure[static_cast<std::size_t>(figure)] = faults;
               }
+            }
+            const int figure = admissible[admittedMember(first, admissible.size())];
+            if (figure != 0) {
+              figures[static_cast<std::size_t>(local)] = figure;
+              settled = std::move(laid_by_figure[static_cast<std::size_t>(figure)]);
+              settled_faults = faults_by_figure[static_cast<std::size_t>(figure)];
             }
           }
         }

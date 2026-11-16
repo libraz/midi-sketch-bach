@@ -125,6 +125,47 @@ TEST(SeedBlockChoice, NeighbouringSeedsNeverShareAValue) {
   }
 }
 
+TEST(SeedBlockChoice, AClearanceOfThreeKeepsEveryValueThreeSeedsApart) {
+  constexpr std::uint32_t kModulus = 12;
+  constexpr std::uint32_t kClear = 3;
+  for (const SeedDecision tag : kBlockTags) {
+    for (std::uint32_t seed = 0; seed + kClear < kBlockSeeds; ++seed) {
+      const std::uint32_t value = seedBlockChoice(seed, tag, kModulus, 0, kClear);
+      for (std::uint32_t gap = 1; gap <= kClear; ++gap) {
+        EXPECT_NE(value, seedBlockChoice(seed + gap, tag, kModulus, 0, kClear))
+            << "seed " << seed << " gap " << gap;
+      }
+    }
+    for (std::uint32_t start = 0; start + kModulus <= kBlockSeeds; start += kModulus) {
+      std::set<std::uint32_t> values;
+      for (std::uint32_t seed = start; seed < start + kModulus; ++seed)
+        values.insert(seedBlockChoice(seed, tag, kModulus, 0, kClear));
+      EXPECT_EQ(values.size(), kModulus) << "block at " << start;
+    }
+  }
+}
+
+// A clearance of one is the neighbour rule: a block whose first value repeats the
+// previous block's last trades its first two.
+TEST(SeedBlockChoice, AClearanceOfOneTradesOnlyTheFirstTwo) {
+  for (const std::uint32_t modulus : kBlockModuli) {
+    for (const SeedDecision tag : kBlockTags) {
+      for (std::uint32_t seed = modulus; seed < kBlockSeeds; ++seed) {
+        const std::uint32_t block = seed / modulus;
+        const std::uint32_t position = seed % modulus;
+        const std::uint32_t first = detail::blockShuffleAt(block, tag, modulus, 0, 0);
+        const bool repeats =
+            first == detail::blockShuffleAt(block - 1, tag, modulus, 0, modulus - 1);
+        std::uint32_t expected = detail::blockShuffleAt(block, tag, modulus, 0, position);
+        if (repeats && position < 2)
+          expected = detail::blockShuffleAt(block, tag, modulus, 0, 1 - position);
+        EXPECT_EQ(seedBlockChoice(seed, tag, modulus), expected)
+            << "modulus " << modulus << " seed " << seed;
+      }
+    }
+  }
+}
+
 TEST(SeedBlockChoice, EachAlignedBlockUsesEveryValueOnce) {
   for (const std::uint32_t modulus : kBlockModuli) {
     for (const SeedDecision tag : kBlockTags) {

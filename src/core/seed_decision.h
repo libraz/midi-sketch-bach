@@ -38,7 +38,6 @@ enum class SeedDecision : std::uint32_t {
   kCantusPhrase = 20,
   kCantusFigure = 21,
   kGoldbergOffset = 22,
-  kGoldbergPalette = 23,
   kGroundDirection = 24,
   kGroundPalette = 25,
   kGroundRotation = 26,
@@ -50,7 +49,6 @@ enum class SeedDecision : std::uint32_t {
   kLinearThirdsRow = 32,
   kGroundPassingDirection = 33,
   kGroundPassingSlot = 34,
-  kGoldbergBassContour = 35,
   kGoldbergFigure = 36,
   kChoraleQuarterContour = 37,
   kPassacagliaDelayedResolution = 38,
@@ -59,6 +57,7 @@ enum class SeedDecision : std::uint32_t {
   kChoraleNeighbourSide = 41,
   kLinearOutlineTurn = 42,
   kTrioBlockOrder = 43,
+  kGoldbergBassLayout = 44,
   kTrioShapePhase = 46,
   kTrioBassRoute = 47,
 };
@@ -104,11 +103,10 @@ inline constexpr std::uint32_t kMaxBlockChoice = 32;
 
 namespace detail {
 
-/// @brief Value at `position` of block `block`'s salted shuffle of 0..modulus-1 (Fisher-Yates).
+/// @brief Block `block`'s salted shuffle of 0..modulus-1 (Fisher-Yates) into `order`.
 /// The high index bit keeps these draws apart from seedChoice draws of the same tag.
-constexpr std::uint32_t blockShuffleAt(std::uint32_t block, SeedDecision tag, std::uint32_t modulus,
-                                       std::uint32_t index, std::uint32_t position) {
-  std::uint32_t order[kMaxBlockChoice] = {};
+constexpr void fillBlockShuffle(std::uint32_t block, SeedDecision tag, std::uint32_t modulus,
+                                std::uint32_t index, std::uint32_t (&order)[kMaxBlockChoice]) {
   for (std::uint32_t pos = 0; pos < modulus; ++pos)
     order[pos] = pos;
   for (std::uint32_t pos = modulus - 1; pos > 0; --pos) {
@@ -119,6 +117,13 @@ constexpr std::uint32_t blockShuffleAt(std::uint32_t block, SeedDecision tag, st
     order[pos] = order[pick];
     order[pick] = held;
   }
+}
+
+/// @brief Value at `position` of block `block`'s salted shuffle of 0..modulus-1.
+constexpr std::uint32_t blockShuffleAt(std::uint32_t block, SeedDecision tag, std::uint32_t modulus,
+                                       std::uint32_t index, std::uint32_t position) {
+  std::uint32_t order[kMaxBlockChoice] = {};
+  fillBlockShuffle(block, tag, modulus, index, order);
   return order[position];
 }
 
@@ -128,27 +133,51 @@ constexpr std::uint32_t blockShuffleAt(std::uint32_t block, SeedDecision tag, st
 ///
 /// Seeds fall into aligned blocks of `modulus`; each block takes its own salted shuffle and
 /// `seed % modulus` reads a position, so the `modulus` seeds of a block use every value once.
-/// A block whose first value repeats the previous block's last swaps its first two, so
-/// neighbouring seeds never share a value. The swap never reaches a block's last position, so a
-/// lookup reads this block's shuffle and at most the previous one. With two alternatives the
-/// rule would force strict alternation, a period of 2; draw those with seedChoice.
+/// Each of a block's first `clear` positions that holds a value the previous block's shuffle
+/// placed within `clear` seeds of it trades with the lowest position in
+/// [clear, modulus - clear) clear of those values, so no two seeds within `clear` of each other
+/// share a value. No trade reaches a block's last `clear` positions, so a lookup reads this
+/// block's shuffle and at most the previous one. With two alternatives the rule would force
+/// strict alternation, a period of 2; draw those with seedChoice.
 /// @param seed The resolved request seed.
 /// @param tag The decision being drawn.
 /// @param modulus Number of alternatives, in [3, kMaxBlockChoice].
 /// @param index Distinguishes repeated draws of one decision; below 2^26.
+/// @param clear Seed distance within which no two seeds share a value; 2 * clear < modulus.
 /// @return A value in [0, modulus).
 constexpr std::uint32_t seedBlockChoice(std::uint32_t seed, SeedDecision tag, std::uint32_t modulus,
-                                        std::uint32_t index = 0) {
+                                        std::uint32_t index = 0, std::uint32_t clear = 1) {
   assert(modulus >= 3 && modulus <= kMaxBlockChoice);
+  assert(clear >= 1 && 2 * clear < modulus);
   const std::uint32_t block = seed / modulus;
   const std::uint32_t position = seed % modulus;
-  if (block == 0 || position > 1)
-    return detail::blockShuffleAt(block, tag, modulus, index, position);
-  const std::uint32_t first = detail::blockShuffleAt(block, tag, modulus, index, 0);
-  const bool repeats = first == detail::blockShuffleAt(block - 1, tag, modulus, index, modulus - 1);
-  if (position == 0)
-    return repeats ? detail::blockShuffleAt(block, tag, modulus, index, 1) : first;
-  return repeats ? first : detail::blockShuffleAt(block, tag, modulus, index, 1);
+  std::uint32_t order[kMaxBlockChoice] = {};
+  detail::fillBlockShuffle(block, tag, modulus, index, order);
+  if (block == 0 || position >= modulus - clear)
+    return order[position];
+  std::uint32_t tail[kMaxBlockChoice] = {};
+  detail::fillBlockShuffle(block - 1, tag, modulus, index, tail);
+  for (std::uint32_t pos = 0; pos < clear; ++pos) {
+    // The previous block's values lying within `clear` seeds of this position.
+    const auto within_clear = [&](std::uint32_t value) {
+      for (std::uint32_t back = modulus - clear + pos; back < modulus; ++back) {
+        if (tail[back] == value)
+          return true;
+      }
+      return false;
+    };
+    if (!within_clear(order[pos]))
+      continue;
+    for (std::uint32_t other = clear; other < modulus - clear; ++other) {
+      if (!within_clear(order[other])) {
+        const std::uint32_t held = order[pos];
+        order[pos] = order[other];
+        order[other] = held;
+        break;
+      }
+    }
+  }
+  return order[position];
 }
 
 /// Most width-`width` coordinates seedTupleChoice draws with its last coordinate.
