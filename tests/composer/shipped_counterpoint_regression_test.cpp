@@ -53,7 +53,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <optional>
+#include <tuple>
 #include <vector>
 
 #include "composer/harmonic_plan.h"
@@ -418,12 +420,83 @@ struct SixFourJudgement {
   const std::vector<NoteEvent>& composed;
 };
 
-BassFourthCounts countUnresolvedBassFourths(const std::vector<NoteEvent>& notes,
-                                            const std::vector<NoteProvenance>& provenance = {},
-                                            const SixFourJudgement* six_four = nullptr) {
+// The array the fourth column reads. Ornament notes sharing a voice and an
+// authored note form a group, read as that authored tone unless an auxiliary
+// lasts a beat or more or is the group's last tone. Without index-parallel
+// provenance the array is read as given.
+struct OrnamentGroupRead {
+  std::vector<NoteEvent> notes;
+  std::vector<NoteProvenance> provenance;
+};
+
+OrnamentGroupRead readOrnamentGroups(const std::vector<NoteEvent>& notes,
+                                     const std::vector<NoteProvenance>& provenance) {
+  if (provenance.size() != notes.size())
+    return {notes, provenance};
+  using GroupKey = std::tuple<VoiceId, Tick, Tick, std::uint8_t>;
+  struct Group {
+    bool sustained_auxiliary = false;
+    Tick last_start = 0;
+    std::uint8_t last_pitch = 0;
+    bool emitted = false;
+  };
+  const auto isGrouped = [&](std::size_t idx) {
+    return provenance[idx].source == NoteSource::Ornament && provenance[idx].has_authored_note;
+  };
+  const auto keyOf = [&](std::size_t idx) {
+    const NoteProvenance& entry = provenance[idx];
+    return GroupKey{notes[idx].voice, entry.authored_start_tick, entry.authored_duration,
+                    entry.authored_pitch};
+  };
+  std::map<GroupKey, Group> groups;
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    if (!isGrouped(idx))
+      continue;
+    const NoteEvent& note = notes[idx];
+    Group& group = groups[keyOf(idx)];
+    if (note.pitch != provenance[idx].authored_pitch && note.duration >= kTicksPerBeat)
+      group.sustained_auxiliary = true;
+    if (note.start_tick >= group.last_start) {
+      group.last_start = note.start_tick;
+      group.last_pitch = note.pitch;
+    }
+  }
+  OrnamentGroupRead read;
+  read.notes.reserve(notes.size());
+  read.provenance.reserve(notes.size());
+  for (std::size_t idx = 0; idx < notes.size(); ++idx) {
+    if (isGrouped(idx)) {
+      const NoteProvenance& entry = provenance[idx];
+      Group& group = groups.at(keyOf(idx));
+      if (!group.sustained_auxiliary && group.last_pitch == entry.authored_pitch) {
+        if (group.emitted)
+          continue;
+        group.emitted = true;
+        NoteEvent tone = notes[idx];
+        tone.start_tick = entry.authored_start_tick;
+        tone.duration = entry.authored_duration;
+        tone.pitch = entry.authored_pitch;
+        read.notes.push_back(tone);
+        read.provenance.push_back(entry);
+        continue;
+      }
+    }
+    read.notes.push_back(notes[idx]);
+    read.provenance.push_back(provenance[idx]);
+  }
+  return read;
+}
+
+BassFourthCounts countUnresolvedBassFourths(
+    const std::vector<NoteEvent>& surface,
+    const std::vector<NoteProvenance>& surface_provenance = {},
+    const SixFourJudgement* six_four = nullptr) {
   BassFourthCounts counts;
-  if (notes.empty())
+  if (surface.empty())
     return counts;
+  const OrnamentGroupRead read = readOrnamentGroups(surface, surface_provenance);
+  const std::vector<NoteEvent>& notes = read.notes;
+  const std::vector<NoteProvenance>& provenance = read.provenance;
   std::optional<SoundingPitchIndex> composed_index;
   if (six_four != nullptr)
     composed_index.emplace(six_four->composed);
@@ -763,6 +836,88 @@ TEST(BassFourthCounter, ShortFourthsAreSortedByHowTheirLineMoves) {
   EXPECT_EQ(repeated_in.unresolved, 1u);
   EXPECT_EQ(repeated_in.short_other, 1u);
   EXPECT_EQ(repeated_in.held + repeated_in.short_step + repeated_in.short_leap, 0u);
+}
+
+NoteProvenance ornamentOf(Tick start, Tick duration, std::uint8_t pitch) {
+  NoteProvenance entry;
+  entry.source = NoteSource::Ornament;
+  entry.has_authored_note = true;
+  entry.authored_start_tick = start;
+  entry.authored_duration = duration;
+  entry.authored_pitch = pitch;
+  return entry;
+}
+
+TEST(BassFourthCounter, AnOrnamentGroupIsReadAsItsAuthoredTone) {
+  // Trill from below on D4 over a held G2: the C on the beat is a fourth over
+  // the bass that only the ornament sounds.
+  std::vector<NoteEvent> notes = {makeNote(1, 0, 1920, 43)};
+  std::vector<NoteProvenance> provenance(1);
+  Tick onset = 0;
+  for (const std::uint8_t pitch : std::array<std::uint8_t, 8>{72, 74, 76, 74, 76, 74, 72, 74}) {
+    notes.push_back(makeNote(0, onset, 120, pitch));
+    provenance.push_back(ornamentOf(0, 960, 74));
+    onset += 120;
+  }
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 1u);
+  EXPECT_EQ(countUnresolvedBassFourths(notes, provenance).unresolved, 0u);
+}
+
+TEST(BassFourthCounter, ASustainedAuxiliaryIsReadAsSounded) {
+  // F4 appoggiatura held a half note over C3 before its authored E4.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1920, 48),
+      makeNote(0, 0, 960, 65),
+      makeNote(0, 960, 960, 64),
+  };
+  std::vector<NoteProvenance> provenance(1);
+  provenance.push_back(ornamentOf(0, 1920, 64));
+  provenance.push_back(ornamentOf(0, 1920, 64));
+  const BassFourthCounts counts = countUnresolvedBassFourths(notes, provenance);
+  EXPECT_EQ(counts.unresolved, 1u);
+  EXPECT_EQ(counts.held, 1u);
+}
+
+TEST(BassFourthCounter, ALowerNeighbourDoesNotResolveAnAuthoredFourth) {
+  // Authored F4 over C3, decorated F-E-F; the E returns to the fourth.
+  const std::vector<NoteEvent> notes = {
+      makeNote(1, 0, 1920, 48),  makeNote(0, 0, 120, 65),   makeNote(0, 120, 120, 64),
+      makeNote(0, 240, 720, 65), makeNote(0, 960, 960, 64),
+  };
+  std::vector<NoteProvenance> provenance(5);
+  for (std::size_t idx = 1; idx <= 3; ++idx)
+    provenance[idx] = ornamentOf(0, 960, 65);
+  EXPECT_EQ(countUnresolvedBassFourths(notes).unresolved, 0u);
+  EXPECT_EQ(countUnresolvedBassFourths(notes, provenance).unresolved, 1u);
+}
+
+TEST(BassFourthCounter, AnAppoggiaturaOnTheResolutionDelaysOnlyTheSubNotes) {
+  // Cadential C6 over a held G2 resolving to B5; the resolution opens on a
+  // restruck C. Read by sub-note the C holds past beat two and the declared
+  // six-four exempts it; read as authored tones the C resolves on beat two.
+  const std::vector<NoteEvent> composed = {
+      makeNote(1, 0, 1920, 43),
+      makeNote(0, 0, 480, 84),
+      makeNote(0, 480, 1440, 83),
+  };
+  const std::vector<NoteEvent> shipped = {
+      makeNote(1, 0, 1920, 43),  makeNote(0, 0, 480, 84),   makeNote(0, 480, 360, 84),
+      makeNote(0, 840, 120, 83), makeNote(0, 960, 960, 83),
+  };
+  std::vector<NoteProvenance> provenance(5);
+  for (std::size_t idx = 2; idx <= 4; ++idx)
+    provenance[idx] = ornamentOf(480, 1440, 83);
+  std::vector<CadentialSixFour> declared(1);
+  declared[0].tick = 0;
+  declared[0].resolution_tick = 480;
+  const SixFourJudgement judged{declared, composed};
+
+  const BassFourthCounts by_sub_note = countUnresolvedBassFourths(shipped, {}, &judged);
+  EXPECT_EQ(by_sub_note.unresolved, 0u);
+  EXPECT_EQ(by_sub_note.sixFourExempted(), 1u);
+  const BassFourthCounts by_group = countUnresolvedBassFourths(shipped, provenance, &judged);
+  EXPECT_EQ(by_group.unresolved, 0u);
+  EXPECT_EQ(by_group.sixFourExempted(), 0u);
 }
 
 TEST(BassFourthCounter, AResolvingFourthIsLicensed) {
@@ -1304,7 +1459,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 51390 -> 51369.
     // A declared cadential six-four is judged by its composed resolution: held 152 -> 88
     // (64 exempt).
-    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, {88, 14, 5, 7}},
+    // Ornament groups read as their authored tone: fourths 114 -> 111.
+    {FormType::Fugue, 0, 0, 20, 26, 0, 0, 2, 2, 0, 51369, {87, 14, 5, 5}},
     // The fugue half is assembled by the same section builder as the bare fugue,
     // so every closure above holds here unchanged. The prelude half writes its
     // two voices through the same parallel-aware wave: its bass support tone is
@@ -1415,7 +1571,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // (64 exempt).
     // The final tonic sits on the lower C, so the compass shift no longer drops two body bass
     // bars an octave and a composed battuta sounds: hidden 18 -> 16, battuta 12 -> 13.
-    {FormType::PreludeAndFugue, 0, 0, 16, 13, 0, 0, 3, 2, 0, 31968, {24, 4, 4, 0}},
+    // Ornament groups read as their authored tone: fourths 32 -> 37.
+    {FormType::PreludeAndFugue, 0, 0, 16, 13, 0, 0, 3, 2, 0, 31968, {29, 4, 4, 0}},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -1600,7 +1757,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 17845 -> 17807.
     // The last quarter of a plain bar takes a step tone in and out: hidden 37 -> 34,
     // successions 17807 -> 17844.
-    {FormType::ChoralePrelude, 0, 0, 34, 12, 0, 0, 3, 2, 0, 17844, {6, 0, 2, 4}},
+    // Ornament groups read as their authored tone: fourths 12 -> 10.
+    {FormType::ChoralePrelude, 0, 0, 34, 12, 0, 0, 3, 2, 0, 17844, {6, 0, 2, 2}},
     // Most of this form's parallel octaves are deliberate: the opening octave
     // cascade states its gesture high, an octave lower, then doubled in V0 and
     // V1 across a descending scale, which is a parallel octave on every one of
@@ -1743,7 +1901,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 29316 -> 25758.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 25758 -> 25752.
-    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, {9, 5, 0, 0}},
+    // Ornament groups read as their authored tone: fourths 14 -> 12.
+    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, {9, 3, 0, 0}},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -1885,7 +2044,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // One anchor ladder ordered by how often the organ stratum writes each fault class: hidden
     // 14 -> 29, anti 3 -> 0 (worst cell 1 -> 0), worst-cell hidden 1 -> 2, successions
     // 28027 -> 28066. Delayed resolutions in the upper voices: successions 28066 -> 28165.
-    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28165, {14, 59, 7, 27}},
+    // Ornament groups read as their authored tone: fourths 107 -> 98.
+    {FormType::Passacaglia, 0, 0, 29, 0, 0, 0, 2, 0, 0, 28165, {14, 54, 7, 23}},
     // Its stretto reads four canon configurations and refuses one that sounds a
     // true parallel, where the follower would otherwise be the leader's exact
     // imitation an octave away at a fixed one-bar delay -- the subject's own
@@ -1971,7 +2131,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // instead of C, a change of measurement: hidden 14 -> 15.
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 30879 -> 30873.
-    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, {12, 8, 0, 0}},
+    // Ornament groups read as their authored tone: fourths 20 -> 18.
+    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, {12, 6, 0, 0}},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0}},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -2137,7 +2298,8 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // successions 30669 -> 30687.
     // The closing block read against the coda and the close that sound there: anti 9 -> 8,
     // hidden 10 -> 11, fourths 16 -> 11, successions 30687 -> 30693.
-    {FormType::GoldbergVariations, 0, 0, 11, 9, 8, 0, 1, 1, 1, 30693, {0, 0, 0, 11}},
+    // Ornament groups read as their authored tone: fourths 11 -> 0.
+    {FormType::GoldbergVariations, 0, 0, 11, 9, 8, 0, 1, 1, 1, 30693, {0, 0, 0, 0}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {
@@ -2423,7 +2585,8 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // A declared cadential six-four is judged by its composed resolution: held 924 -> 668
     // (256 exempt).
     // A unison is a battuta whichever line falls into it, as the validator reads the pair.
-    {FormType::Fugue, 0, 0, 138, 168, 0, 0, 4, 3, 0, 505829, {668, 92, 73, 64}},
+    // Ornament groups read as their authored tone: fourths 897 -> 916.
+    {FormType::Fugue, 0, 0, 138, 168, 0, 0, 4, 3, 0, 505829, {724, 79, 73, 40}},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2541,7 +2704,8 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // (320 exempt).
     // The final tonic sits on the lower C and the compass shift keeps the body bass in place:
     // hidden 131 -> 129, battuta 113 -> 114.
-    {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647533, {432, 60, 86, 41}},
+    // Ornament groups read as their authored tone: fourths 619 -> 649.
+    {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647533, {480, 56, 87, 26}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {
