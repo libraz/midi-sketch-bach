@@ -2474,12 +2474,12 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
   {
     CodaDecl coda;
     coda.voice = 0;
-    // Centre the cadence on the UPPER C of the V0 band so the leading tone B
-    // (one semitone below) still lies inside the band (a leading tone below the
-    // band floor would be clamped up to the tonic and break the resolution).
-    int tonic = kBandHi[0];  // highest C at or below the band ceiling.
+    // The cadence takes the LOWER C of the V0 band: the body reaches the band
+    // ceiling, so a close on the upper C would end the piece on its highest note.
+    // The leading tone B one semitone below still lies inside the band.
+    int tonic = kBandLo[0];  // lowest C at or above the band floor.
     while (tonic % 12 != 0) {
-      --tonic;
+      ++tonic;
     }
     appendCadentialSixFourLanding(coda.notes, barTick(coda_start + 2), kTicksPerBar, tonic,
                                   tonic - 1);

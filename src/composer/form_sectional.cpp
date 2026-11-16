@@ -1601,15 +1601,17 @@ void appendFugueTail(SectionalAssembly& asm_ctx, int first_bar, int bars,
   {
     CodaDecl coda;
     coda.voice = 0;
-    // The shared cadential landing: an eighth-note approach run rises into a
-    // held half-note leading tone B over the penultimate bar's second half
-    // (the cadential trill site), then the final bar holds the tonic C as a
-    // whole note (the plain resolution). cadence_voice_leading reads the
-    // SOUNDING pitch at the approach beat and the cadence downbeat, so the
-    // held B still supplies upper_prev = B and the whole-note C upper_now = C.
-    const int upper_tonic = tonic0 + 12;
-    appendCadentialLanding(coda.notes, barTick(cadence_start), kTicksPerBar, upper_tonic - 1,
-                           upper_tonic, mode, kBandLo[0]);
+    // The shared cadential landing: an eighth-note approach run into a held
+    // half-note leading tone B over the penultimate bar's second half (the
+    // cadential trill site), then the final bar holds the tonic C as a whole
+    // note (the plain resolution). cadence_voice_leading reads the SOUNDING
+    // pitch at the approach beat and the cadence downbeat, so the held B still
+    // supplies upper_prev = B and the whole-note C upper_now = C.
+    // The close takes the lower C of the band: the body reaches the band ceiling,
+    // so the upper C would end the piece on its highest note. A run rising into
+    // that B would dip under the band floor, so it descends into it from above.
+    appendCadentialLanding(coda.notes, barTick(cadence_start), kTicksPerBar, tonic0 - 1, tonic0,
+                           mode, kBandLo[0]);
     for (const MaterialNote& note : coda.notes)
       registry.record(note.start_tick, /*voice=*/0, static_cast<int>(note.pitch), note.duration);
     out.material.coda_extensions.push_back(coda);

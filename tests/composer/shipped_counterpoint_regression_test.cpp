@@ -1413,7 +1413,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // battuta 27 -> 12.
     // A declared cadential six-four is judged by its composed resolution: held 88 -> 24
     // (64 exempt).
-    {FormType::PreludeAndFugue, 0, 0, 18, 12, 0, 0, 3, 2, 0, 31968, {24, 4, 4, 0}},
+    // The final tonic sits on the lower C, so the compass shift no longer drops two body bass
+    // bars an octave and a composed battuta sounds: hidden 18 -> 16, battuta 12 -> 13.
+    {FormType::PreludeAndFugue, 0, 0, 16, 13, 0, 0, 3, 2, 0, 31968, {24, 4, 4, 0}},
     // Its hidden column is the one with room, and with a denominator in the row
     // that can be said as a rate rather than as a ratio to some other form. Both
     // operands are the columns below rather than figures restated here: a
@@ -2534,7 +2536,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // fourths 945 -> 939.
     // A declared cadential six-four is judged by its composed resolution: held 752 -> 432
     // (320 exempt).
-    {FormType::PreludeAndFugue, 0, 0, 131, 113, 0, 0, 4, 3, 0, 647533, {432, 60, 86, 41}},
+    // The final tonic sits on the lower C and the compass shift keeps the body bass in place:
+    // hidden 131 -> 129, battuta 113 -> 114.
+    {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647533, {432, 60, 86, 41}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

@@ -1385,6 +1385,52 @@ TEST(FormFugueTest, CodaCadencesOnTonic) {
   }
 }
 
+// The top voice closes on the tonic well below the piece's highest note, reached
+// as a line: the last body tone moves into the cadence by less than a major sixth.
+TEST(FormFugueTest, FinalTonicSitsBelowThePieceHigh) {
+  for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue, FormType::ToccataAndFugue,
+                        FormType::FantasiaAndFugue}) {
+    for (std::uint32_t seed : {1u, 5u, 42u, 99u}) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(form, seed, minor, naturalBars(form));
+        const ComposeResult r = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+        ASSERT_FALSE(r.notes.empty());
+        Tick end = 0;
+        int high = 0;
+        for (const NoteEvent& note : r.notes) {
+          end = std::max(end, note.start_tick + note.duration);
+          high = std::max(high, static_cast<int>(note.pitch));
+        }
+        const Tick penult = (end - 1) / kBar * kBar - kBar;
+        const NoteEvent* last = nullptr;
+        const NoteEvent* body_last = nullptr;
+        const NoteEvent* coda_first = nullptr;
+        for (const NoteEvent& note : r.notes) {
+          if (note.voice != 0 || note.source == BachNoteSource::Ornament)
+            continue;
+          if (last == nullptr || note.start_tick > last->start_tick)
+            last = &note;
+          if (note.start_tick < penult &&
+              (body_last == nullptr || note.start_tick > body_last->start_tick))
+            body_last = &note;
+          if (note.start_tick >= penult &&
+              (coda_first == nullptr || note.start_tick < coda_first->start_tick))
+            coda_first = &note;
+        }
+        ASSERT_NE(last, nullptr);
+        ASSERT_NE(body_last, nullptr);
+        ASSERT_NE(coda_first, nullptr);
+        const std::string cell = std::string(formTypeToString(form)) + " seed " +
+                                 std::to_string(seed) + (minor ? " minor" : " major");
+        EXPECT_EQ(last->pitch % 12, 0) << cell;
+        EXPECT_GE(high - static_cast<int>(last->pitch), 9) << cell;
+        const int seam = static_cast<int>(coda_first->pitch) - static_cast<int>(body_last->pitch);
+        EXPECT_LT(std::abs(seam), 9) << cell;
+      }
+    }
+  }
+}
+
 TEST(FormFugueTest, CodaHasActualCadentialSixFourResolution) {
   for (FormType form : {FormType::Fugue, FormType::PreludeAndFugue}) {
     const HarnessFixture fx = buildFixture(form, 42, false, naturalBars(form));
