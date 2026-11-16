@@ -298,12 +298,17 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   const auto walk_fifth = [](int tone) {
     return std::clamp(tone + 7 > kFreeV2Hi ? tone - 5 : tone + 7, kFreeV2Lo, kFreeV2Hi);
   };
+  // The other voices' motion into the half-bar onset, where a walking bar strikes its fifth.
+  std::vector<ConcurrentMotion> walk_motions;
   // Whether a bar states `tone` walking: a returning tone takes the density it has not been
-  // heard in yet, and the seed-phased walk decides only while both are still free.
+  // heard in yet, and the seed-phased walk decides only while both are still free. A fifth that
+  // would arrive by a perfect approach against the line above keeps the tone held instead.
   const auto walks = [&](int bar, int tone) {
     const bool held_before = alreadySustained(pedal_held, tone, kTicksPerBar);
     const bool walked_before = alreadySustained(pedal_held, tone, kTicksPerBeat * 2);
-    return held_before != walked_before ? !walked_before : (bar % 4) == walk_phase;
+    const bool wanted = held_before != walked_before ? !walked_before : (bar % 4) == walk_phase;
+    return wanted &&
+           worstPerfectMotionRank(tone, walk_fifth(tone), walk_motions) == kMotionRankClean;
   };
   // The free section closes on a pedal of fixed pitch class, so the bar before it also ranks
   // the departure of its last tone into that cadence: the onset's own tone, or the fifth
@@ -447,6 +452,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // contributes one tone per bar while the line above attacks many times inside
     // it, and the drive into the tail runs in triplet sixteenths.
     registry.motionsIntoOnset(bar_start, /*voice=*/2, /*num_voices=*/3, motions);
+    registry.motionsIntoOnset(bar_start + kTicksPerBeat * 2, /*voice=*/2, /*num_voices=*/3,
+                              walk_motions);
     window_pitches.clear();
     for (Tick beat = kTicksPerBeat; beat < kTicksPerBar; beat += kTicksPerBeat) {
       registry.concurrentThemePitches(bar_start + beat, /*voice=*/2, beat_pitches);

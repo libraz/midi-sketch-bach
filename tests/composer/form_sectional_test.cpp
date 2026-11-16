@@ -1259,6 +1259,61 @@ TEST(FormSectionalTest, ToccataPedalEscapesStayOnTheChord) {
   }
 }
 
+// A walking pedal bar answers its tone with the fifth at the half bar, and that onset takes no
+// perfect approach against the top voice's step into it; such a bar holds its tone instead.
+TEST(FormSectionalTest, ToccataWalkingPedalFifthTakesNoPerfectApproach) {
+  // The top voice falling 83 to 76 over a walk from 50 down to 45 arrives at a hidden fifth.
+  EXPECT_EQ(worstPerfectMotionRank(50, 45, {ConcurrentMotion{0, 83, 76}}), kMotionRankHidden);
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    for (std::uint16_t bars :
+         {std::uint16_t{32}, std::uint16_t{64}, std::uint16_t{96}, std::uint16_t{128}}) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, minor, bars);
+        const Tick free_end = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+        std::vector<const MaterialNote*> top;
+        for (const ToccataSection& section : fx.material.toccata_sections) {
+          if (section.voice != 0)
+            continue;
+          for (const MaterialNote& note : section.notes)
+            top.push_back(&note);
+        }
+        const auto sounding = [&](Tick tick) {
+          const MaterialNote* best = nullptr;
+          for (const MaterialNote* note : top) {
+            if (note->start_tick <= tick && tick < note->start_tick + note->duration &&
+                (best == nullptr || note->start_tick >= best->start_tick))
+              best = note;
+          }
+          return best != nullptr ? static_cast<int>(best->pitch) : -1;
+        };
+        for (const FigurationSection& section : fx.material.figuration_sections) {
+          if (section.voice != 2 || !section.is_pedal_prep)
+            continue;
+          for (std::size_t idx = 1; idx < section.notes.size(); ++idx) {
+            const MaterialNote& head = section.notes[idx - 1];
+            const MaterialNote& fifth = section.notes[idx];
+            const int step = static_cast<int>(fifth.pitch) - static_cast<int>(head.pitch);
+            if (fifth.start_tick >= free_end || head.start_tick % kBar != 0 ||
+                head.duration != kTicksPerBeat * 2 ||
+                fifth.start_tick != head.start_tick + kTicksPerBeat * 2 ||
+                (step != 7 && step != -5))
+              continue;
+            std::vector<ConcurrentMotion> motions;
+            const int prev = sounding(fifth.start_tick - 1);
+            const int curr = sounding(fifth.start_tick);
+            if (prev >= 0 && curr >= 0)
+              motions.push_back(ConcurrentMotion{0, prev, curr});
+            EXPECT_EQ(worstPerfectMotionRank(head.pitch, fifth.pitch, motions), kMotionRankClean)
+                << "seed " << seed << " bars " << bars << (minor ? " minor" : " major") << " tick "
+                << fifth.start_tick << " pedal " << static_cast<int>(head.pitch) << " to "
+                << static_cast<int>(fifth.pitch) << " over " << prev << " to " << curr;
+          }
+        }
+      }
+    }
+  }
+}
+
 // --- 10. Dramaticus keeps its opening flourish solo ------------------------
 
 // A Dramaticus toccata (archetype = seed % 4 == 0) opens with a solo flourish:
