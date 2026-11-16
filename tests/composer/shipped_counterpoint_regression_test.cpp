@@ -2721,81 +2721,96 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647575, {480, 56, 87, 26}},
 }};
 
+// Sweeps `entry`'s form at every shipped length and compares it against the row's pins.
+void expectPinnedCountsAtEveryLength(const LengthCeiling& entry) {
+  PerfectMotionCounts structural_total;
+  PerfectMotionCounts total;
+  std::size_t worst_strict = 0;
+  std::size_t worst_hidden = 0;
+  std::size_t worst_battuta = 0;
+  std::size_t worst_anti = 0;
+  BassFourthCounts bass_fourths;
+  test::ShippedSurface slice;
+  slice.forms = {entry.form};
+  slice.lengths = test::LengthAxis::Shipped;
+  slice.seed_count = kSeedCount;
+  const std::size_t composed_cells = test::sweepShippedCells(
+      slice, [&](const test::ShippedCell& shipped_cell, const test::ProductGateResult& gate) {
+        ASSERT_FALSE(gate.shipped.notes.empty()) << test::cellName(shipped_cell);
+        structural_total.add(countPerfectMotion(gate.composed.notes));
+        const PerfectMotionCounts cell = countPerfectMotion(gate.shipped.notes);
+        total.add(cell);
+        worst_strict = std::max(worst_strict, cell.strict());
+        worst_hidden = std::max(worst_hidden, cell.hidden());
+        worst_battuta = std::max(worst_battuta, cell.battuta);
+        worst_anti = std::max(worst_anti, cell.anti_parallel);
+        const SixFourJudgement six_four{gate.fixture.harmony.cadential_six_fours,
+                                        gate.composed.notes};
+        bass_fourths.add(
+            countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance, &six_four));
+      });
+  std::printf(
+      "[counterpoint/length] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu "
+      "battuta=%zu anti=%zu | worst-cell strict=%zu hidden=%zu battuta=%zu anti=%zu | "
+      "successions=%zu\n",
+      formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
+      total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
+      worst_hidden, worst_battuta, worst_anti, total.successions);
+  std::printf(
+      "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
+      "upper-samples=%zu | six-four exempt=%zu (%zu/%zu/%zu/%zu)\n",
+      formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
+      bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
+      bass_fourths.upper_samples, bass_fourths.sixFourExempted(), bass_fourths.six_four_exempt[0],
+      bass_fourths.six_four_exempt[1], bass_fourths.six_four_exempt[2],
+      bass_fourths.six_four_exempt[3]);
+  EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
+      << formTypeToString(entry.form)
+      << ": parallel perfect intervals in the composed counterpoint changed "
+      << "the pinned count once the form is stretched (par5=" << structural_total.parallel_fifth
+      << " par8=" << structural_total.parallel_octave << ")";
+  EXPECT_EQ(total.strict(), entry.pin_strict)
+      << formTypeToString(entry.form)
+      << ": parallel perfect intervals differ from the pinned count once the "
+      << "form is stretched (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave
+      << ")";
+  EXPECT_EQ(total.battuta, entry.pin_battuta)
+      << formTypeToString(entry.form) << ": battuta changed";
+  EXPECT_EQ(total.hidden(), entry.pin_hidden) << formTypeToString(entry.form) << ": hidden changed";
+  EXPECT_EQ(total.anti_parallel, entry.pin_anti)
+      << formTypeToString(entry.form) << ": anti-parallel changed";
+  expectBassFourthPins(bass_fourths, entry.pin_bass_fourth, entry.form,
+                       "fourths above a parked bass changed at some length");
+  EXPECT_EQ(worst_strict, entry.pin_cell_strict)
+      << formTypeToString(entry.form) << ": one stretched configuration's parallel count changed";
+  EXPECT_EQ(worst_hidden, entry.pin_cell_hidden)
+      << formTypeToString(entry.form) << ": one stretched configuration's hidden count changed";
+  EXPECT_EQ(worst_battuta, entry.pin_cell_battuta)
+      << formTypeToString(entry.form) << ": one stretched configuration's battuta count changed";
+  EXPECT_EQ(worst_anti, entry.pin_cell_anti)
+      << formTypeToString(entry.form) << ": one stretched configuration's anti-parallel changed";
+  EXPECT_EQ(total.successions, entry.pin_successions)
+      << formTypeToString(entry.form) << ": the stretched sweep examines a different number of "
+      << "pair successions";
+  EXPECT_EQ(composed_cells, test::shippedRequestCells(slice).size())
+      << formTypeToString(entry.form) << ": a stretched configuration did not ship";
+}
+
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {
-  for (const LengthCeiling& entry : kLengthCeilings) {
-    PerfectMotionCounts structural_total;
-    PerfectMotionCounts total;
-    std::size_t worst_strict = 0;
-    std::size_t worst_hidden = 0;
-    std::size_t worst_battuta = 0;
-    std::size_t worst_anti = 0;
-    BassFourthCounts bass_fourths;
-    test::ShippedSurface slice;
-    slice.forms = {entry.form};
-    slice.lengths = test::LengthAxis::Shipped;
-    slice.seed_count = kSeedCount;
-    const std::size_t composed_cells = test::sweepShippedCells(
-        slice, [&](const test::ShippedCell& shipped_cell, const test::ProductGateResult& gate) {
-          ASSERT_FALSE(gate.shipped.notes.empty()) << test::cellName(shipped_cell);
-          structural_total.add(countPerfectMotion(gate.composed.notes));
-          const PerfectMotionCounts cell = countPerfectMotion(gate.shipped.notes);
-          total.add(cell);
-          worst_strict = std::max(worst_strict, cell.strict());
-          worst_hidden = std::max(worst_hidden, cell.hidden());
-          worst_battuta = std::max(worst_battuta, cell.battuta);
-          worst_anti = std::max(worst_anti, cell.anti_parallel);
-          const SixFourJudgement six_four{gate.fixture.harmony.cadential_six_fours,
-                                          gate.composed.notes};
-          bass_fourths.add(
-              countUnresolvedBassFourths(gate.shipped.notes, gate.shipped.provenance, &six_four));
-        });
-    std::printf(
-        "[counterpoint/length] %-20s structural=%zu par5=%zu par8=%zu hidden=%zu "
-        "battuta=%zu anti=%zu | worst-cell strict=%zu hidden=%zu battuta=%zu anti=%zu | "
-        "successions=%zu\n",
-        formTypeToString(entry.form), structural_total.strict(), total.parallel_fifth,
-        total.parallel_octave, total.hidden(), total.battuta, total.anti_parallel, worst_strict,
-        worst_hidden, worst_battuta, worst_anti, total.successions);
-    std::printf(
-        "[bass-fourth] %-20s unresolved=%zu (held=%zu step=%zu leap=%zu other=%zu) / "
-        "upper-samples=%zu | six-four exempt=%zu (%zu/%zu/%zu/%zu)\n",
-        formTypeToString(entry.form), bass_fourths.unresolved, bass_fourths.held,
-        bass_fourths.short_step, bass_fourths.short_leap, bass_fourths.short_other,
-        bass_fourths.upper_samples, bass_fourths.sixFourExempted(), bass_fourths.six_four_exempt[0],
-        bass_fourths.six_four_exempt[1], bass_fourths.six_four_exempt[2],
-        bass_fourths.six_four_exempt[3]);
-    EXPECT_EQ(structural_total.strict(), entry.pin_structural_strict)
-        << formTypeToString(entry.form)
-        << ": parallel perfect intervals in the composed counterpoint changed "
-        << "the pinned count once the form is stretched (par5=" << structural_total.parallel_fifth
-        << " par8=" << structural_total.parallel_octave << ")";
-    EXPECT_EQ(total.strict(), entry.pin_strict)
-        << formTypeToString(entry.form)
-        << ": parallel perfect intervals differ from the pinned count once the "
-        << "form is stretched (par5=" << total.parallel_fifth << " par8=" << total.parallel_octave
-        << ")";
-    EXPECT_EQ(total.battuta, entry.pin_battuta)
-        << formTypeToString(entry.form) << ": battuta changed";
-    EXPECT_EQ(total.hidden(), entry.pin_hidden)
-        << formTypeToString(entry.form) << ": hidden changed";
-    EXPECT_EQ(total.anti_parallel, entry.pin_anti)
-        << formTypeToString(entry.form) << ": anti-parallel changed";
-    expectBassFourthPins(bass_fourths, entry.pin_bass_fourth, entry.form,
-                         "fourths above a parked bass changed at some length");
-    EXPECT_EQ(worst_strict, entry.pin_cell_strict)
-        << formTypeToString(entry.form) << ": one stretched configuration's parallel count changed";
-    EXPECT_EQ(worst_hidden, entry.pin_cell_hidden)
-        << formTypeToString(entry.form) << ": one stretched configuration's hidden count changed";
-    EXPECT_EQ(worst_battuta, entry.pin_cell_battuta)
-        << formTypeToString(entry.form) << ": one stretched configuration's battuta count changed";
-    EXPECT_EQ(worst_anti, entry.pin_cell_anti)
-        << formTypeToString(entry.form) << ": one stretched configuration's anti-parallel changed";
-    EXPECT_EQ(total.successions, entry.pin_successions)
-        << formTypeToString(entry.form) << ": the stretched sweep examines a different number of "
-        << "pair successions";
-    EXPECT_EQ(composed_cells, test::shippedRequestCells(slice).size())
-        << formTypeToString(entry.form) << ": a stretched configuration did not ship";
-  }
+  for (const LengthCeiling& entry : kLengthCeilings)
+    expectPinnedCountsAtEveryLength(entry);
+}
+
+// RATCHET: as above, for the sectional forms, whose free section is laid out per bar of its own
+// length, so its pedal, punctuation and register work reach bars the natural length never has.
+constexpr std::array<LengthCeiling, 2> kSectionalLengthCeilings = {{
+    {FormType::ToccataAndFugue, 336, 336, 47, 1, 12, 7, 2, 1, 1, 295264, {56, 14, 0, 0}},
+    {FormType::FantasiaAndFugue, 0, 0, 59, 1, 56, 0, 2, 1, 1, 331458, {71, 26, 0, 0}},
+}};
+
+TEST(ShippedCounterpointRatchet, SectionalFormsMatchPinnedCountsAtEveryLength) {
+  for (const LengthCeiling& entry : kSectionalLengthCeilings)
+    expectPinnedCountsAtEveryLength(entry);
 }
 
 }  // namespace
