@@ -2130,7 +2130,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // that used to sound above it is placed down an octave: hidden 8 -> 10.
     // Seeded aria-bass contours and V0 contour figures: battuta 15 -> 9, anti 8 -> 9,
     // successions 30669 -> 30687.
-    {FormType::GoldbergVariations, 0, 0, 10, 9, 9, 0, 1, 1, 1, 30687, {0, 0, 0, 16}},
+    // The closing block read against the coda and the close that sound there: anti 9 -> 8,
+    // hidden 10 -> 11, fourths 16 -> 11, successions 30687 -> 30693.
+    {FormType::GoldbergVariations, 0, 0, 11, 9, 8, 0, 1, 1, 1, 30693, {0, 0, 0, 11}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsPerForm) {

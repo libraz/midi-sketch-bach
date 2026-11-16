@@ -60,6 +60,21 @@ using detail::Mode;
 // d''' (MIDI 86): the top of the harpsichord compass this music was written for.
 constexpr int kKeyboardTop = 86;
 
+// G2: the coda's dominant, struck on the final approach beat.
+constexpr int kCodaBassDominant = 43;
+
+// The bass the closing bars sound instead of the aria bass: the coda's dominant from
+// the final approach beat, then its tonic through the final bar. `support` (the aria
+// bass just before the approach) and `major_close` let a reader state the close the
+// middle voice will sound there.
+struct GoldbergCodaBass {
+  bool present = false;
+  Tick approach_tick = 0;
+  int tonic = 0;
+  int support = -1;
+  bool major_close = false;
+};
+
 // The Goldberg ground tables live in kGoldbergGroundsMajor /
 // kGoldbergGroundsMinor (seed-selected design variants, period 4 bars, all
 // tones C2-region chord roots so the variation downbeat anchoring stays
@@ -569,18 +584,30 @@ CanonLines layOutCanon(const std::array<int, 4>& designed, int block_start_bar,
 // terms to weigh interleaves them.
 //
 // `entry` is what each voice sounds just before the block (-1 = silent), so the
-// block's first onset is read as the arrival it is.
+// block's first onset is read as the arrival it is. `coda` is the bass that takes
+// over from the aria bass in the closing bars, read where it sounds.
 std::array<int, 8> goldbergBlockFaults(const std::vector<MaterialNote>& upper,
                                        const std::vector<MaterialNote>& inner, int block_start_bar,
                                        const std::array<std::uint8_t, 4>& ground, Mode mode,
                                        bool fill_thirds, const AriaBassTreatment& bass_treatment,
-                                       const std::array<int, 3>& entry = {-1, -1, -1}) {
+                                       const std::array<int, 3>& entry = {-1, -1, -1},
+                                       const GoldbergCodaBass& coda = {}) {
   std::vector<MaterialNote> bass;
   bass.reserve(64);
   for (int local = 0; local < 4; ++local) {
     const int bar = block_start_bar + local;
     appendAriaBassBar(bass, bar, ground[static_cast<std::size_t>(bar % 4)], mode, fill_thirds,
                       bass_treatment);
+  }
+  if (coda.present && coda.approach_tick < barTick(block_start_bar + 4)) {
+    bass.erase(std::remove_if(
+                   bass.begin(), bass.end(),
+                   [&](const MaterialNote& note) { return note.start_tick >= coda.approach_tick; }),
+               bass.end());
+    for (MaterialNote& note : bass)
+      note.duration = std::min(note.duration, coda.approach_tick - note.start_tick);
+    bass.push_back(materialNote(coda.approach_tick, kTicksPerBeat, kCodaBassDominant));
+    bass.push_back(materialNote(coda.approach_tick + kTicksPerBeat, kTicksPerBar, coda.tonic));
   }
   // Register order, highest first, matching the physical voice indices.
   const std::vector<MaterialNote>* voices[3] = {&upper, &inner, &bass};
@@ -1007,6 +1034,10 @@ int innerExitTone(const std::array<int, 3>& candidates, int tone, int target) {
   return exit_tone;
 }
 
+bool closeGoldbergOnCoda(std::vector<MaterialNote>& variation, std::vector<MaterialNote>& inner,
+                         Tick final_bar_tick, Tick approach_tick, int coda_support,
+                         int coda_dominant, int coda_tonic, bool major_close);
+
 // Write the middle voice of one free variation block.
 //
 // The block above it is already settled, the aria bass under it is immutable, so
@@ -1028,8 +1059,12 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
                                           int block_start_bar, Mode mode,
                                           const std::array<std::uint8_t, 4>& ground,
                                           bool fill_thirds, const AriaBassTreatment& bass_treatment,
-                                          InnerSurface surface, const std::array<int, 3>& entry) {
+                                          InnerSurface surface, const std::array<int, 3>& entry,
+                                          const GoldbergCodaBass& coda) {
   const std::array<std::array<int, 3>, 4> candidates = innerBandCandidates(ceiling, mode, ground);
+  const bool closes = coda.present && coda.support >= 0 &&
+                      coda.approach_tick < barTick(block_start_bar + 4) &&
+                      coda.approach_tick >= barTick(block_start_bar);
   struct Candidate {
     std::array<int, 10> score;
     AwkwardLeaps leaps;
@@ -1058,8 +1093,21 @@ std::vector<MaterialNote> designInnerLine(const std::vector<MaterialNote>& upper
             appendInnerBar(line, block_start_bar + static_cast<int>(local), tones[local],
                            exits[local], surface);
           }
-          const std::array<int, 8> faults = goldbergBlockFaults(
-              upper, line, block_start_bar, ground, mode, fill_thirds, bass_treatment, entry);
+          // A block holding the final approach is read as it will sound: the close
+          // replaces the line's tail from the approach beat and retunes the variation there.
+          std::array<int, 8> faults{};
+          if (closes) {
+            std::vector<MaterialNote> sounding_upper = upper;
+            std::vector<MaterialNote> sounding_line = line;
+            closeGoldbergOnCoda(sounding_upper, sounding_line, coda.approach_tick + kTicksPerBeat,
+                                coda.approach_tick, coda.support, kCodaBassDominant, coda.tonic,
+                                coda.major_close);
+            faults = goldbergBlockFaults(sounding_upper, sounding_line, block_start_bar, ground,
+                                         mode, fill_thirds, bass_treatment, entry, coda);
+          } else {
+            faults = goldbergBlockFaults(upper, line, block_start_bar, ground, mode, fill_thirds,
+                                         bass_treatment, entry, coda);
+          }
           // Every bar of a block is laid out on the same surface, so two of them
           // that state the same tones are the same bar. A block that repeats a
           // bar verbatim is not varying anything, which is why this is weighed
@@ -1213,6 +1261,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
   const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground);
+  // Every fault read of a block reads the closing bars against the coda that sounds there.
+  const GoldbergCodaBass coda_bass{true, final_approach_tick, static_cast<int>(ground.front())};
   auto bass_surface_of_block = [&](int blk) {
     return goldbergAriaBassSurface(blk, /*is_aria_block=*/blk == 0 || blk == da_capo_block);
   };
@@ -1241,8 +1291,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
     AriaBassTreatment admitted{bass_surface_of_block(blk), kAriaBassReferenceContour};
     if (!fill_thirds)
       return admitted;
-    const std::array<int, 8> reference_faults = goldbergBlockFaults(
-        upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, admitted);
+    const std::array<int, 8> reference_faults =
+        goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
+                            admitted, {-1, -1, -1}, coda_bass);
     const std::size_t first = first_bass_contour_of_block(blk);
     for (std::size_t turn = 0; turn < kAriaBassContours.count; ++turn) {
       const std::size_t contour = (first + turn) % kAriaBassContours.count;
@@ -1252,7 +1303,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         continue;
       const std::array<int, 8> faults =
           goldbergBlockFaults(upper, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds,
-                              {admitted.surface, contour});
+                              {admitted.surface, contour}, {-1, -1, -1}, coda_bass);
       if (faults <= reference_faults) {
         admitted.contour = contour;
         break;
@@ -1433,8 +1484,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   barTick(bar) + static_cast<Tick>(beat) * kTicksPerBeat, kTicksPerBeat, pitch));
             }
           }
-          const std::array<int, 8> score = goldbergBlockFaults(
-              var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds, bass_treatment);
+          const std::array<int, 8> score =
+              goldbergBlockFaults(var.notes, candidate, blk * kCycleBars, ground, mode, fill_thirds,
+                                  bass_treatment, {-1, -1, -1}, coda_bass);
           if (rotation == 0 || score < best_score) {
             best_score = score;
             tune = std::move(candidate);
@@ -1499,8 +1551,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         std::vector<MaterialNote> settled = lay_out_block(figures);
         if (!design_peak) {
           const AriaBassTreatment probe_bass = bass_treatment;
-          std::array<int, 8> settled_faults = goldbergBlockFaults(
-              settled, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, probe_bass);
+          std::array<int, 8> settled_faults =
+              goldbergBlockFaults(settled, no_inner_line, blk * kCycleBars, ground, mode,
+                                  fill_thirds, probe_bass, {-1, -1, -1}, coda_bass);
           for (int local = 0; local < kCycleBars; ++local) {
             const std::uint32_t bar = static_cast<std::uint32_t>(blk * kCycleBars + local);
             const std::uint32_t first = (req.seed + req.seed / 4u + bar) % 4u;
@@ -1517,8 +1570,9 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                   });
               if (!in_compass)
                 continue;
-              const std::array<int, 8> faults = goldbergBlockFaults(
-                  trial, no_inner_line, blk * kCycleBars, ground, mode, fill_thirds, probe_bass);
+              const std::array<int, 8> faults =
+                  goldbergBlockFaults(trial, no_inner_line, blk * kCycleBars, ground, mode,
+                                      fill_thirds, probe_bass, {-1, -1, -1}, coda_bass);
               if (faults <= settled_faults) {
                 figures = trial_figures;
                 settled = std::move(trial);
@@ -1591,9 +1645,14 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
                 : soundingMaterialPitch(out.material.goldberg_variations.back().notes, entry_tick),
             soundingMaterialPitch(inner_voice, entry_tick),
             soundingMaterialPitch(out.material.goldberg_aria_bass, entry_tick)};
+        // The close reads the aria bass this block has just declared.
+        GoldbergCodaBass inner_coda = coda_bass;
+        inner_coda.support =
+            soundingMaterialPitch(out.material.goldberg_aria_bass, final_approach_tick - 1);
+        inner_coda.major_close = !final_cadence_chord.minor;
         const std::vector<MaterialNote> line = designInnerLine(
             var.notes, ceiling, blk * kCycleBars, mode, ground, fill_thirds, bass_treatment,
-            kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()], entry);
+            kInnerSurfaces[inner_surface_slot % kInnerSurfaces.size()], entry, inner_coda);
         ++inner_surface_slot;
         inner_voice.insert(inner_voice.end(), line.begin(), line.end());
         inner_blocks.push_back(blk);
@@ -1622,7 +1681,6 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
 
   // The immutable four-bar aria bass deliberately stops before the final bar.
   // Its explicit tonic coda resolves the otherwise open V/vi terminal ground.
-  constexpr int kCodaBassDominant = 43;  // G2.
   CodaDecl coda;
   coda.voice = 2;
   coda.notes.push_back(materialNote(final_approach_tick, kTicksPerBeat, kCodaBassDominant));
