@@ -58,6 +58,9 @@ enum class SeedDecision : std::uint32_t {
   kEpisodeChainStart = 40,
   kChoraleNeighbourSide = 41,
   kLinearOutlineTurn = 42,
+  kTrioBlockOrder = 43,
+  kTrioShapePhase = 46,
+  kTrioBassRoute = 47,
 };
 
 /// @brief Independent 32-bit draw for one decision of one piece.

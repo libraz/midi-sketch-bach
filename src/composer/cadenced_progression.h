@@ -34,21 +34,26 @@ namespace bach::composer {
 /// @brief Build an N-bar per-bar progression from the shared 4-chord harmony
 ///        catalogs, ending on a design-valued V -> I(i) cadence.
 ///
-/// Each 4-bar block cycles a catalog pattern selected by (seed, block) so
-/// successive blocks differ; the final two bars are overwritten with a half
-/// cadence (V) then the tonic (I / i, or a Picardy I in minor on the elected
-/// seeds), the perfect-authentic close every length lands on.
+/// Each 4-bar block takes one catalog pattern. The admissible patterns are
+/// visited in permutation `order` (lexicographic, 0 = catalog order), starting
+/// `rotation` places in, so every cycle of blocks uses each pattern once and
+/// successive blocks differ. The final two bars are overwritten with a half
+/// cadence (V) then the tonic (I / i, or a Picardy I in minor), the
+/// perfect-authentic close every length lands on.
 ///
 /// @param bars Total bar count (>= 8).
-/// @param seed Piece seed (selects which catalog pattern each block uses).
+/// @param rotation Place in the visiting order that the first block takes.
+/// @param order Permutation number in [0, n!) for the n admissible patterns.
 /// @param mode Major selects kHarmonyPatterns, Minor selects kHarmonyPatternsMinor.
+/// @param picardy Close a minor piece on a major tonic (electsPicardy).
 /// @param cello_implicit_safe Restrict the minor catalog to patterns whose every
 ///        root is a harmonic-minor degree. The cello prelude's implicit-voice
 ///        shapes need a dedicated migration before they can safely admit every
 ///        natural-minor root; forms that state their voices explicitly do not.
 /// @return Per-bar chord list of length `bars`.
-std::vector<detail::ChordSpec> buildCadencedProgression(int bars, std::uint32_t seed,
-                                                        detail::Mode mode,
+std::vector<detail::ChordSpec> buildCadencedProgression(int bars, std::uint32_t rotation,
+                                                        std::uint32_t order, detail::Mode mode,
+                                                        bool picardy,
                                                         bool cello_implicit_safe = false);
 
 /// @brief Whether a piece closes on a Picardy (major) tonic.

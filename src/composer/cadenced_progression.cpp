@@ -1,5 +1,6 @@
 #include "composer/cadenced_progression.h"
 
+#include <cassert>
 #include <cstddef>
 
 #include "composer/minor_material.h"
@@ -22,7 +23,8 @@ constexpr bool inHarmonicMinor(int pc) {
 
 }  // namespace
 
-std::vector<ChordSpec> buildCadencedProgression(int bars, std::uint32_t seed, Mode mode,
+std::vector<ChordSpec> buildCadencedProgression(int bars, std::uint32_t rotation,
+                                                std::uint32_t order, Mode mode, bool picardy,
                                                 bool cello_implicit_safe) {
   const auto& catalog =
       (mode == Mode::Minor) ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
@@ -38,18 +40,34 @@ std::vector<ChordSpec> buildCadencedProgression(int bars, std::uint32_t seed, Mo
   }
   if (admissible.empty())
     admissible.push_back(0);
+  // Decode `order` as a factorial-base number over the admissible patterns.
+  std::vector<std::size_t> visit;
+  visit.reserve(admissible.size());
+  std::size_t weight = 1;
+  for (std::size_t count = 2; count < admissible.size(); ++count)
+    weight *= count;
+  std::size_t rest = order;
+  for (std::size_t left = admissible.size(); left > 0; --left) {
+    const std::size_t place = rest / weight;
+    assert(place < left);
+    visit.push_back(admissible[place]);
+    admissible.erase(admissible.begin() + static_cast<std::ptrdiff_t>(place));
+    rest %= weight;
+    if (left > 1)
+      weight /= left - 1;
+  }
   std::vector<ChordSpec> chords;
   chords.reserve(static_cast<std::size_t>(bars));
   for (int bar = 0; bar < bars; ++bar) {
     const int block = bar / 4;
     const std::size_t pat =
-        admissible[(static_cast<std::size_t>(seed) + static_cast<std::size_t>(block)) %
-                   admissible.size()];
+        visit[(static_cast<std::size_t>(rotation) + static_cast<std::size_t>(block)) %
+              visit.size()];
     chords.push_back(catalog[pat][static_cast<std::size_t>(bar % 4)]);
   }
   // Design-valued final cadence: V (dominant, always major) then tonic. In
-  // minor the tonic stays minor unless the seed elects a Picardy third.
-  const bool tonic_minor = (mode == Mode::Minor) && !electsPicardy(mode, seed);
+  // minor the tonic stays minor unless the piece elects a Picardy third.
+  const bool tonic_minor = (mode == Mode::Minor) && !picardy;
   chords[static_cast<std::size_t>(bars - 2)] = {7, false};
   chords[static_cast<std::size_t>(bars - 1)] = {0, tonic_minor};
   return chords;

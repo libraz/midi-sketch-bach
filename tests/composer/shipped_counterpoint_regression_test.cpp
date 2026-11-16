@@ -1512,7 +1512,10 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // 7ths over V 8 -> 0, augmented seconds 5 -> 0; battuta 18 -> 20.
     // Chains of prepared suspensions in the sparse manual: hidden 116 -> 114,
     // successions 35177 -> 35768.
-    {FormType::TrioSonata, 0, 0, 114, 20, 4, 0, 5, 2, 1, 35768, {1, 8, 0, 1}},
+    // Block order, shape phase and bass route drawn per piece; the grid seeds
+    // reach other plans: battuta 20 -> 26, anti 4 -> 1, hidden 114 -> 115,
+    // successions 35768 -> 36078.
+    {FormType::TrioSonata, 0, 0, 115, 26, 1, 0, 4, 2, 1, 36078, {2, 4, 3, 0}},
     // The tone before an arrival is re-aimed over a bass pinned to a single
     // octave, and where the consonant window for that re-aim comes back empty it
     // widens to admit a passing dissonance rather than let the parallel ship;

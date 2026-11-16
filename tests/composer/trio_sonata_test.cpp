@@ -31,14 +31,18 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <set>
 #include <vector>
 
+#include "composer/cadenced_progression.h"
 #include "composer/candidate_search.h"
 #include "composer/composer.h"
+#include "composer/figuration.h"
 #include "composer/form_director.h"
 #include "composer/harmonic_plan.h"
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
+#include "composer/minor_material.h"
 #include "composer/provenance.h"
 #include "composer/rule_helpers.h"
 #include "composer/span.h"
@@ -152,6 +156,29 @@ int lowestOtherTrioPitch(const HarnessFixture& fixture, VoiceId voice, Tick tick
       lowest = pitch;
   }
   return lowest;
+}
+
+// Catalog pattern each 4-bar block of `chords` spells, or -1.
+std::vector<int> blockPatterns(const std::vector<detail::ChordSpec>& chords, detail::Mode mode,
+                               int blocks) {
+  const auto& catalog =
+      mode == detail::Mode::Minor ? detail::kHarmonyPatternsMinor : detail::kHarmonyPatterns;
+  std::vector<int> out;
+  for (int blk = 0; blk < blocks; ++blk) {
+    int found = -1;
+    for (std::size_t pat = 0; pat < catalog.size(); ++pat) {
+      bool same = true;
+      for (std::size_t beat = 0; beat < 4; ++beat) {
+        const detail::ChordSpec& got = chords[static_cast<std::size_t>(blk) * 4 + beat];
+        same = same && got.root_pc == catalog[pat][beat].root_pc &&
+               got.minor == catalog[pat][beat].minor;
+      }
+      if (same && found < 0)
+        found = static_cast<int>(pat);
+    }
+    out.push_back(found);
+  }
+  return out;
 }
 
 }  // namespace
@@ -583,6 +610,51 @@ TEST(TrioSonataTest, DeclaredSuspensionShipsTiedWithItsBits) {
       }
     }
   }
+}
+
+TEST(TrioSonataTest, EveryBlockOrderVisitsEachPatternOncePerCycle) {
+  constexpr int kBlocks = 8;  // bars 0-31; the close only rewrites bars 38-39.
+  for (detail::Mode mode : {detail::Mode::Major, detail::Mode::Minor}) {
+    std::set<std::vector<int>> orders;
+    for (std::uint32_t order = 0; order < 24u; ++order) {
+      const std::vector<int> pats =
+          blockPatterns(buildCadencedProgression(40, 0u, order, mode, false), mode, kBlocks);
+      for (int start = 0; start < kBlocks; start += 4) {
+        const std::set<int> cycle(pats.begin() + start, pats.begin() + start + 4);
+        EXPECT_EQ(cycle, (std::set<int>{0, 1, 2, 3})) << "order=" << order;
+      }
+      for (int blk = 1; blk < kBlocks; ++blk)
+        EXPECT_NE(pats[static_cast<std::size_t>(blk)], pats[static_cast<std::size_t>(blk - 1)]);
+      orders.insert(pats);
+    }
+    EXPECT_EQ(orders.size(), 24u);
+  }
+}
+
+TEST(TrioSonataTest, OrderZeroKeepsTheCatalogRotation) {
+  for (std::uint32_t rotation = 0; rotation < 8u; ++rotation) {
+    const std::vector<int> pats =
+        blockPatterns(buildCadencedProgression(40, rotation, 0u, detail::Mode::Major, false),
+                      detail::Mode::Major, 8);
+    for (std::size_t blk = 0; blk < pats.size(); ++blk)
+      EXPECT_EQ(pats[blk], static_cast<int>((rotation + blk) % 4u)) << "rotation=" << rotation;
+  }
+}
+
+TEST(TrioSonataTest, SeedsTwelveApartNoLongerShareTheHarmony) {
+  // Seeds 24-47 form one aligned block of the order draw, so all 24 orders occur.
+  std::vector<std::vector<std::uint8_t>> roots(61);
+  for (std::uint32_t seed = 1; seed <= 60u; ++seed) {
+    for (const ChordEvent& chord :
+         buildTrioForm(SubjectCharacter::Severe, false, seed).harmony.chords)
+      roots[seed].push_back(chord.root_pc);
+  }
+  const std::set<std::vector<std::uint8_t>> plans(roots.begin() + 1, roots.begin() + 49);
+  EXPECT_EQ(plans.size(), 24u);
+  int shared = 0;
+  for (std::size_t seed = 1; seed <= 48; ++seed)
+    shared += roots[seed] == roots[seed + 12] ? 1 : 0;
+  EXPECT_LT(shared, 48);
 }
 
 }  // namespace bach::composer

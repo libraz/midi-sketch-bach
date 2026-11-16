@@ -67,8 +67,9 @@ HarnessFixture buildCelloPreludeForm(const ResolvedRequest& req) {
   const int line_floor = string_range::kCelloLow - req.key_transposition_semitones;
   const int line_ceiling = string_range::kCelloHigh - req.key_transposition_semitones;
 
-  std::vector<ChordSpec> chords = buildCadencedProgression(bars, req.seed, mode,
-                                                           /*cello_implicit_safe=*/true);
+  std::vector<ChordSpec> chords =
+      buildCadencedProgression(bars, req.seed, /*order=*/0u, mode, electsPicardy(mode, req.seed),
+                               /*cello_implicit_safe=*/true);
   // The line closes on a single held tonic, which has no third to raise, so
   // the cello never elects a Picardy close.
   chords.back() = {0, mode == Mode::Minor};

@@ -1460,13 +1460,17 @@ TEST(FormLinearTrio, UpperVoiceBeatCellsAvoidBarGridAliasing) {
 // ascending-sixth leap from the beat anchor, then stepwise descent), so the
 // manual voices write ascending sixths -- the corpus interval bins no step or
 // third cell reaches. The cell's own leap always resolves by a contrary
-// step, so a 32-bar piece must carry several step-resolved sixths (the bin's
-// other occupants -- minor-sixth anchor-zigzag jumps between chord tones --
-// are broken-chord motion with no step-resolution contract, so the bin is
-// not exclusively cell-made, especially in minor).
+// step, so 32-bar pieces carry several step-resolved sixths on average and
+// every piece carries one (the bin's other occupants -- minor-sixth
+// anchor-zigzag jumps between chord tones -- are broken-chord motion with no
+// step-resolution contract, so the bin is not exclusively cell-made,
+// especially in minor). The count depends on the drawn plan, so it is read
+// over a seed range rather than per seed.
 TEST(FormLinearTrio, ManualVoicesWriteStepResolvedAscendingSixths) {
-  for (std::uint32_t seed : kSeeds) {
-    for (bool minor : kMinorFlags) {
+  constexpr std::uint32_t kRangeSeeds = 24;
+  for (bool minor : kMinorFlags) {
+    int resolved_total = 0;
+    for (std::uint32_t seed = 1; seed <= kRangeSeeds; ++seed) {
       const ComposeResult r = build(FormType::TrioSonata, seed, minor, 32, nullptr);
       std::array<std::vector<NoteEvent>, 3> by_voice;
       for (const NoteEvent& note : r.notes) {
@@ -1492,9 +1496,11 @@ TEST(FormLinearTrio, ManualVoicesWriteStepResolvedAscendingSixths) {
         }
       }
       EXPECT_GT(ascending_sixths, 0) << "seed=" << seed << " minor=" << minor;
-      EXPECT_GE(step_resolved, 4) << "seed=" << seed << " minor=" << minor << " (resolved "
-                                  << step_resolved << "/" << ascending_sixths << ")";
+      EXPECT_GT(step_resolved, 0) << "seed=" << seed << " minor=" << minor;
+      resolved_total += step_resolved;
     }
+    EXPECT_GE(resolved_total, 4 * static_cast<int>(kRangeSeeds))
+        << "minor=" << minor << " resolved " << resolved_total << " over " << kRangeSeeds;
   }
 }
 

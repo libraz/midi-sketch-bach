@@ -19,11 +19,13 @@
 #include "composer/texture_helpers.h"
 #include "core/basic_types.h"
 #include "core/pitch_utils.h"
+#include "core/seed_decision.h"
 
 namespace bach::composer {
 
 using detail::ChordSpec;
 using detail::Mode;
+using rng::SeedDecision;
 
 namespace {
 
@@ -690,7 +692,11 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   const Tick kEighth = kTicksPerBeat / 2;     // eighth note.
   const Tick kSixteenth = kTicksPerBeat / 4;  // sixteenth note.
 
-  std::vector<ChordSpec> chords = buildCadencedProgression(bars, req.seed, mode);
+  // Drawn per piece; within one piece every cycle of blocks still uses each pattern once.
+  const std::uint32_t block_order =
+      rng::seedBlockChoice(req.seed, SeedDecision::kTrioBlockOrder, 24u);
+  std::vector<ChordSpec> chords = buildCadencedProgression(bars, /*rotation=*/0u, block_order, mode,
+                                                           electsPicardy(mode, req.seed));
   // Internal cadences every 8 bars: penultimate bar of each 8-bar group is V,
   // the boundary bar is I (the tonic landing). This shapes the long form into
   // clear 8-bar periods. The final two bars already hold the design cadence.
@@ -1158,6 +1164,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   int v0_prev_emitted = -1;
   int v1_prev_emitted = -1;
   ThemeToneRegistry manual_registry;
+  // Only the starting slot is drawn; the shapes still rotate bar by bar.
+  const std::uint32_t shape_phase =
+      rng::seedBlockChoice(req.seed, SeedDecision::kTrioShapePhase, 3u);
 
   for (int bar = 0; bar < bars; ++bar) {
     const std::size_t cycle = static_cast<std::size_t>(bar / 4);
@@ -1197,8 +1206,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // cycle is a design value: its dense line keeps the uniform sixteenth
     // arc (the figura corta cell carries fewer notes per beat and would
     // flatten the density peak).
-    int v0_shape = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) % 3);
-    int v1_shape = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar) + 1) % 3);
+    int v0_shape = static_cast<int>((shape_phase + static_cast<std::uint32_t>(bar)) % 3u);
+    int v1_shape = static_cast<int>((shape_phase + static_cast<std::uint32_t>(bar) + 1u) % 3u);
     if (arc.is_climax)
       (v0_dense ? v0_shape : v1_shape) = 0;
 
@@ -1489,6 +1498,8 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
   // it, so the ticks are handed to it rather than answered here.
   std::vector<Tick> pedal_boxed_ticks;
   int prev_root = 48;  // seed near C3.
+  // Only the offset is drawn; tied routes still rotate bar by bar.
+  const std::uint32_t route_offset = rng::seedDraw(req.seed, SeedDecision::kTrioBassRoute);
   for (int bar = 0; bar < bars; ++bar) {
     const ChordSpec& bar_chord = chords[static_cast<std::size_t>(bar)];
     const int root_pc = bar_chord.root_pc % 12;
@@ -1600,8 +1611,9 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           }
         }
       }
-      const int pick = static_cast<int>((req.seed + static_cast<std::uint32_t>(bar)) %
-                                        static_cast<std::uint32_t>(std::max(matches, 1)));
+      const int pick =
+          static_cast<int>((std::uint64_t{route_offset} + static_cast<std::uint64_t>(bar)) %
+                           static_cast<std::uint64_t>(std::max(matches, 1)));
       int seen = 0;
       for (int first = 0; first < stations; ++first) {
         for (int second = 0; second < stations; ++second) {
@@ -2134,9 +2146,13 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
     // this voice may take here are frequently all at least a hidden perfect
     // against one of them. A boolean reject then finds nothing better than the
     // design tone and ships the true parallel it was called to remove.
+    // The pedal hands over the onsets it could not clear on its own ladder, so
+    // the middle voice reads the same classes in the same order.
     constexpr int kMiddleClean = 0;
     constexpr int kMiddleHidden = 1;
-    constexpr int kMiddleParallel = 2;
+    constexpr int kMiddleBattuta = 2;
+    constexpr int kMiddleAntiParallel = 3;
+    constexpr int kMiddleParallel = 4;
     const auto outer_fault_rank = [&](int line_prev, int cand, Tick tick) {
       if (line_prev < 0)
         return kMiddleClean;
@@ -2151,6 +2167,10 @@ HarnessFixture buildTrioSonataForm(const ResolvedRequest& req) {
           return kMiddleParallel;
         if (formsPerfectParallel(line_prev, cand, other_prev, other_curr))
           worst = std::max(worst, kMiddleHidden);
+        else if (formsAntiParallelPerfect(line_prev, cand, other_prev, other_curr))
+          worst = std::max(worst, kMiddleAntiParallel);
+        else if (formsBattuta(line_prev, cand, other_prev, other_curr))
+          worst = std::max(worst, kMiddleBattuta);
       }
       return worst;
     };
