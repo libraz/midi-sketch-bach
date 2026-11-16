@@ -844,7 +844,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   int consonant_any = -1;  // consonant, parallel allowed (third).
   int consonant_any_key = 1 << 20;
   int fallback = -1;  // least dissonant (last resort).
-  int fallback_score = 1 << 23;
+  int fallback_score = 1 << 24;
   // Only apply the ordering window when it leaves a non-empty range; a degenerate
   // window (a concurrent voice already outside this band's order) falls back to
   // the band so a candidate always exists.
@@ -963,10 +963,12 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     // the line.
     // Admissibility -- consonance, parallels, voice order -- is unaffected.
     const int far_stride = (dist > 7) ? (1 << 13) : 0;
-    // The caller's line rank leads the key, so it orders a tier without leaving it.
+    // The caller's line rank leads the key, so it orders a tier without leaving it. A fourth over
+    // the sounding bass is a dissonance by position and leads that rank; the rank's faults are
+    // motions.
     const int rank = line_rank.empty() ? 0 : line_rank[static_cast<std::size_t>(pitch - band_lo)];
-    const int key =
-        (rank << 14) + far_stride + (bass_fourth ? (1 << 12) : 0) + window_clashes * 128 + dist;
+    const int bass_rung = bass_fourth ? (line_rank.empty() ? (1 << 12) : (1 << 18)) : 0;
+    const int key = bass_rung + (rank << 14) + far_stride + window_clashes * 128 + dist;
     if (clashes == 0) {
       if (key < consonant_any_key) {
         consonant_any_key = key;
@@ -996,14 +998,14 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       // m2/M7/tritone against it is more audible than the perfect-interval
       // parallel this tier exists to dodge -- such a candidate may only
       // survive as the last-resort fallback.
-      const int free_key = weighted_clashes * (1 << 18) + key;
+      const int free_key = weighted_clashes * (1 << 19) + key;
       if (free_key < free_any_key) {
         free_any_key = free_key;
         free_any = pitch;
       }
     }
     // The clash stride must dominate the packed key even with the far-anchor
-    // demotion, the second-inversion rung and the line rank folded in (key < 1<<18), so the
+    // demotion, the second-inversion rung and the line rank folded in (key < 1<<19), so the
     // last resort still minimizes dissonance first and distance second.
     //
     // Between tones that tie on dissonance it takes the one free of a perfect
@@ -1012,7 +1014,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     // down the chain re-examines the choice. A last resort blind to the cardinal
     // prohibition is therefore the one path by which an exhausted onset ships a
     // parallel fifth or octave it had an equally dissonant alternative to.
-    const int score = clashes * (1 << 20) + (is_parallel(pitch) ? (1 << 18) : 0) + key;
+    const int score = clashes * (1 << 21) + (is_parallel(pitch) ? (1 << 19) : 0) + key;
     if (score < fallback_score) {
       fallback_score = score;
       fallback = pitch;

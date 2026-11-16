@@ -440,7 +440,8 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
 ///        style writes constantly, which is why this is not the default.
 /// @param line_rank Rank per band pitch (index pitch - band_lo), lower first and below 16. It
 ///        orders candidates inside each tier ahead of window clashes and distance and never moves
-///        one between tiers. Empty (the default) ranks every pitch equally.
+///        one between tiers; a fourth over the sounding bass still leads it. Empty (the default)
+///        ranks every pitch equally.
 /// @return A chord-tone (downbeat) or diatonic (off-beat) MIDI pitch in band.
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,

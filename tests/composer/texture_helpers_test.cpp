@@ -644,5 +644,43 @@ TEST(TextureHelpersTest, LineRankOrdersATierWithoutCrossingIt) {
       << "a hidden octave paired by the validator stays below every clean tone";
 }
 
+// A strike that sounds as the bass, under a top voice falling 77 to 74 over D in G minor, after
+// the line's C 60 and a rest: A 57 and A 69 step cleanly but sound a fourth under D 74, so the
+// rank yields to the second inversion and D 62 is taken, a battuta across the rest.
+TEST(TextureHelpersTest, BassFourthLeadsTheLineRank) {
+  ThemeToneRegistry registry;
+  registry.record(/*tick=*/0, /*voice=*/1, /*pitch=*/60, /*duration=*/960);
+  registry.record(/*tick=*/1800, /*voice=*/0, /*pitch=*/77, /*duration=*/120);
+  registry.record(/*tick=*/1920, /*voice=*/0, /*pitch=*/74, /*duration=*/240);
+  HarmonicPlan plan;
+  plan.tonic_pc = 7;
+  plan.is_minor = true;
+  ChordEvent subdominant;
+  subdominant.start_tick = 0;
+  subdominant.root_pc = 0;
+  subdominant.quality = ChordQuality::Minor;
+  ChordEvent dominant;
+  dominant.start_tick = 1920;
+  dominant.root_pc = 2;
+  plan.chords = {subdominant, dominant};
+  std::vector<int> theme_pitches;
+  registry.concurrentThemePitches(1920, /*voice=*/1, theme_pitches);
+  std::vector<ConcurrentMotion> motions;
+  registry.motionsIntoOnset(1920, /*voice=*/1, /*num_voices=*/3, motions);
+  constexpr int kLo = 56;
+  const std::vector<int> ranks = lineRankFromLastTone(60, 1920, kLo, /*band_hi=*/71, motions, plan);
+  ASSERT_EQ(ranks.size(), 16U);
+  EXPECT_EQ(ranks[57 - kLo], 0);
+  EXPECT_EQ(ranks[62 - kLo], 1);
+  EXPECT_EQ(ranks[66 - kLo], 4);
+  EXPECT_EQ(ranks[69 - kLo], 0);
+  EXPECT_EQ(
+      consonantChordTone(detail::ChordSpec{2, false}, /*voice=*/1, kLo, /*band_hi=*/71,
+                         /*target=*/63, theme_pitches, /*line_prev=*/-1, motions,
+                         detail::Mode::Minor, /*downbeat=*/true, /*window_pitches=*/{},
+                         /*parallel_free_over_consonant=*/true, /*sustained_bass=*/false, ranks),
+      62);
+}
+
 }  // namespace
 }  // namespace bach::composer
