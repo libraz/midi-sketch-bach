@@ -398,12 +398,10 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // parallel-free against the concurrent V0 figuration.
     const int centre = (kFreeV2Lo + kFreeV2Hi) / 2;
     registry.concurrentThemePitches(bar_start, /*voice=*/2, theme_pitches);
-    // One sixteenth back, not one bar: this voice contributes one tone per bar
-    // while the figuration above it attacks many times inside that bar, so a
-    // bar-back sample compares a motion nobody hears. The union-onset reading
-    // (and the ear) pairs the two at the onset just before the bar head.
-    registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/2,
-                               /*num_voices=*/3, motions);
+    // The figuration's last tone into the bar head, not one bar back: this voice
+    // contributes one tone per bar while the line above attacks many times inside
+    // it, and the drive into the tail runs in triplet sixteenths.
+    registry.motionsIntoOnset(bar_start, /*voice=*/2, /*num_voices=*/3, motions);
     window_pitches.clear();
     for (Tick beat = kTicksPerBeat; beat < kTicksPerBar; beat += kTicksPerBeat) {
       registry.concurrentThemePitches(bar_start + beat, /*voice=*/2, beat_pitches);

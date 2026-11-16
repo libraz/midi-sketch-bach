@@ -301,6 +301,12 @@ void ThemeToneRegistry::arrivalMotions(Tick tick, VoiceId voice, VoiceId num_voi
   concurrentMotions(tick - kSixteenth, tick, voice, num_voices, out_motions);
 }
 
+void ThemeToneRegistry::motionsIntoOnset(Tick tick, VoiceId voice, VoiceId num_voices,
+                                         std::vector<ConcurrentMotion>& out_motions) const {
+  // A wrapped tick - 1 (tick == 0) matches no tone and reads as -1.
+  concurrentMotions(tick - 1, tick, voice, num_voices, out_motions);
+}
+
 void appendScoredCountersubject(const std::vector<MaterialNote>& source, VoiceId voice, Tick start,
                                 Tick end, int band_lo, int band_hi, detail::Mode mode,
                                 std::vector<MaterialNote>& destination, ThemeToneRegistry& registry,

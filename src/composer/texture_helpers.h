@@ -276,6 +276,15 @@ class ThemeToneRegistry {
   void arrivalMotions(Tick tick, VoiceId voice, VoiceId num_voices,
                       std::vector<ConcurrentMotion>& out_motions) const;
 
+  /// @brief Gather each other voice's motion into an onset of `voice` at `tick`, as the
+  /// validator pairs it.
+  ///
+  /// Each voice's "from" tone is the one it sounds just before `tick`: the last tone it
+  /// struck, however fast it runs, and none when it rests into the onset. A fixed
+  /// sixteenth back lands on an earlier tone under a run faster than sixteenths.
+  void motionsIntoOnset(Tick tick, VoiceId voice, VoiceId num_voices,
+                        std::vector<ConcurrentMotion>& out_motions) const;
+
  private:
   std::vector<ThemeTone> tones_;
 };

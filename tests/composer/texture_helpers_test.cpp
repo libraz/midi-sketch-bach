@@ -388,6 +388,32 @@ TEST(TextureHelpersTest, OnsetPitchBeforeReadsAcrossARest) {
                                          registry.soundingPitchInVoice(0, 480)));
 }
 
+TEST(TextureHelpersTest, MotionsIntoOnsetPairTheLastTripletTone) {
+  ThemeToneRegistry registry;
+  // A triplet-sixteenth run 81 78 74 78 into a bar head on 79, over a held 42.
+  const int run[4] = {81, 78, 74, 78};
+  for (int idx = 0; idx < 4; ++idx)
+    registry.record(/*tick=*/1600 + 80 * idx, /*voice=*/0, run[idx], /*duration=*/80);
+  registry.record(/*tick=*/1920, /*voice=*/0, /*pitch=*/79, /*duration=*/960);
+  registry.record(/*tick=*/0, /*voice=*/2, /*pitch=*/42, /*duration=*/1920);
+
+  std::vector<ConcurrentMotion> motions;
+  registry.motionsIntoOnset(/*tick=*/1920, /*voice=*/2, /*num_voices=*/3, motions);
+  ASSERT_EQ(motions.size(), 1u);
+  EXPECT_EQ(motions[0].prev, 78);
+  EXPECT_EQ(motions[0].curr, 79);
+  // The pedal stepping from 42 to 43 under it is the parallel octave the validator refuses.
+  EXPECT_TRUE(formsStrictPerfectParallel(42, 43, motions[0].prev, motions[0].curr));
+
+  // A rest into the onset leaves no "from" tone.
+  ThemeToneRegistry rested;
+  rested.record(/*tick=*/1600, /*voice=*/0, /*pitch=*/78, /*duration=*/120);
+  rested.record(/*tick=*/1920, /*voice=*/0, /*pitch=*/79, /*duration=*/960);
+  rested.motionsIntoOnset(/*tick=*/1920, /*voice=*/2, /*num_voices=*/3, motions);
+  ASSERT_EQ(motions.size(), 1u);
+  EXPECT_EQ(motions[0].prev, -1);
+}
+
 TEST(TextureHelpersTest, ThemeToneRegistryUnsignedSentinelEdge) {
   ThemeToneRegistry registry;
   // No record yet: any lookup is silent.
