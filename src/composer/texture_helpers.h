@@ -175,6 +175,14 @@ struct ConcurrentMotion {
   int curr = -1;      // sounding pitch at the current onset (-1 = silent).
 };
 
+/// @brief True when `tone` reaches no octave of `arrival_pc` in [band_lo, band_hi] without a
+///        true parallel perfect against one of `motions`.
+///
+/// An arrival on a fixed pitch class leaves only its octave free, so a departure that every
+/// in-band octave answers with a parallel forces the fault onto the arrival.
+bool forcesParallelIntoPitchClass(int tone, int arrival_pc, int band_lo, int band_hi,
+                                  const std::vector<ConcurrentMotion>& motions);
+
 /// @brief Perfect-motion fault ranks a moving line can form against another,
 ///        clean to worst: battuta, hidden perfect, contrary arrival at the same
 ///        perfect class, true parallel. Callers relieve a fault only onto a

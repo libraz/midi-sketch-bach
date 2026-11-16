@@ -287,6 +287,33 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // repeating both would be that bar restated note for note, so the pedal
   // reads this to pick the density it has not used on the tone yet.
   std::vector<SustainedBar> pedal_held;
+  // The fifth a walking bar answers its tone with, inside the band.
+  const auto walk_fifth = [](int tone) {
+    return std::clamp(tone + 7 > kFreeV2Hi ? tone - 5 : tone + 7, kFreeV2Lo, kFreeV2Hi);
+  };
+  // Whether a bar states `tone` walking: a returning tone takes the density it has not been
+  // heard in yet, and the seed-phased walk decides only while both are still free.
+  const auto walks = [&](int bar, int tone) {
+    const bool held_before = alreadySustained(pedal_held, tone, kTicksPerBar);
+    const bool walked_before = alreadySustained(pedal_held, tone, kTicksPerBeat * 2);
+    return held_before != walked_before ? !walked_before : (bar % 4) == walk_phase;
+  };
+  // The free section closes on a pedal of fixed pitch class, so the bar before it also ranks
+  // the departure of its last tone into that cadence: the onset's own tone, or the fifth
+  // when the bar would walk.
+  enum class Departure { kNone, kTone, kDensity };
+  Departure departure = Departure::kNone;
+  int departure_bar = -1;
+  const int cadence_pc = plan[static_cast<std::size_t>(free_bars - 1)].root_pc % 12;
+  std::vector<ConcurrentMotion> cadence_motions;
+  registry.motionsIntoOnset(barTick(free_bars - 1), /*voice=*/2, /*num_voices=*/3, cadence_motions);
+  const auto forces_cadence_parallel = [&](int tone) {
+    if (departure == Departure::kNone)
+      return false;
+    const int last =
+        departure == Departure::kDensity && walks(departure_bar, tone) ? walk_fifth(tone) : tone;
+    return forcesParallelIntoPitchClass(last, cadence_pc, kFreeV2Lo, kFreeV2Hi, cadence_motions);
+  };
   // Every beat the bar's pedal tone is still sounding at, read from the V0
   // figuration already placed above it. The pedal is struck once or twice a bar
   // while that line attacks four or more times, so the interval that decides
@@ -322,6 +349,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   constexpr int kPedalAntiParallel = 2;
   constexpr int kPedalParallel = 3;
   const auto pedal_fault_rank = [&](int cand) {
+    if (forces_cadence_parallel(cand)) {
+      return kPedalParallel;
+    }
     if (last_pedal_pitch < 0) {
       return kPedalClean;
     }
@@ -394,6 +424,8 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     pedal_last = bar;
     const ChordSpec& chord = plan[static_cast<std::size_t>(bar)];
     const Tick bar_start = barTick(bar);
+    const bool before_cadence = bar == free_bars - 2;
+    departure_bar = bar;
     // Root chord tone in the V2 band, nearest the band centre, consonant and
     // parallel-free against the concurrent V0 figuration.
     const int centre = (kFreeV2Lo + kFreeV2Hi) / 2;
@@ -444,7 +476,9 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       // dominant root.  The ordinary repeated-run relief is inappropriate
       // here: for some pedal histories it substituted the third/fifth after
       // the cadence-specific root selection above.
+      departure = before_cadence ? Departure::kTone : Departure::kNone;
       const int pitch = bar == free_bars - 1 ? root : pedal_pitch(root, chord);
+      departure = Departure::kNone;
       if (bar == free_bars - 1) {
         last_pedal_pitch = pitch;
         pedal_run = 1;
@@ -460,14 +494,18 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       // strike anchors the chord root; the second alternates when a static run
       // would breach the gate cap.
       const int first = pedal_pitch(root, chord);
+      departure = before_cadence ? Departure::kTone : Departure::kNone;
       const int second = pedal_pitch(root, chord);
+      departure = Departure::kNone;
       addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, first);
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, second);
       registry.record(bar_start, /*voice=*/2, first, kTicksPerBeat * 2);
       registry.record(bar_start + kTicksPerBeat * 2, /*voice=*/2, second, kTicksPerBeat * 2);
       continue;
     }
+    departure = before_cadence ? Departure::kDensity : Departure::kNone;
     const int pitch = pedal_pitch(root, chord);
+    departure = Departure::kNone;
     // Which treatment this tone has already had. The pedal states a tone in one
     // of two densities -- held for the whole bar, or struck as a half note and
     // answered by its own fifth (the walking-pedal idiom) -- and a second bar
@@ -476,12 +514,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     // been heard in yet, and the seed-phased walk decides only while both are
     // still free. The bass note itself never moves for this: what changes on
     // the return is how densely the same pedal is stated.
-    const bool held_before = alreadySustained(pedal_held, pitch, kTicksPerBar);
-    const bool walked_before = alreadySustained(pedal_held, pitch, kTicksPerBeat * 2);
-    bool walking = (bar % 4) == walk_phase;
-    if (held_before != walked_before)
-      walking = !walked_before;
-    if (walking) {
+    if (walks(bar, pitch)) {
       // Half-note root then a half-note fifth above it (still inside the band).
       // The first tone goes through the same ranking as every other pedal onset.
       // Writing the root unranked here left this the one branch where a bar head
@@ -489,10 +522,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       // it: the ordinary branch would have stepped to a chord tone instead. The
       // fifth is measured from the tone actually taken, so the walk keeps its
       // shape wherever the root is displaced.
-      int fifth = pitch + 7;
-      if (fifth > kFreeV2Hi)
-        fifth = pitch - 5;  // fall to the fourth below if the fifth overflows.
-      fifth = std::clamp(fifth, kFreeV2Lo, kFreeV2Hi);
+      const int fifth = walk_fifth(pitch);
       addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, pitch);
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, fifth);
       registry.record(bar_start, /*voice=*/2, pitch, kTicksPerBeat * 2);

@@ -414,6 +414,19 @@ TEST(TextureHelpersTest, MotionsIntoOnsetPairTheLastTripletTone) {
   EXPECT_EQ(motions[0].prev, -1);
 }
 
+TEST(TextureHelpersTest, ForcedParallelIntoAFixedCadencePitchClass) {
+  // A pedal on F# 42 a semitone under a G cadence, V0 stepping F# 78 to G 79 the same way:
+  // both G octaves of the band 40..55 answer with a parallel octave.
+  const std::vector<ConcurrentMotion> motions = {ConcurrentMotion{0, 78, 79}};
+  EXPECT_TRUE(forcesParallelIntoPitchClass(42, 7, 40, 55, motions));
+  // The same pedal under a V0 that falls to the cadence leaves the near G free.
+  EXPECT_FALSE(forcesParallelIntoPitchClass(42, 7, 40, 55, {ConcurrentMotion{0, 78, 74}}));
+  // A pedal away from the leading tone reaches G without the parallel.
+  EXPECT_FALSE(forcesParallelIntoPitchClass(45, 7, 40, 55, motions));
+  // No octave of the pitch class in the band forces nothing.
+  EXPECT_FALSE(forcesParallelIntoPitchClass(42, 7, 44, 54, motions));
+}
+
 TEST(TextureHelpersTest, ThemeToneRegistryUnsignedSentinelEdge) {
   ThemeToneRegistry registry;
   // No record yet: any lookup is silent.
