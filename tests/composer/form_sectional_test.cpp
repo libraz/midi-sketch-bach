@@ -961,6 +961,28 @@ int soundingIn(const ComposeResult& result, VoiceId voice, Tick tick) {
   return pitch;
 }
 
+// The free section's top voice sounding at `tick` (toccata or fantasia material), -1 if silent.
+int topVoiceAt(const HarnessFixture& fx, Tick tick) {
+  int pitch = -1;
+  Tick latest = 0;
+  const auto consider = [&](VoiceId voice, const std::vector<MaterialNote>& notes) {
+    if (voice != 0)
+      return;
+    for (const MaterialNote& note : notes) {
+      if (note.start_tick <= tick && tick < note.start_tick + note.duration &&
+          (pitch < 0 || note.start_tick >= latest)) {
+        latest = note.start_tick;
+        pitch = note.pitch;
+      }
+    }
+  };
+  for (const ToccataSection& section : fx.material.toccata_sections)
+    consider(section.voice, section.notes);
+  for (const FantasiaSection& section : fx.material.fantasia_sections)
+    consider(section.voice, section.notes);
+  return pitch;
+}
+
 // Chord tones of the V1 band inside the window the top voice and the pedal leave at `onset`.
 std::vector<int> strikeWindow(const ComposeResult& result, const HarmonicPlan& plan, Tick onset) {
   std::vector<int> tones;
@@ -1397,55 +1419,81 @@ TEST(FormSectionalTest, ToccataPedalEscapesStayOnTheChord) {
   }
 }
 
-// A walking pedal bar answers its tone with the fifth at the half bar, and that onset takes no
-// perfect approach against the top voice's step into it; such a bar holds its tone instead.
-TEST(FormSectionalTest, ToccataWalkingPedalFifthTakesNoPerfectApproach) {
+// A walking pedal bar answers its tone with the fifth at the half bar, spelled in the local key a
+// semitone off the plain fifth when that leaves the key, and that onset takes no perfect approach
+// against the top voice's step into it; such a bar holds its tone instead.
+TEST(FormSectionalTest, FreeSectionWalkingPedalFifthTakesNoPerfectApproach) {
   // The top voice falling 83 to 76 over a walk from 50 down to 45 arrives at a hidden fifth.
   EXPECT_EQ(worstPerfectMotionRank(50, 45, {ConcurrentMotion{0, 83, 76}}), kMotionRankHidden);
-  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
-    for (std::uint16_t bars :
-         {std::uint16_t{32}, std::uint16_t{64}, std::uint16_t{96}, std::uint16_t{128}}) {
-      for (bool minor : {false, true}) {
-        const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, minor, bars);
-        const Tick free_end = static_cast<Tick>(freeBarsFor(bars)) * kBar;
-        std::vector<const MaterialNote*> top;
-        for (const ToccataSection& section : fx.material.toccata_sections) {
-          if (section.voice != 0)
-            continue;
-          for (const MaterialNote& note : section.notes)
-            top.push_back(&note);
-        }
-        const auto sounding = [&](Tick tick) {
-          const MaterialNote* best = nullptr;
-          for (const MaterialNote* note : top) {
-            if (note->start_tick <= tick && tick < note->start_tick + note->duration &&
-                (best == nullptr || note->start_tick >= best->start_tick))
-              best = note;
-          }
-          return best != nullptr ? static_cast<int>(best->pitch) : -1;
-        };
-        for (const FigurationSection& section : fx.material.figuration_sections) {
-          if (section.voice != 2 || !section.is_pedal_prep)
-            continue;
-          for (std::size_t idx = 1; idx < section.notes.size(); ++idx) {
-            const MaterialNote& head = section.notes[idx - 1];
-            const MaterialNote& fifth = section.notes[idx];
-            const int step = static_cast<int>(fifth.pitch) - static_cast<int>(head.pitch);
-            if (fifth.start_tick >= free_end || head.start_tick % kBar != 0 ||
-                head.duration != kTicksPerBeat * 2 ||
-                fifth.start_tick != head.start_tick + kTicksPerBeat * 2 ||
-                (step != 7 && step != -5))
+  for (FormType form : kForms) {
+    for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+      for (std::uint16_t bars : std::array<std::uint16_t, 4>{32, 64, 96, 128}) {
+        for (bool minor : {false, true}) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const Tick free_end = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+          for (const FigurationSection& section : fx.material.figuration_sections) {
+            if (section.voice != 2 || !section.is_pedal_prep)
               continue;
-            std::vector<ConcurrentMotion> motions;
-            const int prev = sounding(fifth.start_tick - 1);
-            const int curr = sounding(fifth.start_tick);
-            if (prev >= 0 && curr >= 0)
-              motions.push_back(ConcurrentMotion{0, prev, curr});
-            EXPECT_EQ(worstPerfectMotionRank(head.pitch, fifth.pitch, motions), kMotionRankClean)
-                << "seed " << seed << " bars " << bars << (minor ? " minor" : " major") << " tick "
-                << fifth.start_tick << " pedal " << static_cast<int>(head.pitch) << " to "
-                << static_cast<int>(fifth.pitch) << " over " << prev << " to " << curr;
+            for (std::size_t idx = 1; idx < section.notes.size(); ++idx) {
+              const MaterialNote& head = section.notes[idx - 1];
+              const MaterialNote& fifth = section.notes[idx];
+              const int step = static_cast<int>(fifth.pitch) - static_cast<int>(head.pitch);
+              if (fifth.start_tick >= free_end || head.start_tick % kBar != 0 ||
+                  head.duration != kTicksPerBeat * 2 ||
+                  fifth.start_tick != head.start_tick + kTicksPerBeat * 2 ||
+                  (std::abs(step - 7) > 1 && std::abs(step + 5) > 1))
+                continue;
+              std::vector<ConcurrentMotion> motions;
+              const int prev = topVoiceAt(fx, fifth.start_tick - 1);
+              const int curr = topVoiceAt(fx, fifth.start_tick);
+              if (prev >= 0 && curr >= 0)
+                motions.push_back(ConcurrentMotion{0, prev, curr});
+              EXPECT_EQ(worstPerfectMotionRank(head.pitch, fifth.pitch, motions), kMotionRankClean)
+                  << formName(form) << " seed " << seed << " bars " << bars
+                  << (minor ? " minor" : " major") << " tick " << fifth.start_tick << " pedal "
+                  << static_cast<int>(head.pitch) << " to " << static_cast<int>(fifth.pitch)
+                  << " over " << prev << " to " << curr;
+            }
           }
+        }
+      }
+    }
+  }
+}
+
+// The free section's closing pedal is fixed to the dominant, so the bar before it departs toward
+// an octave of that pitch class the top voice's step into the cadence leaves clean: no parallel,
+// hidden or contrary arrival.
+TEST(FormSectionalTest, FreeSectionPedalDepartsCleanlyIntoTheCadence) {
+  for (FormType form : kForms) {
+    for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+      for (std::uint16_t bars : std::array<std::uint16_t, 4>{32, 64, 96, 128}) {
+        for (bool minor : {false, true}) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const Tick cadence = static_cast<Tick>(freeBarsFor(bars) - 1) * kBar;
+          int before = -1;
+          int arrival = -1;
+          for (const FigurationSection& section : fx.material.figuration_sections) {
+            if (section.voice != 2 || !section.is_pedal_prep)
+              continue;
+            for (const MaterialNote& note : section.notes) {
+              if (note.start_tick < cadence && cadence <= note.start_tick + note.duration)
+                before = note.pitch;
+              if (note.start_tick == cadence)
+                arrival = note.pitch;
+            }
+          }
+          if (before < 0 || arrival < 0)
+            continue;
+          const int prev = topVoiceAt(fx, cadence - 1);
+          const int curr = topVoiceAt(fx, cadence);
+          if (prev < 0 || curr < 0)
+            continue;
+          EXPECT_LE(worstPerfectMotionRank(before, arrival, {ConcurrentMotion{0, prev, curr}}),
+                    kMotionRankBattuta)
+              << formName(form) << " seed " << seed << " bars " << bars
+              << (minor ? " minor" : " major") << " pedal " << before << " to " << arrival
+              << " under " << prev << " to " << curr;
         }
       }
     }

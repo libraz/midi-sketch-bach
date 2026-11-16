@@ -227,6 +227,24 @@ bool isChordTone(int pitch, const ChordSpec& chord) {
   return offset == 0 || offset == third_iv || offset == 7 || (chord.seventh && offset == 10);
 }
 
+/// @brief True when the key sounding at `tick` is not the piece's home key.
+bool isForeignKeyAt(const HarmonicPlan& harmony, Tick tick) {
+  const KeyContext local = localKeyAt(harmony, tick);
+  return local.tonic_pc != static_cast<std::uint8_t>(harmony.tonic_pc % 12) ||
+         local.is_minor != harmony.is_minor;
+}
+
+/// @brief The tone the restatement into the local key sounds for `pitch` struck at `tick` over
+///        `chord`: a chord tone, or any tone in the home key, stays where it is.
+int localKeySpelling(int pitch, Tick tick, const ChordSpec& chord, const HarmonicPlan& harmony) {
+  if (!isForeignKeyAt(harmony, tick) || isChordTone(pitch, chord))
+    return pitch;
+  const KeyContext local = localKeyAt(harmony, tick);
+  const detail::PcMask chord_pcs = detail::chordPcMaskInKey(
+      chord, local.tonic_pc, local.is_minor ? detail::Mode::Minor : detail::Mode::Major);
+  return std::clamp(bendIntoKey(pitch, local, chord_pcs), 0, 127);
+}
+
 /// @brief Emit the V2 pedal + V1 punctuation layers under the V0 free section.
 ///
 /// @param asm_ctx The accumulator (spans + figuration sections).
@@ -294,9 +312,12 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // repeating both would be that bar restated note for note, so the pedal
   // reads this to pick the density it has not used on the tone yet.
   std::vector<SustainedBar> pedal_held;
-  // The fifth a walking bar answers its tone with, inside the band.
-  const auto walk_fifth = [](int tone) {
-    return std::clamp(tone + 7 > kFreeV2Hi ? tone - 5 : tone + 7, kFreeV2Lo, kFreeV2Hi);
+  // The fifth a walking bar answers its tone with, inside the band, spelled as the restatement
+  // into the local key will sound it: a fifth above a tone other than the root can leave the key.
+  const auto walk_fifth = [&](int bar, int tone) {
+    const int fifth = std::clamp(tone + 7 > kFreeV2Hi ? tone - 5 : tone + 7, kFreeV2Lo, kFreeV2Hi);
+    return localKeySpelling(fifth, barTick(bar) + kTicksPerBeat * 2,
+                            plan[static_cast<std::size_t>(bar)], out.harmony);
   };
   // The other voices' motion into the half-bar onset, where a walking bar strikes its fifth.
   std::vector<ConcurrentMotion> walk_motions;
@@ -308,7 +329,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     const bool walked_before = alreadySustained(pedal_held, tone, kTicksPerBeat * 2);
     const bool wanted = held_before != walked_before ? !walked_before : (bar % 4) == walk_phase;
     return wanted &&
-           worstPerfectMotionRank(tone, walk_fifth(tone), walk_motions) == kMotionRankClean;
+           worstPerfectMotionRank(tone, walk_fifth(bar, tone), walk_motions) == kMotionRankClean;
   };
   // The free section closes on a pedal of fixed pitch class, so the bar before it also ranks
   // the departure of its last tone into that cadence: the onset's own tone, or the fifth
@@ -319,12 +340,13 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   const int cadence_pc = plan[static_cast<std::size_t>(free_bars - 1)].root_pc % 12;
   std::vector<ConcurrentMotion> cadence_motions;
   registry.motionsIntoOnset(barTick(free_bars - 1), /*voice=*/2, /*num_voices=*/3, cadence_motions);
-  const auto forces_cadence_parallel = [&](int tone) {
+  const auto cadence_departure_rank = [&](int tone) {
     if (departure == Departure::kNone)
-      return false;
-    const int last =
-        departure == Departure::kDensity && walks(departure_bar, tone) ? walk_fifth(tone) : tone;
-    return forcesParallelIntoPitchClass(last, cadence_pc, kFreeV2Lo, kFreeV2Hi, cadence_motions);
+      return kMotionRankClean;
+    const int last = departure == Departure::kDensity && walks(departure_bar, tone)
+                         ? walk_fifth(departure_bar, tone)
+                         : tone;
+    return bestArrivalRankIntoPitchClass(last, cadence_pc, kFreeV2Lo, kFreeV2Hi, cadence_motions);
   };
   // Every beat the bar's pedal tone is still sounding at, read from the V0
   // figuration already placed above it. The pedal is struck once or twice a bar
@@ -361,13 +383,16 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   constexpr int kPedalAntiParallel = 2;
   constexpr int kPedalParallel = 3;
   const auto pedal_fault_rank = [&](int cand) {
-    if (forces_cadence_parallel(cand)) {
-      return kPedalParallel;
+    // The departure into the cadence carries the fault its best arrival still forms; a battuta
+    // there counts with the hidden approach, the rung this ladder keeps for the milder faults.
+    const int departure_rank = cadence_departure_rank(cand);
+    int worst = departure_rank == kMotionRankParallel       ? kPedalParallel
+                : departure_rank == kMotionRankAntiParallel ? kPedalAntiParallel
+                : departure_rank == kMotionRankClean        ? kPedalClean
+                                                            : kPedalHidden;
+    if (worst == kPedalParallel || last_pedal_pitch < 0) {
+      return worst;
     }
-    if (last_pedal_pitch < 0) {
-      return kPedalClean;
-    }
-    int worst = kPedalClean;
     for (const ConcurrentMotion& motion : motions) {
       if (motion.prev < 0 || motion.curr < 0) {
         continue;
@@ -542,7 +567,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       // it: the ordinary branch would have stepped to a chord tone instead. The
       // fifth is measured from the tone actually taken, so the walk keeps its
       // shape wherever the root is displaced.
-      const int fifth = walk_fifth(pitch);
+      const int fifth = walk_fifth(bar, pitch);
       addNote(pedal_section.notes, bar_start, kTicksPerBeat * 2, pitch);
       addNote(pedal_section.notes, bar_start + kTicksPerBeat * 2, kTicksPerBeat * 2, fifth);
       registry.record(bar_start, /*voice=*/2, pitch, kTicksPerBeat * 2);
@@ -898,13 +923,6 @@ void planSectionalModulations(HarmonicPlan& harmony, int total_bars, int free_ba
   }
 }
 
-/// @brief True when the key sounding at `tick` is not the piece's home key.
-bool isForeignKeyAt(const HarmonicPlan& harmony, Tick tick) {
-  const KeyContext local = localKeyAt(harmony, tick);
-  return local.tonic_pc != static_cast<std::uint8_t>(harmony.tonic_pc % 12) ||
-         local.is_minor != harmony.is_minor;
-}
-
 /// @brief Restate every bar of the chord plan in the key sounding at it.
 ///
 /// Degree-preserving, so a home progression keeps its function where it lands (V
@@ -1031,17 +1049,13 @@ void bendIntoLocalKeys(std::vector<MaterialNote>& notes, std::size_t first,
   for (std::size_t idx = first; idx < notes.size(); ++idx) {
     MaterialNote& note = notes[idx];
     const std::size_t bar = static_cast<std::size_t>(note.start_tick / kTicksPerBar);
-    if (bar >= plan.size() || !isForeignKeyAt(harmony, note.start_tick))
+    if (bar >= plan.size())
       continue;
     const int pitch = static_cast<int>(note.pitch);
-    if (isChordTone(pitch, plan[bar]))
-      continue;
-    const KeyContext local = localKeyAt(harmony, note.start_tick);
-    const detail::PcMask harmony = detail::chordPcMaskInKey(
-        plan[bar], local.tonic_pc, local.is_minor ? detail::Mode::Minor : detail::Mode::Major);
-    const int bent = std::clamp(bendIntoKey(pitch, local, harmony), 0, 127);
+    const int bent = localKeySpelling(pitch, note.start_tick, plan[bar], harmony);
     if (bent == pitch)
       continue;
+    const KeyContext local = localKeyAt(harmony, note.start_tick);
     // The previous tone is the one this line will actually sound, bent and all,
     // because the restatement walks the line in order.
     const Tick prev_tick = idx > 0 ? notes[idx - 1].start_tick : 0;

@@ -2138,7 +2138,7 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Ornament groups read as their authored tone: fourths 20 -> 18.
     // The ornament ceiling is the instrument's top read in the composed frame of the placed key:
     // successions 30873 -> 30885.
-    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30885, {12, 6, 0, 0}},
+    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30861, {12, 6, 0, 0}},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0}},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -2804,8 +2804,8 @@ TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) 
 // RATCHET: as above, for the sectional forms, whose free section is laid out per bar of its own
 // length, so its pedal, punctuation and register work reach bars the natural length never has.
 constexpr std::array<LengthCeiling, 2> kSectionalLengthCeilings = {{
-    {FormType::ToccataAndFugue, 336, 336, 47, 1, 12, 7, 2, 1, 1, 295264, {56, 14, 0, 0}},
-    {FormType::FantasiaAndFugue, 0, 0, 59, 1, 56, 0, 2, 1, 1, 331458, {71, 26, 0, 0}},
+    {FormType::ToccataAndFugue, 336, 336, 41, 1, 0, 7, 2, 1, 0, 295273, {56, 14, 0, 0}},
+    {FormType::FantasiaAndFugue, 0, 0, 59, 1, 40, 0, 2, 1, 1, 330918, {71, 26, 0, 0}},
 }};
 
 TEST(ShippedCounterpointRatchet, SectionalFormsMatchPinnedCountsAtEveryLength) {

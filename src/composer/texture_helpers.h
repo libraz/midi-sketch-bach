@@ -175,14 +175,6 @@ struct ConcurrentMotion {
   int curr = -1;      // sounding pitch at the current onset (-1 = silent).
 };
 
-/// @brief True when `tone` reaches no octave of `arrival_pc` in [band_lo, band_hi] without a
-///        true parallel perfect against one of `motions`.
-///
-/// An arrival on a fixed pitch class leaves only its octave free, so a departure that every
-/// in-band octave answers with a parallel forces the fault onto the arrival.
-bool forcesParallelIntoPitchClass(int tone, int arrival_pc, int band_lo, int band_hi,
-                                  const std::vector<ConcurrentMotion>& motions);
-
 /// @brief Perfect-motion fault ranks a moving line can form against another,
 ///        clean to worst: battuta, hidden perfect, contrary arrival at the same
 ///        perfect class, true parallel. Callers relieve a fault only onto a
@@ -199,6 +191,14 @@ int perfectMotionRank(int line_prev, int cand, int other_prev, int other_curr);
 
 /// @brief Worst rank the motion (line_prev -> cand) forms against any of `motions`.
 int worstPerfectMotionRank(int line_prev, int cand, const std::vector<ConcurrentMotion>& motions);
+
+/// @brief Lowest worstPerfectMotionRank with which `tone` reaches an octave of `arrival_pc` in
+///        [band_lo, band_hi]; kMotionRankClean when the band holds none.
+///
+/// An arrival on a fixed pitch class leaves only its octave free, so the departure carries
+/// whatever fault the best of those octaves still forms.
+int bestArrivalRankIntoPitchClass(int tone, int arrival_pc, int band_lo, int band_hi,
+                                  const std::vector<ConcurrentMotion>& motions);
 
 /// @brief True when the step from `from` to `to` is an augmented second in the local key at
 ///        `onset` (a minor third on adjacent letters, its inversion included) or a tritone.

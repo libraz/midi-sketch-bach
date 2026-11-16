@@ -415,17 +415,23 @@ TEST(TextureHelpersTest, MotionsIntoOnsetPairTheLastTripletTone) {
   EXPECT_EQ(motions[0].prev, -1);
 }
 
-TEST(TextureHelpersTest, ForcedParallelIntoAFixedCadencePitchClass) {
+TEST(TextureHelpersTest, BestArrivalRankIntoAFixedCadencePitchClass) {
   // A pedal on F# 42 a semitone under a G cadence, V0 stepping F# 78 to G 79 the same way:
   // both G octaves of the band 40..55 answer with a parallel octave.
   const std::vector<ConcurrentMotion> motions = {ConcurrentMotion{0, 78, 79}};
-  EXPECT_TRUE(forcesParallelIntoPitchClass(42, 7, 40, 55, motions));
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(42, 7, 40, 55, motions), kMotionRankParallel);
   // The same pedal under a V0 that falls to the cadence leaves the near G free.
-  EXPECT_FALSE(forcesParallelIntoPitchClass(42, 7, 40, 55, {ConcurrentMotion{0, 78, 74}}));
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(42, 7, 40, 55, {ConcurrentMotion{0, 78, 74}}),
+            kMotionRankClean);
   // A pedal away from the leading tone reaches G without the parallel.
-  EXPECT_FALSE(forcesParallelIntoPitchClass(45, 7, 40, 55, motions));
-  // No octave of the pitch class in the band forces nothing.
-  EXPECT_FALSE(forcesParallelIntoPitchClass(42, 7, 44, 54, motions));
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(45, 7, 40, 55, motions), kMotionRankClean);
+  // V0 leaping 71 to 79 into the cadence: from B 47 the near G arrives on the octave by contrary
+  // motion and the far one in parallel, while from D 50 the near G is clean.
+  const std::vector<ConcurrentMotion> leap = {ConcurrentMotion{0, 71, 79}};
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(47, 7, 40, 55, leap), kMotionRankAntiParallel);
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(50, 7, 40, 55, leap), kMotionRankClean);
+  // No octave of the pitch class in the band leaves nothing to rank.
+  EXPECT_EQ(bestArrivalRankIntoPitchClass(42, 7, 44, 54, motions), kMotionRankClean);
 }
 
 TEST(TextureHelpersTest, ThemeToneRegistryUnsignedSentinelEdge) {

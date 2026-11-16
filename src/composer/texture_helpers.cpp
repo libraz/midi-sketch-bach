@@ -589,23 +589,6 @@ bool formsStrictPerfectParallel(int line_prev, int cand, int other_prev, int oth
   return isStrictParallelPerfect(line_prev, cand, other_prev, other_curr);
 }
 
-bool forcesParallelIntoPitchClass(int tone, int arrival_pc, int band_lo, int band_hi,
-                                  const std::vector<ConcurrentMotion>& motions) {
-  bool any_octave = false;
-  for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
-    if (((pitch - arrival_pc) % 12 + 12) % 12 != 0)
-      continue;
-    any_octave = true;
-    const bool parallel =
-        std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
-          return formsStrictPerfectParallel(tone, pitch, motion.prev, motion.curr);
-        });
-    if (!parallel)
-      return false;
-  }
-  return any_octave;
-}
-
 bool formsPerfectParallel(int line_prev, int cand, int other_prev, int other_curr) {
   if (line_prev < 0 || other_prev < 0 || other_curr < 0) {
     return false;  // need both voices' two onsets to judge motion.
@@ -661,6 +644,18 @@ int worstPerfectMotionRank(int line_prev, int cand, const std::vector<Concurrent
       break;
   }
   return worst;
+}
+
+int bestArrivalRankIntoPitchClass(int tone, int arrival_pc, int band_lo, int band_hi,
+                                  const std::vector<ConcurrentMotion>& motions) {
+  int best = -1;
+  for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
+    if (((pitch - arrival_pc) % 12 + 12) % 12 != 0)
+      continue;
+    const int rank = worstPerfectMotionRank(tone, pitch, motions);
+    best = best < 0 ? rank : std::min(best, rank);
+  }
+  return best < 0 ? kMotionRankClean : best;
 }
 
 bool isAugmentedStep(int from, int to, const HarmonicPlan& plan, Tick onset) {
