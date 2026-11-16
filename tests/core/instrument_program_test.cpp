@@ -282,6 +282,17 @@ TEST(InstrumentProgramTest, OutputRangeRejectsAScoreNoDisplacementCanPlaceInside
   EXPECT_FALSE(selectOutputOctaveShift(notes, Key::G, InstrumentType::Violin).has_value());
 }
 
+TEST(InstrumentProgramTest, FittingShiftIsTheSelectedShiftOnlyWhereOneFits) {
+  const std::vector<NoteEvent> fits = scoreWithPitches({36, 84});
+  EXPECT_EQ(fittingOutputOctaveShift(fits, Key::B, InstrumentType::Violin),
+            selectOutputOctaveShift(fits, Key::B, InstrumentType::Violin));
+  EXPECT_EQ(fittingOutputOctaveShift({}, Key::G, InstrumentType::Violin), 0);
+
+  const std::vector<NoteEvent> misses = scoreWithPitches({24, 64});
+  ASSERT_TRUE(selectOutputOctaveShift(misses, Key::C, InstrumentType::Guitar).has_value());
+  EXPECT_FALSE(fittingOutputOctaveShift(misses, Key::C, InstrumentType::Guitar).has_value());
+}
+
 TEST(InstrumentProgramTest, ComposedCompassWindowHoldsTheAnchorInItsLowestOctave) {
   const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Harpsichord);
   for (int key_offset = -5; key_offset <= 6; ++key_offset) {

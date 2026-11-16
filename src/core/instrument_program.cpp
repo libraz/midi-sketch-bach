@@ -32,7 +32,7 @@ std::uint8_t gmProgramFor(InstrumentType instrument) {
 InstrumentPitchRange pitchRangeFor(InstrumentType instrument) {
   switch (instrument) {
     case InstrumentType::Organ:
-      return {organ_range::kPedalLow, organ_range::kManualHigh, /*hard_limit=*/true};
+      return {organ_range::kPedalLow, organ_range::kManualHigh};
     case InstrumentType::Harpsichord:
       return {36, 96};
     case InstrumentType::Piano:
@@ -66,10 +66,19 @@ ComposedCompassWindow composedCompassWindow(InstrumentType instrument, int key_o
           static_cast<int>(range.high) - key_offset - octave};
 }
 
-std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
-                                           InstrumentType instrument) {
+namespace {
+
+/// The smallest whole-octave displacement that fits the compass, and the one
+/// leaving the fewest semitones outside it.
+struct OutputOctaveShifts {
+  std::optional<int> fitting;
+  std::optional<int> nearest;
+};
+
+OutputOctaveShifts outputOctaveShifts(const std::vector<NoteEvent>& notes, Key key,
+                                      InstrumentType instrument) {
   if (notes.empty()) {
-    return 0;
+    return {0, 0};
   }
   const InstrumentPitchRange range = pitchRangeFor(instrument);
   const int key_shift = keyTranspositionSemitones(key);
@@ -81,16 +90,12 @@ std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, 
     high = std::max(high, transposed);
   }
 
-  // Prefer the smallest displacement that fits the compass exactly; the
-  // nearest-fitting displacement is only consulted when nothing fits, so a
-  // score that already had a placement keeps the one it had.
   const auto closer = [](int candidate, int incumbent) {
     return std::abs(candidate) < std::abs(incumbent) ||
            (std::abs(candidate) == std::abs(incumbent) && candidate < incumbent);
   };
 
-  std::optional<int> best_shift;
-  std::optional<int> nearest_shift;
+  OutputOctaveShifts shifts;
   int nearest_excess = 0;
   // MIDI itself spans fewer than eleven octaves, so this covers every
   // feasible displacement while retaining a fixed, deterministic bound.
@@ -103,18 +108,34 @@ std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, 
     const int above = std::max(0, (high + shift) - static_cast<int>(range.high));
     const int excess = below + above;
     if (excess == 0) {
-      if (!best_shift || closer(shift, *best_shift)) {
-        best_shift = shift;
+      if (!shifts.fitting || closer(shift, *shifts.fitting)) {
+        shifts.fitting = shift;
       }
       continue;
     }
-    if (!nearest_shift || excess < nearest_excess ||
-        (excess == nearest_excess && closer(shift, *nearest_shift))) {
-      nearest_shift = shift;
+    if (!shifts.nearest || excess < nearest_excess ||
+        (excess == nearest_excess && closer(shift, *shifts.nearest))) {
+      shifts.nearest = shift;
       nearest_excess = excess;
     }
   }
-  return best_shift ? best_shift : nearest_shift;
+  return shifts;
+}
+
+}  // namespace
+
+std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
+                                           InstrumentType instrument) {
+  // Prefer the smallest displacement that fits the compass exactly; the
+  // nearest-fitting displacement is only consulted when nothing fits, so a
+  // score that already had a placement keeps the one it had.
+  const OutputOctaveShifts shifts = outputOctaveShifts(notes, key, instrument);
+  return shifts.fitting ? shifts.fitting : shifts.nearest;
+}
+
+std::optional<int> fittingOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
+                                            InstrumentType instrument) {
+  return outputOctaveShifts(notes, key, instrument).fitting;
 }
 
 void applyInstrument(std::vector<Track>& tracks, InstrumentType instrument) {

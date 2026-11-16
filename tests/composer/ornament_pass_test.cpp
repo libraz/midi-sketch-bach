@@ -1030,6 +1030,71 @@ TEST(OrnamentPassTest, OrganMordentOnTheTopKeyIsNotRefusedForItsUpperNeighbour) 
   EXPECT_GT(mordents, 0);
 }
 
+namespace {
+
+// The compass a figure may reach is the one the output places the piece in. A
+// top line rocking between `step` and `top` over a held bass at `bass`, decorated
+// over sixteen seeds; returns the highest ornament tone sounded.
+int highestOrnamentTone(InstrumentType instrument, Key tonic, std::uint8_t bass, std::uint8_t step,
+                        std::uint8_t top) {
+  int highest = -1;
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    ComposeResult r;
+    for (int bar = 0; bar < 8; ++bar) {
+      r.notes.push_back(makeNote(barToTick(bar), kTicksPerBar, bass, 1));
+      r.provenance.push_back(composeProv(1));
+      const std::array<std::uint8_t, 4> line = {step, top, step, top};
+      for (int beat = 0; beat < 4; ++beat) {
+        r.notes.push_back(makeNote(barToTick(bar) + beat * kTicksPerBeat, kTicksPerBeat,
+                                   line[static_cast<std::size_t>(beat)], 0));
+        r.provenance.push_back(composeProv(0));
+      }
+    }
+    r.tracks = Renderer{}.render(r.notes);
+    OrnamentParams p = baseParams();
+    p.instrument = instrument;
+    p.tonic = tonic;
+    p.seed = seed;
+    applyOrnamentPass(r, p, kNoSuspensions);
+    for (const auto& note : r.notes) {
+      if (note.source == BachNoteSource::Ornament)
+        highest = std::max(highest, static_cast<int>(note.pitch));
+    }
+  }
+  return highest;
+}
+
+}  // namespace
+
+// G sounds five below C, so a line topping out on the manual's top key in C
+// leaves room for an upper auxiliary that still sounds on the manual.
+TEST(OrnamentPassTest, OrganAuxiliaryAboveTheComposedTopIsAdmittedWhereTheKeySoundsItLower) {
+  EXPECT_LE(highestOrnamentTone(InstrumentType::Organ, Key::C, 48, 83, 84), 84);
+  const int highest = highestOrnamentTone(InstrumentType::Organ, Key::G, 48, 83, 84);
+  EXPECT_GT(highest, 84);
+  EXPECT_LE(highest, 84 + 5);
+}
+
+// A bass on the manual's A1 cannot drop an octave, so C# places the piece
+// a semitone up and the composed B under the top key is as high as a figure goes.
+TEST(OrnamentPassTest, OrganAuxiliaryPastTheTopKeyIsRefusedInCSharp) {
+  EXPECT_EQ(highestOrnamentTone(InstrumentType::Organ, Key::C, 33, 81, 83), 84);
+  EXPECT_LE(highestOrnamentTone(InstrumentType::Organ, Key::Cs, 33, 81, 83), 83);
+}
+
+// An A0 bass fits no whole octave in C#, so placement will move bars it cannot
+// know yet; the figure keeps the composed top, as the A1 bass does in C.
+TEST(OrnamentPassTest, OrganAuxiliaryKeepsTheComposedTopWhereNoOctaveFits) {
+  EXPECT_EQ(highestOrnamentTone(InstrumentType::Organ, Key::Cs, 21, 81, 83), 84);
+}
+
+// B places the harpsichord's C2 floor an octave up, so its compass top reads
+// back as 85: an auxiliary above a composed C6 is refused there and not in C.
+TEST(OrnamentPassTest, HarpsichordAuxiliaryIsRefusedAtTheKeyedTopInB) {
+  EXPECT_GT(highestOrnamentTone(InstrumentType::Harpsichord, Key::C, 36, 83, 84), 85);
+  EXPECT_LE(highestOrnamentTone(InstrumentType::Harpsichord, Key::B, 36, 83, 84), 85);
+}
+
 // --- Mid-piece distribution -------------------------------------------------
 
 // A density-0 character is no longer bare until the final cadence: every other

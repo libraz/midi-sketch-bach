@@ -1904,7 +1904,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // Ornament groups read as their authored tone: fourths 14 -> 12.
     // The free-section punctuation ranks each band tone by the line into it and by the
     // departure it leaves the next strike: successions 25752 -> 25770.
-    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25770, {9, 3, 0, 0}},
+    // The ornament ceiling is the instrument's top read in the composed frame of the placed key:
+    // successions 25770 -> 25773.
+    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25773, {9, 3, 0, 0}},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the
@@ -2134,7 +2136,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 30879 -> 30873.
     // Ornament groups read as their authored tone: fourths 20 -> 18.
-    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30873, {12, 6, 0, 0}},
+    // The ornament ceiling is the instrument's top read in the composed frame of the placed key:
+    // successions 30873 -> 30885.
+    {FormType::FantasiaAndFugue, 0, 0, 15, 1, 16, 0, 2, 1, 1, 30885, {12, 6, 0, 0}},
     {FormType::CelloPrelude, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {0, 0, 0, 0}},
     // Two voices only, so an arrival on a perfect interval meets a fixed bass
     // with no third part to hide behind. No true parallel of either class
@@ -2591,7 +2595,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // (256 exempt).
     // A unison is a battuta whichever line falls into it, as the validator reads the pair.
     // Ornament groups read as their authored tone: fourths 897 -> 916.
-    {FormType::Fugue, 0, 0, 138, 168, 0, 0, 4, 3, 0, 505829, {724, 79, 73, 40}},
+    // The ornament ceiling is the instrument's top read in the composed frame of the placed key:
+    // successions 505829 -> 505847.
+    {FormType::Fugue, 0, 0, 138, 168, 0, 0, 4, 3, 0, 505847, {724, 79, 73, 40}},
     // The fugue half carries the same choices and the prelude half adds no true
     // parallel of its own at any length. Its hidden column is the one that rises
     // with the beat anchor's contrary tier reaching past the bar head, and the
@@ -2710,7 +2716,9 @@ constexpr std::array<LengthCeiling, 2> kLengthCeilings = {{
     // The final tonic sits on the lower C and the compass shift keeps the body bass in place:
     // hidden 131 -> 129, battuta 113 -> 114.
     // Ornament groups read as their authored tone: fourths 619 -> 649.
-    {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647533, {480, 56, 87, 26}},
+    // The ornament ceiling is the instrument's top read in the composed frame of the placed key:
+    // successions 647533 -> 647575.
+    {FormType::PreludeAndFugue, 0, 0, 129, 114, 0, 0, 4, 3, 0, 647575, {480, 56, 87, 26}},
 }};
 
 TEST(ShippedCounterpointRatchet, PerfectMotionMatchesPinnedCountsAtEveryLength) {

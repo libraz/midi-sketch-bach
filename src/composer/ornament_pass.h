@@ -112,7 +112,8 @@ namespace bach::composer {
 //     climax_end_tick == 0 disables the window.
 struct OrnamentParams {
   SubjectCharacter character = SubjectCharacter::Severe;  // density via CharacterProfile.
-  InstrumentType instrument = InstrumentType::Organ;      // density scaling.
+  InstrumentType instrument = InstrumentType::Organ;      // density scaling, compass.
+  Key tonic = Key::C;                                     // output key the compass is read in.
   detail::Mode mode = detail::Mode::Major;                // scale for neighbour tones.
   std::uint32_t seed = 0;                                 // deterministic placement.
   Tick ticks_per_bar = kTicksPerBar;                      // meter (3/4 forms pass 1440).

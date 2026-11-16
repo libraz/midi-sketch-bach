@@ -193,6 +193,7 @@ inline ProductGateResult runProductGate(const ComposeRequest& request, Key tonic
   OrnamentParams ornament;
   ornament.character = request.character;
   ornament.instrument = defaultInstrumentForForm(request.form);
+  ornament.tonic = tonic;
   ornament.mode = request.is_minor ? detail::Mode::Minor : detail::Mode::Major;
   ornament.seed = request.seed;
   ornament.bpm = application::kDefaultBpm;

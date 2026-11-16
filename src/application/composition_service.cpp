@@ -240,6 +240,7 @@ CompositionStatus compose(const CompositionRequest& request, CompositionProduct*
   composer::OrnamentParams ornament;
   ornament.character = effective.character;
   ornament.instrument = out->instrument;
+  ornament.tonic = effective.key.tonic;
   ornament.mode =
       effective.key.is_minor ? composer::detail::Mode::Minor : composer::detail::Mode::Major;
   ornament.seed = out->seed;

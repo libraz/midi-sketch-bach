@@ -27,9 +27,6 @@ std::uint8_t gmProgramFor(InstrumentType instrument);
 struct InstrumentPitchRange {
   std::uint8_t low = 0;
   std::uint8_t high = 127;
-  /// True when the instrument has no key outside the range, so no note may
-  /// sound there; false when the range is only the preferred placement.
-  bool hard_limit = false;
 };
 
 /// @brief Return the playable sounding range used for MIDI export.
@@ -73,6 +70,13 @@ ComposedCompassWindow composedCompassWindow(InstrumentType instrument, int key_o
 /// range, which requires an ambitus wider than MIDI itself.
 std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
                                            InstrumentType instrument);
+
+/// @brief The displacement selectOutputOctaveShift returns, only when it fits.
+///
+/// `nullopt` when no whole-octave displacement holds the score inside the
+/// compass: output placement then moves bars, which are not known beforehand.
+std::optional<int> fittingOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
+                                            InstrumentType instrument);
 
 /// @brief Apply an instrument to a set of tracks.
 ///

@@ -153,11 +153,10 @@ ComposeResult violinScore() {
   return result;
 }
 
-// The violin's compass is a preferred range rather than a hard limit, and it is
-// placed by the same mechanism: where no whole-octave displacement fits, the bar
-// holding the outside notes moves an octave inward.
+// The violin's compass is placed by the same mechanism as the organ's: where no
+// whole-octave displacement fits, the bar holding the outside notes moves an
+// octave inward.
 TEST(CompassPlacementTest, PreferredCompassIsPlacedLikeAHardOne) {
-  ASSERT_FALSE(pitchRangeFor(InstrumentType::Violin).hard_limit);
   ComposeResult result = violinScore();
   const auto placement = placeInOutputCompass(&result, Material{}, HarmonicPlan{}, Key::G,
                                               InstrumentType::Violin, kTicksPerBar, kAcceptAll);
@@ -212,6 +211,7 @@ TEST(CompassPlacementTest, ChaconneSoundsInsideTheViolinCompassInEveryKey) {
       OrnamentParams ornament;
       ornament.character = request.character;
       ornament.instrument = InstrumentType::Violin;
+      ornament.tonic = key;
       ornament.mode = request.is_minor ? detail::Mode::Minor : detail::Mode::Major;
       ornament.seed = seed;
       ornament.bpm = application::kDefaultBpm;

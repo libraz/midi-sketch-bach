@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
+#include <optional>
 #include <vector>
 
 #include "composer/character_profile.h"
@@ -16,6 +17,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/validator.h"
 #include "core/instrument_program.h"
+#include "core/pitch_utils.h"
 
 namespace bach::composer {
 
@@ -491,10 +493,15 @@ void applyOrnamentPass(ComposeResult& result, const OrnamentParams& params,
   const std::uint8_t beats_per_bar = params.ts_numerator == 0 ? 4 : params.ts_numerator;
   const Tick beat_ticks = tpb / beats_per_bar;
   const std::uint8_t density = effectiveOrnamentDensity(params.character, params.instrument);
-  // An instrument with no keys above its compass cannot sound a figure there. The
-  // limit is read in the composed frame; output placement owns the transposed one.
-  const InstrumentPitchRange compass = pitchRangeFor(params.instrument);
-  const int ornament_pitch_ceiling = compass.hard_limit ? compass.high : kMidiMax;
+  // A figure may not rise past the instrument's top read back through the key and the
+  // whole-octave shift, a rule whose domain is a shift that fits: where none fits,
+  // placement moves bars not chosen yet, so the composed top holds.
+  const int compass_top = static_cast<int>(pitchRangeFor(params.instrument).high);
+  const std::optional<int> fitting_shift =
+      fittingOutputOctaveShift(result.notes, params.tonic, params.instrument);
+  const int ornament_pitch_ceiling =
+      fitting_shift ? compass_top - keyTranspositionSemitones(params.tonic) - *fitting_shift
+                    : compass_top;
   const int total_bars = static_cast<int>((longestEnd(result.notes) + tpb - 1) / tpb);
 
   // The cadence window is the last two bars; the penultimate bar's cadential
