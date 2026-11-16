@@ -43,6 +43,7 @@
 #include "composer/harness_fixture.h"
 #include "composer/material.h"
 #include "composer/minor_material.h"
+#include "composer/rule_helpers.h"
 #include "composer/subject_catalog.h"
 #include "composer/texture_helpers.h"
 #include "composer/validation.h"
@@ -891,14 +892,14 @@ TEST(FormSectionalTest, FinalCadenceLandsOnTonic) {
 
 // --- 7. Toccata: Material archetype == seed % 4 -----------------------------
 
-// The V1 punctuation tone is judged at the onset the ear pairs it with: the
-// last attack of every other voice before its bar head, a sixteenth back. No
-// punctuation arrival forms a true parallel against that motion.
+// Every V1 punctuation strike in the free section is paired as the validator pairs it: each
+// voice's tone sounding just before the onset, so a strike after a rest pairs with nothing. No
+// strike forms a true parallel against that motion, over every seed's style rotation.
 TEST(FormSectionalTest, FreeSectionPunctuationArrivesWithoutParallelPerfects) {
   for (FormType form : kForms) {
     for (bool minor : {false, true}) {
       for (std::uint16_t bars : kBarLengths) {
-        for (std::uint32_t seed : kSeeds) {
+        for (std::uint32_t seed = 1; seed <= 8; ++seed) {
           const HarnessFixture fx = buildFixture(form, seed, minor, bars);
           const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
           const Tick boundary = static_cast<Tick>(freeBarsFor(bars)) * kBar;
@@ -915,32 +916,169 @@ TEST(FormSectionalTest, FreeSectionPunctuationArrivesWithoutParallelPerfects) {
             }
             return pitch;
           };
-          int v1_prev = -1;
-          std::vector<NoteEvent> line;
-          for (const NoteEvent& note : result.notes) {
-            if (note.voice == 1 && note.start_tick < boundary)
-              line.push_back(note);
-          }
-          std::sort(line.begin(), line.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
-            return lhs.start_tick < rhs.start_tick;
-          });
-          for (const NoteEvent& note : line) {
-            const Tick head = note.start_tick;
-            if (head % kBar == 0 && head > 0 && v1_prev >= 0) {
-              for (VoiceId other : {VoiceId{0}, VoiceId{2}}) {
-                const int other_prev = sounding(other, head - kTicksPerBeat / 4);
-                const int other_curr = sounding(other, head);
-                EXPECT_FALSE(
-                    other_prev >= 0 && other_curr >= 0 &&
-                    formsStrictPerfectParallel(v1_prev, note.pitch, other_prev, other_curr))
-                    << formName(form) << " minor " << minor << " bars " << bars << " seed " << seed
-                    << " tick " << head << " against V" << static_cast<int>(other);
-              }
+          std::vector<Tick> strikes;
+          for (const FigurationSection& section : fx.material.figuration_sections) {
+            for (const MaterialNote& note : section.notes) {
+              if (section.voice == 1 && note.start_tick > 0 && note.start_tick < boundary)
+                strikes.push_back(note.start_tick);
             }
-            v1_prev = note.pitch;
+          }
+          ASSERT_FALSE(strikes.empty()) << formName(form) << " bars " << bars << " seed " << seed;
+          for (const Tick onset : strikes) {
+            const int line_prev = sounding(1, onset - 1);
+            const int curr = sounding(1, onset);
+            for (VoiceId other : {VoiceId{0}, VoiceId{2}}) {
+              const int other_prev = sounding(other, onset - 1);
+              const int other_curr = sounding(other, onset);
+              EXPECT_FALSE(line_prev >= 0 && other_prev >= 0 && other_curr >= 0 &&
+                           formsStrictPerfectParallel(line_prev, curr, other_prev, other_curr))
+                  << formName(form) << " minor " << minor << " bars " << bars << " seed " << seed
+                  << " tick " << onset << " against V" << static_cast<int>(other);
+            }
           }
         }
       }
+    }
+  }
+}
+
+namespace {
+
+// The free-section V1 band.
+constexpr int kFreeV1Lo = 56;
+constexpr int kFreeV1Hi = 71;
+
+int soundingIn(const ComposeResult& result, VoiceId voice, Tick tick) {
+  int pitch = -1;
+  Tick latest = 0;
+  for (const NoteEvent& note : result.notes) {
+    if (note.voice == voice && note.start_tick <= tick && tick < note.start_tick + note.duration &&
+        (pitch < 0 || note.start_tick >= latest)) {
+      latest = note.start_tick;
+      pitch = note.pitch;
+    }
+  }
+  return pitch;
+}
+
+// Chord tones of the V1 band inside the window the top voice and the pedal leave at `onset`.
+std::vector<int> strikeWindow(const ComposeResult& result, const HarmonicPlan& plan, Tick onset) {
+  std::vector<int> tones;
+  const ChordEvent* chord = rule_helpers::chordAt(plan, onset);
+  if (chord == nullptr)
+    return tones;
+  const bool minor_third =
+      chord->quality == ChordQuality::Minor || chord->quality == ChordQuality::Minor7;
+  const int third = minor_third ? 3 : 4;
+  const int top = soundingIn(result, 0, onset);
+  const int bottom = soundingIn(result, 2, onset);
+  int lo = bottom < 0 ? kFreeV1Lo : std::max(kFreeV1Lo, bottom);
+  int hi = top < 0 ? kFreeV1Hi : std::min(kFreeV1Hi, top);
+  if (lo > hi) {  // the selector falls back to the band when the window is empty.
+    lo = kFreeV1Lo;
+    hi = kFreeV1Hi;
+  }
+  for (int pitch = lo; pitch <= hi; ++pitch) {
+    const int interval = ((pitch - chord->root_pc) % 12 + 12) % 12;
+    if (interval == 0 || interval == third || interval == 7)
+      tones.push_back(pitch);
+  }
+  return tones;
+}
+
+// Line rank of `pitch` struck at `onset` after `last_tone`, against the top voice and the pedal.
+int composedLineRank(const ComposeResult& result, const HarmonicPlan& plan, int last_tone,
+                     Tick onset, int pitch) {
+  std::vector<ConcurrentMotion> motions;
+  for (VoiceId voice : {VoiceId{0}, VoiceId{2}}) {
+    const int curr = soundingIn(result, voice, onset);
+    if (curr >= 0)
+      motions.push_back(ConcurrentMotion{voice, soundingIn(result, voice, onset - 1), curr});
+  }
+  const std::vector<int> ranks =
+      lineRankFromLastTone(last_tone, onset, kFreeV1Lo, kFreeV1Hi, motions, plan);
+  return ranks.empty() ? 0 : ranks[static_cast<std::size_t>(pitch - kFreeV1Lo)];
+}
+
+}  // namespace
+
+// The punctuation line is heard across its rests, so a step between consecutive free-section V1
+// strikes forms an augmented second or a tritone in the local key only when every chord tone the
+// voices around the strike leave in the V1 band is one from the previous strike.
+TEST(FormSectionalTest, FreeSectionPunctuationStepsAvoidAugmentedIntervals) {
+  for (FormType form : kForms) {
+    for (bool minor : {false, true}) {
+      for (std::uint16_t bars : std::array<std::uint16_t, 4>{32, 64, 96, 128}) {
+        for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+          const HarnessFixture fx = buildFixture(form, seed, minor, bars);
+          const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+          const Tick boundary = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+          const auto forced = [&](int from, Tick onset) {
+            const std::vector<int> window = strikeWindow(result, fx.harmony, onset);
+            return std::all_of(window.begin(), window.end(), [&](int pitch) {
+              return isAugmentedStep(from, pitch, fx.harmony, onset);
+            });
+          };
+          for (const FigurationSection& section : fx.material.figuration_sections) {
+            if (section.voice != 1)
+              continue;
+            for (std::size_t idx = 1; idx < section.notes.size(); ++idx) {
+              const MaterialNote& from = section.notes[idx - 1];
+              const MaterialNote& to = section.notes[idx];
+              if (to.start_tick >= boundary)
+                break;
+              EXPECT_FALSE(isAugmentedStep(from.pitch, to.pitch, fx.harmony, to.start_tick) &&
+                           !forced(from.pitch, to.start_tick))
+                  << formName(form) << " minor " << minor << " bars " << bars << " seed " << seed
+                  << " step " << static_cast<int>(from.pitch) << " to "
+                  << static_cast<int>(to.pitch) << " tick " << to.start_tick;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// A strike is weighed by the strike after it. In this toccata the bar 27 head over C minor takes
+// G 67 rather than E-flat 63, so the bar 28 head over D need not take D 62 an octave under the
+// top voice's own step 75 to 74, nor F-sharp 66 an augmented second above E-flat.
+TEST(FormSectionalTest, FreeSectionPunctuationDepartsTowardACleanNextStrike) {
+  const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, 15, true, 128);
+  const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+  constexpr Tick kHead = 26 * kBar;
+  constexpr Tick kNext = 27 * kBar;
+  EXPECT_EQ(soundingIn(result, 1, kHead), 67);
+  const int next = soundingIn(result, 1, kNext);
+  EXPECT_EQ(composedLineRank(result, fx.harmony, 67, kNext, next), 0) << "next strike " << next;
+}
+
+// Where no pair of strikes is clean: in this fantasia every chord tone the voices leave the bar 15
+// head either carries a line fault there or leaves the bar 16 head only tones that carry one.
+TEST(FormSectionalTest, FreeSectionPunctuationForcedPairHasNoCleanDeparture) {
+  constexpr Tick kHead = 14 * kBar;
+  constexpr Tick kNext = 15 * kBar;
+  for (std::uint16_t bars : std::array<std::uint16_t, 3>{64, 96, 128}) {
+    const HarnessFixture fx =
+        buildFixture(FormType::FantasiaAndFugue, 10, true, bars, nullptr, SubjectCharacter::Noble);
+    const ComposeResult result = Composer{}.run(fx.material, fx.harmony, fx.voice_plan);
+    int last_tone = -1;
+    for (const FigurationSection& section : fx.material.figuration_sections) {
+      for (const MaterialNote& note : section.notes) {
+        if (section.voice == 1 && note.start_tick < kHead)
+          last_tone = note.pitch;
+      }
+    }
+    ASSERT_GE(last_tone, 0) << "bars " << bars;
+    const std::vector<int> heads = strikeWindow(result, fx.harmony, kHead);
+    ASSERT_FALSE(heads.empty()) << "bars " << bars;
+    for (int head : heads) {
+      const bool clean_here = composedLineRank(result, fx.harmony, last_tone, kHead, head) == 0;
+      const std::vector<int> nexts = strikeWindow(result, fx.harmony, kNext);
+      const bool clean_next = std::any_of(nexts.begin(), nexts.end(), [&](int next) {
+        return composedLineRank(result, fx.harmony, head, kNext, next) == 0;
+      });
+      EXPECT_FALSE(clean_here && clean_next) << "bars " << bars << " head " << head;
     }
   }
 }

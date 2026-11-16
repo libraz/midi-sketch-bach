@@ -574,6 +574,64 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   int punct_first = -1;
   int punct_last = -1;
   int v1_prev = -1;
+  // Where `bar` strikes: its head, or where an answering tail starts; -1 when it does not strike.
+  const auto strike_onset = [&](int bar) -> long long {
+    const FreeLayerPlan& want = layout[static_cast<std::size_t>(bar)];
+    const Tick bar_start = barTick(bar);
+    if (!want.answer_tail)
+      return want.punctuate || want.homophonic || want.fermata || want.held_punct
+                 ? static_cast<long long>(bar_start)
+                 : -1;
+    // The gesture's run leaves the rest of the bar to the pedal alone; the
+    // middle voice answers from where the run stops, so the rest is the top
+    // voice's and the texture does not thin to one line.
+    Tick tail = bar_start;
+    for (const MaterialNote& note : v0_notes) {
+      if (note.start_tick >= bar_start && note.start_tick < bar_start + kTicksPerBar)
+        tail = std::max(tail, note.start_tick + note.duration);
+    }
+    return tail >= bar_start + kTicksPerBar ? -1 : static_cast<long long>(tail);
+  };
+  // The strike at `onset` after `last_tone`, paired as the validator pairs it with the tones
+  // sounding just before the onset (`sounding` is this voice's); the step from `last_tone`, heard
+  // across any rest, orders each tier, then `departure` orders tones that tie on it.
+  const auto strike_tone = [&](const ChordSpec& chord, Tick onset, int last_tone, int sounding,
+                               const std::vector<int>& departure, std::vector<int>& line_rank) {
+    registry.concurrentThemePitches(onset, /*voice=*/1, theme_pitches);
+    registry.motionsIntoOnset(onset, /*voice=*/1, /*num_voices=*/3, motions);
+    line_rank = lineRankFromLastTone(last_tone, onset, kFreeV1Lo, kFreeV1Hi, motions, out.harmony);
+    std::vector<int> order = line_rank;
+    if (!departure.empty()) {
+      order.resize(departure.size(), 0);
+      for (std::size_t idx = 0; idx < order.size(); ++idx)
+        order[idx] = 2 * order[idx] + departure[idx];
+    }
+    return consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, (kFreeV1Lo + kFreeV1Hi) / 2,
+                              theme_pitches, sounding, motions, mode, /*downbeat=*/true,
+                              /*window_pitches=*/{}, /*parallel_free_over_consonant=*/true,
+                              /*sustained_bass=*/false, order);
+  };
+  // 1 for each band tone, struck at `onset` for `dur`, after which the next strike takes a tone
+  // with a line fault; 0 where it takes a clean one or no strike follows. V0 and the pedal are
+  // already placed, so the next strike is judged as it will be struck.
+  const auto departure_rank = [&](int bar, Tick onset, Tick dur) {
+    std::vector<int> departure;
+    long long next_onset = -1;
+    int next = bar + 1;
+    while (next < free_bars && (next_onset = strike_onset(next)) < 0)
+      ++next;
+    if (next_onset < 0)
+      return departure;
+    const Tick next_tick = static_cast<Tick>(next_onset);
+    std::vector<int> next_rank;
+    for (int tone = kFreeV1Lo; tone <= kFreeV1Hi; ++tone) {
+      const int held = onset + dur >= next_tick ? tone : -1;
+      const int next_tone = strike_tone(plan[static_cast<std::size_t>(next)], next_tick, tone, held,
+                                        /*departure=*/{}, next_rank);
+      departure.push_back(next_rank[static_cast<std::size_t>(next_tone - kFreeV1Lo)] == 0 ? 0 : 1);
+    }
+    return departure;
+  };
   for (int bar = 0; bar < free_bars; ++bar) {
     const FreeLayerPlan& want = layout[static_cast<std::size_t>(bar)];
     if (!want.punctuate && !want.homophonic && !want.fermata && !want.answer_tail &&
@@ -582,50 +640,30 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
     if (punct_first < 0)
       punct_first = bar;
     punct_last = bar;
-    const ChordSpec& chord = plan[static_cast<std::size_t>(bar)];
-    const Tick bar_start = barTick(bar);
-    const int centre = (kFreeV1Lo + kFreeV1Hi) / 2;
-    if (want.answer_tail) {
-      // The gesture's run leaves the rest of the bar to the pedal alone; the
-      // middle voice answers from where the run stops, so the rest is the top
-      // voice's and the texture does not thin to one line.
-      Tick tail = bar_start;
-      for (const MaterialNote& note : v0_notes) {
-        if (note.start_tick >= bar_start && note.start_tick < bar_start + kTicksPerBar)
-          tail = std::max(tail, note.start_tick + note.duration);
-      }
-      if (tail >= bar_start + kTicksPerBar)
-        continue;
-      registry.concurrentThemePitches(tail, /*voice=*/1, theme_pitches);
-      registry.concurrentMotions(tail - kSixteenth, tail, /*voice=*/1, /*num_voices=*/3, motions);
-      const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
-                                           theme_pitches, v1_prev, motions, mode,
-                                           /*downbeat=*/true, /*window_pitches=*/{},
-                                           /*parallel_free_over_consonant=*/true);
-      v1_prev = pitch;
-      addNote(punct_section.notes, tail, bar_start + kTicksPerBar - tail, pitch);
-      registry.record(tail, /*voice=*/1, pitch, bar_start + kTicksPerBar - tail);
+    const long long struck = strike_onset(bar);
+    if (struck < 0)
       continue;
-    }
-    registry.concurrentThemePitches(bar_start, /*voice=*/1, theme_pitches);
-    registry.concurrentMotions(bar_start - kSixteenth, bar_start, /*voice=*/1,
-                               /*num_voices=*/3, motions);
-    const int pitch = consonantChordTone(chord, /*voice=*/1, kFreeV1Lo, kFreeV1Hi, centre,
-                                         theme_pitches, v1_prev, motions, mode, /*downbeat=*/true,
-                                         /*window_pitches=*/{},
-                                         /*parallel_free_over_consonant=*/true);
-    v1_prev = pitch;
+    const Tick onset = static_cast<Tick>(struck);
+    const Tick bar_start = barTick(bar);
     // A fermata bar strikes one whole note (the metered breath), a homophonic
     // bar a half note (sounding two beats so the V1+V2 chord articulates
     // together), and a plain head punctuation uses the caller-supplied duration
     // (longer to lift V1 occupancy, shorter for a lighter accompaniment).
     // Either way the bar's tail is left to the V0 figuration alone (a breathing,
-    // non-saturated accompaniment).
-    const Tick dur = want.fermata
-                         ? kTicksPerBar
-                         : (want.homophonic || want.held_punct ? kTicksPerBeat * 2 : v1_punct_dur);
-    addNote(punct_section.notes, bar_start, dur, pitch);
-    registry.record(bar_start, /*voice=*/1, pitch, dur);
+    // non-saturated accompaniment). An answering tail holds to the bar's end.
+    const Tick dur = want.answer_tail
+                         ? bar_start + kTicksPerBar - onset
+                         : (want.fermata ? kTicksPerBar
+                                         : (want.homophonic || want.held_punct ? kTicksPerBeat * 2
+                                                                               : v1_punct_dur));
+    const std::vector<int> departure = departure_rank(bar, onset, dur);
+    std::vector<int> line_rank;
+    const int pitch =
+        strike_tone(plan[static_cast<std::size_t>(bar)], onset, v1_prev,
+                    registry.soundingPitchInVoice(/*voice=*/1, onset - 1), departure, line_rank);
+    v1_prev = pitch;
+    addNote(punct_section.notes, onset, dur, pitch);
+    registry.record(onset, /*voice=*/1, pitch, dur);
   }
   if (!punct_section.notes.empty()) {
     punct_section.start_tick = barTick(punct_first);

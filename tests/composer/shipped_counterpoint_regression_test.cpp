@@ -1902,7 +1902,9 @@ constexpr std::array<FormCeiling, 10> kFormCeilings = {{
     // The wave's oscillation escape takes no tone with a worse perfect-motion fault than staying:
     // battuta 3 -> 1, successions 25758 -> 25752.
     // Ornament groups read as their authored tone: fourths 14 -> 12.
-    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25752, {9, 3, 0, 0}},
+    // The free-section punctuation ranks each band tone by the line into it and by the
+    // departure it leaves the next strike: successions 25752 -> 25770.
+    {FormType::ToccataAndFugue, 84, 84, 11, 1, 0, 7, 2, 1, 0, 25770, {9, 3, 0, 0}},
     // The counter figuration is one continuous voice across the ground cycles
     // and is read as one at every seam; its oscillation tones rank a hidden
     // perfect below a true one; the cadential suspension is chosen against the

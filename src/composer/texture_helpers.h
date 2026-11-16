@@ -200,6 +200,22 @@ int perfectMotionRank(int line_prev, int cand, int other_prev, int other_curr);
 /// @brief Worst rank the motion (line_prev -> cand) forms against any of `motions`.
 int worstPerfectMotionRank(int line_prev, int cand, const std::vector<ConcurrentMotion>& motions);
 
+/// @brief True when the step from `from` to `to` is an augmented second in the local key at
+///        `onset` (a minor third on adjacent letters, its inversion included) or a tritone.
+bool isAugmentedStep(int from, int to, const HarmonicPlan& plan, Tick onset);
+
+/// @brief Rank of each band pitch as the next tone of a line whose last tone is `last_tone`,
+///        heard across any rest between them; the `line_rank` of consonantChordTone.
+///
+/// The step itself is weighed first: an isAugmentedStep adds 4. Below that sits the perfect
+/// motion the step forms against `motions`, in the selector's downbeat tier order: 0 clean,
+/// 1 battuta, 2 contrary arrival, 3 parallel or hidden. A rest keeps the validator from pairing
+/// the step, yet it is still heard as one line.
+/// @return One rank per pitch of [band_lo, band_hi]; empty when there is no last tone.
+std::vector<int> lineRankFromLastTone(int last_tone, Tick onset, int band_lo, int band_hi,
+                                      const std::vector<ConcurrentMotion>& motions,
+                                      const HarmonicPlan& plan);
+
 /// @brief Registry of every already-placed note (theme AND figuration).
 ///
 /// A line built later in the deterministic voice order reads this registry to
@@ -422,12 +438,16 @@ bool designUpperSuspension(SuspensionType type, Tick preparation_tick, Tick susp
 ///        struck is judged against a fraction of what it supports. Under a beat
 ///        anchor the same fourth lasts a sixteenth and is the passing fourth the
 ///        style writes constantly, which is why this is not the default.
+/// @param line_rank Rank per band pitch (index pitch - band_lo), lower first and below 16. It
+///        orders candidates inside each tier ahead of window clashes and distance and never moves
+///        one between tiers. Empty (the default) ranks every pitch equally.
 /// @return A chord-tone (downbeat) or diatonic (off-beat) MIDI pitch in band.
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches = {},
-                       bool parallel_free_over_consonant = false, bool sustained_bass = false);
+                       bool parallel_free_over_consonant = false, bool sustained_bass = false,
+                       const std::vector<int>& line_rank = {});
 
 /// @brief Replace a line's closing two bars with the shared cadential landing.
 ///

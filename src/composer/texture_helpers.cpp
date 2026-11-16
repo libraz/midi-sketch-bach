@@ -663,11 +663,46 @@ int worstPerfectMotionRank(int line_prev, int cand, const std::vector<Concurrent
   return worst;
 }
 
+bool isAugmentedStep(int from, int to, const HarmonicPlan& plan, Tick onset) {
+  if (std::abs(to - from) % 12 == 6)
+    return true;
+  const KeyContext key = localKeyAt(plan, onset);
+  return detail::isAugmentedSecondClass(from, to, key.tonic_pc,
+                                        key.is_minor ? detail::Mode::Minor : detail::Mode::Major);
+}
+
+std::vector<int> lineRankFromLastTone(int last_tone, Tick onset, int band_lo, int band_hi,
+                                      const std::vector<ConcurrentMotion>& motions,
+                                      const HarmonicPlan& plan) {
+  std::vector<int> ranks;
+  if (last_tone < 0)
+    return ranks;
+  const auto against_any = [&](int cand, bool (*forms)(int, int, int, int)) {
+    return std::any_of(motions.begin(), motions.end(), [&](const ConcurrentMotion& motion) {
+      return forms(last_tone, cand, motion.prev, motion.curr);
+    });
+  };
+  for (int pitch = band_lo; pitch <= band_hi; ++pitch) {
+    int rank = 0;
+    if (against_any(pitch, formsPerfectParallel))
+      rank = 3;
+    else if (against_any(pitch, formsBattuta))
+      rank = 1;
+    else if (against_any(pitch, formsAntiParallelPerfect))
+      rank = 2;
+    if (isAugmentedStep(last_tone, pitch, plan, onset))
+      rank += 4;
+    ranks.push_back(rank);
+  }
+  return ranks;
+}
+
 int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, int band_hi,
                        int target, const std::vector<int>& theme_pitches, int line_prev,
                        const std::vector<ConcurrentMotion>& motions, detail::Mode mode,
                        bool downbeat, const std::vector<int>& window_pitches,
-                       bool parallel_free_over_consonant, bool sustained_bass) {
+                       bool parallel_free_over_consonant, bool sustained_bass,
+                       const std::vector<int>& line_rank) {
   const int third = chord.minor ? 3 : 4;
   const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
                            (chord.root_pc + 7) % 12};
@@ -805,11 +840,11 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
   int consonant_anti = -1;
   int consonant_anti_key = 1 << 20;
   int free_any = -1;  // parallel-free, mildest clash profile (second).
-  int free_any_key = 1 << 28;
+  int free_any_key = 1 << 30;
   int consonant_any = -1;  // consonant, parallel allowed (third).
   int consonant_any_key = 1 << 20;
   int fallback = -1;  // least dissonant (last resort).
-  int fallback_score = 1 << 20;
+  int fallback_score = 1 << 23;
   // Only apply the ordering window when it leaves a non-empty range; a degenerate
   // window (a concurrent voice already outside this band's order) falls back to
   // the band so a candidate always exists.
@@ -928,7 +963,10 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     // the line.
     // Admissibility -- consonance, parallels, voice order -- is unaffected.
     const int far_stride = (dist > 7) ? (1 << 13) : 0;
-    const int key = far_stride + (bass_fourth ? (1 << 12) : 0) + window_clashes * 128 + dist;
+    // The caller's line rank leads the key, so it orders a tier without leaving it.
+    const int rank = line_rank.empty() ? 0 : line_rank[static_cast<std::size_t>(pitch - band_lo)];
+    const int key =
+        (rank << 14) + far_stride + (bass_fourth ? (1 << 12) : 0) + window_clashes * 128 + dist;
     if (clashes == 0) {
       if (key < consonant_any_key) {
         consonant_any_key = key;
@@ -958,14 +996,14 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
       // m2/M7/tritone against it is more audible than the perfect-interval
       // parallel this tier exists to dodge -- such a candidate may only
       // survive as the last-resort fallback.
-      const int free_key = weighted_clashes * (1 << 15) + key;
+      const int free_key = weighted_clashes * (1 << 18) + key;
       if (free_key < free_any_key) {
         free_any_key = free_key;
         free_any = pitch;
       }
     }
     // The clash stride must dominate the packed key even with the far-anchor
-    // demotion and the second-inversion rung folded in (key < 1<<14), so the
+    // demotion, the second-inversion rung and the line rank folded in (key < 1<<18), so the
     // last resort still minimizes dissonance first and distance second.
     //
     // Between tones that tie on dissonance it takes the one free of a perfect
@@ -974,7 +1012,7 @@ int consonantChordTone(const detail::ChordSpec& chord, int voice, int band_lo, i
     // down the chain re-examines the choice. A last resort blind to the cardinal
     // prohibition is therefore the one path by which an exhausted onset ships a
     // parallel fifth or octave it had an equally dissonant alternative to.
-    const int score = clashes * (1 << 17) + (is_parallel(pitch) ? (1 << 15) : 0) + key;
+    const int score = clashes * (1 << 20) + (is_parallel(pitch) ? (1 << 18) : 0) + key;
     if (score < fallback_score) {
       fallback_score = score;
       fallback = pitch;

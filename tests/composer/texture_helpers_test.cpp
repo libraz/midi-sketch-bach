@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "composer/figuration.h"
+#include "composer/harmonic_plan.h"
 #include "composer/subject_catalog.h"
 #include "core/basic_types.h"
 
@@ -592,6 +593,55 @@ TEST(TextureHelpersTest, ConsonantChordToneKeepsFarToneWhenNearOnesCrossVoiceOrd
                                         /*target=*/48, theme_pitches, /*line_prev=*/-1, motions,
                                         detail::Mode::Major, /*downbeat=*/true, window);
   EXPECT_EQ(anchor, 40) << "far tone not returned when the near tones cross the voice order";
+}
+
+// A strike after the line's own rest pairs with nothing, but the step to it is still heard. In
+// G minor over D, the line last on E-flat 63 and the top voice stepping 79 to 74, D 62 (a hidden
+// octave from E-flat) ranks above F-sharp 66 (an augmented second) and A 57 / 69 (tritones).
+TEST(TextureHelpersTest, LineRankOrdersATierWithoutCrossingIt) {
+  ThemeToneRegistry registry;
+  registry.record(/*tick=*/0, /*voice=*/1, /*pitch=*/63, /*duration=*/960);
+  registry.record(/*tick=*/1800, /*voice=*/0, /*pitch=*/79, /*duration=*/120);
+  registry.record(/*tick=*/1920, /*voice=*/0, /*pitch=*/74, /*duration=*/120);
+  registry.record(/*tick=*/0, /*voice=*/2, /*pitch=*/43, /*duration=*/1920);
+  registry.record(/*tick=*/1920, /*voice=*/2, /*pitch=*/42, /*duration=*/1920);
+  HarmonicPlan plan;
+  plan.tonic_pc = 7;
+  plan.is_minor = true;
+  ChordEvent flat_six;
+  flat_six.start_tick = 0;
+  flat_six.root_pc = 3;
+  ChordEvent dominant;
+  dominant.start_tick = 1920;
+  dominant.root_pc = 2;
+  plan.chords = {flat_six, dominant};
+  std::vector<int> theme_pitches;
+  registry.concurrentThemePitches(1920, /*voice=*/1, theme_pitches);
+  std::vector<ConcurrentMotion> motions;
+  registry.motionsIntoOnset(1920, /*voice=*/1, /*num_voices=*/3, motions);
+  constexpr int kLo = 56;
+  const std::vector<int> ranks = lineRankFromLastTone(63, 1920, kLo, /*band_hi=*/71, motions, plan);
+  ASSERT_EQ(ranks.size(), 16U);
+  EXPECT_EQ(ranks[57 - kLo], 4);
+  EXPECT_EQ(ranks[62 - kLo], 3);
+  EXPECT_EQ(ranks[66 - kLo], 4);
+  EXPECT_EQ(ranks[69 - kLo], 4);
+  const detail::ChordSpec chord{2, false};
+  const auto strike = [&](int line_prev, const std::vector<int>& line_rank) {
+    return consonantChordTone(chord, /*voice=*/1, kLo, /*band_hi=*/71, /*target=*/63, theme_pitches,
+                              line_prev, motions, detail::Mode::Minor,
+                              /*downbeat=*/true, /*window_pitches=*/{},
+                              /*parallel_free_over_consonant=*/true, /*sustained_bass=*/false,
+                              line_rank);
+  };
+  EXPECT_EQ(strike(/*line_prev=*/-1, ranks), 62);
+  std::vector<int> only_d_demoted(16, 0);
+  only_d_demoted[62 - kLo] = 1;
+  EXPECT_EQ(strike(/*line_prev=*/-1, only_d_demoted), 66) << "the rank leads distance in a tier";
+  std::vector<int> all_but_d_demoted(16, 7);
+  all_but_d_demoted[62 - kLo] = 0;
+  EXPECT_EQ(strike(/*line_prev=*/63, all_but_d_demoted), 66)
+      << "a hidden octave paired by the validator stays below every clean tone";
 }
 
 }  // namespace
