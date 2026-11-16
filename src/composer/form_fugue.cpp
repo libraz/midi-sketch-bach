@@ -1335,10 +1335,10 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     std::vector<int> entry_grid(static_cast<std::size_t>(total_slots), -1);
     const auto lay = [&](std::vector<int>& grid, const std::vector<MaterialNote>& notes) {
       for (const auto& note : notes) {
-        const Tick rel = note.start_tick - win_start;
-        if (rel < 0) {
+        if (note.start_tick < win_start) {
           continue;
         }
+        const Tick rel = note.start_tick - win_start;
         for (Tick tick = rel; tick < rel + note.duration; tick += kSlotTick) {
           const int slot = static_cast<int>(tick / kSlotTick);
           if (slot >= total_slots) {
@@ -1379,8 +1379,11 @@ void appendFugueSection(FugueAssembly& asm_ctx, int first_bar, int bars,
     if (entry_is_bass) {
       constexpr Tick kHalfBar = kTicksPerBar / 2;
       for (const auto& note : counter) {
+        if (note.start_tick < win_start) {
+          continue;
+        }
         const Tick rel = note.start_tick - win_start;
-        if (rel < 0 || rel % kHalfBar != 0) {
+        if (rel % kHalfBar != 0) {
           continue;
         }
         const int slot = static_cast<int>(rel / kSlotTick);

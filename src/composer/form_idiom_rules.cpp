@@ -535,7 +535,6 @@ void checkFormIdiomRules(const FormIdiomContext& context, ValidationReport* out_
   const std::vector<NoteProvenance>& provenance = context.provenance;
   const HarmonicPlan& harmonic_plan = context.harmonic_plan;
   const Material& material = context.material;
-  const VoiceOnsetIndex& onset_index = context.onset_index;
   const Tick ticks_per_bar = context.ticks_per_bar;
   ValidationReport& report = *out_report;
 

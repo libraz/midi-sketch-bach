@@ -290,7 +290,8 @@ void ThemeToneRegistry::concurrentMotions(Tick prev_tick, Tick tick, VoiceId voi
     if (curr < 0) {
       continue;
     }
-    const int prev = (prev_tick >= 0) ? soundingPitchInVoice(other, prev_tick) : -1;
+    // A wrapped prev_tick (tick < kSixteenth) matches no tone and reads as -1.
+    const int prev = soundingPitchInVoice(other, prev_tick);
     out_motions.push_back(ConcurrentMotion{other, prev, curr});
   }
 }

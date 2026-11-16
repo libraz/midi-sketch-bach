@@ -41,7 +41,7 @@ TEST(JsonParserTest, DecodesUnicodeSurrogatePairAndRejectsLoneSurrogates) {
   ASSERT_EQ(parse(R"({"text":"G clef \uD834\uDD1E"})", &values), JsonParseStatus::Ok);
   EXPECT_EQ(values["text"].string_val, std::string("G clef \xF0\x9D\x84\x9E"));
 
-  for (const std::string& json : {
+  for (const char* json : {
            R"({"text":"\uD834"})",
            R"({"text":"\uDD1E"})",
            R"({"text":"\uD834\u0041"})",
