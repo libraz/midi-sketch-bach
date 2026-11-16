@@ -1215,6 +1215,50 @@ TEST(FormSectionalTest, ArcClimaxIsInsideTheFuguePartForLargeForms) {
   }
 }
 
+// Every pedal tone the free section strikes on its own is a tone of the bar's triad: a
+// pedal that escapes a run or a perfect approach takes another tone of the chord, so the
+// local-key restatement after it has nothing to respell. A walking bar's second half is the
+// fifth above its first, and the solo pedal walk runs in quarters; neither is checked here.
+TEST(FormSectionalTest, ToccataPedalEscapesStayOnTheChord) {
+  for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+    for (std::uint16_t bars :
+         {std::uint16_t{32}, std::uint16_t{64}, std::uint16_t{96}, std::uint16_t{128}}) {
+      for (bool minor : {false, true}) {
+        const HarnessFixture fx = buildFixture(FormType::ToccataAndFugue, seed, minor, bars);
+        const Tick free_end = static_cast<Tick>(freeBarsFor(bars)) * kBar;
+        for (const FigurationSection& section : fx.material.figuration_sections) {
+          if (section.voice != 2 || !section.is_pedal_prep || section.start_tick >= free_end)
+            continue;
+          for (std::size_t idx = 0; idx < section.notes.size(); ++idx) {
+            const MaterialNote& note = section.notes[idx];
+            const Tick bar_start = note.start_tick / kBar * kBar;
+            if (note.start_tick >= free_end)
+              break;
+            if (note.duration < kTicksPerBeat * 2)
+              continue;
+            if (note.start_tick != bar_start && idx > 0 &&
+                section.notes[idx - 1].start_tick == bar_start) {
+              const int step =
+                  static_cast<int>(note.pitch) - static_cast<int>(section.notes[idx - 1].pitch);
+              if (step == 7 || step == -5)
+                continue;
+            }
+            const auto chord = std::find_if(
+                fx.harmony.chords.begin(), fx.harmony.chords.end(),
+                [&](const ChordEvent& event) { return event.start_tick == bar_start; });
+            ASSERT_NE(chord, fx.harmony.chords.end());
+            const int third = chord->quality == ChordQuality::Minor ? 3 : 4;
+            const int offset = ((static_cast<int>(note.pitch) - chord->root_pc) % 12 + 12) % 12;
+            EXPECT_TRUE(offset == 0 || offset == third || offset == 7)
+                << "seed " << seed << " bars " << bars << (minor ? " minor" : " major") << " tick "
+                << note.start_tick << " pitch " << static_cast<int>(note.pitch);
+          }
+        }
+      }
+    }
+  }
+}
+
 // --- 10. Dramaticus keeps its opening flourish solo ------------------------
 
 // A Dramaticus toccata (archetype = seed % 4 == 0) opens with a solo flourish:

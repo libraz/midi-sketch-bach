@@ -220,6 +220,13 @@ constexpr int kFreeV1Hi = 71;
 constexpr int kFreeV2Lo = 40;
 constexpr int kFreeV2Hi = 55;
 
+/// @brief True when a pitch belongs to the bar's chord.
+bool isChordTone(int pitch, const ChordSpec& chord) {
+  const int third_iv = chord.minor ? 3 : 4;
+  const int offset = ((pitch - static_cast<int>(chord.root_pc)) % 12 + 12) % 12;
+  return offset == 0 || offset == third_iv || offset == 7 || (chord.seventh && offset == 10);
+}
+
 /// @brief Emit the V2 pedal + V1 punctuation layers under the V0 free section.
 ///
 /// @param asm_ctx The accumulator (spans + figuration sections).
@@ -374,13 +381,19 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
   // Pick the pitch for the next pedal onset: the chord root, unless holding it
   // would extend an identical-pitch run to the gate cap, or the root itself
   // moves in a perfect class with a voice above it. Both escapes draw on the
-  // same chord tones (third and fifth, each above and below the root) so the
-  // step can be the smallest available interval rather than always a leaping
-  // fifth -- a conjunct walking bass keeps the melodic-interval distribution
-  // near the corpus (the BWV565 / BWV538 walking-pedal idiom).
+  // bar's other triad tones in the band, so the step can be the smallest
+  // available interval rather than always a leaping fifth -- a conjunct walking
+  // bass keeps the melodic-interval distribution near the corpus (the BWV565 /
+  // BWV538 walking-pedal idiom). The tone handed in is often the triad's third
+  // or fifth, so the escapes are read from the chord, never as intervals from it.
+  // When no escape reads cleaner the handed-in tone stays.
+  std::vector<int> candidates;
   auto pedal_pitch = [&](int root, const ChordSpec& chord) {
-    const int third_iv = chord.minor ? 3 : 4;
-    const int candidates[4] = {root + third_iv, root - (12 - third_iv), root + 7, root - 5};
+    candidates.clear();
+    for (int alt = kFreeV2Lo; alt <= kFreeV2Hi; ++alt) {
+      if (alt != root && isChordTone(alt, ChordSpec{chord.root_pc, chord.minor}))
+        candidates.push_back(alt);
+    }
     int pitch = root;
     // A run at the gate cap has to break whatever the break costs vertically, so
     // it enters the sweep one rung above the worst vertical fault; a root that
@@ -393,7 +406,7 @@ void appendFreeSectionLayers(SectionalAssembly& asm_ctx, const std::vector<Mater
       int best = -1;
       int best_key = 1 << 30;
       for (int alt : candidates) {
-        if (alt < kFreeV2Lo || alt > kFreeV2Hi || alt == root || pedal_fault_rank(alt) > accept) {
+        if (pedal_fault_rank(alt) > accept) {
           continue;
         }
         // Conjunct still decides between two tones that read alike; the second
@@ -845,13 +858,6 @@ bool isForeignKeyAt(const HarmonicPlan& harmony, Tick tick) {
   const KeyContext local = localKeyAt(harmony, tick);
   return local.tonic_pc != static_cast<std::uint8_t>(harmony.tonic_pc % 12) ||
          local.is_minor != harmony.is_minor;
-}
-
-/// @brief True when a pitch belongs to the bar's chord.
-bool isChordTone(int pitch, const ChordSpec& chord) {
-  const int third_iv = chord.minor ? 3 : 4;
-  const int offset = ((pitch - static_cast<int>(chord.root_pc)) % 12 + 12) % 12;
-  return offset == 0 || offset == third_iv || offset == 7 || (chord.seventh && offset == 10);
 }
 
 /// @brief Restate every bar of the chord plan in the key sounding at it.
