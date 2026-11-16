@@ -1341,6 +1341,34 @@ TEST(FormCantusGoldberg, FirstVariationIdiomFollowsTheContourPhaseParity) {
   EXPECT_NE(idiom_of_parity[0], idiom_of_parity[1]);
 }
 
+// B lifts the C2 ground an octave, which leaves one semitone under D6 for the
+// upper line: every line keeps under it, so the piece ships whole without a moved bar.
+TEST(FormCantusGoldberg, BKeyShipsInsideTheKeyboardWithoutMovedBars) {
+  for (bool minor : {false, true}) {
+    for (std::uint32_t seed = 1; seed <= 16; ++seed) {
+      for (std::uint16_t bars : {std::uint16_t{20}, std::uint16_t{40}}) {
+        ComposeRequest req;
+        req.form = FormType::GoldbergVariations;
+        req.is_minor = minor;
+        req.character = SubjectCharacter::Severe;
+        req.target_bars = bars;
+        req.seed = seed;
+        req.tonic = Key::B;
+        const test::ProductGateResult gate = test::runProductGate(req, Key::B);
+        const std::string where = "minor=" + std::to_string(minor) +
+                                  " seed=" + std::to_string(seed) + " bars=" + std::to_string(bars);
+        ASSERT_TRUE(gate.placed) << where;
+        EXPECT_EQ(gate.placement.displaced_notes, 0u) << where;
+        EXPECT_EQ(
+            countCompassViolations(gate.shipped.notes, InstrumentType::Harpsichord,
+                                   keyTranspositionSemitones(Key::B) + gate.placement.octave_shift),
+            0)
+            << where;
+      }
+    }
+  }
+}
+
 // --- Registral continuity: keyboard compass + no cliff at the close ---------
 
 // Largest interval between consecutive attacks within one voice of `notes`.

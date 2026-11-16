@@ -168,6 +168,8 @@ struct ProductGateResult {
   ComposeResult composed;  ///< Composer output before decoration.
   ComposeResult shipped;   ///< Decorated and placed output.
   HarnessFixture fixture;  ///< The fixture both arrays were built from.
+  /// What placement did; meaningful when `placed`.
+  CompassPlacement placement;
   /// FinalScore validation plus the counterpoint budget over `shipped`.
   std::vector<ValidationFailure> failures;
 
@@ -211,6 +213,8 @@ inline ProductGateResult runProductGate(const ComposeRequest& request, Key tonic
       out.fixture.harmony.ticksPerBar(),
       [&](const ComposeResult& placed) { return validate(placed).failures.empty(); });
   out.placed = placement.has_value();
+  if (placement)
+    out.placement = *placement;
   out.failures = validate(out.shipped).failures;
   return out;
 }

@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -22,6 +24,7 @@
 #include "composer/texture_helpers.h"
 #include "composer/voice_intent.h"
 #include "core/basic_types.h"
+#include "core/instrument_program.h"
 #include "core/pitch_utils.h"
 #include "core/seed_decision.h"
 
@@ -391,46 +394,78 @@ void appendAriaBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mo
       materialNote(base + kHalf, kHalf, chordToneAbove(start, chord.root_pc, chord.minor)));
 }
 
+// Highest tone of `chord`'s triad at or under `ceiling`.
+int triadToneAtOrBelow(int ceiling, const BarChord& chord) {
+  const int third = chord.minor ? 3 : 4;
+  const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
+                           (chord.root_pc + 7) % 12};
+  auto is_triad = [&](int midi) {
+    const int pcl = ((midi % 12) + 12) % 12;
+    return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
+  };
+  int tone = ceiling;
+  while (tone > 0 && !is_triad(tone))
+    --tone;
+  return tone;
+}
+
 // Snapped goldberg figuration start with the keyboard ceiling applied. The
 // figure built on the start (the contour ladder, the figura corta cell) rises
-// up to a ninth above it, so a start more than a ninth under kKeyboardTop would
-// carry the line past the top of the harpsichord's compass. Walk such starts
-// down to the highest chord tone at or under the cap -- the arc's climax
-// register lift compresses against the instrument ceiling, exactly as the real
-// keyboard writing does.
-int goldbergFigurationStart(int register_base, int offset, const BarChord& chord, Mode mode) {
+// up to a ninth above it, so a start more than a ninth under the keyboard top
+// would carry the line past the top of the compass. Walk such starts down to
+// the highest chord tone at or under the cap -- the arc's climax register lift
+// compresses against the instrument ceiling, exactly as the real keyboard
+// writing does.
+int goldbergFigurationStart(int register_base, int offset, const BarChord& chord, Mode mode,
+                            int keyboard_top) {
   const detail::ChordSpec harmony{chord.root_pc, chord.minor};
-  int snapped = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
-                                  chord.root_pc, chord.minor);
-  constexpr int kFigStartCeiling = kKeyboardTop - 9;
-  if (snapped > kFigStartCeiling) {
-    const int third = chord.minor ? 3 : 4;
-    const int triad_pc[3] = {chord.root_pc % 12, (chord.root_pc + third) % 12,
-                             (chord.root_pc + 7) % 12};
-    auto is_triad = [&](int midi) {
-      const int pcl = ((midi % 12) + 12) % 12;
-      return pcl == triad_pc[0] || pcl == triad_pc[1] || pcl == triad_pc[2];
-    };
-    int capped = kFigStartCeiling;
-    while (capped > 0 && !is_triad(capped))
-      --capped;
-    snapped = capped;
+  const int snapped = snapUpToChordTone(detail::scaleUp(register_base, offset, mode, &harmony),
+                                        chord.root_pc, chord.minor);
+  const int start_ceiling = keyboard_top - 9;
+  return snapped > start_ceiling ? triadToneAtOrBelow(start_ceiling, chord) : snapped;
+}
+
+// A ninth over this start stays under every keyed keyboard top, so the step-down
+// below never needs to reach it.
+constexpr int kFigurationStartFloor = 60;
+
+// Lay one figuration bar from `start`. Figure 0 is the one every bar falls back
+// on, so while a laid tone rises past `keyboard_top` its start steps down one chord
+// tone and the bar is laid again; any other figure is laid once for the gate to judge.
+template <typename LayBar>
+void layUnderKeyboardTop(std::vector<MaterialNote>& notes, int start, const BarChord& chord,
+                         int keyboard_top, int figure, const LayBar& lay_bar) {
+  std::vector<MaterialNote> laid;
+  for (;;) {
+    laid.clear();
+    lay_bar(start, laid);
+    if (figure != 0 ||
+        std::all_of(laid.begin(), laid.end(), [keyboard_top](const MaterialNote& note) {
+          return static_cast<int>(note.pitch) <= keyboard_top;
+        }))
+      break;
+    start = triadToneAtOrBelow(start - 1, chord);
+    assert(start >= kFigurationStartFloor);
   }
-  return snapped;
+  notes.insert(notes.end(), laid.begin(), laid.end());
 }
 
 // Append a figuration variation bar: a downbeat-anchored scalar wave with
 // `notes_per_beat` subdivision (1 = quarters, 2 = eighths, 4 = sixteenths).
 // `figure` selects the anchor contour the wave is drawn over.
 void appendVariationBar(PassacagliaVariation& var, int bar, const BarChord& chord, Mode mode,
-                        int notes_per_beat, int register_base, int offset, int figure = 0) {
-  const int snapped = goldbergFigurationStart(register_base, offset, chord, mode);
-  emitAnchoredBar(
-      bar, snapped, chord, mode, notes_per_beat,
-      [&](Tick start, Tick dur, int pitch) {
-        var.notes.push_back(materialNote(start, dur, pitch));
-      },
-      figure);
+                        int notes_per_beat, int register_base, int offset, int keyboard_top,
+                        int figure = 0) {
+  layUnderKeyboardTop(var.notes,
+                      goldbergFigurationStart(register_base, offset, chord, mode, keyboard_top),
+                      chord, keyboard_top, figure, [&](int start, std::vector<MaterialNote>& laid) {
+                        emitAnchoredBar(
+                            bar, start, chord, mode, notes_per_beat,
+                            [&](Tick onset, Tick dur, int pitch) {
+                              laid.push_back(materialNote(onset, dur, pitch));
+                            },
+                            figure);
+                      });
 }
 
 // Canon register anchor. Narrow canons place the dux in this upper band and
@@ -736,10 +771,10 @@ struct CanonDesign {
 // and only after the tones are proved unable to clear a crossing and a true
 // parallel together. The alternation is a design value, so a departure from it
 // is scored and minimised: a block that never needed one keeps it exactly.
-CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
-                             const std::array<std::uint8_t, 4>& ground, int source_register_shift,
-                             int imitation_degrees, int comes_octave_shift, bool imitate_above,
-                             bool fill_thirds, const AriaBassTreatment& bass_treatment) {
+std::optional<CanonDesign> designCanonBlockUnder(
+    int pitch_ceiling, Mode mode, const std::array<std::uint8_t, 4>& ground,
+    int source_register_shift, int imitation_degrees, int comes_octave_shift, bool imitate_above,
+    bool fill_thirds, const AriaBassTreatment& bass_treatment, int keyboard_top) {
   const std::array<std::array<int, 3>, 4> candidates =
       canonLeaderCandidates(pitch_ceiling, mode, ground);
   CanonDesign chosen;
@@ -771,6 +806,12 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
               const CanonLines lines =
                   layOutCanon(assignment, /*block_start_bar=*/0, source_register_shift,
                               imitation_degrees, comes_octave_shift, mode, rising, ground);
+              // Only an assembly whose upper line stays on the keyboard is scored.
+              const std::vector<MaterialNote>& upper = imitate_above ? lines.comes : lines.dux;
+              if (std::any_of(upper.begin(), upper.end(), [keyboard_top](const MaterialNote& note) {
+                    return static_cast<int>(note.pitch) > keyboard_top;
+                  }))
+                continue;
               const std::array<int, 8> faults = goldbergBlockFaults(
                   imitate_above ? lines.comes : lines.dux, imitate_above ? lines.dux : lines.comes,
                   /*block_start_bar=*/0, ground, mode, fill_thirds, bass_treatment);
@@ -812,10 +853,29 @@ CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
       }
     }
   }
+  if (!have_best)
+    return std::nullopt;
   // A clean assembly, where one exists, is always the one kept: the crossing
   // and the true parallel are the first two terms of the score.
   chosen.clean = clean;
   return chosen;
+}
+
+// designCanonBlockUnder at the leader's ceiling, stepped down a semitone at a time
+// while no assembly keeps the upper line on the keyboard.
+CanonDesign designCanonBlock(int pitch_ceiling, Mode mode,
+                             const std::array<std::uint8_t, 4>& ground, int source_register_shift,
+                             int imitation_degrees, int comes_octave_shift, bool imitate_above,
+                             bool fill_thirds, const AriaBassTreatment& bass_treatment,
+                             int keyboard_top) {
+  for (int ceiling = pitch_ceiling;; --ceiling) {
+    assert(ceiling >= pitch_ceiling - 12);
+    const std::optional<CanonDesign> design = designCanonBlockUnder(
+        ceiling, mode, ground, source_register_shift, imitation_degrees, comes_octave_shift,
+        imitate_above, fill_thirds, bass_treatment, keyboard_top);
+    if (design)
+      return *design;
+  }
 }
 
 // Everything about a canon block that follows from its imitation interval
@@ -865,7 +925,8 @@ int canonBlockIndex(int imitation_degrees) {
 // reader of it agree for the whole piece.
 //
 // Asked of the reference order, which is the one a canon block falls back to.
-bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& ground) {
+bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& ground,
+                                  int keyboard_top) {
   for (int imitation_degrees = 0; imitation_degrees < kCanonImitationDegreeCount;
        ++imitation_degrees) {
     const CanonLayout layout = canonLayout(imitation_degrees);
@@ -873,7 +934,8 @@ bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& 
         layout.design_ceiling, mode, ground, layout.source_register_shift, imitation_degrees,
         layout.comes_octave_shift, layout.imitate_above, /*fill_thirds=*/true,
         {goldbergAriaBassSurface(canonBlockIndex(imitation_degrees), /*is_aria_block=*/false),
-         kAriaBassReferenceContour});
+         kAriaBassReferenceContour},
+        keyboard_top);
     if (!probe.clean)
       return false;
   }
@@ -888,7 +950,8 @@ bool ariaBassFillAdmitsEveryCanon(Mode mode, const std::array<std::uint8_t, 4>& 
 // always finds one; a plain bass has a single order.
 std::size_t admitCanonBassContour(int imitation_degrees, Mode mode,
                                   const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
-                                  AriaBassSurface surface, std::size_t first_contour) {
+                                  AriaBassSurface surface, std::size_t first_contour,
+                                  int keyboard_top) {
   if (!fill_thirds)
     return kAriaBassReferenceContour;
   const CanonLayout layout = canonLayout(imitation_degrees);
@@ -898,9 +961,10 @@ std::size_t admitCanonBassContour(int imitation_degrees, Mode mode,
       break;
     if (!ariaBassContourSuitsSurface(contour, surface))
       continue;
-    const CanonDesign probe = designCanonBlock(
-        layout.design_ceiling, mode, ground, layout.source_register_shift, imitation_degrees,
-        layout.comes_octave_shift, layout.imitate_above, fill_thirds, {surface, contour});
+    const CanonDesign probe =
+        designCanonBlock(layout.design_ceiling, mode, ground, layout.source_register_shift,
+                         imitation_degrees, layout.comes_octave_shift, layout.imitate_above,
+                         fill_thirds, {surface, contour}, keyboard_top);
     if (probe.clean)
       return contour;
   }
@@ -911,13 +975,13 @@ std::size_t admitCanonBassContour(int imitation_degrees, Mode mode,
 void buildCanonBlock(PassacagliaVariation& principal, std::vector<MaterialNote>& inner_notes,
                      int block_start_bar, int imitation_degrees, Mode mode,
                      const std::array<std::uint8_t, 4>& ground, bool fill_thirds,
-                     const AriaBassTreatment& bass_treatment) {
+                     const AriaBassTreatment& bass_treatment, int keyboard_top) {
   const CanonLayout layout = canonLayout(imitation_degrees);
   const bool imitate_above = layout.imitate_above;
   const int source_register_shift = layout.source_register_shift;
   const CanonDesign designed = designCanonBlock(
       layout.design_ceiling, mode, ground, source_register_shift, imitation_degrees,
-      layout.comes_octave_shift, imitate_above, fill_thirds, bass_treatment);
+      layout.comes_octave_shift, imitate_above, fill_thirds, bass_treatment, keyboard_top);
   const CanonLines lines =
       layOutCanon(designed.assignment, block_start_bar, source_register_shift, imitation_degrees,
                   layout.comes_octave_shift, mode, designed.rising, ground);
@@ -1283,7 +1347,13 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
       rng::seedBlockChoice(req.seed, rng::SeedDecision::kGoldbergFigure, 4u);
   const auto& ground = (mode == Mode::Major) ? detail::kGoldbergGroundsMajor[ground_variant]
                                              : detail::kGoldbergGroundsMinor[ground_variant];
-  const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground);
+  // The top key the output sounds, read back through the key and the octave the
+  // aria bass's C2 floor is placed in: D6 unless the key lifts that floor an octave.
+  const int keyboard_top =
+      std::min(kKeyboardTop, composedCompassWindow(InstrumentType::Harpsichord,
+                                                   req.key_transposition_semitones, ground.front())
+                                 .high);
+  const bool fill_thirds = ariaBassFillAdmitsEveryCanon(mode, ground, keyboard_top);
   // Every fault read of a block reads the closing bars against the coda that sounds there.
   const GoldbergCodaBass coda_bass{true, final_approach_tick, static_cast<int>(ground.front())};
   auto bass_surface_of_block = [&](int blk) {
@@ -1457,11 +1527,11 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
         const int canon_number = static_cast<int>(variation_number / 3);
         const int imitation_degrees = canon_number - 1;  // 0 = unison canon.
         var.density_level = 1;
-        bass_treatment.contour =
-            admitCanonBassContour(imitation_degrees, mode, ground, fill_thirds,
-                                  bass_treatment.surface, first_bass_contour_of_block(blk));
+        bass_treatment.contour = admitCanonBassContour(
+            imitation_degrees, mode, ground, fill_thirds, bass_treatment.surface,
+            first_bass_contour_of_block(blk), keyboard_top);
         buildCanonBlock(var, inner_voice, blk * kCycleBars, imitation_degrees, mode, ground,
-                        fill_thirds, bass_treatment);
+                        fill_thirds, bass_treatment, keyboard_top);
         inner_blocks.push_back(blk);
         canon_blocks.push_back(blk);
         break;
@@ -1474,7 +1544,7 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
           const int bar = blk * kCycleBars + local;
           appendVariationBar(
               var, bar, goldbergBarChord(ground[static_cast<std::size_t>(bar % kCycleBars)], mode),
-              mode, 4, kVarRegisterBase, offset);
+              mode, 4, kVarRegisterBase, offset, keyboard_top);
         }
         bass_treatment = admit_bass_contour(var.notes, blk);
         // The tune states each bar's triad in one rotation held across the whole
@@ -1549,14 +1619,19 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
             const int figure = figures[static_cast<std::size_t>(local)];
             switch (pattern) {
               case PatternKind::kFiguraCorta:
-                appendFiguraCortaBar(laid.notes, bar,
-                                     goldbergFigurationStart(register_base, offset, chord, mode),
-                                     detail::ChordSpec{chord.root_pc, chord.minor}, mode, figure);
+                layUnderKeyboardTop(
+                    laid.notes,
+                    goldbergFigurationStart(register_base, offset, chord, mode, keyboard_top),
+                    chord, keyboard_top, figure, [&](int start, std::vector<MaterialNote>& cell) {
+                      appendFiguraCortaBar(cell, bar, start,
+                                           detail::ChordSpec{chord.root_pc, chord.minor}, mode,
+                                           figure);
+                    });
                 break;
               case PatternKind::kScalarWave:
               default:
                 appendVariationBar(laid, bar, chord, mode, notes_per_beat, register_base, offset,
-                                   figure);
+                                   keyboard_top, figure);
                 break;
             }
           }
@@ -1585,8 +1660,8 @@ HarnessFixture buildGoldbergVariationsForm(const ResolvedRequest& req) {
               trial_figures[static_cast<std::size_t>(local)] = figure;
               std::vector<MaterialNote> trial = lay_out_block(trial_figures);
               const bool in_compass =
-                  std::all_of(trial.begin(), trial.end(), [](const MaterialNote& note) {
-                    return static_cast<int>(note.pitch) <= kKeyboardTop;
+                  std::all_of(trial.begin(), trial.end(), [keyboard_top](const MaterialNote& note) {
+                    return static_cast<int>(note.pitch) <= keyboard_top;
                   });
               if (!in_compass)
                 continue;
