@@ -54,6 +54,18 @@ InstrumentPitchRange pitchRangeFor(InstrumentType instrument) {
   return {0, 127};
 }
 
+ComposedCompassWindow composedCompassWindow(InstrumentType instrument, int key_offset, int anchor) {
+  const InstrumentPitchRange range = pitchRangeFor(instrument);
+  const int sounding = anchor + key_offset;
+  int octave = 0;
+  while (sounding + octave - interval::kOctave >= static_cast<int>(range.low))
+    octave -= interval::kOctave;
+  while (sounding + octave < static_cast<int>(range.low))
+    octave += interval::kOctave;
+  return {static_cast<int>(range.low) - key_offset - octave,
+          static_cast<int>(range.high) - key_offset - octave};
+}
+
 std::optional<int> selectOutputOctaveShift(const std::vector<NoteEvent>& notes, Key key,
                                            InstrumentType instrument) {
   if (notes.empty()) {

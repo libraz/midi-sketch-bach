@@ -35,6 +35,26 @@ struct InstrumentPitchRange {
 /// @brief Return the playable sounding range used for MIDI export.
 InstrumentPitchRange pitchRangeFor(InstrumentType instrument);
 
+/// Composed-frame pitches that sound inside an instrument's compass.
+struct ComposedCompassWindow {
+  int low = 0;
+  int high = 127;
+};
+
+/// @brief The instrument compass read back through a key offset into the
+///        composed frame, at the lowest whole octave that still sounds `anchor`.
+///
+/// A builder whose lowest tone is fixed (an immutable ground) bounds the
+/// register above it with `high`: that octave leaves the most room above the
+/// anchor, and the output placement finds the same octave for the whole score.
+///
+/// @param instrument The instrument whose compass applies.
+/// @param key_offset Semitones the output adds for the tonic
+///        (keyTranspositionSemitones).
+/// @param anchor The lowest composed pitch the placement must hold.
+/// @return The composed window [low, high]; `anchor` lies within its lowest octave.
+ComposedCompassWindow composedCompassWindow(InstrumentType instrument, int key_offset, int anchor);
+
 /// @brief Select a single octave displacement for a complete C-major score.
 ///
 /// The result is added after key transposition. It is either zero or a

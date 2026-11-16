@@ -290,16 +290,11 @@ int notesPerBeatForTier(int tier) {
  */
 int upperVoiceCeiling(FormType form, const ResolvedRequest& req,
                       const std::vector<std::uint8_t>& ground_pitch) {
-  const InstrumentPitchRange range = pitchRangeFor(defaultInstrumentForForm(form));
   const int ground_low =
-      static_cast<int>(*std::min_element(ground_pitch.begin(), ground_pitch.end())) +
-      req.key_transposition_semitones;
-  int octave = 0;
-  while (ground_low + octave - interval::kOctave >= static_cast<int>(range.low))
-    octave -= interval::kOctave;
-  while (ground_low + octave < static_cast<int>(range.low))
-    octave += interval::kOctave;
-  return static_cast<int>(range.high) - req.key_transposition_semitones - octave;
+      static_cast<int>(*std::min_element(ground_pitch.begin(), ground_pitch.end()));
+  return composedCompassWindow(defaultInstrumentForForm(form), req.key_transposition_semitones,
+                               ground_low)
+      .high;
 }
 
 /**

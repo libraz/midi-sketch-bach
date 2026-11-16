@@ -282,5 +282,20 @@ TEST(InstrumentProgramTest, OutputRangeRejectsAScoreNoDisplacementCanPlaceInside
   EXPECT_FALSE(selectOutputOctaveShift(notes, Key::G, InstrumentType::Violin).has_value());
 }
 
+TEST(InstrumentProgramTest, ComposedCompassWindowHoldsTheAnchorInItsLowestOctave) {
+  const InstrumentPitchRange range = pitchRangeFor(InstrumentType::Harpsichord);
+  for (int key_offset = -5; key_offset <= 6; ++key_offset) {
+    const ComposedCompassWindow window =
+        composedCompassWindow(InstrumentType::Harpsichord, key_offset, 36);
+    EXPECT_EQ(window.high - window.low, range.high - range.low) << "offset " << key_offset;
+    EXPECT_LE(window.low, 36) << "offset " << key_offset;
+    EXPECT_GT(window.low + 12, 36) << "offset " << key_offset;
+  }
+  // A C2 ground placed in B sounds below the harpsichord floor, so it goes an
+  // octave up and the composed top falls from 96 to 85.
+  EXPECT_EQ(composedCompassWindow(InstrumentType::Harpsichord, -1, 36).high, 85);
+  EXPECT_EQ(composedCompassWindow(InstrumentType::Harpsichord, 0, 36).high, 96);
+}
+
 }  // namespace
 }  // namespace bach
