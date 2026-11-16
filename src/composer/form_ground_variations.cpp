@@ -1434,20 +1434,25 @@ void appendCounterFiguration(std::vector<MaterialNote>& notes, ThemeToneRegistry
           // with the held ground, so demanding full freedom regularly rejects
           // all four and leaves the design tone in place -- including when that
           // tone is the true parallel and a merely hidden companion was
-          // available. Take the mildest fault the vocabulary can reach. The
-          // contrary classes the beat anchor ranks are absent here on purpose:
-          // the first candidate below turns the walk round, so they would seem
-          // to belong, but adding them changes not one tone the sweep ships.
+          // available. Take the mildest fault the vocabulary can reach, on the
+          // beat anchor's ladder: the contrary repeat and the battuta between
+          // the hidden perfect and the true parallel.
           constexpr int kOscClean = 0;
           constexpr int kOscHidden = 1;
-          constexpr int kOscParallel = 2;
+          constexpr int kOscBattuta = 2;
+          constexpr int kOscAnti = 3;
+          constexpr int kOscParallel = 4;
           auto osc_fault_rank = [&](int cand) {
             int worst = kOscClean;
             for (const ConcurrentMotion& motion : escape_motions) {
               if (formsStrictPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
                 return kOscParallel;
               if (formsPerfectParallel(prev_emitted, cand, motion.prev, motion.curr))
-                worst = kOscHidden;
+                worst = std::max(worst, kOscHidden);
+              else if (formsAntiParallelPerfect(prev_emitted, cand, motion.prev, motion.curr))
+                worst = std::max(worst, kOscAnti);
+              else if (formsBattuta(prev_emitted, cand, motion.prev, motion.curr))
+                worst = std::max(worst, kOscBattuta);
             }
             return worst;
           };
